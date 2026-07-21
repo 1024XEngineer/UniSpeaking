@@ -67,7 +67,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! grep -q "^# UniSpeaking" README.md; then
+          first_line="$(head -n 1 README.md | tr -d '\r')"
+
+          if [[ "$first_line" != "# UniSpeaking" ]]; then
             echo "::error file=README.md::README.md must start with '# UniSpeaking'"
             exit 1
           fi
