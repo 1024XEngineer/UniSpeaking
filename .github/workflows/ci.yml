@@ -1,0 +1,123 @@
+name: UniSpeaking CI
+
+run-name: UniSpeaking CI · ${{ github.event_name }} · ${{ github.ref_name }}
+
+on:
+  # 有人向 main 提交 Pull Request 时运行
+  pull_request:
+    branches:
+      - main
+
+  # 代码正式进入 main 后再运行一次
+  push:
+    branches:
+      - main
+
+  # 允许从 GitHub Actions 页面手动运行
+  workflow_dispatch:
+
+# 当前 CI 只需要读取仓库内容
+permissions:
+  contents: read
+
+# 同一分支连续提交时，取消旧的未完成任务
+concurrency:
+  group: unispeaking-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository-baseline:
+    name: Repository Baseline
+
+    # 使用 GitHub 提供的临时 Ubuntu 环境
+    runs-on: ubuntu-latest
+
+    # 防止任务意外挂住
+    timeout-minutes: 5
+
+    steps:
+      # 把当前仓库代码下载到 GitHub Runner
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # 检查仓库初始化阶段必须存在的文件
+      - name: Check required repository files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_files=(
+            "README.md"
+            "LICENSE"
+            ".gitignore"
+          )
+
+          for file in "${required_files[@]}"; do
+            if [[ ! -f "$file" ]]; then
+              echo "::error file=$file::Missing required repository file: $file"
+              exit 1
+            fi
+
+            echo "Found required file: $file"
+          done
+
+      # 检查 README 是否保留正确的项目标题
+      - name: Validate README title
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! grep -q "^# UniSpeaking" README.md; then
+            echo "::error file=README.md::README.md must start with '# UniSpeaking'"
+            exit 1
+          fi
+
+          echo "README title is valid."
+
+      # 阻止明显的密钥和环境变量文件进入仓库
+      - name: Reject sensitive file names
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t forbidden_files < <(
+            find . \
+              -path "./.git" -prune -o \
+              -type f \
+              \( \
+                -name ".env" -o \
+                -name ".env.local" -o \
+                -name ".env.production" -o \
+                -name "*.pem" -o \
+                -name "*.key" -o \
+                -name "*.p12" -o \
+                -name "*.pfx" -o \
+                -name "id_rsa" -o \
+                -name "id_ed25519" \
+              \) \
+              -print
+          )
+
+          if (( ${#forbidden_files[@]} > 0 )); then
+            echo "::error::Potential sensitive files were committed:"
+            printf '%s\n' "${forbidden_files[@]}"
+            exit 1
+          fi
+
+          echo "No forbidden sensitive file names found."
+
+      # 把本次检查结果写入 GitHub Actions 摘要
+      - name: Write CI summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## UniSpeaking CI"
+            echo ""
+            echo "- Event: \`${{ github.event_name }}\`"
+            echo "- Branch: \`${{ github.ref_name }}\`"
+            echo "- Commit: \`${{ github.sha }}\`"
+            echo "- Result: \`${{ job.status }}\`"
+            echo ""
+            echo "Current stage: repository bootstrap validation."
+          } >> "$GITHUB_STEP_SUMMARY"
