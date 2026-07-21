@@ -1,0 +1,30 @@
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Local environment variables
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+
+# Test and coverage output
+coverage/
+.coverage
+htmlcov/
+
+# Build output
+dist/
+build/
