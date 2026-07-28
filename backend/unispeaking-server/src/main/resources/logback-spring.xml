@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+	<include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+	<include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+	<springProperty scope="context" name="REALTIME_FLOW_LOG_FILE"
+			source="realtime.flow.log-file"
+			defaultValue="logs/realtime-flow.log"/>
+
+	<appender name="REALTIME_FLOW_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+		<file>${REALTIME_FLOW_LOG_FILE}</file>
+		<encoder>
+			<pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%thread] %logger - %msg%n</pattern>
+			<charset>UTF-8</charset>
+		</encoder>
+		<rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+			<fileNamePattern>${REALTIME_FLOW_LOG_FILE}.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+			<maxFileSize>20MB</maxFileSize>
+			<maxHistory>14</maxHistory>
+			<totalSizeCap>200MB</totalSizeCap>
+		</rollingPolicy>
+	</appender>
+
+	<logger name="com.unispeaking.realtimeflow" level="INFO" additivity="false">
+		<appender-ref ref="REALTIME_FLOW_FILE"/>
+	</logger>
+
+	<root level="INFO">
+		<appender-ref ref="CONSOLE"/>
+	</root>
+</configuration>

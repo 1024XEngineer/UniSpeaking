@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: unispeaking_server
+  config:
+    import: optional:file:${UNISPEAKING_ENV_FILE:../../deploy/env/.env}[.properties]
+
+server:
+  port: ${SERVER_PORT:8080}
+
+realtime:
+  flow:
+    log-file: ${REALTIME_FLOW_LOG_FILE:logs/realtime-flow.log}
+  qwen:
+    api-key: ${DASHSCOPE_API_KEY:}
+    workspace-id: ${BAILIAN_WORKSPACE_ID:}
+    model: ${BAILIAN_MODEL:qwen3.5-omni-flash-realtime}
+    region: ${BAILIAN_REGION:cn-beijing}
+    temporary-key-endpoint: ${REALTIME_QWEN_TEMPORARY_KEY_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/tokens}
+    temporary-key-ttl-seconds: ${REALTIME_QWEN_TEMPORARY_KEY_TTL_SECONDS:300}
+    connect-timeout: ${REALTIME_QWEN_CONNECT_TIMEOUT:10s}
+    read-timeout: ${REALTIME_QWEN_READ_TIMEOUT:20s}
+    max-answer-bytes: ${REALTIME_QWEN_MAX_ANSWER_BYTES:1048576}
