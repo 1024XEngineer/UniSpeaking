@@ -1,30 +1,56 @@
-# macOS
-.DS_Store
+HELP.md
+target/
+backend/*/target/
+.mvn/wrapper/maven-wrapper.jar
+backend/*/.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
 
-# IDE
-.idea/
-.vscode/
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
 
-# Local environment variables
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### Go ###
+bin/
+coverage.out
+*.test
+
+### Frontend ###
+node_modules/
+dist/
+.vite/
+
+### Env ###
 .env
-.env.*
-!.env.example
-!.env.template
+*.local
+!deploy/env/.env.example
 
-# Logs
-*.log
+### Runtime logs ###
 logs/
 
-# Temporary files
-*.tmp
-*.temp
-*.swp
+### VS Code ###
+.vscode/
 
-# Test and coverage output
-coverage/
-.coverage
-htmlcov/
-
-# Build output
-dist/
-build/
+### macOS ###
+.DS_Store
