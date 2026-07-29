@@ -1,18 +1,21 @@
 package com.unispeaking.domain.po.session;
 
+import com.unispeaking.domain.po.conversation.ConversationMessage;
 import com.unispeaking.domain.vo.prompt.SessionPrompt;
 import com.unispeaking.domain.vo.realtime.ProviderType;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
 import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public abstract class AbstractSceneSession {
 
 	private final String id;
 	private final String userId;
 	private final Instant createdAt = Instant.now();
+	private final List<ConversationMessage> messages = new CopyOnWriteArrayList<>();
 	private String sceneId;
-	private String flowId;
 	private SceneType sceneType;
 	private String providerSessionId;
 	private SessionStatus status = SessionStatus.CREATED;
@@ -59,8 +62,12 @@ public abstract class AbstractSceneSession {
 	}
 
 	public void complete() {
+		complete(Instant.now());
+	}
+
+	public void complete(Instant stopTime) {
 		status = SessionStatus.COMPLETED;
-		endedAt = Instant.now();
+		endedAt = stopTime == null ? Instant.now() : stopTime;
 	}
 
 	public void fail() {
@@ -74,13 +81,18 @@ public abstract class AbstractSceneSession {
 		fail();
 	}
 
+	public void addMessage(ConversationMessage message) {
+		if (message != null) {
+			messages.add(message);
+		}
+	}
+
 	public String getId() { return id; }
 	public String getUserId() { return userId; }
 	public Instant getCreatedAt() { return createdAt; }
+	public List<ConversationMessage> getMessages() { return List.copyOf(messages); }
 	public String getSceneId() { return sceneId; }
 	public void setSceneId(String sceneId) { this.sceneId = sceneId; }
-	public String getFlowId() { return flowId; }
-	public void setFlowId(String flowId) { this.flowId = flowId; }
 	public SceneType getSceneType() { return sceneType; }
 	public void setSceneType(SceneType sceneType) { this.sceneType = sceneType; }
 	public String getProviderSessionId() { return providerSessionId; }

@@ -1,6 +1,6 @@
 # UniSpeaking 前后端接口文档
 
-本文档用于前端和后端对齐接口。当前后端已实现自由会话的开始、WebSocket 追加完整消息和结束；登录注册、用户偏好、场景、评分、个人中心等接口属于建议新增契约。
+本文档用于前端和后端对齐接口。当前后端已实现登录注册、JWT 鉴权、用户偏好、字幕翻译、自由会话开始、WebSocket 追加完整消息和结束；其他未实现接口会单独标记。
 
 ## 1. 基础约定
 
@@ -128,48 +128,14 @@ Authorization: Bearer <accessToken>
 }
 ```
 
-## 3. Level 和老师选择 HTTP 接口
+## 3. Level、老师和长期用户资料 HTTP 接口
 
-状态：建议新增。
-
-### 3.1 保存新手引导偏好
-
-```text
-PUT /api/users/me/onboarding
-Authorization: Bearer <accessToken>
-```
-
-请求：
-
-```json
-{
-  "level": "starter",
-  "teacherId": "james"
-}
-```
-
-字段：
-
-| 字段 | 可选值 |
-| --- | --- |
-| `level` | `starter`, `basic`, `independent`, `fluent` |
-| `teacherId` | `clara`, `james`, `leo`, `david`, `emily`, `arthur` |
-
-响应：
-
-```json
-{
-  "userId": "user_123",
-  "level": "starter",
-  "teacherId": "james",
-  "onboardingCompleted": true
-}
-```
+状态：已实现。新手引导的“下一步”和设置页的“保存设置”统一调用用户偏好接口。
 
 ### 3.2 获取用户偏好
 
 ```text
-GET /api/users/me/profile
+GET /api/user-preferences
 Authorization: Bearer <accessToken>
 ```
 
@@ -177,19 +143,21 @@ Authorization: Bearer <accessToken>
 
 ```json
 {
-  "userId": "user_123",
-  "displayName": "Yufan",
-  "level": "starter",
-  "teacherId": "james",
-  "voiceId": "Katerina",
-  "conversationSpeed": "自然"
+  "success": true,
+  "data": {
+    "userId": "11111111-1111-4111-8111-111111111111",
+    "preferredVoice": "Katerina",
+    "preferredAiSpeechSpeed": "NATURAL",
+    "cefrLevel": "C",
+    "memoryText": "兴趣与背景：喜欢科技和旅行，从事软件产品相关工作。个人信息：昵称 Sunny；不希望讨论具体客户和项目。"
+  }
 }
 ```
 
 ### 3.3 更新用户偏好
 
 ```text
-PATCH /api/users/me/profile
+PUT /api/user-preferences
 Authorization: Bearer <accessToken>
 ```
 
@@ -197,20 +165,57 @@ Authorization: Bearer <accessToken>
 
 ```json
 {
-  "level": "basic",
-  "teacherId": "clara",
-  "conversationSpeed": "适中",
-  "voiceId": "Katerina"
+  "preferredVoice": "Katerina",
+  "preferredAiSpeechSpeed": "MODERATE",
+  "cefrLevel": "B",
+  "memoryText": "兴趣与背景：喜欢科技、电影和旅行，熟悉会议和演示场景。个人信息：昵称 Sunny；不希望讨论具体公司、客户或项目。"
 }
 ```
 
-响应同 `GET /api/users/me/profile`。
+所有字段都可省略；省略表示保留原值，`memoryText` 传空字符串表示清空长期资料。`memoryText` 最长 4000 个字符，只保存用户主动提供的长期背景、称谓和话题边界，不保存逐轮对话或会话历史摘要。响应同 `GET /api/user-preferences`。
 
-## 4. 场景会话统一接口
+字段值：
+
+| 字段 | 可选值 |
+| --- | --- |
+| `preferredVoice` | `Katerina`, `Aiden`, `Raymond`, `Tina`, `Harvey`, `Dolce` |
+| `preferredAiSpeechSpeed` | `SLOWER`, `MODERATE`, `NATURAL`, `FASTER` |
+| `cefrLevel` | `A`, `B`, `C`, `D` |
+
+## 4. 字幕翻译 HTTP 接口
+
+状态：已实现。前端只在用户点击某句字幕的“翻译”按钮时调用，结果缓存在当前页面的字幕行中。
+
+```text
+POST /api/translations
+Authorization: Bearer <accessToken>
+```
+
+请求：
+
+```json
+{
+  "text": "How are you today?"
+}
+```
+
+响应数据：
+
+```json
+{
+  "sourceText": "How are you today?",
+  "translatedText": "你今天好吗？",
+  "targetLanguage": "zh-CN"
+}
+```
+
+后端通过 `AiProviderRegistry` 选择 `qwen3.5-plus`，调用百炼 Chat Completions 完成翻译。待翻译文本不能为空且最长 4000 个字符。
+
+## 5. 场景会话统一接口
 
 状态：已实现统一启动、WebSocket 追加完整消息和结束。
 
-### 4.1 启动场景会话
+### 5.1 启动场景会话
 
 ```text
 POST /api/scene-sessions
@@ -220,9 +225,6 @@ POST /api/scene-sessions
 
 ```json
 {
-  "sceneType": "FREE_CHAT",
-  "prompt": "自由对话。老师：James。语速：自然。水平：starter。",
-  "userPreference": "I prefer gentle correction and short replies.",
   "offerSdp": "浏览器生成的 WebRTC Offer SDP",
   "provider": "QWEN",
   "model": "qwen3.5-omni-flash-realtime",
@@ -231,46 +233,45 @@ POST /api/scene-sessions
 }
 ```
 
-`sceneType` 可选：
-
-```text
-FREE_CHAT, CUSTOM_SCENE, IELTS_SCENE, INTERVIEW_SCENE
-```
+该接口是自由聊天入口。客户端不传 `userId`、`sceneType`、`prompt`、
+`topic` 或 `userPreference`。后端从 JWT 获取用户 ID，从数据库读取用户
+Profile 和偏好，固定以 `FREE_CHAT` 调用 `SceneService` 和
+`FiveLayerPromptService` 生成完整五层提示词。
 
 响应：
 
 ```json
 {
-  "sceneId": "scene_801cca60-5b30-49ce-be9c-54a55655754a",
+  "sceneId": "freechat_801cca605b3049cebe9c54a55655754a",
   "sceneName": "Free Chat",
   "sceneType": "FREE_CHAT",
   "wordList": [],
   "phraseList": [],
   "sentenceList": [],
-  "flowId": "flow_9524a0d2-617d-42a4-b824-f7e86cc5158c",
   "currentStage": "DIALOGUE",
   "scoringEnabled": false,
   "sessionId": "scene_801cca60-5b30-49ce-be9c-54a55655754a",
-  "localSessionId": "scene_801cca60-5b30-49ce-be9c-54a55655754a",
   "providerSessionId": null,
   "answerSdp": "Qwen 返回的 WebRTC Answer SDP",
   "credentialExpiresAt": "2026-07-21T08:20:07Z",
   "voiceId": "Katerina",
   "status": "WAITING_CLIENT",
   "startTime": "2026-07-21T08:15:07Z",
-  "scenePrompt": "完整系统提示词",
   "systemPrompt": "完整系统提示词"
 }
 ```
 
 自由会话会直接进入 `DIALOGUE` 阶段且不评分；自定义场景会返回三组学习材料并从 `WORD_LEARNING` 开始，后续可接单词、词组、句子学习和评分。
 
-`scenePrompt` 是后端在 `SceneService.generateScene(...)` 中完成权限校验、用户 Profile 注入、用户偏好注入和场景输入注入后的完整提示词，Session 阶段直接使用它。
-`SessionService.startSession(...)` 使用 `offerSdp/model/voice` 调用
+`systemPrompt` 是后端在 `SceneService.generateScene(...)` 中完成权限校验、
+用户 Profile 注入和用户偏好注入后的完整五层提示词。前端必须将它放入
+DataChannel `session.update.session.instructions`，不得使用客户端默认提示词替代。
+`SessionService.startSession(prompt)` 只创建业务会话并记录开始时间。
+`RealtimeSessionConnector` 使用 `offerSdp/model/voice` 调用
 `RealtimeConnectionService`，内部申请短期凭证并交换 Answer SDP。`systemPrompt`
-与 `scenePrompt` 内容相同，用于兼容实时前端已有字段。
+就是 `SceneService` 生成的 `scenePrompt`，启动响应只保留这一个提示词字段。
 
-### 4.2 追加完整消息
+### 5.2 追加完整消息
 
 ```text
 WS /ws/session-messages
@@ -298,6 +299,10 @@ WS /ws/session-messages
 | `content` | 用户或模型的一条完整文本，不传流式 delta |
 | `audio` | 用户说话音频，使用 base64 字符串；模型消息通常为空 |
 
+后端只在 `content` 是非空最终文本时追加消息。自由聊天消息按收到顺序写入
+Redis List，`owner=1` 表示用户、`owner=0` 表示 AI；音频不会写入 Redis，
+流式 transcription/audio delta 也不会保存。
+
 响应：
 
 ```json
@@ -311,7 +316,7 @@ WS /ws/session-messages
 }
 ```
 
-### 4.3 结束自由会话
+### 5.3 结束自由会话
 
 ```text
 WS /ws/session-messages
@@ -322,7 +327,8 @@ WS /ws/session-messages
 ```json
 {
   "type": "session.end",
-  "sessionId": "scene_801cca60-5b30-49ce-be9c-54a55655754a"
+  "sessionId": "scene_801cca60-5b30-49ce-be9c-54a55655754a",
+  "stopTime": "2026-07-21T08:25:07Z"
 }
 ```
 
@@ -335,10 +341,7 @@ WS /ws/session-messages
   "success": true,
   "code": "OK",
   "message": "success",
-  "data": {
-    "sessionId": "scene_801cca60-5b30-49ce-be9c-54a55655754a",
-    "stopTime": "2026-07-21T08:25:07Z"
-  }
+  "data": null
 }
 ```
 
@@ -348,14 +351,14 @@ HTTP `POST /api/scene-sessions/{sessionId}/end` 目前保留，方便调试和�
 
 1. 会话状态变为 `COMPLETED`。
 2. 结算用量。
-3. 更新 session memory。
+3. 保留本次完整消息；不更新用户长期 `memory_text`。
 
-## 5. 自定义场景接口
+## 6. 自定义场景接口
 
 状态：自定义场景使用独立 `CustomSceneController`，与
 `FreeChatSessionController` 分开。独立学习 WebSocket、TTS、发音评分和最终报告仍待接入。
 
-### 5.1 生成自定义场景
+### 6.1 生成自定义场景
 
 ```text
 POST /api/custom-scenes/generate
@@ -385,18 +388,16 @@ Authorization: Bearer <accessToken>
   "code": "OK",
   "message": "success",
   "data": {
-    "sceneId": "scene_801cca60-5b30-49ce-be9c-54a55655754a",
-    "sceneName": "第一次去健身房，咨询设施、开放时间...",
-    "sceneType": "CUSTOM_SCENE",
+    "sceneId": "custom_801cca605b3049cebe9c54a55655754a",
     "wordList": [],
     "phraseList": [],
     "sentenceList": [],
-    "scenePrompt": "完整的自定义场景提示词"
+    "scenePrompt": "L1 基础职责\n\nL2 老师角色\n\nL3 难度与语速\n\nL4 用户长期偏好\n\nL5 当前场景"
   }
 }
 ```
 
-### 5.2 启动场景训练
+### 6.2 启动场景训练
 
 自定义场景使用独立启动接口：
 
@@ -416,60 +417,64 @@ POST /api/custom-scenes/start
 
 为兼容已有前端，`sceneInput` 也可以使用字段名 `prompt`。
 
-### 5.3 场景学习 Flow
+### 6.3 场景学习 Flow
 
 ```text
 POST /api/custom-scenes/flows
 POST /api/custom-scenes/flows/advance
-GET  /api/custom-scenes/flows/{flowId}
+GET  /api/custom-scenes/flows/{sceneId}/content?stage=WORD_LEARNING
 POST /api/custom-scenes/flows/complete
 ```
 
-响应会包含学习材料：
+创建 Flow 只传已经生成并保存的 `sceneId`：
 
 ```json
 {
-  "sceneId": "scene_801cca60-5b30-49ce-be9c-54a55655754a",
-  "sceneName": "第一次去健身房，咨询设施、开放时间和会员...",
-  "sceneType": "CUSTOM_SCENE",
-  "wordList": [
-    {
-      "contentId": "word_1",
-      "englishText": "membership",
-      "chineseText": "核心话题词",
-      "phonetic": ""
-    }
-  ],
-  "phraseList": [
-    {
-      "contentId": "phrase_1",
-      "englishText": "Could you tell me more about this situation?",
-      "chineseText": "你能多介绍一下这个场景吗？",
-      "phonetic": ""
-    }
-  ],
-  "sentenceList": [
-    {
-      "contentId": "sentence_1",
-      "englishText": "Hi, I would like to practice a conversation about this situation.",
-      "chineseText": "你好，我想练习关于这个场景的对话。",
-      "phonetic": ""
-    }
-  ],
-  "flowId": "flow_9524a0d2-617d-42a4-b824-f7e86cc5158c",
-  "currentStage": "WORD_LEARNING",
-  "scoringEnabled": true,
-  "sessionId": "scene_801cca60-5b30-49ce-be9c-54a55655754a",
-  "startTime": "2026-07-21T08:15:07Z",
-  "scenePrompt": "完整系统提示词"
+  "sceneId": "custom_801cca605b3049cebe9c54a55655754a"
 }
 ```
 
-## 6. 个人中心 HTTP 接口
+创建响应：
+
+```json
+{
+  "sceneId": "custom_801cca605b3049cebe9c54a55655754a",
+  "stage": "WORD_LEARNING",
+  "completed": false
+}
+```
+
+获取当前阶段内容：
+
+```json
+[
+  {
+    "contentId": "word_1",
+    "englishText": "membership",
+    "chineseText": "核心话题词",
+    "phonetic": ""
+  }
+]
+```
+
+推进阶段时传当前阶段，用于防止前端重复点击或乱序请求：
+
+```json
+{
+  "sceneId": "custom_801cca605b3049cebe9c54a55655754a",
+  "stage": "WORD_LEARNING"
+}
+```
+
+`FREE_CHAT` 创建 Flow 后直接返回 `DIALOGUE`；其他场景从
+`WORD_LEARNING` 开始。`SceneFlowService` 根据 `sceneId` 读取已保存的
+场景内容，不再接收 `userId`、Prompt 或三组学习材料。
+
+## 7. 个人中心 HTTP 接口
 
 状态：建议新增。
 
-### 6.1 学习概览
+### 7.1 学习概览
 
 ```text
 GET /api/users/me/overview
@@ -500,7 +505,7 @@ Authorization: Bearer <accessToken>
 }
 ```
 
-### 6.2 会员和额度
+### 7.2 会员和额度
 
 ```text
 GET /api/users/me/subscription
@@ -523,7 +528,7 @@ Authorization: Bearer <accessToken>
 }
 ```
 
-### 6.3 学习资产列表
+### 7.3 学习资产列表
 
 ```text
 GET /api/learning-assets
@@ -559,7 +564,7 @@ pageSize=20
 }
 ```
 
-### 6.4 学习资产详情
+### 7.4 学习资产详情
 
 ```text
 GET /api/learning-assets/{assetId}
@@ -594,7 +599,7 @@ Authorization: Bearer <accessToken>
 }
 ```
 
-### 6.5 删除学习资产
+### 7.5 删除学习资产
 
 ```text
 DELETE /api/learning-assets/{assetId}
@@ -609,13 +614,13 @@ Authorization: Bearer <accessToken>
 }
 ```
 
-## 7. 评分接口
+## 8. 评分接口
 
 状态：建议新增。
 
 评分可在会话结束后由后端异步生成，也可前端主动查询。
 
-### 7.1 查询会话评分
+### 8.1 查询会话评分
 
 ```text
 GET /api/scene-sessions/{localSessionId}/score
@@ -668,7 +673,7 @@ Authorization: Bearer <accessToken>
 }
 ```
 
-### 7.2 评分状态
+### 8.2 评分状态
 
 如果评分异步生成：
 
@@ -692,7 +697,7 @@ Authorization: Bearer <accessToken>
 PENDING, READY, FAILED
 ```
 
-## 8. 前端页面和接口对应关系
+## 9. 前端页面和接口对应关系
 
 | 前端页面 | HTTP 接口 | 实时协议 |
 | --- | --- | --- |
@@ -711,7 +716,7 @@ PENDING, READY, FAILED
 | 会员额度 | `GET /api/users/me/subscription` | 无 |
 | 评分结果 | `GET /api/scene-sessions/{sessionId}/score` | 无 |
 
-## 9. 当前后端已实现清单
+## 10. 当前后端已实现清单
 
 | 能力 | 状态 | 文件 |
 | --- | --- | --- |
@@ -720,13 +725,14 @@ PENDING, READY, FAILED
 | 结束自由会话 | 已实现，WebSocket 为主，HTTP 保留 | `SessionMessageWebSocketHandler`, `FreeChatSessionController`, `SessionService.endSession` |
 | 申请 Qwen 临时 token | 保留 Provider 能力，当前不属于 SessionService | `RealtimeCredentialServiceImpl` |
 | Offer SDP 换 Answer SDP | 已通过模型 Registry 选择 Realtime Provider | `AiProviderRegistry` -> `QwenRealtimeProvider` |
-| 登录注册 | 未实现 | 建议新增 |
-| 用户偏好 | 仓储和服务雏形存在，HTTP 未实现 | 建议新增 Controller |
+| 登录注册与 JWT 鉴权 | 已实现 | `AuthController`, `AuthService`, `JwtTokenService` |
+| 用户偏好与长期用户资料 | 已实现，MyBatis-Plus 持久化 | `UserPreferenceController`, `ProfileService` |
+| 字幕按需翻译 | 已实现，使用 `qwen3.5-plus` | `TranslationController`, `TranslationService`, `QwenLlmProvider` |
 | 自定义场景 | 已实现独立入口 | `CustomSceneController` |
 | 学习资产 | 未实现 | 建议新增 |
 | 评分 | 未实现 | 建议新增 |
 
-## 10. 联调时看日志
+## 11. 联调时看日志
 
 日志文件：
 

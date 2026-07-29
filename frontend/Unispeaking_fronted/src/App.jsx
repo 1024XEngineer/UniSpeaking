@@ -58,6 +58,16 @@ import {
   Trophy,
 } from "lucide-react";
 import { assetRecords, learningItems, levels, plans, recommendations, teachers } from "./data.js";
+import {
+  clearAuthSession,
+  getCurrentUser,
+  getUserPreference,
+  hasAuthSession,
+  login,
+  register,
+  translateText,
+  updateUserPreference,
+} from "./apiClient.js";
 import { createRealtimeClient } from "./realtimeClient.js";
 import { IeltsAssets, IeltsTrainingCenter } from "./IeltsModule.jsx";
 import { InterviewAssets, InterviewTrainingCenter } from "./InterviewModule.jsx";
@@ -170,7 +180,11 @@ const transcriptTranslationLookup = {
   "That sounds great. I’ll have that, thank you.": "听起来不错，我就要这个，谢谢。",
 };
 
-const resolveTranscriptTranslation = (line) => line.zh || transcriptTranslationLookup[line.en?.trim()] || "本句中文翻译暂未生成。";
+const resolveTranscriptTranslation = (line) => {
+  if (line.translationStatus === "loading") return "正在翻译…";
+  if (line.translationError) return line.translationError;
+  return line.zh || transcriptTranslationLookup[line.en?.trim()] || "本句中文翻译暂未生成。";
+};
 
 function CallTranscript({ lines, translated, onToggleTranslation, transcriptRef, onScroll, className, emptyStatus }) {
   return (
@@ -179,7 +193,8 @@ function CallTranscript({ lines, translated, onToggleTranslation, transcriptRef,
         ? <article className="transcript__line"><small>字幕</small><p>{emptyStatus}</p></article>
         : lines.map((line, index) => {
           const isTranslated = translated.includes(index);
-          return <article key={line.id || index} className={cx("transcript__line", line.who === "你" && "is-user")}><small>{line.who}</small><p>{line.en}</p><button type="button" aria-label={`${isTranslated ? "收起" : "查看"}${line.who}这句字幕的翻译`} onClick={() => onToggleTranslation(index)}><Translate />{isTranslated ? "收起翻译" : "翻译"}</button>{isTranslated && <span>{resolveTranscriptTranslation(line)}</span>}</article>;
+          const canTranslate = line.final !== false;
+          return <article key={line.id || index} className={cx("transcript__line", line.who === "你" && "is-user")}><small>{line.who}</small><p>{line.en}</p>{canTranslate && <button type="button" aria-label={`${isTranslated ? "收起" : "查看"}${line.who}这句字幕的翻译`} disabled={line.translationStatus === "loading"} onClick={() => onToggleTranslation(index)}><Translate />{line.translationStatus === "loading" ? "翻译中" : isTranslated ? "收起翻译" : "翻译"}</button>}{isTranslated && <span>{resolveTranscriptTranslation(line)}</span>}</article>;
         })}
     </div>
   );
@@ -308,22 +323,25 @@ function Splash({ onStart, onLogin }) {
 function Auth({ mode: initialMode, onBack, onSuccess }) {
   const [mode, setMode] = useState(initialMode || "signup");
   const [showPassword, setShowPassword] = useState(false);
-  const [sent, setSent] = useState(false);
-  if (sent) {
-    return (
-      <main className="auth-layout">
-        <aside className="auth-layout__aside"><Brand /><div><p className="eyebrow">ONE STEP LEFT</p><h2>先验证邮箱，<br />再开始第一次对话。</h2></div><p>语你说 · UniSpeaking</p></aside>
-        <section className="auth-panel verify-panel">
-          <div className="verify-icon"><EnvelopeSimple /></div>
-          <p className="eyebrow">CHECK YOUR INBOX</p>
-          <h1>验证你的邮箱</h1>
-          <p>验证邮件已发送至 <strong>hello@example.com</strong>。完成验证后即可进入产品。</p>
-          <Button onClick={onSuccess}>我已完成验证</Button>
-          <button className="text-button">重新发送邮件</button>
-        </section>
-      </main>
-    );
-  }
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      const auth = mode === "signup"
+        ? await register({ username, password })
+        : await login({ username, password });
+      await onSuccess(auth, mode);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "认证请求失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
   return (
     <main className="auth-layout">
       <aside className="auth-layout__aside">
@@ -334,13 +352,14 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
       <section className="auth-panel">
         <button className="back-link" onClick={onBack}><ArrowLeft />返回</button>
         <div className="auth-panel__heading"><h1>{mode === "signup" ? "创建账号" : "欢迎回来"}</h1><p>{mode === "signup" ? "用邮箱注册，开始你的口语练习。" : "继续上一次的学习进度。"}</p></div>
-        <form onSubmit={(event) => { event.preventDefault(); mode === "signup" ? setSent(true) : onSuccess(); }}>
-          <label>邮箱<input type="email" placeholder="name@example.com" required /></label>
-          <label>密码<span className="password-field"><input type={showPassword ? "text" : "password"} placeholder="至少 8 位字符" required /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>
+        <form onSubmit={submit}>
+          <label>邮箱<input type="email" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="name@example.com" maxLength="254" required /></label>
+          <label>密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 6 位字符" minLength="6" maxLength="72" required /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>
           {mode === "login" && <button type="button" className="forgot-link">忘记密码？</button>}
-          <Button className="auth-submit" type="submit">{mode === "signup" ? "注册并验证邮箱" : "登录"}</Button>
+          {error && <p className="call-error">{error}</p>}
+          <Button className="auth-submit" type="submit" disabled={submitting}>{submitting ? "请稍候" : mode === "signup" ? "注册" : "登录"}</Button>
         </form>
-        <p className="auth-switch">{mode === "signup" ? "已经有账号？" : "还没有账号？"}<button onClick={() => setMode(mode === "signup" ? "login" : "signup")}>{mode === "signup" ? "直接登录" : "创建账号"}</button></p>
+        <p className="auth-switch">{mode === "signup" ? "已经有账号？" : "还没有账号？"}<button onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setError(""); }}>{mode === "signup" ? "直接登录" : "创建账号"}</button></p>
       </section>
     </main>
   );
@@ -473,6 +492,15 @@ function LevelSelect({ value, onChange }) {
 }
 
 const speedOptions = ["慢一些", "适中", "自然", "快一些"];
+const speedCodeByLabel = {
+  "慢一些": "SLOWER",
+  "适中": "MODERATE",
+  "自然": "NATURAL",
+  "快一些": "FASTER",
+};
+const speedLabelByCode = Object.fromEntries(
+  Object.entries(speedCodeByLabel).map(([label, code]) => [code, label]),
+);
 
 function SpeedSelector({ value, onChange, className }) {
   const speedIndex = Math.max(0, speedOptions.indexOf(value));
@@ -504,19 +532,33 @@ function ConversationSettings({ speed, level, teacher, onSave, onClose }) {
   const [draftSpeed, setDraftSpeed] = useState(speed);
   const [draftLevel, setDraftLevel] = useState(level || "basic");
   const [draftTeacherId, setDraftTeacherId] = useState(teacher.id);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSave({
+        speed: draftSpeed,
+        level: draftLevel,
+        teacher: teachers.find((item) => item.id === draftTeacherId),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <section className="conversation-settings" role="dialog" aria-modal="false" aria-labelledby="conversation-settings-title">
-      <button className="conversation-settings__close" aria-label="关闭对话设置" onClick={onClose}><X /></button>
+      <button className="conversation-settings__close" aria-label="关闭对话设置" disabled={saving} onClick={onClose}><X /></button>
       <div className="conversation-settings__heading"><h2 id="conversation-settings-title">对话设置</h2><p>调整后会从下一次对话开始生效。</p></div>
       <div className="conversation-settings__group"><label>对话语速</label><SpeedSelector value={draftSpeed} onChange={setDraftSpeed} /></div>
       <div className="conversation-settings__group"><label htmlFor="conversation-level">英语水平</label><LevelSelect value={draftLevel} onChange={setDraftLevel} /></div>
       <div className="conversation-settings__group"><label>AI 老师</label><TeacherSelector selectedId={draftTeacherId} onSelect={(item) => setDraftTeacherId(item.id)} /></div>
-      <div className="conversation-settings__actions"><button onClick={onClose}>取消</button><button className="is-primary" onClick={() => onSave({ speed: draftSpeed, level: draftLevel, teacher: teachers.find((item) => item.id === draftTeacherId) })}>保存设置</button></div>
+      <div className="conversation-settings__actions"><button disabled={saving} onClick={onClose}>取消</button><button className="is-primary" disabled={saving} onClick={save}>{saving ? "保存中…" : "保存设置"}</button></div>
     </section>
   );
 }
 
-function Conversation({ teacher, speed, level, onSettingsChange }) {
+function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart }) {
   const [inCall, setInCall] = useState(false);
   const [callState, setCallState] = useState("idle");
   const [callStatus, setCallStatus] = useState("准备开始");
@@ -527,10 +569,38 @@ function Conversation({ teacher, speed, level, onSettingsChange }) {
   const [translated, setTranslated] = useState([]);
   const [lines, setLines] = useState([]);
   const clientRef = useRef(null);
+  const clientGenerationRef = useRef(0);
   const remoteAudioRef = useRef(null);
   const transcriptRef = useRef(null);
   const transcriptPinnedRef = useRef(true);
-  const toggleTranslation = (index) => setTranslated((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index]);
+  const toggleTranslation = async (index) => {
+    const line = lines[index];
+    if (!line) return;
+    if (translated.includes(index)) {
+      setTranslated((current) => current.filter((item) => item !== index));
+      return;
+    }
+    setTranslated((current) => [...current, index]);
+    if (line.zh || line.translationStatus === "loading") return;
+    const lineId = line.id;
+    setLines((current) => current.map((item) => item.id === lineId
+      ? { ...item, translationStatus: "loading", translationError: "" }
+      : item));
+    try {
+      const result = await translateText(line.en);
+      setLines((current) => current.map((item) => item.id === lineId
+        ? { ...item, zh: result.translatedText, translationStatus: "done", translationError: "" }
+        : item));
+    } catch (error) {
+      setLines((current) => current.map((item) => item.id === lineId
+        ? {
+          ...item,
+          translationStatus: "failed",
+          translationError: error instanceof Error ? error.message : "翻译失败，请稍后重试。",
+        }
+        : item));
+    }
+  };
   const handleTranscriptScroll = () => {
     const transcript = transcriptRef.current;
     if (!transcript) return;
@@ -542,15 +612,18 @@ function Conversation({ teacher, speed, level, onSettingsChange }) {
     if (!content) return;
     setLines((current) => {
       const lineId = id || `${who}-live`;
-      const index = current.findIndex((line) => line.id === lineId && !line.final);
+      const exactIndex = current.findIndex((line) => line.id === lineId);
+      const fallbackIndex = final
+        ? current.findLastIndex((line) => line.who === who && !line.final)
+        : -1;
+      const index = exactIndex >= 0 ? exactIndex : fallbackIndex;
       if (index < 0) {
-        const idSuffix = final ? `-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` : "";
-        return [...current, { id: `${lineId}${idSuffix}`, who, en: content, final }];
+        return [...current, { id: lineId, who, en: content, final }];
       }
       const next = [...current];
       next[index] = {
         ...next[index],
-        id: final ? `${next[index].id}-final-${Date.now()}` : next[index].id,
+        id: lineId,
         en: text || `${next[index].en}${delta}`,
         final,
       };
@@ -579,11 +652,21 @@ function Conversation({ teacher, speed, level, onSettingsChange }) {
       setCallStatus("可以开始说了");
       return;
     }
-    if (event.type === "conversation.item.input_audio_transcription.completed") {
+    if (event.type === "local.greeting_timeout") {
+      setCallState("active");
+      setCallStatus("可以开始说了");
+      return;
+    }
+    if (event.type === "local.provider_warning") {
+      setCallState("active");
+      setCallStatus("可以继续对话");
+      return;
+    }
+    if (event.type === "local.transcript.final") {
       updateRealtimeTranscript({
-        id: event.item_id || event.item?.id || "user-live",
-        who: "你",
-        text: event.transcript || event.text || "",
+        id: event.itemId,
+        who: event.owner === 1 ? "你" : teacher.name,
+        text: event.text,
         final: true,
       });
       return;
@@ -605,15 +688,6 @@ function Conversation({ teacher, speed, level, onSettingsChange }) {
         id: event.item_id || event.response_id || "assistant-live",
         who: teacher.name,
         delta: event.delta || event.text || "",
-      });
-      return;
-    }
-    if (event.type === "response.audio_transcript.done") {
-      updateRealtimeTranscript({
-        id: event.item_id || event.response_id || "assistant-live",
-        who: teacher.name,
-        text: event.transcript || event.text || "",
-        final: true,
       });
       return;
     }
@@ -657,9 +731,15 @@ function Conversation({ teacher, speed, level, onSettingsChange }) {
 
   const getClient = () => {
     if (!clientRef.current) {
-      clientRef.current = createRealtimeClient({
-        onEvent: handleRealtimeEvent,
+      const generation = ++clientGenerationRef.current;
+      let client;
+      client = createRealtimeClient({
+        onEvent: (event) => {
+          if (clientRef.current !== client || clientGenerationRef.current !== generation) return;
+          handleRealtimeEvent(event);
+        },
         onRemoteStream: (stream) => {
+          if (clientRef.current !== client || clientGenerationRef.current !== generation) return;
           if (!remoteAudioRef.current) return;
           remoteAudioRef.current.srcObject = stream;
           void remoteAudioRef.current.play().catch(() => {
@@ -667,11 +747,13 @@ function Conversation({ teacher, speed, level, onSettingsChange }) {
           });
         },
       });
+      clientRef.current = client;
     }
     return clientRef.current;
   };
 
   const startConversation = async () => {
+    await onBeforeStart?.();
     setInCall(true);
     setPaused(false);
     setSubtitles(true);
@@ -680,11 +762,14 @@ function Conversation({ teacher, speed, level, onSettingsChange }) {
     setCallError("");
     setCallState("connecting");
     setCallStatus("正在请求麦克风");
+    const client = getClient();
     try {
-      await getClient().start({
-        topic: `自由对话。老师：${teacher.name}。语速：${speed}。水平：${level || "basic"}。`,
+      await client.start({
+        voice: teacher.voiceId,
+        speechSpeed: speedCodeByLabel[speed] || "NATURAL",
       });
     } catch (error) {
+      if (clientRef.current !== client) return;
       setCallState("error");
       setCallError(error instanceof Error ? error.message : "无法开始实时对话");
       setCallStatus("连接失败");
@@ -693,15 +778,18 @@ function Conversation({ teacher, speed, level, onSettingsChange }) {
 
   const togglePaused = async () => {
     if (callState === "ended") return;
+    const client = clientRef.current;
+    if (!client) return;
     const next = !paused;
     setPaused(next);
-    if (next) await getClient().pause();
-    else await getClient().resume();
+    if (next) await client.pause();
+    else await client.resume();
   };
 
   const stopConversation = async () => {
     const client = clientRef.current;
     clientRef.current = null;
+    clientGenerationRef.current += 1;
     setInCall(false);
     setSubtitles(false);
     setPaused(false);
@@ -711,7 +799,10 @@ function Conversation({ teacher, speed, level, onSettingsChange }) {
   };
 
   useEffect(() => () => {
-    void clientRef.current?.stop({ notifyBackend: false, reason: "component_unmount" });
+    const client = clientRef.current;
+    clientRef.current = null;
+    clientGenerationRef.current += 1;
+    void client?.stop({ notifyBackend: false, reason: "component_unmount" });
   }, []);
 
   useEffect(() => {
@@ -736,7 +827,7 @@ function Conversation({ teacher, speed, level, onSettingsChange }) {
   if (!inCall) return (
     <main className="conversation standby">
       <div className="conversation__top conversation__top--standby"><button className="dialog-settings-button" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(!settingsOpen)}><GearSix className="dialog-settings-button__icon" /><span>对话设置</span></button></div>
-      {settingsOpen && <ConversationSettings speed={speed} level={level} teacher={teacher} onClose={() => setSettingsOpen(false)} onSave={(settings) => { onSettingsChange(settings); setSettingsOpen(false); }} />}
+      {settingsOpen && <ConversationSettings speed={speed} level={level} teacher={teacher} onClose={() => setSettingsOpen(false)} onSave={async (settings) => { if (await onSettingsChange(settings)) setSettingsOpen(false); }} />}
       <section className="standby__center">
         <div className="portrait portrait--large"><img src={teacher.image} alt={teacher.name} /></div>
         <p className="eyebrow">{teacher.name.toUpperCase()} · {teacher.accent}</p>
@@ -745,7 +836,7 @@ function Conversation({ teacher, speed, level, onSettingsChange }) {
         {callError && <p className="call-error">{callError}</p>}
         <ExpandingCta className="standby__cta" onClick={startConversation}>开始对话</ExpandingCta>
       </section>
-      <p className="privacy-note"><ShieldCheck />自由对话内容不会保存</p>
+	      <p className="privacy-note"><ShieldCheck />字幕文本将暂存 24 小时</p>
     </main>
   );
   return (
@@ -1182,9 +1273,11 @@ function Assets({ onPractice, onRestart, onIelts, onInterview, onOpenRecord, onC
   );
 }
 
-function Profile({ section, setSection, teacher, speed, level, onSettingsChange, onLogout }) {
+function Profile({ section, setSection, user, teacher, speed, level, onSettingsChange, onLogout }) {
+  const displayName = user?.nickname || user?.username?.split("@")[0] || "UniSpeaking User";
+  const email = user?.username || "";
   return (
-    <main className="profile-layout"><aside className="profile-nav"><div className="profile-user"><img src={teacher.image} alt="Yufan" /><span><strong>Yufan</strong><small>yufan@example.com</small></span></div><nav><button className={section === "profile" ? "is-active" : ""} onClick={() => setSection("profile")}><User />个人概览</button><button className={section === "membership" ? "is-active" : ""} onClick={() => setSection("membership")}><Crown />会员权益</button><button className={section === "settings" ? "is-active" : ""} onClick={() => setSection("settings")}><SlidersHorizontal />助手设置</button></nav><button className="logout" onClick={onLogout}><SignOut />退出登录</button></aside><section className="profile-content">{section === "profile" && <Overview />}{section === "membership" && <Membership />}{section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} />}</section></main>
+    <main className="profile-layout"><aside className="profile-nav"><div className="profile-user"><img src={teacher.image} alt={displayName} /><span><strong>{displayName}</strong><small>{email}</small></span></div><nav><button className={section === "profile" ? "is-active" : ""} onClick={() => setSection("profile")}><User />个人概览</button><button className={section === "membership" ? "is-active" : ""} onClick={() => setSection("membership")}><Crown />会员权益</button><button className={section === "settings" ? "is-active" : ""} onClick={() => setSection("settings")}><SlidersHorizontal />助手设置</button></nav><button className="logout" onClick={onLogout}><SignOut />退出登录</button></aside><section className="profile-content">{section === "profile" && <Overview />}{section === "membership" && <Membership />}{section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} />}</section></main>
   );
 }
 
@@ -1296,11 +1389,12 @@ function Membership() {
 
 function Settings({ teacher, speed, level, onSettingsChange }) {
   const [syncPulse, setSyncPulse] = useState(0);
-  const updateSettings = (next) => {
-    onSettingsChange(next);
-    setSyncPulse((current) => current + 1);
+  const updateSettings = async (next) => {
+    if (await onSettingsChange(next)) {
+      setSyncPulse((current) => current + 1);
+    }
   };
-  return <div className="assistant-settings-page"><PageHeader eyebrow="ASSISTANT SETTINGS" title="AI 助手设置" subtitle="只调整真正影响对话体验的选项。" action={<span key={syncPulse} className="sync-state"><CheckCircle />设置已同步</span>} /><section className="settings-list"><article><div><h2>对话语速</h2><p>选择更舒适的回应节奏。</p></div><SpeedSelector className="assistant-settings__speed" value={speed} onChange={(nextSpeed) => updateSettings({ speed: nextSpeed, level, teacher })} /></article><article><div><h2>英语水平</h2><p>新对话会按照该难度调整表达。</p></div><LevelSelect value={level} onChange={(nextLevel) => updateSettings({ speed, level: nextLevel, teacher })} /></article><article className="teacher-settings"><div><h2>AI 老师</h2><p>每位老师有固定口音和陪练方式。</p></div><TeacherSelector className="assistant-settings__teachers" selectedId={teacher.id} onSelect={(nextTeacher) => updateSettings({ speed, level, teacher: nextTeacher })} /></article><article><div><h2>账户与隐私</h2><p>管理密码与账户数据。</p></div><div className="account-actions"><button><Password />修改密码<CaretRight /></button><button className="danger"><Trash />删除账户<CaretRight /></button></div></article></section></div>;
+  return <div className="assistant-settings-page"><PageHeader eyebrow="ASSISTANT SETTINGS" title="AI 助手设置" subtitle="只调整真正影响对话体验的选项。" action={<span key={syncPulse} className="sync-state"><CheckCircle />设置已同步</span>} /><section className="settings-list"><article><div><h2>对话语速</h2><p>选择更舒适的回应节奏。</p></div><SpeedSelector className="assistant-settings__speed" value={speed} onChange={(nextSpeed) => updateSettings({ speed: nextSpeed })} /></article><article><div><h2>英语水平</h2><p>新对话会按照该难度调整表达。</p></div><LevelSelect value={level} onChange={(nextLevel) => updateSettings({ level: nextLevel })} /></article><article className="teacher-settings"><div><h2>AI 老师</h2><p>每位老师有固定口音和陪练方式。</p></div><TeacherSelector className="assistant-settings__teachers" selectedId={teacher.id} onSelect={(nextTeacher) => updateSettings({ teacher: nextTeacher })} /></article><article><div><h2>账户与隐私</h2><p>管理密码与账户数据。</p></div><div className="account-actions"><button><Password />修改密码<CaretRight /></button><button className="danger"><Trash />删除账户<CaretRight /></button></div></article></section></div>;
 }
 
 function Paywall({ title, onClose, onMembership }) {
@@ -1309,6 +1403,8 @@ function Paywall({ title, onClose, onMembership }) {
 
 export function App() {
   const initialRoute = useMemo(() => resolveRoute(window.location), []);
+  const [authReady, setAuthReady] = useState(false);
+  const [user, setUser] = useState(null);
   const [flow, setFlow] = useState(initialRoute.flow);
   const [authMode, setAuthMode] = useState(initialRoute.authMode);
   const [level, setLevel] = useState("");
@@ -1322,6 +1418,8 @@ export function App() {
   const [ieltsRoute, setIeltsRoute] = useState(initialRoute.ieltsRoute || null);
   const [interviewRoute, setInterviewRoute] = useState(initialRoute.interviewRoute || null);
   const [paywall, setPaywall] = useState(null);
+  const preferenceWriteChainRef = useRef(Promise.resolve());
+  const preferenceWriteVersionRef = useRef(0);
 
   const applyRoute = (route) => {
     setFlow(route.flow);
@@ -1343,6 +1441,17 @@ export function App() {
     applyRoute({ ...resolveRoute(url), ...overrides, canonicalPath: undefined });
   };
 
+  const applyPreference = (preference) => {
+    if (!preference) return;
+    const nextLevel = levels.find((item) => item.cefrLevel === preference.cefrLevel);
+    const nextTeacher = teachers.find((item) => item.voiceId === preference.preferredVoice);
+    if (nextLevel) setLevel(nextLevel.id);
+    if (nextTeacher) setTeacher(nextTeacher);
+    if (preference.preferredAiSpeechSpeed) {
+      setConversationSpeed(speedLabelByCode[preference.preferredAiSpeechSpeed] || "自然");
+    }
+  };
+
   useEffect(() => {
     if (initialRoute.canonicalPath && window.location.pathname !== initialRoute.canonicalPath) {
       window.history.replaceState({}, "", initialRoute.canonicalPath);
@@ -1358,11 +1467,121 @@ export function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, [initialRoute]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const bootstrapAuth = async () => {
+      if (!hasAuthSession()) {
+        if (!["splash", "auth"].includes(initialRoute.flow)) {
+          navigate(paths.auth.login, { authMode: "login" }, true);
+        }
+        if (!cancelled) setAuthReady(true);
+        return;
+      }
+      try {
+        const [currentUser, preference] = await Promise.all([
+          getCurrentUser(),
+          getUserPreference(),
+        ]);
+        if (cancelled) return;
+        setUser(currentUser);
+        applyPreference(preference);
+        if (initialRoute.flow === "app" && !preference.cefrLevel) {
+          navigate(paths.auth.level, {}, true);
+        } else if (initialRoute.flow === "app" && !preference.preferredVoice) {
+          navigate(paths.auth.teacher, {}, true);
+        }
+      } catch {
+        clearAuthSession();
+        if (!cancelled && !["splash", "auth"].includes(initialRoute.flow)) {
+          navigate(paths.auth.login, { authMode: "login" }, true);
+        }
+      } finally {
+        if (!cancelled) setAuthReady(true);
+      }
+    };
+    void bootstrapAuth();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const goSplash = () => navigate(paths.root);
   const goAuth = (mode) => navigate(mode === "login" ? paths.auth.login : paths.auth.signup);
   const goLevel = () => navigate(paths.auth.level, { authMode });
   const goTeacher = () => navigate(paths.auth.teacher, { authMode });
   const enterApp = () => setMainPage("conversation");
+  const completeAuthentication = async (auth, mode) => {
+    setUser(auth.user);
+    const preference = await getUserPreference();
+    applyPreference(preference);
+    if (mode === "signup" || !preference.cefrLevel) {
+      goLevel();
+    } else if (!preference.preferredVoice) {
+      goTeacher();
+    } else {
+      enterApp();
+    }
+  };
+  const saveLevelAndContinue = async () => {
+    const selectedLevel = levels.find((item) => item.id === level);
+    if (!selectedLevel) return;
+    try {
+      const preference = await updateUserPreference({ cefrLevel: selectedLevel.cefrLevel });
+      applyPreference(preference);
+      goTeacher();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "英语水平保存失败");
+    }
+  };
+  const saveTeacherAndEnter = async () => {
+    try {
+      const preference = await updateUserPreference({ preferredVoice: teacher.voiceId });
+      applyPreference(preference);
+      enterApp();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "AI 老师保存失败");
+    }
+  };
+  const persistSettings = async (settings) => {
+    const patch = {};
+    if (settings.teacher) {
+      setTeacher(settings.teacher);
+      patch.preferredVoice = settings.teacher.voiceId;
+    }
+    if (settings.speed) {
+      setConversationSpeed(settings.speed);
+      patch.preferredAiSpeechSpeed = speedCodeByLabel[settings.speed] || "NATURAL";
+    }
+    if (settings.level) {
+      const selectedLevel = levels.find((item) => item.id === settings.level);
+      if (selectedLevel) {
+        setLevel(selectedLevel.id);
+        patch.cefrLevel = selectedLevel.cefrLevel;
+      }
+    }
+    if (!Object.keys(patch).length) return true;
+
+    const writeVersion = ++preferenceWriteVersionRef.current;
+    const write = preferenceWriteChainRef.current
+      .catch(() => undefined)
+      .then(() => updateUserPreference(patch));
+    preferenceWriteChainRef.current = write;
+    try {
+      const preference = await write;
+      if (writeVersion === preferenceWriteVersionRef.current) {
+        applyPreference(preference);
+      }
+      return true;
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "设置保存失败");
+      return false;
+    }
+  };
+  const logout = () => {
+    clearAuthSession();
+    setUser(null);
+    goSplash();
+  };
   const startTraining = (title, initialStep = "learn", options = {}) => {
     setSceneTitle(title);
     navigate(paths.scenes.training, { page: options.returnPage || "scenes", authMode, training: { initialStep, standaloneSpeak: Boolean(options.standaloneSpeak), returnPage: options.returnPage || "scenes" }, result: null });
@@ -1373,19 +1592,20 @@ export function App() {
   const navigateInterview = (path) => navigate(path, { authMode });
   const openCompletedAssetDetail = () => navigate(paths.assets.latest, { assetView: "detail", authMode });
 
+  if (!authReady) return <main className="splash" aria-busy="true" />;
   if (flow === "splash") return <Splash onStart={() => goAuth("signup")} onLogin={() => goAuth("login")} />;
-  if (flow === "auth") return <Auth mode={authMode} onBack={goSplash} onSuccess={goLevel} />;
-  if (flow === "level") return <LevelSetup selected={level} onSelect={setLevel} onNext={goTeacher} />;
-  if (flow === "teacher") return <TeacherSetup selectedId={teacher.id} onSelect={(id) => setTeacher(teachers.find((item) => item.id === id))} onFinish={enterApp} />;
+  if (flow === "auth") return <Auth mode={authMode} onBack={goSplash} onSuccess={completeAuthentication} />;
+  if (flow === "level") return <LevelSetup selected={level} onSelect={setLevel} onNext={saveLevelAndContinue} />;
+  if (flow === "teacher") return <TeacherSetup selectedId={teacher.id} onSelect={(id) => setTeacher(teachers.find((item) => item.id === id))} onFinish={saveTeacherAndEnter} />;
   let content;
   if (training) content = <Training sceneTitle={sceneTitle} teacher={teacher} initialStep={training.initialStep} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={showResult} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} />;
-  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={(settings) => { setConversationSpeed(settings.speed); setLevel(settings.level); setTeacher(settings.teacher); }} />;
+  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} />;
   else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={() => setMainPage("ielts")} onInterview={() => setMainPage("interview")} />;
   else if (page === "assets") content = <Assets initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", authMode })} onIelts={() => setMainPage("ielts-assets")} onInterview={() => setMainPage("interview-assets")} onPractice={(title) => startTraining(title, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(title) => startTraining(title, "learn", { returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
   else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBackToAssets={() => setMainPage("assets")} onInterviewAssets={() => setMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
   else if (page === "interview") content = <InterviewTrainingCenter route={interviewRoute} onNavigate={navigateInterview} onExit={() => setMainPage("scenes")} onAssets={() => navigateInterview(paths.interview.assets.root)} />;
   else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBackToAssets={() => setMainPage("assets")} onIeltsAssets={() => setMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} />;
-  else content = <Profile section={page} setSection={setMainPage} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={(settings) => { setConversationSpeed(settings.speed); setLevel(settings.level); setTeacher(settings.teacher); }} onLogout={goSplash} />;
+  else content = <Profile section={page} setSection={setMainPage} user={user} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onLogout={logout} />;
   return <AppShell page={page} setPage={setMainPage} teacher={teacher}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}</AppShell>;
 }

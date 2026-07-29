@@ -1,8 +1,8 @@
 package com.unispeaking.exception;
 
 import com.unispeaking.domain.dto.response.ApiResponse;
-import com.unispeaking.exception.BusinessException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -12,9 +12,15 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class GlobalExceptionHandler {
 
 	@ExceptionHandler(BusinessException.class)
-	@ResponseStatus(HttpStatus.BAD_REQUEST)
-	public ApiResponse<Void> handleBusinessException(BusinessException exception) {
-		return ApiResponse.failure(exception.code(), exception.getMessage());
+	public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException exception) {
+		HttpStatus status = switch (exception.code()) {
+			case "AUTHENTICATION_REQUIRED", "INVALID_ACCESS_TOKEN", "ACCESS_TOKEN_REVOKED",
+					"INVALID_CREDENTIALS", "USER_NOT_ACTIVE" -> HttpStatus.UNAUTHORIZED;
+			case "USERNAME_ALREADY_EXISTS" -> HttpStatus.CONFLICT;
+			default -> HttpStatus.BAD_REQUEST;
+		};
+		return ResponseEntity.status(status)
+				.body(ApiResponse.failure(exception.code(), exception.getMessage()));
 	}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)

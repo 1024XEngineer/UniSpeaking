@@ -58,7 +58,7 @@ FreeChatSessionController
 CustomSceneController
 ├── 固定 CUSTOM_SCENE
 ├── SceneService.generateScene(...)
-├── SceneFlowService.createFlow/advanceStage/getFlow/completeFlow(...)
+├── SceneFlowServiceSelector（按 sceneId 选择流程实例）
 └── SceneSessionCoordinator
     ├── SceneService.generateScene(...)
     ├── SceneFlowService.createFlow(...)
@@ -66,13 +66,16 @@ CustomSceneController
         ├── FreeChatSessionService
         └── CustomSceneSessionService
             ├── SessionStateStore
-            ├── FreeChatConversationService
-            └── SessionMemoryService
+            └── FreeChatConversationService
 ```
 
-Controller 不承载业务逻辑，只做入参接收、薄转换和返回响应。当前所有场景启动统一由 `SceneSessionCoordinator` 按 `UniSpeaking架构设计（完整版）.md` 的 Service 边界组合调用。`SceneService` 只负责 `generateScene(...)`；`SceneFlowService` 只负责 Flow 创建、推进、查询、完成；`SessionService` 负责开始会话、追加完整消息、结束会话。
+Controller 不承载业务逻辑，只做入参接收、薄转换和返回响应。当前所有场景启动统一由 `SceneSessionCoordinator` 按 `UniSpeaking架构设计（完整版）.md` 的 Service 边界组合调用。`SceneService` 只负责 `generateScene(...)`；`SceneFlowService` 只负责 Flow 创建、推进、读取当前阶段内容和完成；`SessionService` 负责开始会话、追加完整消息、结束会话。
 
-`SceneService.generateScene(...)` 内部完成场景生成前的业务准备：解析/校验用户身份，校验场景配置权限，读取用户 Profile，把用户偏好和场景输入注入 Prompt，最后返回完整 `scenePrompt`。Session 阶段只接收这个完整 prompt，不再拼接用户偏好或场景提示词。
+`SceneService.generateScene(...)` 内部完成场景生成前的业务准备：解析/校验用户身份，校验场景配置权限，读取用户 Profile，把用户偏好和场景输入注入五层 Prompt，并把 `SceneGenerationResponse` 暂存在 `SceneRepository`。响应中的 `scenePrompt` 是严格按 L1-L5 合成后的一个完整字符串。Session 阶段直接接收它，不再读取 Profile，也不再拼接场景提示词。
+
+场景 ID 编码场景类型：`freechat_`、`custom_`、`interview_`、`ielts_`。
+`SceneFlowService` 解析此前缀决定初始阶段，自由聊天直接进入
+`DIALOGUE`，其余场景进入 `WORD_LEARNING`。
 
 ```text
 FreeChatSessionController
@@ -85,28 +88,61 @@ CustomSceneController
 ### 会话暂存链路
 
 ```text
-FreeChatSessionService extends SessionService
-CustomSceneSessionService extends SessionService
+FreeChatSessionService implements SessionService (prototype)
+CustomSceneSessionService implements SessionService (prototype)
     ├── AuthService
     ├── UsageQuotaService
     ├── SessionStateStore
-    ├── RealtimeConnectionService
-    │   ├── RealtimeCredentialService
-    │   └── AiProviderRegistry -> QwenRealtimeProvider
-    ├── FreeChatConversationService
-    └── SessionMemoryService
+    └── FreeChatConversationService
+        └── FreeChatConversationStore
+            ├── RedisFreeChatConversationStore (默认)
+            └── InMemoryFreeChatConversationStore (测试)
+
+RealtimeSessionConnector
+└── RealtimeConnectionService
+    ├── RealtimeCredentialService
+    └── AiProviderRegistry -> QwenRealtimeProvider
 ```
 
 `SessionService` 当前只保留 `UniSpeaking架构设计（完整版）.md` 中定义的三个业务方法：
 
 ```text
 SessionService
-├── startSession(StartSessionRequest) -> StartSessionResponse
-├── addMessage(AddSessionMessageRequest) -> void
-└── endSession(EndSessionRequest) -> EndSessionResponse
+├── startSession(String prompt) -> StartSessionResponse
+├── addMessage(Message message) -> void
+└── endSession(String sessionId, String stopTime) -> void
 ```
 
-`FreeChatSessionService` 和 `CustomSceneSessionService` 负责各自场景的会话对象创建、会话暂存、完整消息保存和会话结束后的记忆更新。它们只保存 `SceneService` 已产出的完整 prompt。`startSession` 还负责把 `offerSdp/model/voice` 交给 `RealtimeConnectionService`，取得 Answer SDP 后返回前端。暂停、恢复、打断、DataChannel 绑定、绑定超时等过程事件不属于 SessionService 的公开方法。
+`FreeChatSessionService` 和 `CustomSceneSessionService` 是每个业务会话独立创建的 prototype 实例，负责会话对象创建、会话暂存和完整消息处理。它们只保存 `SceneService` 已产出的完整 prompt。`SessionServiceSelector` 用 WebSocket 外层的 `sessionId` 找到实例后，再调用无 `sessionId` 的 `addMessage(Message)`。Offer SDP、model、voice 和 Answer SDP 交换由 `RealtimeSessionConnector` 编排，不属于 SessionService。
+
+自由聊天的用户和 AI 最终文本默认写入 Redis List，key 为
+`unispeaking:free-chat:session:{sessionId}:messages`。使用 `RPUSH` 保持消息
+顺序，每次追加都会刷新 TTL，默认保留 24 小时。Redis payload 只包含
+`messageId/owner/content/createdAt`，不保存音频，也不保存流式 delta。测试
+环境设置 `conversation.redis.enabled=false`，使用内存 Store。
+
+`user_preference.memory_text` 是用户主动维护的长期档案摘要，只记录兴趣与熟悉背景、昵称或称谓、年龄段、代词和敏感话题边界。它只通过 `ProfileService.updatePreference(...)` 更新。逐轮用户/AI 消息保存在 Conversation Store，会话结束时不会生成摘要或回写 `memory_text`。
+
+### 五层 Prompt 组装
+
+`SceneService.generateScene(...)` 对所有场景统一调用
+`FiveLayerPromptService`：
+
+```text
+L1 Base Duty
+    +
+L2 Coach Role <- preferred_voice
+    +
+L3 Difficulty + Speed <- cefr_level + preferred_ai_speech_speed
+    +
+L4 Learner Memory <- user_preference.memory_text
+    +
+L5 Current Scene <- sceneInput + 本次 userPreference + 学习材料
+```
+
+自由聊天选择 `L5_Open_Conversation.template.md`，其他场景统一选择
+`L5_Current_Scene.template.md`。模板默认位于
+`src/main/resources/prompts/five-layer`；配置 `PROMPT_TEMPLATE_DIR` 后会从外部目录逐次读取，修改 Markdown 文件即可影响下一次场景生成，无需修改 Java。
 
 ### 会话消息 WebSocket
 
@@ -142,10 +178,13 @@ SceneService
     └── 产出完整 scenePrompt
 
 SceneFlowService
-├── createFlow(CreateSceneFlowRequest)
-├── advanceStage(AdvanceSceneStageRequest)
-├── getFlow(flowId)
-└── completeFlow(CompleteSceneFlowRequest)
+├── createFlow(sceneId)
+├── advanceStage(stage)
+├── completeFlow(completed)
+└── getByCurrentStage(stage) -> List<LearningContentItem>
+
+SceneFlowServiceSelector
+└── 按 sceneId 保存和选择独立的 SceneFlowService 实例
 
 EvaluationService
 ├── evaluateSentence(SentenceEvaluationRequest)
@@ -190,4 +229,4 @@ Registry 当前登记 `qwen3.5-omni-flash-realtime`（Realtime 默认）、
 - 追加完整消息：WebSocket `/ws/session-messages`，`type=session.message`
 - 结束会话：WebSocket `/ws/session-messages`，`type=session.end`；HTTP `POST /api/scene-sessions/{sessionId}/end` 保留
 - 用户/AI 完整消息保存到自由会话 Conversation Store
-- 会话结束后调用 SessionMemoryService 更新会话记忆
+- 长期用户档案通过用户偏好接口显式维护，不从会话记录自动生成

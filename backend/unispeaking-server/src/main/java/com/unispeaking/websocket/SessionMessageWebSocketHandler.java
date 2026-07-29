@@ -1,8 +1,6 @@
 package com.unispeaking.websocket;
 
 import com.unispeaking.common.logging.RealtimeFlowLog;
-import com.unispeaking.domain.dto.session.AddSessionMessageRequest;
-import com.unispeaking.domain.dto.session.EndSessionRequest;
 import com.unispeaking.domain.dto.session.SessionSocketAck;
 import com.unispeaking.domain.dto.session.SessionSocketMessage;
 import com.unispeaking.orchestration.SessionServiceSelector;
@@ -43,9 +41,9 @@ public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 
 	private void handleFrame(WebSocketSession webSocketSession, SessionSocketMessage frame) throws IOException {
 		String sessionId = requireSessionId(frame.sessionId());
-		switch (normalize(frame.type())) {
-			case "message" -> {
-				sessionServiceSelector.addMessage(new AddSessionMessageRequest(sessionId, frame.message()));
+			switch (normalize(frame.type())) {
+				case "message" -> {
+					sessionServiceSelector.addMessage(sessionId, frame.message());
 				RealtimeFlowLog.info("session.websocket.message sessionId={} owner={} content={} audioBytes={}",
 						sessionId,
 						frame.message() == null ? null : frame.message().owner(),
@@ -53,13 +51,13 @@ public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 						frame.message() == null || frame.message().audio() == null
 								? 0 : frame.message().audio().length);
 				send(webSocketSession, SessionSocketAck.success("session.message.accepted", sessionId, null));
-			}
-			case "end" -> {
-				var response = sessionServiceSelector.endSession(new EndSessionRequest(sessionId));
-				RealtimeFlowLog.info("session.websocket.end sessionId={} stopTime={}",
-						response.sessionId(), response.stopTime());
-				send(webSocketSession, SessionSocketAck.success("session.end.accepted", sessionId, response));
-			}
+				}
+				case "end" -> {
+					sessionServiceSelector.endSession(sessionId, frame.stopTime());
+					RealtimeFlowLog.info("session.websocket.end sessionId={} stopTime={}",
+							sessionId, frame.stopTime());
+					send(webSocketSession, SessionSocketAck.success("session.end.accepted", sessionId, null));
+				}
 			default -> throw new IllegalArgumentException("unsupported session socket type: " + frame.type());
 		}
 	}

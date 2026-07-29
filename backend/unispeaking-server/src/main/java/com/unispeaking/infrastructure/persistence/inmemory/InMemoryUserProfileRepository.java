@@ -5,9 +5,7 @@ import com.unispeaking.repository.UserProfileRepository;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.stereotype.Repository;
 
-@Repository
 public class InMemoryUserProfileRepository implements UserProfileRepository {
 
 	private final Map<String, UserProfile> profiles = new ConcurrentHashMap<>();

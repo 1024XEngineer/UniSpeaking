@@ -3,9 +3,48 @@ spring:
     name: unispeaking_server
   config:
     import: optional:file:${UNISPEAKING_ENV_FILE:../../deploy/env/.env}[.properties]
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/unispeaking}
+    username: ${DATABASE_USERNAME:postgres}
+    password: ${DATABASE_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:63790}
+      password: ${REDIS_PASSWORD:}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:2s}
+      timeout: ${REDIS_COMMAND_TIMEOUT:2s}
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema.sql
 
 server:
   port: ${SERVER_PORT:8080}
+
+prompt:
+  templates:
+    directory: ${PROMPT_TEMPLATE_DIR:}
+
+conversation:
+  redis:
+    enabled: ${FREE_CHAT_REDIS_ENABLED:true}
+    key-prefix: ${FREE_CHAT_REDIS_KEY_PREFIX:unispeaking:free-chat:session}
+    ttl: ${FREE_CHAT_REDIS_TTL:24h}
+
+mybatis-plus:
+  type-handlers-package: com.unispeaking.infrastructure.persistence.mybatis.typehandler
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+
+auth:
+  jwt:
+    issuer: ${JWT_ISSUER:unispeaking}
+    secret: ${JWT_SECRET:}
+    access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:2h}
 
 realtime:
   flow:
