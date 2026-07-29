@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-evaluation-fixture",
+  "object": "chat.completion",
+  "created": 1785283200,
+  "model": "evaluation-model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"feedbackSummary\":\"表达清晰\",\"suggestedExpression\":\"I would like a coffee.\"}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 128,
+    "completion_tokens": 32,
+    "total_tokens": 160
+  }
+}
