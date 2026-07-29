@@ -28,6 +28,7 @@
 	</scm>
 	<properties>
 		<java.version>21</java.version>
+		<mybatis-plus.version>3.5.17</mybatis-plus.version>
 	</properties>
 		<dependencies>
 			<dependency>
@@ -53,7 +54,7 @@
 		<dependency>
 			<groupId>com.baomidou</groupId>
 			<artifactId>mybatis-plus-spring-boot4-starter</artifactId>
-			<version>3.5.17</version>
+			<version>${mybatis-plus.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -67,6 +68,11 @@
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
 			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>de.sciss</groupId>
+			<artifactId>jump3r</artifactId>
+			<version>1.0.5</version>
 		</dependency>
 
 		<dependency>
