@@ -383,18 +383,10 @@ class QwenRealtimeProviderTest {
 
 	@Test
 	void streamsWavToIflytekWithTheServerConfiguredCredential() throws Exception {
-		String xml = """
-				<?xml version="1.0" encoding="UTF-8"?>
-				<xml_result>
-				  <read_chapter total_score="88.4" fluency_score="84.6"
-				      accuracy_score="91.2" standard_score="82.8" tone_score="79.7">
-				    <read_sentence/>
-				  </read_chapter>
-				</xml_result>
-				""";
 		String finalMessage = """
-				{"code":0,"message":"success","data":{"status":2,"data":"%s"}}
-				""".formatted(Base64.getEncoder().encodeToString(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+				{"header":{"code":0,"message":"success","status":2},
+				 "payload":{"result":{"status":2,"text":"e30="}}}
+				""";
 		RecordingWebSocketConnector connector = new RecordingWebSocketConnector(finalMessage);
 		IflytekScoringProvider provider = new IflytekScoringProvider(
 				new ObjectMapper(),
@@ -402,9 +394,9 @@ class QwenRealtimeProviderTest {
 				"app-id",
 				"api-key",
 				"api-secret",
-				URI.create("wss://ise-api.xfyun.cn/v2/open-ise"),
-				"en_vip",
-				"read_sentence",
+				URI.create("wss://cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720"),
+				"en",
+				"sent",
 				Duration.ofSeconds(2),
 				1_048_576,
 				Duration.ZERO);
@@ -416,16 +408,26 @@ class QwenRealtimeProviderTest {
 
 		assertEquals(finalMessage, response);
 		assertTrue(connector.uri.getQuery().contains("authorization="));
-		assertTrue(connector.uri.getQuery().contains("host=ise-api.xfyun.cn"));
-		assertTrue(connector.frames.stream().anyMatch(frame -> frame.contains("\"cmd\":\"ssb\"")));
-		assertTrue(connector.frames.stream().anyMatch(frame -> frame.contains("\"aus\":1")));
-		assertTrue(connector.frames.stream().anyMatch(frame -> frame.contains("\"aus\":4")));
+		assertTrue(connector.uri.getQuery().contains(
+				"host=cn-east-1.ws-api.xf-yun.com"));
+		assertTrue(connector.frames.stream().anyMatch(
+				frame -> frame.contains("\"encoding\":\"lame\"")));
+		assertTrue(connector.frames.stream().anyMatch(
+				frame -> frame.contains("\"status\":2")));
 		assertTrue(connector.frames.stream().noneMatch(frame -> frame.contains("api-secret")));
 		JsonNode startFrame = new ObjectMapper().readTree(connector.frames.getFirst());
 		assertEquals(
-				"\uFEFF[content]\nPractice makes progress.",
-				startFrame.path("business").path("text").asString());
-		assertTrue(startFrame.path("business").path("ttp_skip").asBoolean(false));
+				"Practice makes progress.",
+				startFrame.path("parameter").path("st")
+						.path("refText").asString());
+		assertEquals(
+				1,
+				startFrame.path("parameter").path("st")
+						.path("phoneme_output").asInt());
+		assertEquals(
+				"IPA88",
+				startFrame.path("parameter").path("st")
+						.path("dict_type").asString());
 	}
 
 	@Test
@@ -433,7 +435,7 @@ class QwenRealtimeProviderTest {
 		RecordingWebSocketConnector connector = new RecordingWebSocketConnector("{}");
 		IflytekScoringProvider provider = iflytekProvider(
 				connector,
-				URI.create("wss://evil.example/v2/open-ise"),
+				URI.create("wss://evil.example/v1/private/s8e098720"),
 				Duration.ofSeconds(2));
 
 		BusinessException exception = assertThrows(
@@ -443,22 +445,21 @@ class QwenRealtimeProviderTest {
 						box(wavWithSampleRate(16_000)),
 						null));
 
-		assertEquals("IFLYTEK_ISE_ENDPOINT_INVALID", exception.code());
+		assertEquals("IFLYTEK_SUNTONE_ENDPOINT_INVALID", exception.code());
 		assertEquals(null, connector.uri);
 	}
 
 	@Test
 	void appliesTheIflytekDeadlineToAudioFrameSends() {
-		String xml = "<read_sentence total_score=\"88\"/>";
 		String finalMessage = """
-				{"code":0,"data":{"status":2,"data":"%s"}}
-				""".formatted(Base64.getEncoder().encodeToString(
-				xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+				{"header":{"code":0,"status":2},
+				 "payload":{"result":{"status":2,"text":"e30="}}}
+				""";
 		RecordingWebSocketConnector connector =
 				new RecordingWebSocketConnector(finalMessage, true);
 		IflytekScoringProvider provider = iflytekProvider(
 				connector,
-				URI.create("wss://ise-api.xfyun.cn/v2/open-ise"),
+				URI.create("wss://cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720"),
 				Duration.ofMillis(10));
 
 		BusinessException exception = assertThrows(
@@ -468,7 +469,7 @@ class QwenRealtimeProviderTest {
 						box(wavWithSampleRate(16_000)),
 						null));
 
-		assertEquals("IFLYTEK_ISE_TIMEOUT", exception.code());
+		assertEquals("IFLYTEK_SUNTONE_TIMEOUT", exception.code());
 	}
 
 	@Test
@@ -476,7 +477,7 @@ class QwenRealtimeProviderTest {
 		RecordingWebSocketConnector connector = new RecordingWebSocketConnector("{}");
 		IflytekScoringProvider provider = iflytekProvider(
 				connector,
-				URI.create("wss://ise-api.xfyun.cn/v2/open-ise"),
+				URI.create("wss://cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720"),
 				Duration.ofSeconds(2));
 
 		BusinessException exception = assertThrows(
@@ -492,15 +493,14 @@ class QwenRealtimeProviderTest {
 
 	@Test
 	void returnsTheFinalIflytekResponseWithoutParsingScores() {
-		String xml = "<read_sentence fluency_score=\"84.6\" accuracy_score=\"91.2\"/>";
 		String finalMessage = """
-				{"code":0,"data":{"status":2,"data":"%s"}}
-				""".formatted(Base64.getEncoder().encodeToString(
-				xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+				{"header":{"code":0,"status":2},
+				 "payload":{"result":{"status":2,"text":"e30="}}}
+				""";
 		RecordingWebSocketConnector connector = new RecordingWebSocketConnector(finalMessage);
 		IflytekScoringProvider provider = iflytekProvider(
 				connector,
-				URI.create("wss://ise-api.xfyun.cn/v2/open-ise"),
+				URI.create("wss://cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720"),
 				Duration.ofSeconds(2));
 
 		String response = provider.evaluatePronunciation(
@@ -748,8 +748,8 @@ class QwenRealtimeProviderTest {
 				"api-key",
 				"api-secret",
 				endpoint,
-				"en_vip",
-				"read_sentence",
+				"en",
+				"sent",
 				readTimeout,
 				1_048_576,
 				Duration.ZERO);
