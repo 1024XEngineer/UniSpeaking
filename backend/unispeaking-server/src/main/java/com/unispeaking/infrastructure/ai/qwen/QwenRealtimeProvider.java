@@ -1,10 +1,7 @@
 package com.unispeaking.infrastructure.ai.qwen;
 
 import com.unispeaking.common.logging.RealtimeFlowLog;
-import com.unispeaking.domain.dto.ai.RealtimeSdpExchangeRequest;
-import com.unispeaking.domain.dto.ai.RealtimeSdpExchangeResponse;
 import com.unispeaking.domain.vo.realtime.ProviderType;
-import com.unispeaking.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.RealtimeProvider;
 import java.io.IOException;
@@ -32,64 +29,58 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 	}
 
 	@Override
-	public RealtimeSdpExchangeResponse exchangeRealtimeSdp(RealtimeSdpExchangeRequest request) {
-		if (request == null) {
-			throw new BusinessException("INVALID_SDP_REQUEST", "Realtime SDP exchange request is required");
-		}
-		String offerSdp = request.offerSdp();
+	public String exchangeRealtimeSdp(String modelId, String offerSdp, String token) {
 		if (offerSdp == null || offerSdp.isBlank()) {
-			throw new BusinessException("INVALID_SDP", "WebRTC offer SDP is required");
+			throw nonRetryableFailure("INVALID_SDP", "WebRTC offer SDP is required");
 		}
-		if (request.apiKey() == null || request.apiKey().isBlank()) {
-			throw new BusinessException("QWEN_CREDENTIAL_MISSING", "Qwen bearer credential is not configured");
+		if (token == null || token.isBlank()) {
+			throw retryableFailure("QWEN_CREDENTIAL_MISSING", "Qwen bearer credential is not configured");
 		}
-		String model = request.model() == null || request.model().isBlank()
+		String model = modelId == null || modelId.isBlank()
 				? AiProviderRegistry.QWEN_REALTIME_FLASH
-				: request.model().trim();
+				: modelId.trim();
 		if (!supports(model)) {
-			throw new BusinessException(
+			throw nonRetryableFailure(
 					"QWEN_REALTIME_MODEL_NOT_SUPPORTED",
 					"Qwen realtime model is not registered: " + model);
 		}
 		String sdpExchangeUrl = properties.getWebRtcSdpExchangeUrl(model);
 		if (sdpExchangeUrl.isBlank()) {
-			throw new BusinessException(
+			throw retryableFailure(
 					"QWEN_WORKSPACE_OR_MODEL_MISSING",
 					"Set BAILIAN_WORKSPACE_ID before starting a Qwen realtime session");
 		}
-		String userId = request.context() == null ? null : request.context().userId();
-		String localSessionId = request.context() == null ? null : request.context().businessId();
 		try {
-			RealtimeFlowLog.info("flow.3.sdp.request localSessionId={} userId={} provider={} url={} model={} temporaryToken={} offerSdp={}",
-					localSessionId, userId, type(), sdpExchangeUrl, model,
-					RealtimeFlowLog.maskSecret(request.apiKey()),
+			RealtimeFlowLog.info("flow.3.sdp.request provider={} url={} model={} temporaryToken={} offerSdp={}",
+					type(), sdpExchangeUrl, model,
+					RealtimeFlowLog.maskSecret(token),
 					RealtimeFlowLog.sdpSummary(offerSdp));
 			HttpRequest httpRequest = HttpRequest.newBuilder()
 					.uri(URI.create(sdpExchangeUrl))
 					.timeout(properties.getReadTimeout())
-					.header("Authorization", "Bearer " + request.apiKey())
+					.header("Authorization", "Bearer " + token)
 					.header("Content-Type", "application/sdp")
 					.POST(HttpRequest.BodyPublishers.ofString(offerSdp))
 					.build();
 			HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
-				throw new BusinessException("QWEN_SIGNALING_FAILED",
+				throw retryableFailure("QWEN_SIGNALING_FAILED",
 						"Qwen signaling returned " + response.statusCode());
 			}
 			if (response.body().length() > properties.getMaxAnswerBytes()) {
-				throw new BusinessException("QWEN_ANSWER_TOO_LARGE", "Qwen answer SDP exceeds the configured limit");
+				throw retryableFailure("QWEN_ANSWER_TOO_LARGE", "Qwen answer SDP exceeds the configured limit");
 			}
-			RealtimeFlowLog.info("flow.3.sdp.response localSessionId={} status={} answerSdp={}",
-					localSessionId, response.statusCode(),
+			RealtimeFlowLog.info("flow.3.sdp.response status={} answerSdp={}",
+					response.statusCode(),
 					RealtimeFlowLog.sdpSummary(response.body()));
-			return new RealtimeSdpExchangeResponse(response.body(), null);
+			return response.body();
 		}
 		catch (IOException exception) {
-			throw new BusinessException("QWEN_SIGNALING_IO_ERROR", "Failed to call Qwen signaling");
+			throw retryableFailure("QWEN_SIGNALING_IO_ERROR", "Failed to call Qwen signaling");
 		}
 		catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
-			throw new BusinessException("QWEN_SIGNALING_INTERRUPTED", "Qwen signaling call was interrupted");
+			throw nonRetryableFailure("QWEN_SIGNALING_INTERRUPTED", "Qwen signaling call was interrupted");
 		}
 	}
 

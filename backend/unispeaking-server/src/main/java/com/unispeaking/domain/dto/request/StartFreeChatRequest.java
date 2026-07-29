@@ -1,15 +1,10 @@
 package com.unispeaking.domain.dto.request;
 
 import com.unispeaking.domain.vo.realtime.ProviderType;
-import com.unispeaking.domain.vo.scene.SceneType;
+import jakarta.validation.constraints.NotBlank;
 
 public record StartFreeChatRequest(
-		String userId,
-		SceneType sceneType,
-		String prompt,
-		String userPreference,
-		String offerSdp,
-		String topic,
+		@NotBlank String offerSdp,
 		ProviderType provider,
 		String model,
 		String voice,

@@ -1,57 +1,60 @@
 package com.unispeaking.orchestration;
 
-import com.unispeaking.domain.dto.session.AddSessionMessageRequest;
-import com.unispeaking.domain.dto.session.EndSessionRequest;
-import com.unispeaking.domain.dto.session.EndSessionResponse;
-import com.unispeaking.domain.dto.session.StartSessionRequest;
+import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
-import com.unispeaking.domain.po.session.AbstractSceneSession;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.exception.SessionNotFoundException;
-import com.unispeaking.repository.SessionStateStore;
 import com.unispeaking.service.session.CustomSceneSessionService;
 import com.unispeaking.service.session.FreeChatSessionService;
 import com.unispeaking.service.session.SessionService;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 @Component
 public class SessionServiceSelector {
 
-	private final SessionStateStore sessionStateStore;
-	private final FreeChatSessionService freeChatSessionService;
-	private final CustomSceneSessionService customSceneSessionService;
+	private final ObjectProvider<FreeChatSessionService> freeChatServices;
+	private final ObjectProvider<CustomSceneSessionService> customSceneServices;
+	private final Map<String, SessionService> sessions = new ConcurrentHashMap<>();
 
 	public SessionServiceSelector(
-			SessionStateStore sessionStateStore,
-			FreeChatSessionService freeChatSessionService,
-			CustomSceneSessionService customSceneSessionService) {
-		this.sessionStateStore = sessionStateStore;
-		this.freeChatSessionService = freeChatSessionService;
-		this.customSceneSessionService = customSceneSessionService;
+			ObjectProvider<FreeChatSessionService> freeChatServices,
+			ObjectProvider<CustomSceneSessionService> customSceneServices) {
+		this.freeChatServices = freeChatServices;
+		this.customSceneServices = customSceneServices;
 	}
 
-	public StartSessionResponse startSession(StartSessionRequest request) {
-		return resolve(request.sceneType()).startSession(request);
+	public StartSessionResponse startSession(SceneType sceneType, String prompt) {
+		SessionService service = create(sceneType);
+		StartSessionResponse response = service.startSession(prompt);
+		sessions.put(response.sessionId(), service);
+		return response;
 	}
 
-	public void addMessage(AddSessionMessageRequest request) {
-		resolveBySessionId(request.sessionId()).addMessage(request);
+	public void addMessage(String sessionId, Message message) {
+		resolve(sessionId).addMessage(message);
 	}
 
-	public EndSessionResponse endSession(EndSessionRequest request) {
-		return resolveBySessionId(request.sessionId()).endSession(request);
+	public void endSession(String sessionId, String stopTime) {
+		SessionService service = resolve(sessionId);
+		service.endSession(sessionId, stopTime);
+		sessions.remove(sessionId, service);
 	}
 
-	private SessionService resolveBySessionId(String sessionId) {
-		AbstractSceneSession session = sessionStateStore.findById(sessionId)
-				.orElseThrow(() -> new SessionNotFoundException(sessionId));
-		return resolve(session.getSceneType());
-	}
-
-	private SessionService resolve(SceneType sceneType) {
-		if (sceneType == SceneType.FREE_CHAT || sceneType == null) {
-			return freeChatSessionService;
+	private SessionService resolve(String sessionId) {
+		SessionService service = sessions.get(sessionId);
+		if (service == null) {
+			throw new SessionNotFoundException(sessionId);
 		}
-		return customSceneSessionService;
+		return service;
+	}
+
+	private SessionService create(SceneType sceneType) {
+		if (sceneType == SceneType.FREE_CHAT || sceneType == null) {
+			return freeChatServices.getObject();
+		}
+		return customSceneServices.getObject();
 	}
 }

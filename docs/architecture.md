@@ -94,19 +94,18 @@ implementation skeleton:
 
 ```text
 SessionService
-├── FreeChatSessionService
-└── CustomSceneSessionService
-    implementations -> AbstractSceneSessionService
+├── FreeChatSessionService (prototype)
+└── CustomSceneSessionService (prototype)
+    implementations -> SessionService
 
 SceneService
 ├── FreeChatSceneService
 └── CustomSceneService
     implementations -> AbstractSceneService
 
-ScenePromptService<T>
-├── FreeChatPromptService
-└── CustomScenePromptService
-    implementations -> AbstractScenePromptService<T>
+SceneService
+└── FiveLayerPromptService
+    └── composes one five-layer prompt for every scene type
 
 ConversationService
 ├── FreeChatConversationService
@@ -119,10 +118,12 @@ RealtimeEventService
     implementations -> AbstractRealtimeEventService
 ```
 
-The abstract implementations contain shared algorithms; the specialized
-interfaces expose feature-specific extension points. Services such as auth,
-quota, evaluation, profile, scene content, and learning records remain
-independent because they do not represent specializations of one another.
+Prompt construction is not split by scene type. `SceneService` loads the user
+profile and scene configuration, calls the single `FiveLayerPromptService`, and
+saves the generated scene together with its five prompt layers. Session
+services receive only the final joined prompt. The other abstract
+implementations contain shared algorithms; specialized services expose
+feature-specific extension points.
 
 ## Service versus domain
 
@@ -175,38 +176,27 @@ schema before mapper scanning is enabled.
 
 ## Development mode
 
-Login, registration, database persistence, Redis, and production authorization
-are not enabled yet.
+Registration, login, JWT authentication, PostgreSQL user persistence, and
+PostgreSQL user-preference persistence are enabled. Session state, conversation
+messages, generated scenes, and learning-flow state still use in-process stores
+and are lost when the backend restarts.
 
-- When a request provides `userId`, the service uses that value.
-- When `userId` is absent, the service uses `local-demo-user`.
-- Scene access checks currently do not reject requests.
-- Profiles, sessions, conversations, scenes, learning data, and memory are held
-  in process memory and are lost when the backend restarts.
-
-These are explicit development fallbacks. Production authentication and
-persistence should replace their adapters without changing the session use
-cases.
-
-## User memory flow
+## Long-term learner profile
 
 ```text
-session completes
--> load the session transcript
--> create a bounded session summary
--> merge the summary with the user's existing memory
--> save the updated in-memory profile
--> include that memory in prompts for later sessions
+authenticated user updates preferences
+-> ProfileService validates and normalizes memoryText
+-> MyBatis-Plus stores it in user_preference.memory_text
+-> SceneService loads it as long-term learner context
+-> prompt generation includes it in later sessions
 ```
 
-The first profile starts with an empty memory. A session with no transcript does
-not create artificial memory. Completion is idempotent, so duplicate completion
-events do not append the same summary twice.
-
-`ConversationMemoryProvider` is the replaceable boundary. The current local
-adapter creates a deterministic bounded transcript summary and retains at most
-4,000 characters of merged memory. It can later be replaced by a Qwen
-summarization adapter.
+`memory_text` contains only user-maintained interests and familiar background,
+preferred name or form of address, broad age or pronoun preferences when
+needed, and topic boundaries. It must not contain per-turn transcripts or
+automatically generated session-history summaries. User and assistant messages
+remain in the conversation store; ending a session never updates
+`memory_text`.
 
 ## Realtime flow
 

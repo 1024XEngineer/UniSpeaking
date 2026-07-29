@@ -1,8 +1,16 @@
+import { getAccessToken } from "./apiClient.js";
+
 const DEFAULT_API_BASE = "";
-const DEFAULT_USER_ID = "local-demo-user";
 const DEFAULT_VOICE = "Katerina";
 const DEFAULT_MODEL = "qwen3.5-omni-flash-realtime";
 const DATA_CHANNEL_LABEL = "oai-events";
+const DEFAULT_SPEECH_SPEED = "NATURAL";
+const SPEECH_SPEED_INSTRUCTIONS = {
+  SLOWER: "Voice delivery rule: speak distinctly and very slowly, around 70 English words per minute, with clear pauses between short phrases.",
+  MODERATE: "Voice delivery rule: speak at a calm moderate pace, around 120 English words per minute, with clear pauses between ideas.",
+  NATURAL: "Voice delivery rule: speak at a natural conversational pace, around 165 English words per minute.",
+  FASTER: "Voice delivery rule: speak quickly but clearly, around 210 English words per minute, without dropping or slurring words.",
+};
 
 const eventId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -74,8 +82,86 @@ function waitForChannel(channel) {
   });
 }
 
+function normalizedSpeechSpeed(value) {
+  const speed = String(value || "").trim().toUpperCase();
+  return SPEECH_SPEED_INSTRUCTIONS[speed] ? speed : DEFAULT_SPEECH_SPEED;
+}
+
+export function extractCompletedAssistantMessage(event) {
+  if (event.type === "response.audio_transcript.done") {
+    return {
+      id: event.item_id || event.response_id || event.event_id,
+      text: event.transcript || event.text,
+    };
+  }
+  if (event.type === "response.text.done") {
+    return {
+      id: event.item_id || event.response_id || event.event_id,
+      text: event.text || event.transcript,
+    };
+  }
+  if (event.type === "response.content_part.done") {
+    return {
+      id: event.item_id || event.response_id || event.event_id,
+      text: event.part?.transcript || event.part?.text,
+    };
+  }
+  const outputItems = event.type === "response.output_item.done"
+    ? [event.item]
+    : event.type === "response.done"
+      ? event.response?.output
+      : null;
+  if (!Array.isArray(outputItems)) return null;
+  const item = outputItems.find((candidate) => candidate?.role === "assistant" && Array.isArray(candidate.content));
+  if (!item) return null;
+  const text = item.content
+    .map((part) => part?.transcript || part?.text || "")
+    .join("")
+    .trim();
+  return {
+    id: item.id || event.response_id || event.response?.id || event.event_id,
+    text,
+  };
+}
+
+export function isActiveResponseConflict(event) {
+  if (event?.type !== "error") return false;
+  const message = event.error?.message || event.message || "";
+  return /conversation already has an active response/i.test(message);
+}
+
+export function buildRealtimeSessionConfig({
+  systemPrompt = "",
+  topic = "",
+  voice = DEFAULT_VOICE,
+  model = DEFAULT_MODEL,
+  speechSpeed = DEFAULT_SPEECH_SPEED,
+} = {}) {
+  const selectedSpeechSpeed = normalizedSpeechSpeed(speechSpeed);
+  return {
+    modalities: ["text", "audio"],
+    voice: voice || DEFAULT_VOICE,
+    instructions: [
+      systemPrompt || topic || "",
+      SPEECH_SPEED_INSTRUCTIONS[selectedSpeechSpeed],
+    ].filter(Boolean).join("\n\n"),
+    input_audio_format: "pcm",
+    output_audio_format: "pcm",
+    input_audio_transcription: { model: "qwen3-asr-flash-realtime" },
+    smooth_output: false,
+    turn_detection: {
+      type: String(model || DEFAULT_MODEL).startsWith("qwen3.5-omni-") ? "semantic_vad" : "server_vad",
+      threshold: 0.5,
+      prefix_padding_ms: 500,
+      silence_duration_ms: 800,
+      create_response: true,
+      interrupt_response: true,
+    },
+  };
+}
+
 export function createRealtimeClient({
-  apiBase = import.meta.env.VITE_UNISPEAKING_API_BASE || DEFAULT_API_BASE,
+  apiBase = import.meta.env?.VITE_UNISPEAKING_API_BASE || DEFAULT_API_BASE,
   onEvent = () => {},
   onRemoteStream = () => {},
 } = {}) {
@@ -86,19 +172,25 @@ export function createRealtimeClient({
   let sessionSocket = null;
   let localStream = null;
   let audioSender = null;
-  let localSessionId = null;
+  let sessionId = null;
   let sessionConfig = null;
   let pendingAcks = [];
   let persistedMessageIds = new Set();
   let muted = false;
   let paused = false;
   let started = false;
+  let inputReady = false;
+  let sessionUpdateAcknowledged = false;
+  let sessionUpdateRetryTimer = null;
+  let initialResponseStarted = false;
+  let initialResponseFallbackTimer = null;
+  let stopPromise = null;
 
   const emit = (event) => onEvent(event);
 
   function setTrackEnabled() {
     const track = localStream?.getAudioTracks?.()[0];
-    if (track) track.enabled = started && !muted && !paused;
+    if (track) track.enabled = started && inputReady && !muted && !paused;
   }
 
   function rejectPendingAcks(error) {
@@ -154,8 +246,8 @@ export function createRealtimeClient({
     });
   }
 
-  async function sendSessionFrame(type, message = null) {
-    if (!localSessionId) throw new Error("本地会话 ID 尚未建立");
+  async function sendSessionFrame(type, message = null, stopTime = null) {
+    if (!sessionId) throw new Error("会话 ID 尚未建立");
     const socket = await connectSessionSocket();
     const operation = type === "end" ? "end" : "message";
     const ack = new Promise((resolve, reject) => {
@@ -167,18 +259,25 @@ export function createRealtimeClient({
     });
     socket.send(JSON.stringify({
       type,
-      sessionId: localSessionId,
+      sessionId,
       message,
+      stopTime,
     }));
     return ack;
   }
 
   function addSessionMessage(owner, content, providerMessageId) {
     const text = String(content || "").trim();
-    if (!text) return;
+    if (!text) return false;
     const messageKey = providerMessageId ? `${owner}:${providerMessageId}` : null;
-    if (messageKey && persistedMessageIds.has(messageKey)) return;
+    if (messageKey && persistedMessageIds.has(messageKey)) return false;
     if (messageKey) persistedMessageIds.add(messageKey);
+    emit({
+      type: "local.transcript.final",
+      owner,
+      itemId: providerMessageId || eventId("transcript"),
+      text,
+    });
     void sendSessionFrame("message", {
       owner,
       content: text,
@@ -187,6 +286,7 @@ export function createRealtimeClient({
       if (messageKey) persistedMessageIds.delete(messageKey);
       emit({ type: "local.backend_warning", message: error.message });
     });
+    return true;
   }
 
   function sendProviderEvent(event) {
@@ -196,20 +296,52 @@ export function createRealtimeClient({
     channel.send(JSON.stringify(event));
   }
 
-  async function postStart({ offerSdp, topic, userId }) {
+  function clearInitializationTimers() {
+    if (sessionUpdateRetryTimer) {
+      window.clearTimeout(sessionUpdateRetryTimer);
+      sessionUpdateRetryTimer = null;
+    }
+    if (initialResponseFallbackTimer) {
+      window.clearTimeout(initialResponseFallbackTimer);
+      initialResponseFallbackTimer = null;
+    }
+  }
+
+  function sendSessionUpdate() {
+    sendProviderEvent({
+      event_id: eventId("config"),
+      type: "session.update",
+      session: sessionConfig,
+    });
+  }
+
+  function requestInitialResponse() {
+    if (initialResponseStarted) return;
+    sendProviderEvent({
+      event_id: eventId("greeting"),
+      type: "response.create",
+    });
+    initialResponseFallbackTimer = window.setTimeout(() => {
+      initialResponseFallbackTimer = null;
+      inputReady = true;
+      setTrackEnabled();
+      emit({ type: "local.greeting_timeout" });
+    }, 5_000);
+  }
+
+  async function postStart({ offerSdp, voice, model }) {
+    const accessToken = getAccessToken();
     const response = await fetch(`${base}/api/scene-sessions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
       body: JSON.stringify({
-        userId: userId || DEFAULT_USER_ID,
-        sceneType: "FREE_CHAT",
-        prompt: topic || "",
-        userPreference: "",
         offerSdp,
-        topic: topic || undefined,
         provider: "QWEN",
-        model: DEFAULT_MODEL,
-        voice: DEFAULT_VOICE,
+        model: model || DEFAULT_MODEL,
+        voice: voice || DEFAULT_VOICE,
         translationEnabled: true,
       }),
     });
@@ -225,6 +357,18 @@ export function createRealtimeClient({
       return;
     }
 
+    if (isActiveResponseConflict(event)) {
+      initialResponseStarted = true;
+      inputReady = true;
+      if (initialResponseFallbackTimer) {
+        window.clearTimeout(initialResponseFallbackTimer);
+        initialResponseFallbackTimer = null;
+      }
+      setTrackEnabled();
+      emit({ type: "local.provider_warning", message: event.error?.message || event.message });
+      return;
+    }
+
     emit(event);
 
     if (event.type === "session.created") {
@@ -234,16 +378,41 @@ export function createRealtimeClient({
         await audioSender?.replaceTrack(audioTrack);
       }
       setTrackEnabled();
-      sendProviderEvent({ event_id: eventId("config"), type: "session.update", session: sessionConfig });
+      sendSessionUpdate();
+      sessionUpdateRetryTimer = window.setTimeout(() => {
+        sessionUpdateRetryTimer = null;
+        if (!sessionUpdateAcknowledged && channel?.readyState === "open") {
+          sendSessionUpdate();
+        }
+      }, 2_000);
       return;
     }
 
     if (event.type === "session.updated") {
-      sendProviderEvent({ event_id: eventId("response"), type: "response.create" });
+      if (sessionUpdateAcknowledged) return;
+      sessionUpdateAcknowledged = true;
+      if (sessionUpdateRetryTimer) {
+        window.clearTimeout(sessionUpdateRetryTimer);
+        sessionUpdateRetryTimer = null;
+      }
+      inputReady = true;
+      setTrackEnabled();
+      requestInitialResponse();
       return;
     }
 
     if (event.type === "input_audio_buffer.speech_started") {
+      return;
+    }
+
+    if (event.type === "response.created") {
+      initialResponseStarted = true;
+      inputReady = true;
+      if (initialResponseFallbackTimer) {
+        window.clearTimeout(initialResponseFallbackTimer);
+        initialResponseFallbackTimer = null;
+      }
+      setTrackEnabled();
       return;
     }
 
@@ -256,17 +425,22 @@ export function createRealtimeClient({
       return;
     }
 
-    if (event.type === "response.audio_transcript.done") {
+    const completedAssistantMessage = extractCompletedAssistantMessage(event);
+    if (completedAssistantMessage) {
       addSessionMessage(
         0,
-        event.transcript || event.text,
-        event.item_id || event.response_id || event.response?.id || event.event_id,
+        completedAssistantMessage.text,
+        completedAssistantMessage.id,
       );
     }
   }
 
-  async function start({ topic = "", userId = DEFAULT_USER_ID } = {}) {
-    if (peer) return { localSessionId };
+  async function start({
+    voice = DEFAULT_VOICE,
+    model = DEFAULT_MODEL,
+    speechSpeed = DEFAULT_SPEECH_SPEED,
+  } = {}) {
+    if (peer) return { sessionId };
     emit({ type: "local.connecting" });
 
     try {
@@ -298,26 +472,30 @@ export function createRealtimeClient({
       await peer.setLocalDescription(offer);
       await waitForIceGathering(peer);
 
-      const backend = await postStart({ offerSdp: peer.localDescription?.sdp || offer.sdp || "", topic, userId });
-      localSessionId = backend.localSessionId;
-      sessionConfig = {
-        modalities: ["text", "audio"],
+      const backend = await postStart({
+        offerSdp: peer.localDescription?.sdp || offer.sdp || "",
+        voice,
+        model,
+      });
+      sessionId = backend.sessionId;
+      const finalSystemPrompt = String(backend.systemPrompt || "").trim();
+      if (!finalSystemPrompt) {
+        throw new Error("后端没有返回由 SceneService 生成的五层提示词");
+      }
+      sessionConfig = buildRealtimeSessionConfig({
+        systemPrompt: finalSystemPrompt,
         voice: backend.voiceId || DEFAULT_VOICE,
-        instructions: backend.systemPrompt || topic || "",
-        input_audio_transcription: { model: "gummy-realtime-v1" },
-        turn_detection: {
-          type: "server_vad",
-          interrupt_response: true,
-        },
-      };
+        model,
+        speechSpeed,
+      });
 
       await connectSessionSocket();
       await peer.setRemoteDescription({ type: "answer", sdp: normalizeSdp(backend.answerSdp) });
       await waitForChannel(channel);
-      emit({ type: "local.connected", localSessionId, backend });
-      return { localSessionId, backend };
+      emit({ type: "local.connected", sessionId, backend });
+      return { sessionId, backend };
     } catch (error) {
-      await stop({ notifyBackend: false, reason: "start_failed" });
+      await stop({ notifyBackend: false, reason: "start_failed", emitEnded: false });
       emit({ type: "local.error", message: error instanceof Error ? error.message : "无法开始实时对话" });
       throw error;
     }
@@ -349,29 +527,50 @@ export function createRealtimeClient({
     emit({ type: "local.interrupted" });
   }
 
-  async function stop({ notifyBackend = true, reason = "user_stop" } = {}) {
-    if (notifyBackend && localSessionId) {
-      await sendSessionFrame("end").catch((error) => {
-        emit({ type: "local.backend_warning", message: error.message });
-      });
-    }
-    try { channel?.close?.(); } catch { /* already closed */ }
-    try { sessionSocket?.close?.(); } catch { /* already closed */ }
-    try { peer?.close?.(); } catch { /* already closed */ }
+  async function performStop({
+    notifyBackend = true,
+    reason = "user_stop",
+    emitEnded = true,
+  } = {}) {
+    clearInitializationTimers();
+    started = false;
+    inputReady = false;
+    setTrackEnabled();
     localStream?.getTracks?.().forEach((track) => track.stop());
+
+    const endRequest = notifyBackend && sessionId
+      ? sendSessionFrame("end", null, new Date().toISOString()).catch((error) => {
+        emit({ type: "local.backend_warning", message: error.message });
+      })
+      : Promise.resolve();
+
+    try { channel?.close?.(); } catch { /* already closed */ }
+    try { peer?.close?.(); } catch { /* already closed */ }
+    await endRequest;
+    try { sessionSocket?.close?.(); } catch { /* already closed */ }
     peer = null;
     channel = null;
     sessionSocket = null;
     localStream = null;
     audioSender = null;
-    localSessionId = null;
+    sessionId = null;
     sessionConfig = null;
     pendingAcks = [];
     persistedMessageIds = new Set();
-    started = false;
+    sessionUpdateAcknowledged = false;
+    initialResponseStarted = false;
     paused = false;
     muted = false;
-    emit({ type: "local.ended", reason });
+    if (emitEnded) emit({ type: "local.ended", reason });
+  }
+
+  function stop(options = {}) {
+    if (!stopPromise) {
+      stopPromise = performStop(options).finally(() => {
+        stopPromise = null;
+      });
+    }
+    return stopPromise;
   }
 
   return {
@@ -382,6 +581,6 @@ export function createRealtimeClient({
     interrupt,
     stop,
     setMuted,
-    isActive: () => Boolean(peer || localSessionId),
+    isActive: () => Boolean(peer || sessionId),
   };
 }

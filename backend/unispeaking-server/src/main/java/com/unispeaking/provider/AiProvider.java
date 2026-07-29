@@ -1,35 +1,81 @@
 package com.unispeaking.provider;
 
-import com.unispeaking.domain.dto.ai.AudioTranscriptionRequest;
-import com.unispeaking.domain.dto.ai.AudioTranscriptionResponse;
-import com.unispeaking.domain.dto.ai.LlmTaskRequest;
-import com.unispeaking.domain.dto.ai.LlmTaskResponse;
-import com.unispeaking.domain.dto.ai.PronunciationEvaluationRequest;
-import com.unispeaking.domain.dto.ai.PronunciationEvaluationResponse;
-import com.unispeaking.domain.dto.ai.RealtimeSdpExchangeRequest;
-import com.unispeaking.domain.dto.ai.RealtimeSdpExchangeResponse;
-import com.unispeaking.domain.dto.ai.SpeechAudioRequest;
-import com.unispeaking.domain.dto.ai.SpeechAudioResponse;
 import com.unispeaking.domain.vo.ai.AiCapability;
-import com.unispeaking.domain.vo.realtime.ProviderType;
 import java.util.Set;
 
+/**
+ * Common contract exposed by every pluggable AI provider adapter.
+ *
+ * <p>The Registry invokes only the operation matching {@link #capability()}.
+ * Default methods make unsupported operations explicit without forcing an
+ * adapter to implement capabilities it does not provide.</p>
+ */
 public interface AiProvider {
 
-	ProviderType type();
+	String providerId();
 
 	AiCapability capability();
 
 	Set<String> supportedModels();
 
-	RealtimeSdpExchangeResponse exchangeRealtimeSdp(RealtimeSdpExchangeRequest request);
+	/**
+	 * Completes the WebRTC Offer SDP / Answer SDP exchange.
+	 *
+	 * @param offerSdp browser-generated Offer SDP
+	 * @param token short-lived provider credential
+	 * @return provider Answer SDP without modification
+	 */
+	default String exchangeRealtimeSdp(String offerSdp, String token) {
+		throw unsupported("Realtime");
+	}
 
-	SpeechAudioResponse generateSpeechAudio(SpeechAudioRequest request);
+	/**
+	 * Converts text to the provider's configured WAV audio.
+	 *
+	 * @param text text to synthesize
+	 * @param token reserved for interface compatibility; TTS uses server credentials
+	 * @return WAV audio bytes
+	 */
+	default Byte[] generateSpeechAudio(String text, String token) {
+		throw unsupported("TTS");
+	}
 
-	LlmTaskResponse executeLlmTask(LlmTaskRequest request);
+	/**
+	 * Executes a text-generation task.
+	 *
+	 * @param prompt prompt sent to the model
+	 * @param token reserved for interface compatibility; LLM uses server credentials
+	 * @return only the model message content
+	 */
+	default String executeLlmTask(String prompt, String token) {
+		throw unsupported("LLM");
+	}
 
-	AudioTranscriptionResponse convertAudioToText(AudioTranscriptionRequest request);
+	/**
+	 * Converts WAV audio to transcription text.
+	 *
+	 * @param audio complete WAV file bytes
+	 * @param token reserved for interface compatibility; ASR uses server credentials
+	 * @return only the transcription text
+	 */
+	default String convertAudioToText(Byte[] audio, String token) {
+		throw unsupported("ASR");
+	}
 
-	PronunciationEvaluationResponse evaluatePronunciation(
-			PronunciationEvaluationRequest request);
+	/**
+	 * Sends WAV audio for pronunciation evaluation.
+	 *
+	 * @param text reference text
+	 * @param audio complete WAV file bytes
+	 * @param token reserved for interface compatibility; scoring uses server credentials
+	 * @return the complete final provider response without score parsing
+	 */
+	default String evaluatePronunciation(String text, Byte[] audio, String token) {
+		throw unsupported("pronunciation scoring");
+	}
+
+	private UnsupportedOperationException unsupported(String operation) {
+		return new UnsupportedOperationException(
+				providerId() + " provider does not support " + operation);
+	}
 }

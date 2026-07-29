@@ -1,11 +1,29 @@
 services:
+  redis:
+    image: redis:7.4-alpine
+    env_file:
+      - ./env/.env
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+    ports:
+      - "63790:6379"
+    volumes:
+      - redis-data:/data
+
   backend:
     build:
       context: ../backend/unispeaking-server
     env_file:
       - ./env/.env
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     ports:
       - "8080:8080"
+    depends_on:
+      - redis
 
   frontend:
     build:
@@ -24,3 +42,6 @@ services:
     depends_on:
       - backend
       - frontend
+
+volumes:
+  redis-data:

@@ -1,17 +1,12 @@
 package com.unispeaking.orchestration;
 
-import com.unispeaking.domain.dto.scene.AdvanceSceneStageRequest;
-import com.unispeaking.domain.dto.scene.CreateSceneFlowRequest;
 import com.unispeaking.domain.dto.scene.SceneFlowResponse;
 import com.unispeaking.domain.dto.scene.SceneGenerationRequest;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.dto.scene.StartSceneSessionRequest;
 import com.unispeaking.domain.dto.scene.StartSceneSessionResponse;
-import com.unispeaking.domain.dto.session.StartSessionRequest;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
-import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.domain.vo.scene.SceneType;
-import com.unispeaking.service.scene.SceneFlowService;
 import com.unispeaking.service.scene.SceneService;
 import org.springframework.stereotype.Component;
 
@@ -19,16 +14,19 @@ import org.springframework.stereotype.Component;
 public class SceneSessionCoordinator {
 
 	private final SceneService sceneService;
-	private final SceneFlowService sceneFlowService;
+	private final SceneFlowServiceSelector sceneFlowServiceSelector;
 	private final SessionServiceSelector sessionServiceSelector;
+	private final RealtimeSessionConnector realtimeSessionConnector;
 
 	public SceneSessionCoordinator(
 			SceneService sceneService,
-			SceneFlowService sceneFlowService,
-			SessionServiceSelector sessionServiceSelector) {
+			SceneFlowServiceSelector sceneFlowServiceSelector,
+			SessionServiceSelector sessionServiceSelector,
+			RealtimeSessionConnector realtimeSessionConnector) {
 		this.sceneService = sceneService;
-		this.sceneFlowService = sceneFlowService;
+		this.sceneFlowServiceSelector = sceneFlowServiceSelector;
 		this.sessionServiceSelector = sessionServiceSelector;
+		this.realtimeSessionConnector = realtimeSessionConnector;
 	}
 
 	public StartSceneSessionResponse start(StartSceneSessionRequest request) {
@@ -37,54 +35,49 @@ public class SceneSessionCoordinator {
 				request.userPreference(),
 				request.sceneType(),
 				request.sceneInput()));
-		SceneFlowResponse flow = sceneFlowService.createFlow(new CreateSceneFlowRequest(
-				request.userId(),
-				scene.sceneId()));
-		if (scene.sceneType() == SceneType.FREE_CHAT) {
-			flow = advanceToDialogue(request.userId(), flow.flowId());
-		}
-		StartSessionResponse session = sessionServiceSelector.startSession(new StartSessionRequest(
-				request.userId(),
+		SceneFlowResponse flow = sceneFlowServiceSelector.createFlow(scene.sceneId());
+		SceneType sceneType = request.sceneType() == null
+				? SceneType.FREE_CHAT
+				: request.sceneType();
+		String finalPrompt = scene.scenePrompt();
+		StartSessionResponse session = sessionServiceSelector.startSession(
+				sceneType,
+				finalPrompt);
+		RealtimeSessionConnection connection = realtimeSessionConnector.connect(
+				session.sessionId(),
 				scene.sceneId(),
-				flow.flowId(),
-				scene.sceneType(),
-				scene.scenePrompt(),
-				request.offerSdp(),
-				request.provider(),
-				request.model(),
-				request.voice(),
-				request.translationEnabled()));
+				finalPrompt,
+				request);
 		return new StartSceneSessionResponse(
 				scene.sceneId(),
-				scene.sceneName(),
-				scene.sceneType(),
+				sceneName(sceneType, request.sceneInput()),
+				sceneType,
 				scene.wordList(),
 				scene.phraseList(),
 				scene.sentenceList(),
-				flow.flowId(),
-				flow.currentStage(),
-				scoringEnabled(scene.sceneType()),
+				flow.stage(),
+				scoringEnabled(sceneType),
 				session.sessionId(),
-				session.sessionId(),
-				session.providerSessionId(),
-				session.answerSdp(),
-				session.credentialExpiresAt(),
-				session.voiceId(),
-				session.status(),
+				connection.providerSessionId(),
+				connection.answerSdp(),
+				connection.credentialExpiresAt(),
+				connection.voiceId(),
+				connection.status(),
 				session.startTime(),
-				scene.scenePrompt(),
-				scene.scenePrompt());
-	}
-
-	private SceneFlowResponse advanceToDialogue(String userId, String flowId) {
-		SceneFlowResponse flow = sceneFlowService.getFlow(flowId);
-		while (flow.currentStage() != SceneFlowStage.DIALOGUE) {
-			flow = sceneFlowService.advanceStage(new AdvanceSceneStageRequest(userId, flowId));
-		}
-		return flow;
+				finalPrompt);
 	}
 
 	private boolean scoringEnabled(SceneType sceneType) {
 		return sceneType != SceneType.FREE_CHAT;
+	}
+
+	private String sceneName(SceneType sceneType, String sceneInput) {
+		if (sceneType == SceneType.FREE_CHAT) {
+			return "Free Chat";
+		}
+		String name = sceneInput == null || sceneInput.isBlank()
+				? "Custom Scene"
+				: sceneInput.trim();
+		return name.length() <= 24 ? name : name.substring(0, 24) + "...";
 	}
 }
