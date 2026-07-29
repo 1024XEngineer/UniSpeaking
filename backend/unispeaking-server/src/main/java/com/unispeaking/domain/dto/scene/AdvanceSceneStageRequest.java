@@ -1,4 +1,8 @@
 package com.unispeaking.domain.dto.scene;
 
-public record AdvanceSceneStageRequest(String userId, String flowId) {
+import com.unispeaking.domain.vo.scene.SceneFlowStage;
+
+public record AdvanceSceneStageRequest(
+		String sceneId,
+		SceneFlowStage stage) {
 }

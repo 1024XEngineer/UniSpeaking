@@ -3,8 +3,6 @@ package com.unispeaking.controller;
 import com.unispeaking.mapper.SceneSessionMapper;
 import com.unispeaking.domain.dto.request.StartFreeChatRequest;
 import com.unispeaking.domain.dto.response.ApiResponse;
-import com.unispeaking.domain.dto.session.EndSessionRequest;
-import com.unispeaking.domain.dto.session.EndSessionResponse;
 import com.unispeaking.domain.dto.scene.StartSceneSessionResponse;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.common.logging.RealtimeFlowLog;
@@ -36,15 +34,15 @@ public class FreeChatSessionController {
 
 	@PostMapping
 	public ApiResponse<StartSceneSessionResponse> start(@Valid @RequestBody StartFreeChatRequest request) {
-		RealtimeFlowLog.info("session.controller.start sceneType={} prompt={}",
-				SceneType.FREE_CHAT,
-				RealtimeFlowLog.textSummary(request.prompt()));
+		RealtimeFlowLog.info("session.controller.start sceneType={} model={} voice={}",
+				SceneType.FREE_CHAT, request.model(), request.voice());
 		return ApiResponse.success(sceneSessionCoordinator.start(
 				mapper.toFreeChatSessionRequest(request)));
 	}
 
 	@PostMapping("/{sessionId}/end")
-	public ApiResponse<EndSessionResponse> end(@PathVariable String sessionId) {
-		return ApiResponse.success(sessionServiceSelector.endSession(new EndSessionRequest(sessionId)));
+	public ApiResponse<Void> end(@PathVariable String sessionId) {
+		sessionServiceSelector.endSession(sessionId, null);
+		return ApiResponse.success(null);
 	}
 }

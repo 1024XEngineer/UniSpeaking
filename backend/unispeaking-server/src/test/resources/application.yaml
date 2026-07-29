@@ -1,0 +1,33 @@
+spring:
+  config:
+    import: ""
+  datasource:
+    url: jdbc:h2:mem:unispeaking-test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  sql:
+    init:
+      mode: never
+
+conversation:
+  redis:
+    enabled: false
+
+auth:
+  jwt:
+    issuer: unispeaking-test
+    secret: dGVzdC1qd3Qtc2VjcmV0LXdpdGgtYXQtbGVhc3QtMzItYnl0ZXM=
+    access-token-ttl: 1h
+
+realtime:
+  qwen:
+    api-key: test-key
+    workspace-id: test-workspace
+    model: qwen3.5-omni-flash-realtime
+    region: cn-beijing
+    temporary-key-endpoint: https://example.com/api/v1/tokens
+    temporary-key-ttl-seconds: 300
+    connect-timeout: 1s
+    read-timeout: 1s
+    max-answer-bytes: 1048576

@@ -5,19 +5,23 @@ import com.unispeaking.domain.dto.response.ApiResponse;
 import com.unispeaking.domain.dto.scene.AdvanceSceneStageRequest;
 import com.unispeaking.domain.dto.scene.CompleteSceneFlowRequest;
 import com.unispeaking.domain.dto.scene.CreateSceneFlowRequest;
+import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.dto.scene.SceneFlowResponse;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.dto.scene.StartSceneSessionResponse;
+import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.mapper.CustomSceneMapper;
+import com.unispeaking.orchestration.SceneFlowServiceSelector;
 import com.unispeaking.orchestration.SceneSessionCoordinator;
-import com.unispeaking.service.scene.SceneFlowService;
 import com.unispeaking.service.scene.SceneService;
 import jakarta.validation.Valid;
+import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -25,17 +29,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class CustomSceneController {
 
 	private final SceneService sceneService;
-	private final SceneFlowService sceneFlowService;
+	private final SceneFlowServiceSelector sceneFlowServiceSelector;
 	private final SceneSessionCoordinator sceneSessionCoordinator;
 	private final CustomSceneMapper mapper;
 
 	public CustomSceneController(
 			SceneService sceneService,
-			SceneFlowService sceneFlowService,
+			SceneFlowServiceSelector sceneFlowServiceSelector,
 			SceneSessionCoordinator sceneSessionCoordinator,
 			CustomSceneMapper mapper) {
 		this.sceneService = sceneService;
-		this.sceneFlowService = sceneFlowService;
+		this.sceneFlowServiceSelector = sceneFlowServiceSelector;
 		this.sceneSessionCoordinator = sceneSessionCoordinator;
 		this.mapper = mapper;
 	}
@@ -55,23 +59,27 @@ public class CustomSceneController {
 	@PostMapping("/flows")
 	public ApiResponse<SceneFlowResponse> createFlow(
 			@RequestBody CreateSceneFlowRequest request) {
-		return ApiResponse.success(sceneFlowService.createFlow(request));
+		return ApiResponse.success(sceneFlowServiceSelector.createFlow(request.sceneId()));
 	}
 
 	@PostMapping("/flows/advance")
 	public ApiResponse<SceneFlowResponse> advanceStage(
 			@RequestBody AdvanceSceneStageRequest request) {
-		return ApiResponse.success(sceneFlowService.advanceStage(request));
-	}
-
-	@GetMapping("/flows/{flowId}")
-	public ApiResponse<SceneFlowResponse> getFlow(@PathVariable String flowId) {
-		return ApiResponse.success(sceneFlowService.getFlow(flowId));
+		return ApiResponse.success(sceneFlowServiceSelector.advanceStage(
+				request.sceneId(),
+				request.stage()));
 	}
 
 	@PostMapping("/flows/complete")
 	public ApiResponse<Void> completeFlow(@RequestBody CompleteSceneFlowRequest request) {
-		sceneFlowService.completeFlow(request);
+		sceneFlowServiceSelector.completeFlow(request.sceneId(), request.completed());
 		return ApiResponse.success(null);
+	}
+
+	@GetMapping("/flows/{sceneId}/content")
+	public ApiResponse<List<LearningContentItem>> getByCurrentStage(
+			@PathVariable String sceneId,
+			@RequestParam(required = false) SceneFlowStage stage) {
+		return ApiResponse.success(sceneFlowServiceSelector.getByCurrentStage(sceneId, stage));
 	}
 }

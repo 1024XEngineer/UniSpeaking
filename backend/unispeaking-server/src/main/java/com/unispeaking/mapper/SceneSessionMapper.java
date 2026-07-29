@@ -9,14 +9,11 @@ import org.springframework.stereotype.Component;
 public class SceneSessionMapper {
 
 	public StartSceneSessionRequest toFreeChatSessionRequest(StartFreeChatRequest request) {
-		String sceneInput = request.prompt() == null || request.prompt().isBlank()
-				? request.topic()
-				: request.prompt();
 		return new StartSceneSessionRequest(
-				request.userId(),
+				null,
 				SceneType.FREE_CHAT,
-				sceneInput,
-				request.userPreference(),
+				null,
+				null,
 				request.offerSdp(),
 				request.provider(),
 				request.model(),

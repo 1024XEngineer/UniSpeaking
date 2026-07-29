@@ -1,63 +1,109 @@
 package com.unispeaking.service.scene.impl;
 
-import com.unispeaking.domain.dto.scene.AdvanceSceneStageRequest;
-import com.unispeaking.domain.dto.scene.CompleteSceneFlowRequest;
-import com.unispeaking.domain.dto.scene.CreateSceneFlowRequest;
+import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.dto.scene.SceneFlowResponse;
+import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.vo.scene.SceneFlowStage;
+import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.exception.BusinessException;
+import com.unispeaking.exception.SceneNotFoundException;
+import com.unispeaking.repository.SceneRepository;
 import com.unispeaking.service.scene.SceneFlowService;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.List;
+import org.springframework.beans.factory.config.ConfigurableBeanFactory;
+import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Service;
 
 @Service
+@Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
 public class SceneFlowServiceImpl implements SceneFlowService {
 
-	private final Map<String, SceneFlowResponse> flows = new ConcurrentHashMap<>();
+	private final SceneRepository sceneRepository;
+	private SceneFlowResponse currentFlow;
 
-	@Override
-	public SceneFlowResponse createFlow(CreateSceneFlowRequest request) {
-		SceneFlowResponse response = new SceneFlowResponse(
-				"flow_" + UUID.randomUUID(),
-				request.sceneId(),
-				SceneFlowStage.WORD_LEARNING,
-				false);
-		flows.put(response.flowId(), response);
-		return response;
+	public SceneFlowServiceImpl(SceneRepository sceneRepository) {
+		this.sceneRepository = sceneRepository;
 	}
 
 	@Override
-	public SceneFlowResponse advanceStage(AdvanceSceneStageRequest request) {
-		SceneFlowResponse current = getFlow(request.flowId());
-		SceneFlowStage nextStage = next(current.currentStage());
-		SceneFlowResponse response = new SceneFlowResponse(
-				current.flowId(),
+	public synchronized SceneFlowResponse createFlow(String sceneId) {
+		findScene(sceneId);
+		SceneType sceneType = parseSceneType(sceneId);
+		SceneFlowStage initialStage = sceneType == SceneType.FREE_CHAT
+				? SceneFlowStage.DIALOGUE
+				: SceneFlowStage.WORD_LEARNING;
+		currentFlow = new SceneFlowResponse(
+				sceneId,
+				initialStage,
+				false);
+		return currentFlow;
+	}
+
+	@Override
+	public synchronized SceneFlowResponse advanceStage(SceneFlowStage stage) {
+		SceneFlowResponse current = requireFlow();
+		requireCurrentStage(current, stage);
+		SceneFlowStage nextStage = next(current.stage());
+		currentFlow = new SceneFlowResponse(
 				current.sceneId(),
 				nextStage,
 				nextStage == SceneFlowStage.COMPLETED);
-		flows.put(response.flowId(), response);
-		return response;
+		return currentFlow;
 	}
 
 	@Override
-	public SceneFlowResponse getFlow(String flowId) {
-		SceneFlowResponse flow = flows.get(flowId);
-		if (flow == null) {
-			throw new BusinessException("SCENE_FLOW_NOT_FOUND", "scene flow not found: " + flowId);
+	public synchronized void completeFlow(Boolean completed) {
+		if (!Boolean.TRUE.equals(completed)) {
+			return;
 		}
-		return flow;
-	}
-
-	@Override
-	public void completeFlow(CompleteSceneFlowRequest request) {
-		SceneFlowResponse current = getFlow(request.flowId());
-		flows.put(current.flowId(), new SceneFlowResponse(
-				current.flowId(),
+		SceneFlowResponse current = requireFlow();
+		currentFlow = new SceneFlowResponse(
 				current.sceneId(),
 				SceneFlowStage.COMPLETED,
-				true));
+				true);
+	}
+
+	@Override
+	public synchronized List<LearningContentItem> getByCurrentStage(SceneFlowStage stage) {
+		SceneFlowResponse flow = requireFlow();
+		requireCurrentStage(flow, stage);
+		SceneGenerationResponse scene = findScene(flow.sceneId());
+		return switch (flow.stage()) {
+			case WORD_LEARNING -> scene.wordList();
+			case PHRASE_LEARNING -> scene.phraseList();
+			case SENTENCE_LEARNING -> scene.sentenceList();
+			case DIALOGUE, COMPLETED -> List.of();
+		};
+	}
+
+	private SceneType parseSceneType(String sceneId) {
+		return SceneType.fromSceneId(sceneId)
+				.orElseThrow(() -> new BusinessException(
+						"INVALID_SCENE_ID",
+						"unsupported scene id prefix: " + sceneId));
+	}
+
+	private SceneFlowResponse requireFlow() {
+		if (currentFlow == null) {
+			throw new BusinessException("SCENE_FLOW_NOT_FOUND", "scene flow has not been created");
+		}
+		return currentFlow;
+	}
+
+	private SceneGenerationResponse findScene(String sceneId) {
+		return sceneRepository.findGeneratedById(sceneId)
+				.orElseThrow(() -> new SceneNotFoundException(sceneId));
+	}
+
+	private void requireCurrentStage(
+			SceneFlowResponse flow,
+			SceneFlowStage requestedStage) {
+		if (requestedStage != null && requestedStage != flow.stage()) {
+			throw new BusinessException(
+					"SCENE_STAGE_MISMATCH",
+					"requested stage " + requestedStage
+							+ " does not match current stage " + flow.stage());
+		}
 	}
 
 	private SceneFlowStage next(SceneFlowStage current) {

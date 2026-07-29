@@ -3,18 +3,14 @@ package com.unispeaking.service.scene.impl;
 import com.unispeaking.domain.dto.scene.SceneGenerationRequest;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.dto.scene.LearningContentItem;
-import com.unispeaking.domain.vo.prompt.CustomScenePromptContext;
 import com.unispeaking.domain.po.profile.UserProfile;
-import com.unispeaking.domain.vo.prompt.FreeChatPromptContext;
-import com.unispeaking.domain.vo.prompt.SessionPrompt;
 import com.unispeaking.domain.vo.scene.SceneConfig;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.exception.SceneNotFoundException;
 import com.unispeaking.repository.SceneRepository;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.profile.ProfileService;
-import com.unispeaking.service.prompt.CustomScenePromptService;
-import com.unispeaking.service.prompt.FreeChatPromptService;
+import com.unispeaking.service.prompt.FiveLayerPromptService;
 import com.unispeaking.service.scene.SceneService;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,20 +23,17 @@ public class SceneServiceImpl implements SceneService {
 	private final AuthService authService;
 	private final ProfileService profileService;
 	private final SceneRepository sceneRepository;
-	private final FreeChatPromptService freeChatPromptService;
-	private final CustomScenePromptService customScenePromptService;
+	private final FiveLayerPromptService promptService;
 
 	public SceneServiceImpl(
 			AuthService authService,
 			ProfileService profileService,
 			SceneRepository sceneRepository,
-			FreeChatPromptService freeChatPromptService,
-			CustomScenePromptService customScenePromptService) {
+			FiveLayerPromptService promptService) {
 		this.authService = authService;
 		this.profileService = profileService;
 		this.sceneRepository = sceneRepository;
-		this.freeChatPromptService = freeChatPromptService;
-		this.customScenePromptService = customScenePromptService;
+		this.promptService = promptService;
 	}
 
 	@Override
@@ -51,70 +44,30 @@ public class SceneServiceImpl implements SceneService {
 				.orElseThrow(() -> new SceneNotFoundException(sceneType.name()));
 		UserProfile profile = profileService.getProfile(userId);
 		String sceneInput = request.sceneInput() == null ? "" : request.sceneInput().trim();
-		String sceneName = buildSceneName(sceneType, sceneInput);
 		List<LearningContentItem> wordList = buildWordList(sceneType, sceneInput);
 		List<LearningContentItem> phraseList = buildPhraseList(sceneType, sceneInput);
 		List<LearningContentItem> sentenceList = buildSentenceList(sceneType, sceneInput);
-		String scenePrompt = buildCompletePrompt(
-				sceneType,
+		String scenePrompt = String.join("\n\n", promptService.compose(
 				profile,
 				sceneConfig,
+				sceneType,
 				sceneInput,
 				request.userPreference(),
 				wordList,
 				phraseList,
-				sentenceList);
-		return new SceneGenerationResponse(
-				"scene_" + UUID.randomUUID(),
-				sceneName,
-				sceneType,
+				sentenceList));
+		SceneGenerationResponse response = new SceneGenerationResponse(
+				generateSceneId(sceneType),
 				wordList,
 				phraseList,
 				sentenceList,
 				scenePrompt);
+		return sceneRepository.saveGenerated(response);
 	}
 
-	private String buildCompletePrompt(
-			SceneType sceneType,
-			UserProfile profile,
-			SceneConfig sceneConfig,
-			String sceneInput,
-			String userPreference,
-			List<LearningContentItem> wordList,
-			List<LearningContentItem> phraseList,
-			List<LearningContentItem> sentenceList) {
-		String input = sceneInput == null || sceneInput.isBlank()
-				? "Start a natural English conversation with the learner."
-				: sceneInput;
-		if (sceneType == SceneType.FREE_CHAT) {
-			SessionPrompt prompt = freeChatPromptService.build(new FreeChatPromptContext(
-					profile,
-					sceneConfig,
-					input,
-					userPreference));
-			return prompt.systemPrompt();
-		}
-		SessionPrompt prompt = customScenePromptService.build(new CustomScenePromptContext(
-				profile,
-				sceneConfig,
-				sceneType,
-				input,
-				userPreference,
-				wordList,
-				phraseList,
-				sentenceList));
-		return prompt.systemPrompt();
-	}
-
-	private String buildSceneName(SceneType sceneType, String sceneInput) {
-		if (sceneType == SceneType.FREE_CHAT) {
-			return "Free Chat";
-		}
-		String input = sceneInput == null || sceneInput.isBlank() ? "Custom Scene" : sceneInput.trim();
-		if (input.length() <= 24) {
-			return input;
-		}
-		return input.substring(0, 24) + "...";
+	private String generateSceneId(SceneType sceneType) {
+		String randomPart = UUID.randomUUID().toString().replace("-", "");
+		return sceneType.sceneIdPrefix() + "_" + randomPart;
 	}
 
 	private List<LearningContentItem> buildWordList(SceneType sceneType, String sceneInput) {

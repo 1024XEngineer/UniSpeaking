@@ -28,8 +28,6 @@ SceneGenerationRequest {
 }
 SceneGenerationResponse {
     String sceneId;
-    String sceneName;
-    SceneType sceneType;
     List<LearningContentItem> wordList;
     List<LearningContentItem> phraseList;
     List<LearningContentItem> sentenceList;
@@ -39,20 +37,15 @@ SceneGenerationResponse {
 public interface SceneFlowService {
     // 为已经生成完成的场景创建流程。
     SceneFlowResponse createFlow(
-        CreateSceneFlowRequest request
+        String sceneId
     );
     // 完成当前阶段并进入下一阶段。
-    SceneFlowResponse advanceStage(
-        AdvanceSceneStageRequest request
-    );
+    SceneFlowResponse advanceStage(SceneFlowStage stage);
 
-    SceneFlowResponse getFlow(
-        String flowId
-    );
+    void completeFlow(Boolean completed);
 
-    void completeFlow(
-        CompleteSceneFlowRequest request
-    );
+    // 获取当前阶段的学习内容。
+    List<LearningContentItem> getByCurrentStage(SceneFlowStage stage);
 }
 enum SceneFlowStage {
     WORD_LEARNING,
@@ -61,23 +54,10 @@ enum SceneFlowStage {
     DIALOGUE,
     COMPLETED
 }
-CreateSceneFlowRequest {
-    String userId;
-    String sceneId;
-}
 SceneFlowResponse {
-    String flowId;
     String sceneId;
-    SceneFlowStage currentStage;
+    SceneFlowStage stage;
     Boolean completed;
-}
-AdvanceSceneStageRequest {
-    String userId;
-    String flowId;
-}
-CompleteSceneFlowRequest {
-    String userId;
-    String flowId;
 }
 
 package com.unispeaking.session;
@@ -87,9 +67,7 @@ public interface SessionService {
     /**
      * 开始一次业务会话，生成 sessionId 并记录开始时间。
      */
-    StartSessionResponse startSession(
-        StartSessionRequest request
-    );
+    StartSessionResponse startSession(String prompt);
 
     /**
      * 向当前会话中追加一条用户或 AI 的完整消息。
@@ -97,41 +75,25 @@ public interface SessionService {
      * 只保存最终完整文本，不保存流式 delta。
      * 消息可以先追加到内存，再异步写入数据库。
      */
-    void addMessage(
-        AddSessionMessageRequest request
-    );
+    void addMessage(Message message);
 
     /**
      * 结束当前业务会话，记录结束时间。
      */
-    EndSessionResponse endSession(
-        EndSessionRequest request
-    );
-}
-StartSessionRequest {
-    SceneType sceneType;
-    String prompt;
+    void endSession(String sessionId, String stopTime);
 }
 StartSessionResponse {
     String sessionId;
     String startTime;
-}
-EndSessionRequest {
-    String sessionId;
-}
-EndSessionResponse {
-    String sessionId;
-    String stopTime;
-}
-AppendSessionMessageRequest {
-    String sessionId;
-    Message message;
 }
 Message {
     Integer owner;    // 1：用户，0：模型
     String content;   // 用户或模型的完整文本
     byte[] audio;     // 可选音频，模型消息通常为空
 }
+
+自由聊天的 `addMessage(Message)` 将用户和 AI 的最终文本按顺序暂存到
+Redis List；音频和流式 delta 不进入 Redis，消息通过 TTL 自动过期。
 
 public interface EvaluationService {
 
@@ -320,7 +282,7 @@ SceneService.generateScene(
 )
     └── AiProviderRegistry.getLlmProvider("qwen3.5-plus").executeLlmTask(
             context.userId = "user_1001",
-            context.businessId = "scene_2001",
+            context.businessId = "custom_2001",
             prompt = "生成咖啡店点单的单词、词组、句子和对话Prompt"
         )
         → LlmTaskResponse {
@@ -328,8 +290,7 @@ SceneService.generateScene(
         }
 
 → SceneGenerationResponse {
-    sceneId = "scene_2001",
-    sceneName = "咖啡店点单",
+    sceneId = "custom_2001",
     wordList,
     phraseList,
     sentenceList,
@@ -340,12 +301,11 @@ SceneService.generateScene(
 【创建场景流程】
 
 SceneFlowService.createFlow(
-    userId = "user_1001",
-    sceneId = "scene_2001"
+    sceneId = "custom_2001"
 )
 → SceneFlowResponse {
-    flowId = "flow_3001",
-    currentStage = WORD_LEARNING,
+    sceneId = "custom_2001",
+    stage = WORD_LEARNING,
     completed = false
 }
 
@@ -354,7 +314,7 @@ SceneFlowService.createFlow(
 
 AiProviderRegistry.getTtsProvider("aliyun-tts").generateSpeechAudio(
     context.userId = "user_1001",
-    context.businessId = "scene_2001",
+    context.businessId = "custom_2001",
     text = "coffee"
 )
 → SpeechAudioResponse {
@@ -363,11 +323,12 @@ AiProviderRegistry.getTtsProvider("aliyun-tts").generateSpeechAudio(
 }
 
 SceneFlowService.advanceStage(
-    userId = "user_1001",
-    flowId = "flow_3001"
+    stage = WORD_LEARNING
 )
 → SceneFlowResponse {
-    currentStage = PHRASE_LEARNING
+    sceneId = "custom_2001",
+    stage = PHRASE_LEARNING,
+    completed = false
 }
 
 
@@ -375,7 +336,7 @@ SceneFlowService.advanceStage(
 
 AiProviderRegistry.getTtsProvider("aliyun-tts").generateSpeechAudio(
     context.userId = "user_1001",
-    context.businessId = "scene_2001",
+    context.businessId = "custom_2001",
     text = "a cup of coffee"
 )
 → SpeechAudioResponse {
@@ -384,11 +345,12 @@ AiProviderRegistry.getTtsProvider("aliyun-tts").generateSpeechAudio(
 }
 
 SceneFlowService.advanceStage(
-    userId = "user_1001",
-    flowId = "flow_3001"
+    stage = PHRASE_LEARNING
 )
 → SceneFlowResponse {
-    currentStage = SENTENCE_LEARNING
+    sceneId = "custom_2001",
+    stage = SENTENCE_LEARNING,
+    completed = false
 }
 
 
@@ -396,7 +358,7 @@ SceneFlowService.advanceStage(
 
 AiProviderRegistry.getTtsProvider("aliyun-tts").generateSpeechAudio(
     context.userId = "user_1001",
-    context.businessId = "scene_2001",
+    context.businessId = "custom_2001",
     text = "Could I have a cup of coffee?"
 )
 → SpeechAudioResponse {
@@ -427,19 +389,19 @@ EvaluationService.evaluateSentence(
 }
 
 SceneFlowService.advanceStage(
-    userId = "user_1001",
-    flowId = "flow_3001"
+    stage = SENTENCE_LEARNING
 )
 → SceneFlowResponse {
-    currentStage = DIALOGUE
+    sceneId = "custom_2001",
+    stage = DIALOGUE,
+    completed = false
 }
 
 
 【开始场景会话】
 
 SessionService.startSession(
-    sceneType = CUSTOM_SCENE,
-    prompt = "你是一名咖啡店店员……"
+    "你是一名咖啡店店员……"
 )
 → StartSessionResponse {
     sessionId = "session_5001",
@@ -462,22 +424,16 @@ AiProviderRegistry.getRealtimeProvider(
 【保存对话内容】
 
 SessionService.addMessage(
-    sessionId = "session_5001",
-    message = {
-        owner = 0,
-        content = "What would you like to order?",
-        audio = null
-    }
+    owner = 0,
+    content = "What would you like to order?",
+    audio = null
 )
 → void
 
 SessionService.addMessage(
-    sessionId = "session_5001",
-    message = {
-        owner = 1,
-        content = "I would like a cup of coffee.",
-        audio = "用户本轮音频"
-    }
+    owner = 1,
+    content = "I would like a cup of coffee.",
+    audio = "用户本轮音频"
 )
 → void
 
@@ -519,12 +475,10 @@ EvaluationService.evaluateDialogueTurn(
 【结束会话】
 
 SessionService.endSession(
-    sessionId = "session_5001"
-)
-→ EndSessionResponse {
     sessionId = "session_5001",
-    stopTime = "2026-07-24 10:42:00"
-}
+    stopTime = "2026-07-24T10:42:00Z"
+)
+→ void
 
 
 【生成最终报告】
@@ -575,7 +529,6 @@ EvaluationService.generateConversationReport(
 【完成流程】
 
 SceneFlowService.completeFlow(
-    userId = "user_1001",
-    flowId = "flow_3001"
+    completed = true
 )
 → void

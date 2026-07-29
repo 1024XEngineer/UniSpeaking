@@ -13,17 +13,14 @@ public record StartSceneSessionResponse(
 		List<LearningContentItem> wordList,
 		List<LearningContentItem> phraseList,
 		List<LearningContentItem> sentenceList,
-		String flowId,
 		SceneFlowStage currentStage,
 		Boolean scoringEnabled,
 		String sessionId,
-		String localSessionId,
 		String providerSessionId,
 		String answerSdp,
 		Instant credentialExpiresAt,
 		String voiceId,
 		SessionStatus status,
 		String startTime,
-		String scenePrompt,
 		String systemPrompt) {
 }
