@@ -3,7 +3,9 @@ package com.unispeaking.orchestration;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
 import com.unispeaking.domain.vo.scene.SceneType;
+import com.unispeaking.exception.BusinessException;
 import com.unispeaking.exception.SessionNotFoundException;
+import com.unispeaking.repository.SessionStateStore;
 import com.unispeaking.service.session.CustomSceneSessionService;
 import com.unispeaking.service.session.FreeChatSessionService;
 import com.unispeaking.service.session.SessionService;
@@ -17,13 +19,16 @@ public class SessionServiceSelector {
 
 	private final ObjectProvider<FreeChatSessionService> freeChatServices;
 	private final ObjectProvider<CustomSceneSessionService> customSceneServices;
+	private final SessionStateStore sessionStateStore;
 	private final Map<String, SessionService> sessions = new ConcurrentHashMap<>();
 
 	public SessionServiceSelector(
 			ObjectProvider<FreeChatSessionService> freeChatServices,
-			ObjectProvider<CustomSceneSessionService> customSceneServices) {
+			ObjectProvider<CustomSceneSessionService> customSceneServices,
+			SessionStateStore sessionStateStore) {
 		this.freeChatServices = freeChatServices;
 		this.customSceneServices = customSceneServices;
+		this.sessionStateStore = sessionStateStore;
 	}
 
 	public StartSessionResponse startSession(SceneType sceneType, String prompt) {
@@ -33,14 +38,29 @@ public class SessionServiceSelector {
 		return response;
 	}
 
-	public void addMessage(String sessionId, Message message) {
-		resolve(sessionId).addMessage(message);
+	public void addMessage(String userId, String sessionId, Message message) {
+		resolveOwned(userId, sessionId).addMessage(message);
 	}
 
-	public void endSession(String sessionId, String stopTime) {
-		SessionService service = resolve(sessionId);
+	public void endSession(String userId, String sessionId, String stopTime) {
+		SessionService service = resolveOwned(userId, sessionId);
 		service.endSession(sessionId, stopTime);
 		sessions.remove(sessionId, service);
+	}
+
+	private SessionService resolveOwned(String userId, String sessionId) {
+		if (userId == null || userId.isBlank()) {
+			throw new BusinessException("AUTHENTICATION_REQUIRED", "请先登录");
+		}
+		if (sessionId == null || sessionId.isBlank()) {
+			throw new SessionNotFoundException(String.valueOf(sessionId));
+		}
+		var session = sessionStateStore.findById(sessionId)
+				.orElseThrow(() -> new SessionNotFoundException(sessionId));
+		if (!userId.equals(session.getUserId())) {
+			throw new BusinessException("SESSION_ACCESS_DENIED", "当前用户无权访问该会话");
+		}
+		return resolve(sessionId);
 	}
 
 	private SessionService resolve(String sessionId) {
