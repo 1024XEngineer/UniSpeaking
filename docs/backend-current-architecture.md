@@ -226,7 +226,7 @@ Registry 当前登记 `qwen3.5-omni-flash-realtime`（Realtime 默认）、
 - 自由会话：`SceneFlowStage=DIALOGUE`，`scoringEnabled=false`
 - 自定义场景：生成 `wordList`、`phraseList`、`sentenceList` 和完整 `scenePrompt`，`SceneFlowStage=WORD_LEARNING`，`scoringEnabled=true`
 - 雅思/面试：复用自定义场景会话骨架，Flow 从 `WORD_LEARNING` 开始，后续评分细节待接入
-- 追加完整消息：WebSocket `/ws/session-messages`，`type=session.message`
-- 结束会话：WebSocket `/ws/session-messages`，`type=session.end`；HTTP `POST /api/scene-sessions/{sessionId}/end` 保留
+- 追加完整消息：带 JWT 握手的 WebSocket `/ws/session-messages`，`type=session.message`，并校验会话所有者
+- 结束会话：带 JWT 握手的 WebSocket `/ws/session-messages`，`type=session.end`；HTTP `POST /api/scene-sessions/{sessionId}/end` 同样校验会话所有者
 - 用户/AI 完整消息保存到自由会话 Conversation Store
 - 长期用户档案通过用户偏好接口显式维护，不从会话记录自动生成

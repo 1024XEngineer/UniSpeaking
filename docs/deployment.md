@@ -84,7 +84,9 @@ docker compose --env-file env/.env up --build
 ```
 
 Compose passes `env/.env` into the backend container. `VITE_BACKEND_URL` is a
-frontend build-time value and defaults to `/backend`.
+frontend build-time value and defaults to `/backend`. Both REST requests and
+the authenticated session WebSocket preserve this prefix, so nginx routes them
+to the backend service.
 
 After Spring returns the answer SDP, the browser establishes its WebRTC peer
 connection directly with Qwen.

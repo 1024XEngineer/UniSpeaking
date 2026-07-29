@@ -24,7 +24,10 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.util.StringUtils;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -33,17 +36,37 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 public class SecurityConfig {
 
 	@Bean
-	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+	SecurityFilterChain securityFilterChain(
+			HttpSecurity http,
+			BearerTokenResolver bearerTokenResolver) throws Exception {
 		http
 				.csrf(csrf -> csrf.disable())
 				.cors(Customizer.withDefaults())
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(authorize -> authorize
 						.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-						.requestMatchers("/api/auth/register", "/api/auth/login", "/ws/**").permitAll()
+						.requestMatchers("/api/auth/register", "/api/auth/login").permitAll()
 						.anyRequest().authenticated())
-				.oauth2ResourceServer(resourceServer -> resourceServer.jwt(Customizer.withDefaults()));
+				.oauth2ResourceServer(resourceServer -> resourceServer
+						.bearerTokenResolver(bearerTokenResolver)
+						.jwt(Customizer.withDefaults()));
 		return http.build();
+	}
+
+	@Bean
+	BearerTokenResolver bearerTokenResolver() {
+		DefaultBearerTokenResolver headerResolver = new DefaultBearerTokenResolver();
+		return request -> {
+			String headerToken = headerResolver.resolve(request);
+			if (StringUtils.hasText(headerToken)) {
+				return headerToken;
+			}
+			if ("/ws/session-messages".equals(request.getRequestURI())) {
+				String queryToken = request.getParameter("access_token");
+				return StringUtils.hasText(queryToken) ? queryToken : null;
+			}
+			return null;
+		};
 	}
 
 	@Bean

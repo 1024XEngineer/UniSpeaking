@@ -3,7 +3,16 @@ import {
   buildRealtimeSessionConfig,
   extractCompletedAssistantMessage,
   isActiveResponseConflict,
+  normalizeBaseUrl,
+  websocketUrl,
 } from "../src/realtimeClient.js";
+
+assert.equal(normalizeBaseUrl("/backend"), "/backend");
+assert.equal(normalizeBaseUrl("https://api.example.com/backend/"), "https://api.example.com/backend");
+assert.equal(
+  websocketUrl("/backend", "signed-token", "https://app.example.com"),
+  "wss://app.example.com/backend/ws/session-messages?access_token=signed-token",
+);
 
 assert.deepEqual(
   extractCompletedAssistantMessage({
