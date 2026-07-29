@@ -41,9 +41,10 @@ public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 
 	private void handleFrame(WebSocketSession webSocketSession, SessionSocketMessage frame) throws IOException {
 		String sessionId = requireSessionId(frame.sessionId());
-			switch (normalize(frame.type())) {
-				case "message" -> {
-					sessionServiceSelector.addMessage(sessionId, frame.message());
+		String userId = requireAuthenticatedUserId(webSocketSession);
+		switch (normalize(frame.type())) {
+			case "message" -> {
+				sessionServiceSelector.addMessage(userId, sessionId, frame.message());
 				RealtimeFlowLog.info("session.websocket.message sessionId={} owner={} content={} audioBytes={}",
 						sessionId,
 						frame.message() == null ? null : frame.message().owner(),
@@ -51,15 +52,24 @@ public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 						frame.message() == null || frame.message().audio() == null
 								? 0 : frame.message().audio().length);
 				send(webSocketSession, SessionSocketAck.success("session.message.accepted", sessionId, null));
-				}
-				case "end" -> {
-					sessionServiceSelector.endSession(sessionId, frame.stopTime());
-					RealtimeFlowLog.info("session.websocket.end sessionId={} stopTime={}",
-							sessionId, frame.stopTime());
-					send(webSocketSession, SessionSocketAck.success("session.end.accepted", sessionId, null));
-				}
+			}
+			case "end" -> {
+				sessionServiceSelector.endSession(userId, sessionId, frame.stopTime());
+				RealtimeFlowLog.info("session.websocket.end sessionId={} stopTime={}",
+						sessionId, frame.stopTime());
+				send(webSocketSession, SessionSocketAck.success("session.end.accepted", sessionId, null));
+			}
 			default -> throw new IllegalArgumentException("unsupported session socket type: " + frame.type());
 		}
+	}
+
+	private String requireAuthenticatedUserId(WebSocketSession session) {
+		Object value = session.getAttributes()
+				.get(SessionWebSocketAuthenticationInterceptor.AUTHENTICATED_USER_ID);
+		if (!(value instanceof String userId) || userId.isBlank()) {
+			throw new IllegalStateException("authenticated WebSocket user is required");
+		}
+		return userId;
 	}
 
 	private String normalize(String type) {

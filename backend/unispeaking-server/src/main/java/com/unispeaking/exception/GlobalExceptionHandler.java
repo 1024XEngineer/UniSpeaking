@@ -16,6 +16,7 @@ public class GlobalExceptionHandler {
 		HttpStatus status = switch (exception.code()) {
 			case "AUTHENTICATION_REQUIRED", "INVALID_ACCESS_TOKEN", "ACCESS_TOKEN_REVOKED",
 					"INVALID_CREDENTIALS", "USER_NOT_ACTIVE" -> HttpStatus.UNAUTHORIZED;
+			case "SESSION_ACCESS_DENIED" -> HttpStatus.FORBIDDEN;
 			case "USERNAME_ALREADY_EXISTS" -> HttpStatus.CONFLICT;
 			default -> HttpStatus.BAD_REQUEST;
 		};

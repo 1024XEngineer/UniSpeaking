@@ -274,8 +274,13 @@ DataChannel `session.update.session.instructions`，不得使用客户端默认�
 ### 5.2 追加完整消息
 
 ```text
-WS /ws/session-messages
+WS /ws/session-messages?access_token=<JWT>
 ```
+
+浏览器 WebSocket 握手必须携带登录接口签发的 JWT。Docker 部署时实际地址为
+`/backend/ws/session-messages?access_token=<JWT>`。Spring Security 在协议升级前
+验证 JWT，握手拦截器将已验证的 `userId` 写入 WebSocket 会话；后端随后对每个
+`session.message` 和 `session.end` 校验 `sessionId` 是否属于该用户。
 
 请求：
 
@@ -319,7 +324,7 @@ Redis List，`owner=1` 表示用户、`owner=0` 表示 AI；音频不会写入 R
 ### 5.3 结束自由会话
 
 ```text
-WS /ws/session-messages
+WS /ws/session-messages?access_token=<JWT>
 ```
 
 请求：

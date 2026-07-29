@@ -1,4 +1,4 @@
-const API_BASE = (import.meta.env?.VITE_UNISPEAKING_API_BASE || "").replace(/\/$/, "");
+const API_BASE = (import.meta.env?.VITE_BACKEND_URL || "").replace(/\/$/, "");
 const ACCESS_TOKEN_KEY = "unispeaking.accessToken";
 
 async function unwrap(response) {

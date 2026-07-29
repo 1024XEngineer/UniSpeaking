@@ -14,21 +14,35 @@ const SPEECH_SPEED_INSTRUCTIONS = {
 
 const eventId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-function normalizeBaseUrl(baseUrl) {
+export function normalizeBaseUrl(baseUrl) {
   if (!baseUrl) return "";
-  const url = new URL(baseUrl);
+  const value = String(baseUrl).trim().replace(/\/$/, "");
+  if (value.startsWith("/") && !value.startsWith("//")) {
+    return value;
+  }
+  const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("后端地址必须使用 HTTP 或 HTTPS");
   }
   return url.toString().replace(/\/$/, "");
 }
 
-function websocketUrl(baseUrl) {
-  const origin = baseUrl || window.location.origin;
-  const url = new URL(origin);
+export function websocketUrl(
+  baseUrl,
+  accessToken,
+  pageOrigin = globalThis.window?.location?.origin,
+) {
+  if (!pageOrigin && (!baseUrl || String(baseUrl).startsWith("/"))) {
+    throw new Error("无法确定 WebSocket 页面来源");
+  }
+  const url = new URL(baseUrl || "/", pageOrigin);
+  const basePath = url.pathname.replace(/\/$/, "");
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.pathname = "/ws/session-messages";
+  url.pathname = `${basePath}/ws/session-messages`.replace(/\/{2,}/g, "/");
   url.search = "";
+  if (accessToken) {
+    url.searchParams.set("access_token", accessToken);
+  }
   url.hash = "";
   return url.toString();
 }
@@ -161,12 +175,11 @@ export function buildRealtimeSessionConfig({
 }
 
 export function createRealtimeClient({
-  apiBase = import.meta.env?.VITE_UNISPEAKING_API_BASE || DEFAULT_API_BASE,
+  apiBase = import.meta.env?.VITE_BACKEND_URL || DEFAULT_API_BASE,
   onEvent = () => {},
   onRemoteStream = () => {},
 } = {}) {
   const base = normalizeBaseUrl(apiBase);
-  const sessionMessagesUrl = websocketUrl(base);
   let peer = null;
   let channel = null;
   let sessionSocket = null;
@@ -228,7 +241,11 @@ export function createRealtimeClient({
         sessionSocket.addEventListener("error", () => reject(new Error("会话 WebSocket 连接失败")), { once: true });
       });
     }
-    sessionSocket = new WebSocket(sessionMessagesUrl);
+    const accessToken = getAccessToken();
+    if (!accessToken) {
+      return Promise.reject(new Error("请先登录后再建立会话 WebSocket"));
+    }
+    sessionSocket = new WebSocket(websocketUrl(base, accessToken));
     sessionSocket.onmessage = handleSessionAck;
     sessionSocket.onclose = () => {
       rejectPendingAcks(new Error("会话 WebSocket 已关闭"));
