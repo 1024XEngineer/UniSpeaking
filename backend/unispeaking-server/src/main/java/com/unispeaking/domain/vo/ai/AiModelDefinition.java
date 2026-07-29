@@ -1,10 +1,8 @@
 package com.unispeaking.domain.vo.ai;
 
-import com.unispeaking.domain.vo.realtime.ProviderType;
-
 public record AiModelDefinition(
 		String modelId,
-		ProviderType providerType,
+		String providerId,
 		AiCapability capability,
 		boolean defaultModel) {
 }
