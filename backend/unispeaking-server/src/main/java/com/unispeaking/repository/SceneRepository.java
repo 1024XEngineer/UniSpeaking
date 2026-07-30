@@ -1,6 +1,7 @@
 package com.unispeaking.repository;
 
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
+import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.vo.scene.SceneConfig;
 import com.unispeaking.domain.vo.scene.SceneType;
 import java.util.Optional;
@@ -8,5 +9,9 @@ import java.util.Optional;
 public interface SceneRepository {
 	Optional<SceneConfig> findByType(SceneType type);
 	SceneGenerationResponse saveGenerated(SceneGenerationResponse scene);
+	SceneGenerationResponse saveCustomScene(
+			CustomSceneDefinition definition,
+			SceneGenerationResponse response);
 	Optional<SceneGenerationResponse> findGeneratedById(String sceneId);
+	Optional<CustomSceneDefinition> findCustomDefinitionById(String sceneId);
 }

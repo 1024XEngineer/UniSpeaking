@@ -58,6 +58,7 @@ public class MybatisUserProfileRepository implements UserProfileRepository {
 				entity.getPreferredVoice(),
 				entity.getPreferredAiSpeechSpeed(),
 				"zh-CN",
-				entity.getMemoryText());
+				entity.getMemoryText(),
+				entity.getPreferences());
 	}
 }
