@@ -39,7 +39,7 @@ domain
 └── vo
     ├── ai            # AiCallContext
     ├── conversation  # SpeakerType
-    ├── evaluation    # AudioInput / FiveDimensionScore
+    ├── evaluation    # 五维会话评分与单轮发音明细
     ├── prompt        # Prompt 构建上下文和值对象
     ├── realtime      # ProviderType / 凭证 / 连接结果
     ├── scene         # SceneType / SceneConfig / SceneFlowStage
@@ -187,9 +187,10 @@ SceneFlowServiceSelector
 └── 按 sceneId 保存和选择独立的 SceneFlowService 实例
 
 EvaluationService
-├── evaluateSentence(SentenceEvaluationRequest)
-├── evaluateDialogueTurn(DialogueTurnEvaluationRequest)
-└── generateConversationReport(ConversationReportRequest)
+├── evaluateSentenceReading(sentenceId, audio)
+├── evaluateDialogueTurn(DialogueTurnEvaluationCommand)
+├── generateDialogueReport(sessionId, dialogue)
+└── getDialogueEvaluation(sessionId)
 
 AiProvider
 └── AbstractAiProvider
@@ -216,9 +217,10 @@ AiProviderRegistry
 
 Registry 当前登记 `qwen3.5-omni-flash-realtime`（Realtime 默认）、
 `qwen3.5-omni-plus-realtime`、`qwen3.5-plus`（LLM 默认）、
-`deepseek-chat`、`iflytek-pronunciation-evaluation`（评分默认）、
+`deepseek-v4-flash`、`iflytek-suntone`（评分默认）、
 `aliyun-tts`（TTS 默认）和 `minimax-tts`。目前只有 Qwen Realtime SDP
-交换接入真实厂商 API；其余 Provider 是可路由骨架，在厂商凭证和协议接入前返回明确的能力未配置错误。
+交换、Qwen LLM 和科大讯飞 Suntone 评分接入真实厂商 API；缺少对应凭证时
+返回明确的能力未配置错误。
 
 ## 当前可跑通能力
 

@@ -41,7 +41,7 @@ public class AiProviderRegistry {
 	public static final String DEEPSEEK_CHAT = "deepseek-v4-flash";
 	public static final String QWEN_ASR = "qwen3-asr-flash";
 	public static final String DOUBAO_ASR = "volc.bigasr.auc_turbo";
-	public static final String IFLYTEK_PRONUNCIATION_SCORING = "iflytek-open-ise";
+	public static final String IFLYTEK_PRONUNCIATION_SCORING = "iflytek-suntone";
 	public static final String QWEN_TTS = "qwen3-tts-flash";
 	public static final String ALIYUN_TTS = "cosyvoice-v3-flash";
 	public static final String MINIMAX_TTS = "speech-2.8-hd";
