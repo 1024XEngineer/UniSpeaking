@@ -54,9 +54,12 @@ public class AuthServiceImpl implements AuthService {
 				username,
 				passwordEncoder.encode(request.password()),
 				normalizeNullable(request.nickname()),
+				null,
 				UserRole.USER,
 				UserStatus.ACTIVE,
 				0,
+				null,
+				null,
 				null,
 				now,
 				now);

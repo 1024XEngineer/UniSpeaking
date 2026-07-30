@@ -5,19 +5,60 @@ CREATE TABLE IF NOT EXISTS "user" (
     username VARCHAR(254) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     nickname VARCHAR(32),
+    avatar_object_key VARCHAR(512),
     role VARCHAR(16) NOT NULL DEFAULT 'USER',
     status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
     auth_version BIGINT NOT NULL DEFAULT 0,
     last_login_at TIMESTAMPTZ,
+    deletion_requested_at TIMESTAMPTZ,
+    deletion_scheduled_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT user_role_check CHECK (role IN ('USER', 'ADMIN')),
-    CONSTRAINT user_status_check CHECK (status IN ('ACTIVE', 'DISABLED', 'LOCKED')),
-    CONSTRAINT user_auth_version_check CHECK (auth_version >= 0)
+    CONSTRAINT user_status_check
+        CHECK (status IN ('ACTIVE', 'DISABLED', 'LOCKED', 'PENDING_DELETION')),
+    CONSTRAINT user_auth_version_check CHECK (auth_version >= 0),
+    CONSTRAINT user_deletion_schedule_check CHECK (
+        (status = 'PENDING_DELETION'
+            AND deletion_requested_at IS NOT NULL
+            AND deletion_scheduled_at IS NOT NULL
+            AND deletion_scheduled_at > deletion_requested_at)
+        OR
+        (status <> 'PENDING_DELETION'
+            AND deletion_requested_at IS NULL
+            AND deletion_scheduled_at IS NULL)
+    )
 );
 
 ALTER TABLE "user"
 ALTER COLUMN username TYPE VARCHAR(254);
+
+ALTER TABLE "user"
+ADD COLUMN IF NOT EXISTS avatar_object_key VARCHAR(512),
+ADD COLUMN IF NOT EXISTS deletion_requested_at TIMESTAMPTZ,
+ADD COLUMN IF NOT EXISTS deletion_scheduled_at TIMESTAMPTZ;
+
+ALTER TABLE "user"
+DROP CONSTRAINT IF EXISTS user_status_check;
+
+ALTER TABLE "user"
+ADD CONSTRAINT user_status_check
+CHECK (status IN ('ACTIVE', 'DISABLED', 'LOCKED', 'PENDING_DELETION'));
+
+ALTER TABLE "user"
+DROP CONSTRAINT IF EXISTS user_deletion_schedule_check;
+
+ALTER TABLE "user"
+ADD CONSTRAINT user_deletion_schedule_check CHECK (
+    (status = 'PENDING_DELETION'
+        AND deletion_requested_at IS NOT NULL
+        AND deletion_scheduled_at IS NOT NULL
+        AND deletion_scheduled_at > deletion_requested_at)
+    OR
+    (status <> 'PENDING_DELETION'
+        AND deletion_requested_at IS NULL
+        AND deletion_scheduled_at IS NULL)
+);
 
 CREATE TABLE IF NOT EXISTS user_preference (
     user_id UUID PRIMARY KEY,
@@ -62,7 +103,9 @@ SET username = EXCLUDED.username,
     password_hash = EXCLUDED.password_hash,
     nickname = EXCLUDED.nickname,
     role = EXCLUDED.role,
-    status = EXCLUDED.status;
+    status = EXCLUDED.status,
+    deletion_requested_at = NULL,
+    deletion_scheduled_at = NULL;
 
 DO $$
 DECLARE
@@ -112,6 +155,47 @@ DROP CONSTRAINT IF EXISTS user_preference_speech_speed_check;
 ALTER TABLE user_preference
 ADD CONSTRAINT user_preference_speech_speed_check
 CHECK (preferred_ai_speech_speed IN ('SLOWER', 'MODERATE', 'NATURAL', 'FASTER'));
+
+CREATE TABLE IF NOT EXISTS achievement_definitions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(64) NOT NULL UNIQUE,
+    name VARCHAR(64) NOT NULL,
+    description VARCHAR(255) NOT NULL,
+    category VARCHAR(32) NOT NULL,
+    metric_key VARCHAR(64) NOT NULL,
+    target_value BIGINT NOT NULL,
+    icon_key VARCHAR(64) NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT achievement_target_value_check CHECK (target_value > 0),
+    CONSTRAINT achievement_sort_order_check CHECK (sort_order >= 0),
+    CONSTRAINT achievement_status_check CHECK (status IN ('ACTIVE', 'INACTIVE'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_achievement_definitions_active_order
+ON achievement_definitions (status, sort_order, code);
+
+CREATE TABLE IF NOT EXISTS user_achievement_progress (
+    user_id UUID NOT NULL,
+    achievement_id UUID NOT NULL,
+    progress_value BIGINT NOT NULL DEFAULT 0,
+    unlocked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, achievement_id),
+    CONSTRAINT user_achievement_progress_user_fk
+        FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE,
+    CONSTRAINT user_achievement_progress_definition_fk
+        FOREIGN KEY (achievement_id) REFERENCES achievement_definitions(id)
+        ON DELETE RESTRICT,
+    CONSTRAINT user_achievement_progress_value_check
+        CHECK (progress_value >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_achievement_progress_unlocked
+ON user_achievement_progress (user_id, unlocked_at);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER

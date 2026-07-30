@@ -113,9 +113,12 @@ class AuthServiceImplTest {
 				"learner@example.com",
 				"bcrypt-hash",
 				null,
+				null,
 				UserRole.USER,
 				UserStatus.ACTIVE,
 				0,
+				null,
+				null,
 				null,
 				now,
 				now);

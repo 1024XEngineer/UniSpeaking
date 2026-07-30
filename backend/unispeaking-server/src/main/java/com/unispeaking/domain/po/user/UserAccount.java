@@ -8,10 +8,13 @@ public record UserAccount(
 		String username,
 		String passwordHash,
 		String nickname,
+		String avatarObjectKey,
 		UserRole role,
 		UserStatus status,
 		long authVersion,
 		Instant lastLoginAt,
+		Instant deletionRequestedAt,
+		Instant deletionScheduledAt,
 		Instant createdAt,
 		Instant updatedAt) {
 
@@ -21,10 +24,13 @@ public record UserAccount(
 				username,
 				passwordHash,
 				nickname,
+				avatarObjectKey,
 				role,
 				status,
 				authVersion,
 				value,
+				deletionRequestedAt,
+				deletionScheduledAt,
 				createdAt,
 				updatedAt);
 	}

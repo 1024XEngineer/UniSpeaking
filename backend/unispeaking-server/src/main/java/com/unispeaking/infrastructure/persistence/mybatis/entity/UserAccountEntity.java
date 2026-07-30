@@ -20,10 +20,13 @@ public class UserAccountEntity {
 	private String username;
 	private String passwordHash;
 	private String nickname;
+	private String avatarObjectKey;
 	private String role;
 	private String status;
 	private Long authVersion;
 	private OffsetDateTime lastLoginAt;
+	private OffsetDateTime deletionRequestedAt;
+	private OffsetDateTime deletionScheduledAt;
 	private OffsetDateTime createdAt;
 	private OffsetDateTime updatedAt;
 }
