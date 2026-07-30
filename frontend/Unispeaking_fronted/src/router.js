@@ -2,6 +2,10 @@ const baseRoute = {
   authMode: "signup",
   training: null,
   result: null,
+  sceneId: null,
+  sessionId: null,
+  conversationSessionId: null,
+  assetSceneId: null,
 };
 
 const appRoute = (page, extra = {}) => ({
@@ -46,9 +50,19 @@ export const paths = {
     teacher: "/teacher",
   },
   app: PAGE_PATHS,
+  conversation: {
+    root: "/conversation",
+    session: (sessionId) => `/conversation/${encodeURIComponent(sessionId)}`,
+  },
   scenes: {
     training: "/scenes/training",
     result: "/scenes/training/result",
+    word: (sceneId) => `/scenes/${encodeURIComponent(sceneId)}/word`,
+    phrase: (sceneId) => `/scenes/${encodeURIComponent(sceneId)}/phrase`,
+    sentence: (sceneId) => `/scenes/${encodeURIComponent(sceneId)}/sentence`,
+    session: (sceneId, sessionId) => `/scenes/${encodeURIComponent(sceneId)}/session/${encodeURIComponent(sessionId)}`,
+    sessionResult: (sceneId, sessionId) => `/scenes/${encodeURIComponent(sceneId)}/session/${encodeURIComponent(sessionId)}/result`,
+    assets: (sceneId) => `/scenes/${encodeURIComponent(sceneId)}/assets`,
   },
   assets: {
     root: "/assets",
@@ -184,6 +198,52 @@ export function parseInterviewRoute(pathname) {
   });
 }
 
+export function parseSceneRoute(pathname) {
+  const path = normalizePath(pathname);
+  const segments = path.split("/").filter(Boolean);
+  if (segments[0] !== "scenes" || segments.length < 2) return null;
+  if (segments[1] === "training") return null;
+
+  const sceneId = safeDecode(segments[1]);
+  const stage = segments[2];
+  if (["word", "phrase", "sentence"].includes(stage)) {
+    return appRoute("scenes", {
+      sceneId,
+      training: {
+        sceneId,
+        stage,
+        initialStep: stage === "sentence" ? "read" : "learn",
+        returnPage: "scenes",
+        standaloneSpeak: false,
+      },
+    });
+  }
+  if (stage === "session" && segments[3]) {
+    const sessionId = safeDecode(segments[3]);
+    return appRoute("scenes", {
+      sceneId,
+      sessionId,
+      training: {
+        sceneId,
+        sessionId,
+        stage: "session",
+        initialStep: "speak",
+        returnPage: "scenes",
+        standaloneSpeak: false,
+      },
+      ...(segments[4] === "result" ? { result: { completed: true } } : {}),
+    });
+  }
+  if (stage === "assets") {
+    return appRoute("assets", {
+      sceneId,
+      assetSceneId: sceneId,
+      assetView: "detail",
+    });
+  }
+  return appRoute("scenes", { canonicalPath: paths.app.scenes });
+}
+
 function previewRoute(preview) {
   if (!preview) return null;
   if (preview === "teacher") return { ...baseRoute, flow: "teacher", page: "conversation" };
@@ -212,6 +272,15 @@ export function resolveRoute(locationLike = window.location) {
   if (pathname === paths.auth.level) return { ...baseRoute, flow: "level", page: "conversation" };
   if (pathname === paths.auth.teacher) return { ...baseRoute, flow: "teacher", page: "conversation" };
 
+  if (pathname.startsWith(`${paths.conversation.root}/`)) {
+    const segments = pathname.split("/").filter(Boolean);
+    if (segments.length === 2) {
+      return appRoute("conversation", {
+        conversationSessionId: safeDecode(segments[1]),
+      });
+    }
+  }
+
   if (pathname === paths.scenes.training || pathname === "/training") {
     return appRoute("scenes", {
       training: { initialStep: "learn", returnPage: "scenes", standaloneSpeak: false },
@@ -226,6 +295,8 @@ export function resolveRoute(locationLike = window.location) {
     });
   }
   if (pathname === paths.assets.latest) return appRoute("assets", { assetView: "detail" });
+  const sceneRoute = parseSceneRoute(pathname);
+  if (sceneRoute) return sceneRoute;
 
   if (pathname === "/ielts-assets") {
     return appRoute("ielts-assets", {
