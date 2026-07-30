@@ -4,6 +4,7 @@ import com.unispeaking.domain.dto.scene.SceneGenerationRequest;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.po.profile.UserProfile;
+import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.vo.scene.SceneConfig;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.exception.SceneNotFoundException;
@@ -12,28 +13,36 @@ import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.profile.ProfileService;
 import com.unispeaking.service.prompt.FiveLayerPromptService;
 import com.unispeaking.service.scene.SceneService;
+import com.unispeaking.service.scene.CustomSceneGenerationService;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class SceneServiceImpl implements SceneService {
 
+	private static final Logger LOGGER = LoggerFactory.getLogger(SceneServiceImpl.class);
+
 	private final AuthService authService;
 	private final ProfileService profileService;
 	private final SceneRepository sceneRepository;
 	private final FiveLayerPromptService promptService;
+	private final CustomSceneGenerationService customSceneGenerationService;
 
 	public SceneServiceImpl(
 			AuthService authService,
 			ProfileService profileService,
 			SceneRepository sceneRepository,
-			FiveLayerPromptService promptService) {
+			FiveLayerPromptService promptService,
+			CustomSceneGenerationService customSceneGenerationService) {
 		this.authService = authService;
 		this.profileService = profileService;
 		this.sceneRepository = sceneRepository;
 		this.promptService = promptService;
+		this.customSceneGenerationService = customSceneGenerationService;
 	}
 
 	@Override
@@ -44,6 +53,16 @@ public class SceneServiceImpl implements SceneService {
 				.orElseThrow(() -> new SceneNotFoundException(sceneType.name()));
 		UserProfile profile = profileService.getProfile(userId);
 		String sceneInput = request.sceneInput() == null ? "" : request.sceneInput().trim();
+		String sceneId = generateSceneId(sceneType);
+		if (sceneType == SceneType.CUSTOM_SCENE) {
+			return generateCustomScene(
+					sceneId,
+					userId,
+					sceneInput,
+					request.userPreference(),
+					profile,
+					sceneConfig);
+		}
 		List<LearningContentItem> wordList = buildWordList(sceneType, sceneInput);
 		List<LearningContentItem> phraseList = buildPhraseList(sceneType, sceneInput);
 		List<LearningContentItem> sentenceList = buildSentenceList(sceneType, sceneInput);
@@ -57,12 +76,62 @@ public class SceneServiceImpl implements SceneService {
 				phraseList,
 				sentenceList));
 		SceneGenerationResponse response = new SceneGenerationResponse(
-				generateSceneId(sceneType),
+				sceneId,
 				wordList,
 				phraseList,
 				sentenceList,
 				scenePrompt);
 		return sceneRepository.saveGenerated(response);
+	}
+
+	private SceneGenerationResponse generateCustomScene(
+			String sceneId,
+			String userId,
+			String sceneInput,
+			String userPreference,
+			UserProfile profile,
+			SceneConfig sceneConfig) {
+		long totalStartedAt = System.nanoTime();
+		long generationStartedAt = System.nanoTime();
+		CustomSceneDefinition definition = customSceneGenerationService.generate(
+				sceneId,
+				userId,
+				sceneInput,
+				userPreference,
+				profile);
+		long generationMillis = elapsedMillis(generationStartedAt);
+		long promptStartedAt = System.nanoTime();
+		String scenePrompt = String.join("\n\n", promptService.compose(
+				profile,
+				sceneConfig,
+				SceneType.CUSTOM_SCENE,
+				sceneInput,
+				userPreference,
+				definition.wordList(),
+				definition.phraseList(),
+				definition.sentenceList(),
+				definition));
+		long promptMillis = elapsedMillis(promptStartedAt);
+		SceneGenerationResponse response = new SceneGenerationResponse(
+				sceneId,
+				definition.wordList(),
+				definition.phraseList(),
+				definition.sentenceList(),
+				scenePrompt);
+		long cacheStartedAt = System.nanoTime();
+		SceneGenerationResponse saved = sceneRepository.saveCustomScene(definition, response);
+		LOGGER.info(
+				"custom scene ready sceneId={} generationMs={} promptMs={} cacheAndScheduleMs={} totalMs={}",
+				sceneId,
+				generationMillis,
+				promptMillis,
+				elapsedMillis(cacheStartedAt),
+				elapsedMillis(totalStartedAt));
+		return saved;
+	}
+
+	private long elapsedMillis(long startedAt) {
+		return (System.nanoTime() - startedAt) / 1_000_000;
 	}
 
 	private String generateSceneId(SceneType sceneType) {

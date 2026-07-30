@@ -60,11 +60,14 @@ import {
 import { assetRecords, learningItems, levels, plans, recommendations, teachers } from "./data.js";
 import {
   clearAuthSession,
+  createCustomSceneFlow,
+  generateCustomScene,
   getCurrentUser,
   getUserPreference,
   hasAuthSession,
   login,
   register,
+  synthesizeSpeech,
   translateText,
   updateUserPreference,
 } from "./apiClient.js";
@@ -75,6 +78,80 @@ import { NewtonsCradle } from "./NewtonsCradle.jsx";
 import { hrefForPage, paths, resolveRoute } from "./router.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
+const pronunciationAudioCache = new Map();
+const chineseCharacterPattern = /[\u3400-\u9fff]/;
+const sceneCachePrefix = "unispeaking.scene.";
+
+function cacheGeneratedScene(scene) {
+  if (!scene?.sceneId) return;
+  const { scenePrompt: _scenePrompt, ...cacheableScene } = scene;
+  try {
+    window.sessionStorage.setItem(
+      `${sceneCachePrefix}${scene.sceneId}`,
+      JSON.stringify(cacheableScene),
+    );
+  } catch {
+    // The live in-memory scene remains available when session storage is unavailable.
+  }
+}
+
+function cachedGeneratedScene(sceneId) {
+  if (!sceneId) return null;
+  try {
+    const value = window.sessionStorage.getItem(`${sceneCachePrefix}${sceneId}`);
+    return value ? JSON.parse(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+function compactSceneText(value, maxLength) {
+  const normalized = String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/^["'“”]+|["'“”]+$/g, "")
+    .trim();
+  if (!normalized) return "暂未提供";
+  const firstSentence = normalized.split(/(?<=[。！？!?；;])\s*/)[0] || normalized;
+  return firstSentence.length > maxLength
+    ? `${firstSentence.slice(0, maxLength).trim()}…`
+    : firstSentence;
+}
+
+async function sceneDisplayValue(value, maxLength) {
+  const source = String(value || "").trim();
+  if (!source) return "暂未提供";
+  if (chineseCharacterPattern.test(source)) return compactSceneText(source, maxLength);
+  try {
+    const translated = await translateText(source);
+    return compactSceneText(translated?.translatedText || source, maxLength);
+  } catch {
+    return compactSceneText(source, maxLength);
+  }
+}
+
+async function buildSceneDisplaySummary(scene) {
+  const [title, background, aiRole, userRole, learningGoal] = await Promise.all([
+    sceneDisplayValue(scene.title, 18),
+    sceneDisplayValue(scene.background, 58),
+    sceneDisplayValue(scene.aiRole, 22),
+    sceneDisplayValue(scene.userRole, 22),
+    sceneDisplayValue(scene.learningGoal, 42),
+  ]);
+  return { title, background, aiRole, userRole, learningGoal };
+}
+
+function cachedPronunciationAudio(text) {
+  if (!pronunciationAudioCache.has(text)) {
+    pronunciationAudioCache.set(
+      text,
+      synthesizeSpeech(text).catch((error) => {
+        pronunciationAudioCache.delete(text);
+        throw error;
+      }),
+    );
+  }
+  return pronunciationAudioCache.get(text);
+}
 
 function Brand({ compact = false }) {
   return (
@@ -97,6 +174,72 @@ function AudioToggle({ label = "播放声音", compact = false, mini = false }) 
     >
       <span className="audio-toggle__speaker"><SpeakerHigh weight="fill" /></span>
       <span className="audio-toggle__muted"><SpeakerSlash weight="fill" /></span>
+    </button>
+  );
+}
+
+function PronunciationAudioButton({ text, label = "播放发音" }) {
+  const audioRef = useRef(null);
+  const objectUrlRef = useRef("");
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setFailed(false);
+    audioRef.current?.pause();
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    objectUrlRef.current = "";
+    audioRef.current = null;
+
+    cachedPronunciationAudio(text)
+      .then((blob) => {
+        if (cancelled) return;
+        const objectUrl = URL.createObjectURL(blob);
+        const audio = new Audio(objectUrl);
+        objectUrlRef.current = objectUrl;
+        audioRef.current = audio;
+        setLoading(false);
+        audio.play().catch(() => undefined);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoading(false);
+          setFailed(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      audioRef.current?.pause();
+      audioRef.current = null;
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = "";
+    };
+  }, [text, reloadKey]);
+
+  const replay = () => {
+    const audio = audioRef.current;
+    if (!audio) {
+      setReloadKey((current) => current + 1);
+      return;
+    }
+    audio.currentTime = 0;
+    audio.play().catch(() => setFailed(true));
+  };
+
+  return (
+    <button
+      type="button"
+      className={cx("audio-toggle", "audio-toggle--mini", loading && "is-loading", failed && "has-error")}
+      aria-label={failed ? `${label}失败，点击重试` : label}
+      title={failed ? "语音生成失败，点击重试" : label}
+      disabled={loading}
+      onClick={replay}
+    >
+      <span className="audio-toggle__speaker"><SpeakerHigh weight="fill" /></span>
     </button>
   );
 }
@@ -431,7 +574,7 @@ function AppShell({ page, setPage, teacher, children }) {
     <div className={cx("app-shell", sidebarOpen && "is-sidebar-open")}>
       <aside className={cx("sidebar", sidebarOpen && "is-open")} onMouseEnter={() => setSidebarOpen(true)} onMouseLeave={() => setSidebarOpen(false)}>
         <Brand compact={!sidebarOpen} />
-        <nav>{items.map(({ id, label, icon: Icon }) => <button key={id} className={cx("sidebar__item", activePage === id && "is-active")} onClick={() => setPage(id)} aria-label={label} title={label}><Icon weight={activePage === id ? "bold" : "regular"} /><span className="sidebar__label"><span>{label}</span></span></button>)}</nav>
+        <nav>{items.map(({ id, label, icon: Icon }) => <button key={id} className={cx("sidebar__item", activePage === id && "is-active")} onClick={() => { if (activePage !== id) setPage(id); }} aria-label={label} title={label}><Icon weight={activePage === id ? "bold" : "regular"} /><span className="sidebar__label"><span>{label}</span></span></button>)}</nav>
         <button className={cx("sidebar__avatar", ["profile", "membership", "settings"].includes(page) && "is-active")} onClick={() => setPage("profile")}><img src={teacher.image} alt="个人中心" /></button>
       </aside>
       <div className="app-main">{children}</div>
@@ -558,7 +701,7 @@ function ConversationSettings({ speed, level, teacher, onSave, onClose }) {
   );
 }
 
-function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart }) {
+function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, onSessionStarted, onSessionEnded }) {
   const [inCall, setInCall] = useState(false);
   const [callState, setCallState] = useState("idle");
   const [callStatus, setCallStatus] = useState("准备开始");
@@ -720,6 +863,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart }
       setCallState("idle");
       setCallStatus("准备开始");
       clientRef.current = null;
+      onSessionEnded?.();
       return;
     }
     if (event.type === "error" || event.type === "local.error") {
@@ -764,10 +908,11 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart }
     setCallStatus("正在请求麦克风");
     const client = getClient();
     try {
-      await client.start({
+      const startedSession = await client.start({
         voice: teacher.voiceId,
         speechSpeed: speedCodeByLabel[speed] || "NATURAL",
       });
+      if (startedSession?.sessionId) onSessionStarted?.(startedSession.sessionId);
     } catch (error) {
       if (clientRef.current !== client) return;
       setCallState("error");
@@ -796,6 +941,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart }
     setCallState("idle");
     setCallStatus("准备开始");
     await client?.stop({ reason: "user_stop" });
+    onSessionEnded?.();
   };
 
   useEffect(() => () => {
@@ -862,17 +1008,58 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart }
 
 function Scenes({ onStartTraining, onIelts, onInterview }) {
   const [prompt, setPrompt] = useState("");
+  const promptRef = useRef(null);
+  const previewSceneIdRef = useRef("");
   const [preview, setPreview] = useState(null);
-  const [generating, setGenerating] = useState(false);
+  const [previewDisplay, setPreviewDisplay] = useState(null);
+  const [generationSource, setGenerationSource] = useState(null);
+  const [startingTraining, setStartingTraining] = useState(false);
+  const [generationError, setGenerationError] = useState("");
   const [specialtyOpen, setSpecialtyOpen] = useState(false);
   const examples = ["餐厅点餐并说明忌口", "商场退换一件商品", "问路并确认交通方式", "预约理发并说明需求"];
-  const generate = () => {
-    if (!prompt.trim() || generating) return;
-    setGenerating(true);
-    window.setTimeout(() => {
-      setPreview({ title: "我的专属练习", task: prompt.trim(), duration: "约 10 分钟", role: "你与场景角色" });
-      setGenerating(false);
-    }, 700);
+  const syncPrompt = (event) => {
+    setPrompt(event.currentTarget.value.slice(0, 200));
+  };
+  const generating = generationSource !== null;
+  const generate = async (requestedInput, recommendationId = null) => {
+    const fromRecommendation = typeof requestedInput === "string";
+    const currentInput = fromRecommendation
+      ? requestedInput
+      : promptRef.current?.value ?? prompt;
+    const sceneInput = currentInput.trim();
+    if (!sceneInput || generating) return;
+    if (!fromRecommendation) setPrompt(sceneInput);
+    setGenerationError("");
+    setGenerationSource(fromRecommendation ? `recommendation:${recommendationId}` : "manual");
+    try {
+      const scene = await generateCustomScene(sceneInput);
+      previewSceneIdRef.current = scene.sceneId;
+      setPreview(scene);
+      setPreviewDisplay(null);
+      void buildSceneDisplaySummary(scene).then((display) => {
+        if (previewSceneIdRef.current === scene.sceneId) setPreviewDisplay(display);
+      });
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "场景生成失败，请稍后重试");
+    } finally {
+      setGenerationSource(null);
+    }
+  };
+  const startGeneratedTraining = async () => {
+    if (!preview || startingTraining) return;
+    setGenerationError("");
+    setStartingTraining(true);
+    try {
+      await createCustomSceneFlow(preview.sceneId);
+      onStartTraining(preview);
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "学习流程创建失败，请稍后重试");
+      previewSceneIdRef.current = "";
+      setPreview(null);
+      setPreviewDisplay(null);
+    } finally {
+      setStartingTraining(false);
+    }
   };
   return (
     <main className="page page--scenes">
@@ -890,20 +1077,21 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
             </div>
           </div>
           <div className={cx("scene-input", prompt.trim() && "has-content")}>
-            <textarea value={prompt} maxLength={200} onChange={(event) => setPrompt(event.target.value)} placeholder="你今天想练习什么？例如：第一次去健身房，咨询设施、开放时间和会员体验" />
+            <textarea ref={promptRef} value={prompt} maxLength={200} onChange={syncPrompt} onInput={syncPrompt} onCompositionEnd={syncPrompt} placeholder="你今天想练习什么？例如：第一次去健身房，咨询设施、开放时间和会员体验" />
             <div className="scene-input__footer">
               <div className="example-chips"><small>快速开始</small>{examples.map((example) => <button key={example} onClick={() => setPrompt(example)}>{example}</button>)}</div>
-              <div className="scene-input__controls"><span>{prompt.length}/200</span><ExpandingCta className={cx("scene-generate", generating && "is-generating")} disabled={!prompt.trim() || generating} onClick={generate}>{generating ? <><NewtonsCradle size={22} className="newtons-cradle--inline" label="正在生成练习场景" />正在生成</> : "生成练习场景"}</ExpandingCta></div>
+              <div className="scene-input__controls"><span>{prompt.length}/200</span><ExpandingCta className={cx("scene-generate", generationSource === "manual" && "is-generating")} disabled={!prompt.trim() || generating} onClick={() => void generate()}><span className="generation-button-state notranslate" translate="no"><span className={cx("generation-button-state__idle", generationSource === "manual" && "is-hidden")}>生成练习场景</span><span className={cx("generation-button-state__loading", generationSource !== "manual" && "is-hidden")}><NewtonsCradle size={22} className="newtons-cradle--inline" label="正在生成练习场景" /><span>正在生成</span></span></span></ExpandingCta></div>
             </div>
+            {generationError && <p className="scene-generation-error" role="alert">{generationError}</p>}
           </div>
         </section>
 
         <section className="recommendations scene-module">
           <div className="scene-section-heading"><div><p className="eyebrow">NEED INSPIRATION?</p><h2>从推荐场景开始</h2></div><p>还没想好？选择一个常用场景直接练习。</p></div>
-          <div className="recommendation-list">{recommendations.map((item) => <article key={item.id}><span className="recommendation__number">{item.number}</span><span className="recommendation__title"><span className="tag">{item.tag}</span><strong>{item.title}</strong></span><small>{item.duration}<i>·</i>{item.level}</small><p>{item.goal}</p><ExpandingCta className="scene-card-cta" onClick={() => onStartTraining(item.title)}>开始练习</ExpandingCta></article>)}</div>
+          <div className="recommendation-list">{recommendations.map((item) => { const loading = generationSource === `recommendation:${item.id}`; return <article key={item.id}><span className="recommendation__number">{item.number}</span><span className="recommendation__title"><span className="tag">{item.tag}</span><strong>{item.title}</strong></span><small>{item.duration}<i>·</i>{item.level}</small><p>{item.goal}</p><ExpandingCta className={cx("scene-card-cta", loading && "is-generating")} disabled={generating} onClick={() => void generate(item.title, item.id)}><span className="generation-button-state notranslate" translate="no"><span className={cx("generation-button-state__idle", loading && "is-hidden")}>开始练习</span><span className={cx("generation-button-state__loading", !loading && "is-hidden")}><NewtonsCradle size={20} className="newtons-cradle--inline" label={`正在生成${item.title}场景`} /><span>正在生成</span></span></span></ExpandingCta></article>; })}</div>
         </section>
       </div>
-      {preview && <Modal onClose={() => setPreview(null)}><p className="eyebrow">SCENE READY</p><h2>练习场景已生成</h2><p className="modal-lead">确认信息后进入“学—读—说”训练流程。</p><dl className="scene-summary"><div><dt>场景</dt><dd>{preview.title}</dd></div><div><dt>你的任务</dt><dd>{preview.task}</dd></div><div><dt>角色</dt><dd>{preview.role}</dd></div><div><dt>预计时间</dt><dd>{preview.duration}</dd></div></dl><div className="modal-actions"><Button variant="secondary" onClick={() => setPreview(null)}>返回修改</Button><Button onClick={() => onStartTraining(preview.title)} icon={<ArrowRight />}>确认并开始</Button></div></Modal>}
+      {preview && <Modal onClose={() => { previewSceneIdRef.current = ""; setPreview(null); setPreviewDisplay(null); }}><p className="eyebrow">场景已准备好</p><h2>{previewDisplay?.title || (chineseCharacterPattern.test(preview.title || "") ? compactSceneText(preview.title, 18) : "正在整理场景…")}</h2><p className="modal-lead">确认场景信息，然后开始学习。</p><dl className="scene-summary"><div><dt>场景简介</dt><dd>{previewDisplay?.background || (chineseCharacterPattern.test(preview.background || "") ? compactSceneText(preview.background, 58) : "正在整理中文摘要…" )}</dd></div><div><dt>AI 扮演</dt><dd>{previewDisplay?.aiRole || (chineseCharacterPattern.test(preview.aiRole || "") ? compactSceneText(preview.aiRole, 22) : "正在整理…" )}</dd></div><div><dt>你将扮演</dt><dd>{previewDisplay?.userRole || (chineseCharacterPattern.test(preview.userRole || "") ? compactSceneText(preview.userRole, 22) : "正在整理…" )}</dd></div><div><dt>练习重点</dt><dd>{previewDisplay?.learningGoal || (chineseCharacterPattern.test(preview.learningGoal || "") ? compactSceneText(preview.learningGoal, 42) : "正在整理中文摘要…" )}</dd></div><div><dt>预计用时</dt><dd>{preview.estimatedMinutes} 分钟</dd></div></dl><div className="modal-actions"><Button variant="secondary" disabled={startingTraining} onClick={() => { previewSceneIdRef.current = ""; setPreview(null); setPreviewDisplay(null); }}>返回修改</Button><Button disabled={startingTraining} onClick={() => void startGeneratedTraining()} icon={<ArrowRight />}>{startingTraining ? "正在进入" : "确认进入"}</Button></div></Modal>}
     </main>
   );
 }
@@ -1045,7 +1233,11 @@ function ReadScoreModal({ feedback, onClose }) {
   );
 }
 
-function Training({ sceneTitle, teacher, initialStep = "learn", standaloneSpeak = false, result, onExit, onComplete, onBack, onAssets }) {
+function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, initialStep = "learn", initialStage = "word", standaloneSpeak = false, result, onExit, onComplete, onBack, onAssets, onStageChange }) {
+  const generatedWordItems = useMemo(() => (sceneContent?.wordList || []).map((entry) => ({ id: entry.contentId, type: "单词", en: entry.englishText, zh: entry.chineseText, phonetic: entry.phonetic })), [sceneContent]);
+  const generatedPhraseItems = useMemo(() => (sceneContent?.phraseList || []).map((entry) => ({ id: entry.contentId, type: "词组", en: entry.englishText, zh: entry.chineseText, phonetic: entry.phonetic })), [sceneContent]);
+  const generatedSentenceItems = useMemo(() => (sceneContent?.sentenceList || []).map((entry) => ({ id: entry.contentId, type: "句子", en: entry.englishText, zh: entry.chineseText, phonetic: entry.phonetic })), [sceneContent]);
+  const generatedMode = Boolean(sceneId) || generatedWordItems.length > 0 || generatedPhraseItems.length > 0;
   const steps = [
     { id: "learn", label: "学" },
     { id: "read", label: "读" },
@@ -1055,6 +1247,7 @@ function Training({ sceneTitle, teacher, initialStep = "learn", standaloneSpeak 
   const [step, setStep] = useState(initialStep);
   const [unlockedStepIndex, setUnlockedStepIndex] = useState(initialStepIndex);
   const [completedSteps, setCompletedSteps] = useState(() => steps.slice(0, initialStepIndex).map((item) => item.id));
+  const [learningGroup, setLearningGroup] = useState(initialStage === "phrase" ? "phrases" : "words");
   const [learnIndex, setLearnIndex] = useState(0);
   const [readIndex, setReadIndex] = useState(0);
   const [learnedItems, setLearnedItems] = useState([]);
@@ -1064,23 +1257,65 @@ function Training({ sceneTitle, teacher, initialStep = "learn", standaloneSpeak 
   const [speakingLines, setSpeakingLines] = useState(2);
   const [simulationPaused, setSimulationPaused] = useState(false);
   const [simulationTranslated, setSimulationTranslated] = useState([]);
+  const lessonItems = generatedMode
+    ? (learningGroup === "words" ? generatedWordItems : generatedPhraseItems)
+    : learningItems;
+  const readItems = generatedMode ? generatedSentenceItems : learningItems;
   const itemIndex = step === "read" ? readIndex : learnIndex;
-  const item = learningItems[itemIndex];
+  const item = step === "read" ? readItems[itemIndex] : lessonItems[itemIndex];
   const score = readScores[readIndex] ?? null;
   const completeStep = (id) => setCompletedSteps((current) => current.includes(id) ? current : [...current, id]);
   const goToStep = (id) => {
     const targetIndex = steps.findIndex((item) => item.id === id);
-    if (targetIndex <= unlockedStepIndex) setStep(id);
+    if (targetIndex > unlockedStepIndex) return;
+    setStep(id);
+    if (!generatedMode) return;
+    if (id === "learn") onStageChange?.(learningGroup === "phrases" ? "phrase" : "word");
+    if (id === "read") onStageChange?.("sentence");
+    if (id === "speak" && sessionId) onStageChange?.("session", sessionId);
   };
   const nextLearn = () => {
-    setLearnedItems((current) => current.includes(learnIndex) ? current : [...current, learnIndex]);
-    if (learnIndex < learningItems.length - 1) setLearnIndex(learnIndex + 1);
+    const itemId = item.id || `${learningGroup}-${learnIndex}-${item.en}`;
+    setLearnedItems((current) => current.includes(itemId) ? current : [...current, itemId]);
+    if (learnIndex < lessonItems.length - 1) setLearnIndex(learnIndex + 1);
+    else if (generatedMode && learningGroup === "words" && generatedPhraseItems.length > 0) {
+      setLearningGroup("phrases");
+      setLearnIndex(0);
+      onStageChange?.("phrase");
+    }
     else {
       completeStep("learn");
       setUnlockedStepIndex((current) => Math.max(current, 1));
+      setReadIndex(0);
       setStep("read");
+      if (generatedMode) onStageChange?.("sentence");
     }
   };
+  const previousLearn = () => {
+    if (learnIndex > 0) {
+      setLearnIndex(learnIndex - 1);
+    } else if (generatedMode && learningGroup === "phrases" && generatedWordItems.length > 0) {
+      setLearningGroup("words");
+      setLearnIndex(generatedWordItems.length - 1);
+      onStageChange?.("word");
+    }
+  };
+  useEffect(() => {
+    if (!generatedMode) return;
+    if (initialStage === "word") {
+      setStep("learn");
+      setLearningGroup("words");
+    } else if (initialStage === "phrase") {
+      setStep("learn");
+      setLearningGroup("phrases");
+    } else if (initialStage === "sentence") {
+      setStep("read");
+      setUnlockedStepIndex((current) => Math.max(current, 1));
+    } else if (initialStage === "session") {
+      setStep("speak");
+      setUnlockedStepIndex((current) => Math.max(current, 2));
+    }
+  }, [generatedMode, initialStage]);
   const submitRead = () => {
     const nextScore = readIndex === 1 && score === null ? 68 : 86;
     setReadScores((current) => ({ ...current, [readIndex]: nextScore }));
@@ -1104,6 +1339,18 @@ function Training({ sceneTitle, teacher, initialStep = "learn", standaloneSpeak 
     ...(speakingLines >= 3 ? [{ id: "simulation-assistant-2", who: teacher.name, en: "Sure — how about a medium oat milk latte?", zh: "当然，中杯燕麦奶拿铁怎么样？" }] : []),
     ...(speakingLines >= 4 ? [{ id: "simulation-user-2", who: "你", en: "That sounds great. I’ll have that, thank you.", zh: "听起来不错，我就要这个，谢谢。" }] : []),
   ];
+  if (!item && step !== "speak") {
+    return (
+      <main className="training-page">
+        <header className="training-header"><div><strong>{sceneTitle || "自定义场景"}</strong><span>场景内容加载失败</span></div><button className="training-exit" aria-label="关闭训练" onClick={onExit}><span><X weight="bold" /></span></button></header>
+        <section className="training-empty" role="alert">
+          <h1>场景学习内容为空</h1>
+          <p>后端没有返回当前阶段需要的单词、词组或句子，请返回场景广场重新生成。</p>
+          <ExpandingCta direction="back" onClick={onBack}>返回场景广场</ExpandingCta>
+        </section>
+      </main>
+    );
+  }
   return (
     <main className={cx("training-page", standaloneSpeak && "training-page--standalone")}>
       <header className="training-header"><div><strong>{sceneTitle}</strong><span>从语言到真实表达</span></div><button className="training-exit" aria-label="关闭训练" onClick={onExit}><span><X weight="bold" /></span></button></header>
@@ -1114,8 +1361,9 @@ function Training({ sceneTitle, teacher, initialStep = "learn", standaloneSpeak 
           return <button key={stepItem.id} className={cx("stepper__item", step === stepItem.id && "is-active", done && "is-done")} disabled={index > unlockedStepIndex} onClick={() => goToStep(stepItem.id)}><span className="stepper__check">{done ? <Check weight="bold" /> : index + 1}</span><span className="stepper__copy"><strong>{stepItem.label}</strong></span></button>;
         })}
       </nav>}
-      {step === "learn" && <section className="training-workspace"><aside className="lesson-list"><div><span>本组语言</span><small>{learnIndex + 1} / {learningItems.length}</small></div>{learningItems.map((learningItem, index) => <button key={learningItem.en} className={cx(index === learnIndex && "is-active", learnedItems.includes(index) && "is-done")} onClick={() => setLearnIndex(index)}><small>{learningItem.type}</small><strong>{learningItem.en}</strong><span>{learnedItems.includes(index) ? <Check weight="bold" /> : index + 1}</span></button>)}</aside><article className="learn-stage"><small>{item.type}</small><h1>{item.en}</h1><div className="pronunciation"><span>/ˌrekəˈmend/</span><AudioToggle mini label={`${item.en} 的发音`} /></div><p>{item.zh}</p><div className="stage-footer"><ExpandingCta direction="back" disabled={learnIndex === 0} onClick={() => setLearnIndex(learnIndex - 1)}>上一个</ExpandingCta><ExpandingCta onClick={nextLearn}>{learnIndex === learningItems.length - 1 ? "进入朗读" : "下一个"}</ExpandingCta></div></article></section>}
-      {step === "read" && <section className="training-workspace"><aside className="lesson-list"><div><span>完整表达</span><small>{readIndex + 1} / {learningItems.length}</small></div>{learningItems.map((learningItem, index) => <button key={learningItem.en} className={cx(index === readIndex && "is-active", (readScores[index] ?? 0) >= 70 && "is-done")} onClick={() => setReadIndex(index)}><small>句子</small><strong>{learningItem.en}</strong><span>{(readScores[index] ?? 0) >= 70 ? <Check weight="bold" /> : index + 1}</span></button>)}</aside><article className="read-stage"><h1>{item.en}</h1><p>{item.zh}</p><div className="rhythm"><span>节奏重点</span><strong>{item.en.split(" ").slice(0, 4).join(" · ")}</strong></div><MicrophoneToggle label="朗读麦克风" onActivate={submitRead} /><h3>{score === null ? "轮到你说" : score >= 70 ? "朗读通过" : "再试一次"}</h3>{score === null && <p>尽量完整、连贯地说出整句话。</p>}<button type="button" className="read-replay" onClick={playReadDemo}><SpeakerHigh weight="fill" />{heardReadDemos.includes(readIndex) ? "再听一次标准示范" : "听标准示范"}</button>{score >= 70 && <div className="stage-footer read-stage-footer"><span /><ExpandingCta onClick={nextRead}>{readIndex === learningItems.length - 1 ? "进入模拟" : "下一句"}</ExpandingCta></div>}</article></section>}
+      {step === "learn" && <section className="training-workspace"><aside className="lesson-list"><div><span>{generatedMode ? (learningGroup === "words" ? "场景单词" : "场景词组") : "本组语言"}</span><small>{learnIndex + 1} / {lessonItems.length}</small></div>{lessonItems.map((learningItem, index) => { const itemId = learningItem.id || `${learningGroup}-${index}-${learningItem.en}`; return <button key={itemId} type="button" disabled className={cx(index === learnIndex && "is-active", learnedItems.includes(itemId) && "is-done")}><small>{learningItem.type}</small><strong>{learningItem.en}</strong><span>{learnedItems.includes(itemId) ? <Check weight="bold" /> : index + 1}</span></button>; })}</aside><article className="learn-stage"><small>{item.type}</small><h1>{item.en}</h1><div className="pronunciation"><span>{item.phonetic || ""}</span>{generatedMode ? <PronunciationAudioButton text={item.en} label={`播放 ${item.en} 的发音`} /> : <AudioToggle mini label={`${item.en} 的发音`} />}</div><p>{item.zh}</p><div className="stage-footer"><ExpandingCta direction="back" disabled={learnIndex === 0 && (!generatedMode || learningGroup === "words")} onClick={previousLearn}>上一个</ExpandingCta><ExpandingCta onClick={nextLearn}>{learnIndex < lessonItems.length - 1 ? "下一个" : generatedMode && learningGroup === "words" && generatedPhraseItems.length > 0 ? "进入词组" : "进入朗读"}</ExpandingCta></div></article></section>}
+      {step === "read" && generatedMode && <section className="training-workspace"><aside className="lesson-list"><div><span>场景句子</span><small>{readIndex + 1} / {readItems.length}</small></div>{readItems.map((readItem, index) => <button key={readItem.id || readItem.en} type="button" disabled className={cx(index === readIndex && "is-active")}><small>句子</small><strong>{readItem.en}</strong><span>{index + 1}</span></button>)}</aside><article className="read-stage"><h1>{item.en}</h1><p>{item.zh}</p><div className="rhythm"><span>完整表达</span><strong>{item.en.split(" ").slice(0, 5).join(" · ")}</strong></div><h3>句子跟读暂未开放</h3><p>当前先展示本场景生成的参考句子，后续接入跟读与评分。</p><div className="stage-footer"><ExpandingCta direction="back" disabled={readIndex === 0} onClick={() => setReadIndex(readIndex - 1)}>上一个</ExpandingCta><ExpandingCta disabled={readIndex === readItems.length - 1} onClick={() => setReadIndex(readIndex + 1)}>下一句</ExpandingCta></div></article></section>}
+      {step === "read" && !generatedMode && <section className="training-workspace"><aside className="lesson-list"><div><span>完整表达</span><small>{readIndex + 1} / {learningItems.length}</small></div>{learningItems.map((learningItem, index) => <button key={learningItem.en} className={cx(index === readIndex && "is-active", (readScores[index] ?? 0) >= 70 && "is-done")} onClick={() => setReadIndex(index)}><small>句子</small><strong>{learningItem.en}</strong><span>{(readScores[index] ?? 0) >= 70 ? <Check weight="bold" /> : index + 1}</span></button>)}</aside><article className="read-stage"><h1>{item.en}</h1><p>{item.zh}</p><div className="rhythm"><span>节奏重点</span><strong>{item.en.split(" ").slice(0, 4).join(" · ")}</strong></div><MicrophoneToggle label="朗读麦克风" onActivate={submitRead} /><h3>{score === null ? "轮到你说" : score >= 70 ? "朗读通过" : "再试一次"}</h3>{score === null && <p>尽量完整、连贯地说出整句话。</p>}<button type="button" className="read-replay" onClick={playReadDemo}><SpeakerHigh weight="fill" />{heardReadDemos.includes(readIndex) ? "再听一次标准示范" : "听标准示范"}</button>{score >= 70 && <div className="stage-footer read-stage-footer"><span /><ExpandingCta onClick={nextRead}>{readIndex === learningItems.length - 1 ? "进入模拟" : "下一句"}</ExpandingCta></div>}</article></section>}
       {step === "speak" && <section className="simulation call call--subtitles"><section className="call__stage"><div className="call-presence call-presence--compact"><div className="portrait portrait--small"><img src={teacher.image} alt={teacher.name} /></div><div className="listening-state listening-state--compact"><VoiceWaveform active={!simulationPaused && !result} compact /><CallTimer paused={simulationPaused} /></div></div><CallTranscript lines={simulationTranscript} translated={simulationTranslated} onToggleTranslation={(index) => setSimulationTranslated((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index])} className="simulation__transcript" /></section><CallControls paused={simulationPaused} onToggleMicrophone={() => { setSimulationPaused((current) => !current); setSpeakingLines((current) => Math.min(4, current + 1)); }} onEnd={() => onComplete(speakingLines >= 4)} showSubtitles={false} /></section>}
       {result && <ResultModal completed={result.completed} onBack={onBack} onAssets={onAssets} />}
       {readFeedback && <ReadScoreModal feedback={readFeedback} onClose={() => setReadFeedback(null)} />}
@@ -1230,7 +1478,7 @@ function AssetModulePlaceholder({ module, onBack }) {
   );
 }
 
-function Assets({ onPractice, onRestart, onIelts, onInterview, onOpenRecord, onCloseRecord, initialView = "home", initialRecordTitle }) {
+function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRecord, onCloseRecord, initialView = "home", initialRecordTitle }) {
   const sceneRecords = assetRecords.filter((record) => record.category === "普通场景");
   const initialRecord = sceneRecords.find((record) => record.title === initialRecordTitle) || sceneRecords[0];
   const [selected, setSelected] = useState(initialRecord);
@@ -1261,7 +1509,7 @@ function Assets({ onPractice, onRestart, onIelts, onInterview, onOpenRecord, onC
         <article className="asset-detail">
           <header>
             <div><p className="eyebrow">{selected.category}</p><h2>{selected.title}</h2><p>{selected.date} · {selected.status}</p></div>
-            <div className="asset-detail__actions"><AnimatedDeleteButton onClick={() => setDeleteOpen(true)} /><ExpandingCta className="teacher-cta asset-open-button" onClick={onOpenRecord}>打开当前学习资产</ExpandingCta></div>
+            <div className="asset-detail__actions"><AnimatedDeleteButton onClick={() => setDeleteOpen(true)} /><ExpandingCta className="teacher-cta asset-open-button" onClick={() => onOpenRecord(sceneId || selected.id)}>打开当前学习资产</ExpandingCta></div>
           </header>
           <div className="asset-items" aria-label="已保存的单词、短语和句子">
             {learningItems.map((item) => <div key={item.en}><span className="tag">{item.type}</span><p><strong>{item.en}</strong><small>{item.zh}</small></p><ScenePlaybackToggle label={`播放 ${item.en} 的发音`} /></div>)}
@@ -1412,9 +1660,13 @@ export function App() {
   const [teacher, setTeacher] = useState(teachers[0]);
   const [page, setPage] = useState(initialRoute.page);
   const [sceneTitle, setSceneTitle] = useState("咖啡店点单");
+  const [generatedScene, setGeneratedScene] = useState(
+    () => cachedGeneratedScene(initialRoute.sceneId || initialRoute.assetSceneId),
+  );
   const [training, setTraining] = useState(initialRoute.training);
   const [result, setResult] = useState(initialRoute.result);
   const [assetView, setAssetView] = useState(initialRoute.assetView || "home");
+  const [assetSceneId, setAssetSceneId] = useState(initialRoute.assetSceneId || null);
   const [ieltsRoute, setIeltsRoute] = useState(initialRoute.ieltsRoute || null);
   const [interviewRoute, setInterviewRoute] = useState(initialRoute.interviewRoute || null);
   const [paywall, setPaywall] = useState(null);
@@ -1428,9 +1680,18 @@ export function App() {
     setTraining(route.training);
     setResult(route.result);
     setAssetView(route.assetView || "home");
+    setAssetSceneId(route.assetSceneId || null);
     setIeltsRoute(route.ieltsRoute || null);
     setInterviewRoute(route.interviewRoute || null);
     setPaywall(null);
+    const routeSceneId = route.sceneId || route.assetSceneId;
+    if (routeSceneId) {
+      const cachedScene = cachedGeneratedScene(routeSceneId);
+      if (cachedScene) {
+        setGeneratedScene(cachedScene);
+        setSceneTitle(cachedScene.title || "自定义场景");
+      }
+    }
   };
 
   const navigate = (path, overrides = {}, replace = false) => {
@@ -1582,15 +1843,67 @@ export function App() {
     setUser(null);
     goSplash();
   };
-  const startTraining = (title, initialStep = "learn", options = {}) => {
+  const startTraining = (sceneOrTitle, initialStep = "learn", options = {}) => {
+    const scene = typeof sceneOrTitle === "object" ? sceneOrTitle : null;
+    const title = scene?.title || sceneOrTitle;
+    if (scene?.sceneId) cacheGeneratedScene(scene);
+    setGeneratedScene(scene);
     setSceneTitle(title);
-    navigate(paths.scenes.training, { page: options.returnPage || "scenes", authMode, training: { initialStep, standaloneSpeak: Boolean(options.standaloneSpeak), returnPage: options.returnPage || "scenes" }, result: null });
+    const stage = initialStep === "read" ? "sentence" : initialStep === "speak" ? "session" : "word";
+    const targetPath = scene?.sceneId && stage !== "session"
+      ? paths.scenes[stage](scene.sceneId)
+      : paths.scenes.training;
+    navigate(targetPath, {
+      page: options.returnPage || "scenes",
+      authMode,
+      sceneId: scene?.sceneId || null,
+      training: {
+        sceneId: scene?.sceneId || null,
+        stage,
+        initialStep,
+        standaloneSpeak: Boolean(options.standaloneSpeak),
+        returnPage: options.returnPage || "scenes",
+      },
+      result: null,
+    });
   };
-  const showResult = (completed) => navigate(paths.scenes.result, { page: training?.returnPage || "scenes", authMode, training, result: { completed } });
+  const navigateSceneStage = (stage, sessionId = null) => {
+    const sceneId = training?.sceneId || generatedScene?.sceneId;
+    if (!sceneId) return;
+    const targetPath = stage === "session"
+      ? paths.scenes.session(sceneId, sessionId)
+      : paths.scenes[stage](sceneId);
+    navigate(targetPath, {
+      page: "scenes",
+      authMode,
+      sceneId,
+      sessionId,
+      training: {
+        ...training,
+        sceneId,
+        sessionId,
+        stage,
+        initialStep: stage === "sentence" ? "read" : stage === "session" ? "speak" : "learn",
+      },
+    });
+  };
+  const showResult = (completed) => {
+    const sceneId = training?.sceneId || generatedScene?.sceneId;
+    const sessionId = training?.sessionId;
+    const targetPath = sceneId && sessionId
+      ? paths.scenes.sessionResult(sceneId, sessionId)
+      : paths.scenes.result;
+    navigate(targetPath, { page: training?.returnPage || "scenes", authMode, sceneId, sessionId, training, result: { completed } });
+  };
   const setMainPage = (next) => navigate(hrefForPage(next), { page: next, authMode, training: null, result: null });
   const navigateIelts = (path) => navigate(path, { authMode });
   const navigateInterview = (path) => navigate(path, { authMode });
-  const openCompletedAssetDetail = () => navigate(paths.assets.latest, { assetView: "detail", authMode });
+  const openCompletedAssetDetail = (requestedSceneId = null) => {
+    const explicitSceneId = typeof requestedSceneId === "string" ? requestedSceneId : null;
+    const sceneId = explicitSceneId || training?.sceneId || generatedScene?.sceneId || assetSceneId;
+    const targetPath = sceneId ? paths.scenes.assets(sceneId) : paths.assets.latest;
+    navigate(targetPath, { page: "assets", assetView: "detail", assetSceneId: sceneId || null, sceneId: sceneId || null, authMode });
+  };
 
   if (!authReady) return <main className="splash" aria-busy="true" />;
   if (flow === "splash") return <Splash onStart={() => goAuth("signup")} onLogin={() => goAuth("login")} />;
@@ -1598,10 +1911,10 @@ export function App() {
   if (flow === "level") return <LevelSetup selected={level} onSelect={setLevel} onNext={saveLevelAndContinue} />;
   if (flow === "teacher") return <TeacherSetup selectedId={teacher.id} onSelect={(id) => setTeacher(teachers.find((item) => item.id === id))} onFinish={saveTeacherAndEnter} />;
   let content;
-  if (training) content = <Training sceneTitle={sceneTitle} teacher={teacher} initialStep={training.initialStep} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={showResult} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} />;
-  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} />;
+  if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={showResult} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
+  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={() => navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true)} />;
   else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={() => setMainPage("ielts")} onInterview={() => setMainPage("interview")} />;
-  else if (page === "assets") content = <Assets initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", authMode })} onIelts={() => setMainPage("ielts-assets")} onInterview={() => setMainPage("interview-assets")} onPractice={(title) => startTraining(title, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(title) => startTraining(title, "learn", { returnPage: "assets" })} />;
+  else if (page === "assets") content = <Assets sceneId={assetSceneId || generatedScene?.sceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => setMainPage("ielts-assets")} onInterview={() => setMainPage("interview-assets")} onPractice={(title) => startTraining(title, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(title) => startTraining(title, "learn", { returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
   else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBackToAssets={() => setMainPage("assets")} onInterviewAssets={() => setMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
   else if (page === "interview") content = <InterviewTrainingCenter route={interviewRoute} onNavigate={navigateInterview} onExit={() => setMainPage("scenes")} onAssets={() => navigateInterview(paths.interview.assets.root)} />;

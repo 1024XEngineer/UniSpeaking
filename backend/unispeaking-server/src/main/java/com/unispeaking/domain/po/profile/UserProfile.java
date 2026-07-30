@@ -6,13 +6,34 @@ public record UserProfile(
 		String voiceId,
 		String aiSpeechSpeed,
 		String nativeLanguage,
-		String memoryText) {
+		String memoryText,
+		String preferencesJson) {
 
 	public UserProfile {
 		aiSpeechSpeed = aiSpeechSpeed == null || aiSpeechSpeed.isBlank()
 				? "NATURAL"
 				: aiSpeechSpeed;
 		memoryText = memoryText == null ? "" : memoryText.strip();
+		preferencesJson = preferencesJson == null || preferencesJson.isBlank()
+				? "{}"
+				: preferencesJson.strip();
+	}
+
+	public UserProfile(
+			String userId,
+			String level,
+			String voiceId,
+			String aiSpeechSpeed,
+			String nativeLanguage,
+			String memoryText) {
+		this(
+				userId,
+				level,
+				voiceId,
+				aiSpeechSpeed,
+				nativeLanguage,
+				memoryText,
+				"{}");
 	}
 
 	public UserProfile(
@@ -35,6 +56,7 @@ public record UserProfile(
 				preferredVoice == null ? voiceId : preferredVoice,
 				preferredAiSpeechSpeed == null ? aiSpeechSpeed : preferredAiSpeechSpeed,
 				nativeLanguage,
-				updatedMemoryText == null ? memoryText : updatedMemoryText);
+				updatedMemoryText == null ? memoryText : updatedMemoryText,
+				preferencesJson);
 	}
 }

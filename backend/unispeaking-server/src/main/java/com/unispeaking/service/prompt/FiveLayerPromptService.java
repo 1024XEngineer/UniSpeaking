@@ -2,6 +2,7 @@ package com.unispeaking.service.prompt;
 
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.po.profile.UserProfile;
+import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.vo.scene.SceneConfig;
 import com.unispeaking.domain.vo.scene.SceneType;
 import java.io.IOException;
@@ -66,6 +67,28 @@ public class FiveLayerPromptService {
 			List<LearningContentItem> words,
 			List<LearningContentItem> phrases,
 			List<LearningContentItem> sentences) {
+		return compose(
+				profile,
+				sceneConfig,
+				sceneType,
+				sceneInput,
+				userPreference,
+				words,
+				phrases,
+				sentences,
+				null);
+	}
+
+	public List<String> compose(
+			UserProfile profile,
+			SceneConfig sceneConfig,
+			SceneType sceneType,
+			String sceneInput,
+			String userPreference,
+			List<LearningContentItem> words,
+			List<LearningContentItem> phrases,
+			List<LearningContentItem> sentences,
+			CustomSceneDefinition customScene) {
 		CoachTemplate coach = selectCoach(profile.voiceId(), sceneConfig);
 		String layer3 = String.join(
 				"\n\n",
@@ -87,7 +110,8 @@ public class FiveLayerPromptService {
 						coach.name(),
 						words,
 						phrases,
-						sentences));
+						sentences,
+						customScene));
 		return List.of(
 				load("L1_Base_Duty.md"),
 				load(coach.fileName()),
@@ -124,7 +148,8 @@ public class FiveLayerPromptService {
 			String coachName,
 			List<LearningContentItem> words,
 			List<LearningContentItem> phrases,
-			List<LearningContentItem> sentences) {
+			List<LearningContentItem> sentences,
+			CustomSceneDefinition customScene) {
 		String input = valueOrDefault(
 				sceneInput,
 				"Start a natural learner-led English conversation.");
@@ -134,12 +159,44 @@ public class FiveLayerPromptService {
 		boolean freeChat = sceneType == SceneType.FREE_CHAT;
 		String aiRole = freeChat
 				? coachName + ", the selected English speaking coach"
-				: "the realistic counterpart appropriate to the learner's scenario, "
-						+ "while retaining " + coachName + "'s coaching style";
+				: valueOrDefault(
+						customScene == null ? null : customScene.aiRole(),
+						"the realistic counterpart appropriate to the learner's scenario, "
+								+ "while retaining " + coachName + "'s coaching style");
 		return Map.ofEntries(
 				Map.entry("ai_role", aiRole),
-				Map.entry("title", freeChat ? "open conversation" : input),
-				Map.entry("learning_goal", input),
+				Map.entry(
+						"title",
+						freeChat
+								? "open conversation"
+								: valueOrDefault(
+										customScene == null ? null : customScene.title(),
+										input)),
+				Map.entry(
+						"background",
+						valueOrDefault(
+								customScene == null ? null : customScene.background(),
+								input)),
+				Map.entry(
+						"user_role",
+						valueOrDefault(
+								customScene == null ? null : customScene.userRole(),
+								"the learner")),
+				Map.entry(
+						"learning_goal",
+						valueOrDefault(
+								customScene == null ? null : customScene.learningGoal(),
+								input)),
+				Map.entry(
+						"custom_instruction",
+						valueOrDefault(
+								customScene == null ? null : customScene.customInstruction(),
+								"No additional scene instruction.")),
+				Map.entry(
+						"success_factor",
+						valueOrDefault(
+								customScene == null ? null : customScene.successFactorJson(),
+								"{}")),
 				Map.entry("scene_type", sceneType.name()),
 				Map.entry("scene_input", input),
 				Map.entry("current_preference", currentPreference),

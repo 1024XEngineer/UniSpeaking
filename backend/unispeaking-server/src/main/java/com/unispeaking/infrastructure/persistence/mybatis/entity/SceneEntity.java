@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.unispeaking.infrastructure.persistence.mybatis.typehandler.PostgresJsonbStringTypeHandler;
+import com.unispeaking.infrastructure.persistence.mybatis.typehandler.PostgresUuidTypeHandler;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 import lombok.Getter;
@@ -14,17 +15,22 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@TableName("user_preference")
-public class UserPreferenceEntity {
+@TableName(value = "scene", autoResultMap = true)
+public class SceneEntity {
 
-	@TableId(value = "user_id", type = IdType.INPUT)
+	@TableId(value = "id", type = IdType.INPUT)
+	private String id;
+	@TableField(typeHandler = PostgresUuidTypeHandler.class)
 	private UUID userId;
-	private String preferredVoice;
-	private String preferredAiSpeechSpeed;
+	private String title;
+	private String background;
+	private String aiRole;
+	private String userRole;
+	private String learningGoal;
+	private String customInstruction;
 	@TableField(typeHandler = PostgresJsonbStringTypeHandler.class)
-	private String preferences;
-	private String memoryText;
-	private String cefrLevel;
+	private String successFactor;
 	private OffsetDateTime createdAt;
 	private OffsetDateTime updatedAt;
+	private OffsetDateTime deletedAt;
 }

@@ -70,10 +70,55 @@ export function getUserPreference() {
 }
 
 export function updateUserPreference(preference) {
-  return request("/api/user-preferences", {
-    method: "PUT",
-    body: JSON.stringify(preference),
+	return request("/api/user-preferences", {
+		method: "PUT",
+		body: JSON.stringify(preference),
+	});
+}
+
+export async function generateCustomScene(sceneInput, userPreference = null) {
+  const scene = await request("/api/custom-scenes/generate", {
+    method: "POST",
+    body: JSON.stringify({ sceneInput, userPreference }),
   });
+  if (!scene || typeof scene !== "object" || !scene.sceneId) {
+    throw new Error("场景生成响应缺少 sceneId");
+  }
+  const normalized = {
+    ...scene,
+    wordList: Array.isArray(scene.wordList) ? scene.wordList : [],
+    phraseList: Array.isArray(scene.phraseList) ? scene.phraseList : [],
+    sentenceList: Array.isArray(scene.sentenceList) ? scene.sentenceList : [],
+  };
+  if (!normalized.wordList.length || !normalized.phraseList.length || !normalized.sentenceList.length) {
+    throw new Error("场景生成内容不完整，请重新生成");
+  }
+  return normalized;
+}
+
+export function createCustomSceneFlow(sceneId) {
+  return request("/api/custom-scenes/flows", {
+    method: "POST",
+    body: JSON.stringify({ sceneId }),
+  });
+}
+
+export async function synthesizeSpeech(text, model = null) {
+  const token = getAccessToken();
+  const response = await fetch(`${API_BASE}/api/tts/synthesize`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ text, model }),
+  });
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") || "";
+    const body = contentType.includes("application/json") ? await response.json() : null;
+    throw new Error(body?.message || body?.code || `语音生成失败（${response.status}）`);
+  }
+  return response.blob();
 }
 
 export function translateText(text) {
