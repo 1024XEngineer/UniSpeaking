@@ -2,6 +2,8 @@ package com.unispeaking.controller;
 
 import com.unispeaking.domain.dto.account.AccountProfileResponse;
 import com.unispeaking.domain.dto.account.AvatarResponse;
+import com.unispeaking.domain.dto.account.ChangePasswordRequest;
+import com.unispeaking.domain.dto.account.DeleteAccountRequest;
 import com.unispeaking.domain.dto.account.UpdateAccountProfileRequest;
 import com.unispeaking.domain.dto.response.ApiResponse;
 import com.unispeaking.exception.BusinessException;
@@ -66,6 +68,23 @@ public class AccountController {
 	@DeleteMapping("/avatar")
 	public ApiResponse<Void> deleteAvatar() {
 		accountService.deleteAvatar(currentUserId());
+		return ApiResponse.success(null);
+	}
+
+	@PostMapping("/password")
+	public ApiResponse<Void> changePassword(
+			@Valid @RequestBody ChangePasswordRequest request) {
+		accountService.changePassword(
+				currentUserId(),
+				request.currentPassword(),
+				request.newPassword());
+		return ApiResponse.success(null);
+	}
+
+	@DeleteMapping
+	public ApiResponse<Void> requestDeletion(
+			@Valid @RequestBody DeleteAccountRequest request) {
+		accountService.requestDeletion(currentUserId(), request.currentPassword());
 		return ApiResponse.success(null);
 	}
 

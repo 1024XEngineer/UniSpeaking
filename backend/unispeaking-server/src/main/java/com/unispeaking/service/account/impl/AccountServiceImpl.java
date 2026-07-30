@@ -8,12 +8,18 @@ import com.unispeaking.repository.UserAccountRepository;
 import com.unispeaking.service.account.AccountService;
 import com.unispeaking.service.account.AvatarStorage;
 import com.unispeaking.service.account.AvatarUrlResolver;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AccountServiceImpl implements AccountService {
@@ -24,14 +30,34 @@ public class AccountServiceImpl implements AccountService {
 	private final UserAccountRepository repository;
 	private final AvatarStorage avatarStorage;
 	private final AvatarUrlResolver avatarUrlResolver;
+	private final PasswordEncoder passwordEncoder;
+	private final Clock clock;
+
+	@Autowired
+	public AccountServiceImpl(
+			UserAccountRepository repository,
+			AvatarStorage avatarStorage,
+			AvatarUrlResolver avatarUrlResolver,
+			PasswordEncoder passwordEncoder) {
+		this(
+				repository,
+				avatarStorage,
+				avatarUrlResolver,
+				passwordEncoder,
+				Clock.systemUTC());
+	}
 
 	public AccountServiceImpl(
 			UserAccountRepository repository,
 			AvatarStorage avatarStorage,
-			AvatarUrlResolver avatarUrlResolver) {
+			AvatarUrlResolver avatarUrlResolver,
+			PasswordEncoder passwordEncoder,
+			Clock clock) {
 		this.repository = repository;
 		this.avatarStorage = avatarStorage;
 		this.avatarUrlResolver = avatarUrlResolver;
+		this.passwordEncoder = passwordEncoder;
+		this.clock = clock;
 	}
 
 	@Override
@@ -97,6 +123,46 @@ public class AccountServiceImpl implements AccountService {
 		}
 		repository.updateProfile(userId, current.nickname(), null);
 		tryDeleteOldAvatar(current.avatarObjectKey());
+	}
+
+	@Override
+	@Transactional
+	public void changePassword(
+			UUID userId,
+			String currentPassword,
+			String newPassword) {
+		UserAccount current = requireUser(userId);
+		if (!passwordEncoder.matches(currentPassword, current.passwordHash())) {
+			throw new BusinessException(
+					"CURRENT_PASSWORD_INVALID",
+					"当前密码不正确");
+		}
+		if (passwordEncoder.matches(newPassword, current.passwordHash())) {
+			throw new BusinessException(
+					"NEW_PASSWORD_SAME_AS_CURRENT",
+					"新密码不能与当前密码相同");
+		}
+		repository.updatePasswordAndAuthVersion(
+				userId,
+				passwordEncoder.encode(newPassword),
+				current.authVersion() + 1);
+	}
+
+	@Override
+	@Transactional
+	public void requestDeletion(UUID userId, String currentPassword) {
+		UserAccount current = requireUser(userId);
+		if (!passwordEncoder.matches(currentPassword, current.passwordHash())) {
+			throw new BusinessException(
+					"CURRENT_PASSWORD_INVALID",
+					"当前密码不正确");
+		}
+		Instant requestedAt = clock.instant();
+		repository.requestDeletion(
+				userId,
+				current.authVersion() + 1,
+				requestedAt,
+				requestedAt.plus(30, ChronoUnit.DAYS));
 	}
 
 	private UserAccount requireUser(UUID userId) {

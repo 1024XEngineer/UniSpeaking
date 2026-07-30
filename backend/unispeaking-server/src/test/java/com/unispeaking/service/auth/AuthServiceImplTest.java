@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.unispeaking.domain.dto.account.ReactivateAccountRequest;
 import com.unispeaking.domain.dto.auth.LoginRequest;
 import com.unispeaking.domain.dto.auth.RegisterRequest;
 import com.unispeaking.domain.po.profile.UserProfile;
@@ -18,7 +19,9 @@ import com.unispeaking.repository.UserAccountRepository;
 import com.unispeaking.repository.UserProfileRepository;
 import com.unispeaking.service.account.AvatarUrlResolver;
 import com.unispeaking.service.auth.impl.AuthServiceImpl;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,6 +37,8 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 
 @ExtendWith(MockitoExtension.class)
 class AuthServiceImplTest {
+
+	private static final Instant NOW = Instant.parse("2026-07-30T04:00:00Z");
 
 	@Mock
 	private UserAccountRepository userAccountRepository;
@@ -101,17 +106,56 @@ class AuthServiceImplTest {
 		assertEquals(user.id().toString(), service.requireUserId("spoofed-user-id"));
 	}
 
+	@Test
+	void reactivatesPendingAccountBeforeDeletionDeadline() {
+		UserAccount pending = pendingUser(NOW.plusSeconds(60));
+		when(userAccountRepository.findByUsername("learner@example.com"))
+				.thenReturn(Optional.of(pending));
+		when(passwordEncoder.matches("secret12", pending.passwordHash())).thenReturn(true);
+		UserAccount active = userWithAuthVersion(3);
+		when(userAccountRepository.reactivate(pending.id(), 3)).thenReturn(active);
+		when(jwtTokenService.issue(active))
+				.thenReturn(new IssuedJwt("reactivated-token", NOW.plusSeconds(3600)));
+
+		var response = service().reactivate(new ReactivateAccountRequest(
+				"learner@example.com",
+				"secret12"));
+
+		assertEquals("reactivated-token", response.accessToken());
+		verify(userAccountRepository).reactivate(pending.id(), 3);
+	}
+
+	@Test
+	void rejectsReactivationAtDeletionDeadline() {
+		UserAccount pending = pendingUser(NOW);
+		when(userAccountRepository.findByUsername("learner@example.com"))
+				.thenReturn(Optional.of(pending));
+		when(passwordEncoder.matches("secret12", pending.passwordHash())).thenReturn(true);
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> service().reactivate(new ReactivateAccountRequest(
+						"learner@example.com",
+						"secret12")));
+
+		assertEquals("ACCOUNT_REACTIVATION_NOT_ALLOWED", exception.code());
+	}
+
 	private AuthServiceImpl service() {
 		return new AuthServiceImpl(
 				userAccountRepository,
 				userProfileRepository,
 				passwordEncoder,
 				jwtTokenService,
-				avatarUrlResolver);
+				avatarUrlResolver,
+				Clock.fixed(NOW, ZoneOffset.UTC));
 	}
 
 	private UserAccount user() {
-		Instant now = Instant.parse("2026-07-28T00:00:00Z");
+		return userWithAuthVersion(0);
+	}
+
+	private UserAccount userWithAuthVersion(long authVersion) {
 		return new UserAccount(
 				UUID.fromString("22222222-2222-4222-8222-222222222222"),
 				"learner@example.com",
@@ -120,11 +164,28 @@ class AuthServiceImplTest {
 				null,
 				UserRole.USER,
 				UserStatus.ACTIVE,
-				0,
+				authVersion,
 				null,
 				null,
 				null,
-				now,
-				now);
+				NOW,
+				NOW);
+	}
+
+	private UserAccount pendingUser(Instant scheduledAt) {
+		return new UserAccount(
+				UUID.fromString("22222222-2222-4222-8222-222222222222"),
+				"learner@example.com",
+				"bcrypt-hash",
+				null,
+				null,
+				UserRole.USER,
+				UserStatus.PENDING_DELETION,
+				2,
+				null,
+				NOW.minusSeconds(60),
+				scheduledAt,
+				NOW.minusSeconds(3600),
+				NOW);
 	}
 }

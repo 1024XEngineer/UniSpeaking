@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.domain.po.user.UserAccount;
@@ -13,13 +15,17 @@ import com.unispeaking.domain.po.user.UserStatus;
 import com.unispeaking.exception.BusinessException;
 import com.unispeaking.repository.UserAccountRepository;
 import com.unispeaking.service.account.impl.AccountServiceImpl;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 @ExtendWith(MockitoExtension.class)
 class AccountServiceImplTest {
@@ -29,6 +35,7 @@ class AccountServiceImplTest {
 	private static final byte[] PNG_BYTES = new byte[] {
 		(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01
 	};
+	private static final Instant NOW = Instant.parse("2026-07-30T04:00:00Z");
 
 	@Mock
 	private UserAccountRepository repository;
@@ -36,6 +43,8 @@ class AccountServiceImplTest {
 	private AvatarStorage avatarStorage;
 	@Mock
 	private AvatarUrlResolver avatarUrlResolver;
+	@Mock
+	private PasswordEncoder passwordEncoder;
 
 	@Test
 	void trimsNicknameBeforeUpdatingAccount() {
@@ -98,12 +107,65 @@ class AccountServiceImplTest {
 		assertEquals("INVALID_AVATAR_FILE", exception.code());
 	}
 
+	@Test
+	void rejectsIncorrectCurrentPassword() {
+		UserAccount current = user("Yufan", null, 4);
+		when(repository.findById(USER_ID)).thenReturn(Optional.of(current));
+		when(passwordEncoder.matches("incorrect", current.passwordHash())).thenReturn(false);
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> service().changePassword(USER_ID, "incorrect", "new-secret"));
+
+		assertEquals("CURRENT_PASSWORD_INVALID", exception.code());
+		verify(repository, never()).updatePasswordAndAuthVersion(any(), any(), any(Long.class));
+	}
+
+	@Test
+	void incrementsAuthVersionWhenPasswordChanges() {
+		UserAccount current = user("Yufan", null, 4);
+		when(repository.findById(USER_ID)).thenReturn(Optional.of(current));
+		when(passwordEncoder.matches("old-secret", current.passwordHash())).thenReturn(true);
+		when(passwordEncoder.matches("new-secret", current.passwordHash())).thenReturn(false);
+		when(passwordEncoder.encode("new-secret")).thenReturn("new-bcrypt-hash");
+
+		service().changePassword(USER_ID, "old-secret", "new-secret");
+
+		verify(repository).updatePasswordAndAuthVersion(
+				USER_ID,
+				"new-bcrypt-hash",
+				5);
+	}
+
+	@Test
+	void schedulesDeletionThirtyDaysLaterAndRevokesExistingTokens() {
+		UserAccount current = user("Yufan", null, 7);
+		when(repository.findById(USER_ID)).thenReturn(Optional.of(current));
+		when(passwordEncoder.matches("current-secret", current.passwordHash())).thenReturn(true);
+
+		service().requestDeletion(USER_ID, "current-secret");
+
+		verify(repository).requestDeletion(
+				USER_ID,
+				8,
+				NOW,
+				NOW.plus(30, ChronoUnit.DAYS));
+	}
+
 	private AccountServiceImpl service() {
-		return new AccountServiceImpl(repository, avatarStorage, avatarUrlResolver);
+		return new AccountServiceImpl(
+				repository,
+				avatarStorage,
+				avatarUrlResolver,
+				passwordEncoder,
+				Clock.fixed(NOW, ZoneOffset.UTC));
 	}
 
 	private UserAccount user(String nickname, String avatarObjectKey) {
-		Instant now = Instant.parse("2026-07-30T04:00:00Z");
+		return user(nickname, avatarObjectKey, 0);
+	}
+
+	private UserAccount user(String nickname, String avatarObjectKey, long authVersion) {
 		return new UserAccount(
 				USER_ID,
 				"learner@example.com",
@@ -112,11 +174,11 @@ class AccountServiceImplTest {
 				avatarObjectKey,
 				UserRole.USER,
 				UserStatus.ACTIVE,
-				0,
+				authVersion,
 				null,
 				null,
 				null,
-				now,
-				now);
+				NOW,
+				NOW);
 	}
 }

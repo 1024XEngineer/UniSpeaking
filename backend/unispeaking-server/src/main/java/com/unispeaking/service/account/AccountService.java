@@ -15,4 +15,11 @@ public interface AccountService {
 			byte[] bytes);
 
 	void deleteAvatar(UUID userId);
+
+	void changePassword(
+			UUID userId,
+			String currentPassword,
+			String newPassword);
+
+	void requestDeletion(UUID userId, String currentPassword);
 }

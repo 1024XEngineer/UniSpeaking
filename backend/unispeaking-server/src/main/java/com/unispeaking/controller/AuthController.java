@@ -1,5 +1,6 @@
 package com.unispeaking.controller;
 
+import com.unispeaking.domain.dto.account.ReactivateAccountRequest;
 import com.unispeaking.domain.dto.auth.AuthResponse;
 import com.unispeaking.domain.dto.auth.LoginRequest;
 import com.unispeaking.domain.dto.auth.RegisterRequest;
@@ -31,6 +32,12 @@ public class AuthController {
 	@PostMapping("/login")
 	public ApiResponse<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
 		return ApiResponse.success(authService.login(request));
+	}
+
+	@PostMapping("/reactivate")
+	public ApiResponse<AuthResponse> reactivate(
+			@Valid @RequestBody ReactivateAccountRequest request) {
+		return ApiResponse.success(authService.reactivate(request));
 	}
 
 	@GetMapping("/me")

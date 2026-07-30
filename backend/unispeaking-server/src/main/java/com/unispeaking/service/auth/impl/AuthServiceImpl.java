@@ -1,5 +1,6 @@
 package com.unispeaking.service.auth.impl;
 
+import com.unispeaking.domain.dto.account.ReactivateAccountRequest;
 import com.unispeaking.domain.dto.auth.AuthResponse;
 import com.unispeaking.domain.dto.auth.LoginRequest;
 import com.unispeaking.domain.dto.auth.RegisterRequest;
@@ -15,9 +16,11 @@ import com.unispeaking.repository.UserProfileRepository;
 import com.unispeaking.service.account.AvatarUrlResolver;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.auth.JwtTokenService;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -34,25 +37,44 @@ public class AuthServiceImpl implements AuthService {
 	private final PasswordEncoder passwordEncoder;
 	private final JwtTokenService jwtTokenService;
 	private final AvatarUrlResolver avatarUrlResolver;
+	private final Clock clock;
 
+	@Autowired
 	public AuthServiceImpl(
 			UserAccountRepository userAccountRepository,
 			UserProfileRepository userProfileRepository,
 			PasswordEncoder passwordEncoder,
 			JwtTokenService jwtTokenService,
 			AvatarUrlResolver avatarUrlResolver) {
+		this(
+				userAccountRepository,
+				userProfileRepository,
+				passwordEncoder,
+				jwtTokenService,
+				avatarUrlResolver,
+				Clock.systemUTC());
+	}
+
+	public AuthServiceImpl(
+			UserAccountRepository userAccountRepository,
+			UserProfileRepository userProfileRepository,
+			PasswordEncoder passwordEncoder,
+			JwtTokenService jwtTokenService,
+			AvatarUrlResolver avatarUrlResolver,
+			Clock clock) {
 		this.userAccountRepository = userAccountRepository;
 		this.userProfileRepository = userProfileRepository;
 		this.passwordEncoder = passwordEncoder;
 		this.jwtTokenService = jwtTokenService;
 		this.avatarUrlResolver = avatarUrlResolver;
+		this.clock = clock;
 	}
 
 	@Override
 	@Transactional
 	public AuthResponse register(RegisterRequest request) {
 		String username = normalizeUsername(request.username());
-		Instant now = Instant.now();
+		Instant now = clock.instant();
 		UserAccount user = new UserAccount(
 				UUID.randomUUID(),
 				username,
@@ -92,12 +114,40 @@ public class AuthServiceImpl implements AuthService {
 		if (!passwordEncoder.matches(request.password(), user.passwordHash())) {
 			throw invalidCredentials();
 		}
+		if (user.status() == UserStatus.PENDING_DELETION) {
+			throw new BusinessException(
+					"ACCOUNT_PENDING_DELETION",
+					"账号处于待删除状态，请先撤销注销");
+		}
 		if (user.status() != UserStatus.ACTIVE) {
 			throw new BusinessException("USER_NOT_ACTIVE", "账号当前不可登录");
 		}
-		Instant lastLoginAt = Instant.now();
+		Instant lastLoginAt = clock.instant();
 		userAccountRepository.updateLastLoginAt(user.id(), lastLoginAt);
 		return createAuthResponse(user.withLastLoginAt(lastLoginAt));
+	}
+
+	@Override
+	@Transactional
+	public AuthResponse reactivate(ReactivateAccountRequest request) {
+		String username = normalizeUsername(request.username());
+		UserAccount user = userAccountRepository.findByUsername(username)
+				.orElseThrow(this::invalidCredentials);
+		if (!passwordEncoder.matches(request.password(), user.passwordHash())) {
+			throw invalidCredentials();
+		}
+		Instant scheduledAt = user.deletionScheduledAt();
+		if (user.status() != UserStatus.PENDING_DELETION
+				|| scheduledAt == null
+				|| !clock.instant().isBefore(scheduledAt)) {
+			throw new BusinessException(
+					"ACCOUNT_REACTIVATION_NOT_ALLOWED",
+					"账号当前无法撤销注销");
+		}
+		UserAccount reactivated = userAccountRepository.reactivate(
+				user.id(),
+				user.authVersion() + 1);
+		return createAuthResponse(reactivated);
 	}
 
 	@Override
