@@ -123,6 +123,40 @@ CREATE TABLE IF NOT EXISTS achievement_definitions (
 CREATE INDEX IF NOT EXISTS idx_achievement_definitions_active_order
 ON achievement_definitions (status, sort_order, code);
 
+INSERT INTO achievement_definitions (
+    code,
+    name,
+    description,
+    category,
+    metric_key,
+    target_value,
+    icon_key,
+    sort_order,
+    status
+)
+VALUES
+    ('FIRST_CONVERSATION', '初次对话', '完成第一次英语对话', 'CONVERSATION',
+        'COMPLETED_SESSION_COUNT', 1, 'message-circle', 10, 'INACTIVE'),
+    ('SEVEN_DAY_STREAK', '七日同行', '连续学习 7 天', 'STREAK',
+        'CONTINUOUS_LEARNING_DAYS', 7, 'footprints', 20, 'INACTIVE'),
+    ('SCENE_EXPLORER', '场景探索者', '完成 5 个不同场景', 'EXPLORATION',
+        'DISTINCT_COMPLETED_SCENE_COUNT', 5, 'compass', 30, 'INACTIVE'),
+    ('EXPRESSION_STAR', '表达之星', '整场评分达到 90 分', 'EVALUATION',
+        'MAX_FINAL_SCORE', 90, 'star', 40, 'INACTIVE'),
+    ('PRONUNCIATION_PRACTICE_30', '发音练习家', '完成 30 次发音评测', 'EVALUATION',
+        'PRONUNCIATION_EVALUATION_COUNT', 30, 'mic', 50, 'INACTIVE'),
+    ('ASSET_COLLECTOR_20', '知识收藏家', '保存 20 条学习资产', 'ASSET',
+        'SAVED_ASSET_COUNT', 20, 'bookmark', 60, 'INACTIVE'),
+    ('CONVERSATION_REGULAR_20', '对话常客', '完成 20 次英语对话', 'CONVERSATION',
+        'COMPLETED_SESSION_COUNT', 20, 'messages-square', 70, 'INACTIVE'),
+    ('LANGUAGE_BUILDER_100', '语言建造者', '掌握 100 个表达', 'ASSET',
+        'MASTERED_EXPRESSION_COUNT', 100, 'blocks', 80, 'INACTIVE'),
+    ('LISTENING_PRACTICE_50', '听力练习家', '播放 50 次示范音频', 'LISTENING',
+        'DEMO_AUDIO_PLAY_COUNT', 50, 'headphones', 90, 'INACTIVE'),
+    ('MONTHLY_ATTENDANCE_20', '月度全勤', '当月学习 20 天', 'STREAK',
+        'MONTHLY_ACTIVE_DAY_COUNT', 20, 'calendar-check', 100, 'INACTIVE')
+ON CONFLICT (code) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS user_achievement_progress (
     user_id UUID NOT NULL,
     achievement_id UUID NOT NULL,
