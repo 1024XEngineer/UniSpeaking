@@ -222,6 +222,68 @@ Registry 当前登记 `qwen3.5-omni-flash-realtime`（Realtime 默认）、
 交换、Qwen LLM 和科大讯飞 Suntone 评分接入真实厂商 API；缺少对应凭证时
 返回明确的能力未配置错误。
 
+## 个人中心与账号安全
+
+个人中心按账号、偏好、成就和只读概览分开持有数据，不把学习统计复制到 `"user"` 表。
+
+```text
+AccountController
+├── PATCH /api/account/profile
+├── POST/DELETE /api/account/avatar
+└── DELETE /api/account
+    └── AccountService
+        ├── UserAccountRepository
+        ├── PasswordEncoder
+        └── AvatarStorage -> QiniuAvatarStorage
+
+AuthController
+├── PUT /api/auth/password -> AccountService
+└── POST /api/auth/reactivate -> AuthService
+```
+
+`"user"` 表只新增账号生命周期所需的 `avatar_object_key`、
+`deletion_requested_at` 和 `deletion_scheduled_at`。头像二进制放七牛云，数据库
+不保存公网 URL；`AvatarUrlResolver` 用部署环境中的访问域名生成响应 URL。
+
+改密与申请注销都会在同一数据库更新中递增 `auth_version`。业务入口读取 JWT
+中的 `auth_version` 并与用户表比对，所以旧 Token 在下一次请求时返回
+`ACCESS_TOKEN_REVOKED`。注销申请把账号改为 `PENDING_DELETION`，预计删除时间
+固定为申请时间加 30 天；期限前可用邮箱和密码恢复，恢复后再次递增
+`auth_version`。
+
+当前只实现“停用、保留、恢复”闭环。到期物理删除尚未启用，因为必须先由每个
+数据归属模块提供幂等清理实现并确认执行顺序；在这些端口到齐前，不能只删除
+`"user"` 行。
+
+### 个人概览查询边界
+
+```text
+ProfileOverviewController
+└── ProfileOverviewService
+    ├── LearningStatisticsQueryPort
+    ├── LearningAssetCountPort
+    └── AchievementService
+        ├── AchievementMetricQueryPort
+        └── AchievementRepository
+```
+
+三个端口都由个人中心声明、由数据归属模块实现：
+
+| 端口 | 负责模块需提供的数据 | 归属要求 |
+| --- | --- | --- |
+| `LearningStatisticsQueryPort` | 本周分钟数、连续学习天数、按月每日分钟数与练习次数 | 会话/评测模块查询时按 `userId` 限定 |
+| `LearningAssetCountPort` | 资产总数、按月每日新增数 | 学习资产模块提供 `countByUserId`，所有资产查询验证数据归属 |
+| `AchievementMetricQueryPort` | 每个 `AchievementMetricKey` 的当前值 | 由对应指标的数据归属模块实现 |
+
+`AchievementServiceImpl` 和 `ProfileOverviewController` 使用条件装配。任一生产
+端口缺失时，概览接口不会用 Mock 或零值伪装成功；前端显示不可用状态。接入
+端口后，再将有真实指标实现的成就定义从 `INACTIVE` 改为 `ACTIVE`。
+
+成就数据使用两张表：
+
+- `achievement_definitions`：成就编码、指标键、目标值、图标键、排序和启用状态；
+- `user_achievement_progress`：用户当前进度和首次解锁时间，重复同步不会覆盖原解锁时间。
+
 ## 当前可跑通能力
 
 - 场景会话统一启动：HTTP `POST /api/scene-sessions`
@@ -232,3 +294,6 @@ Registry 当前登记 `qwen3.5-omni-flash-realtime`（Realtime 默认）、
 - 结束会话：带 JWT 握手的 WebSocket `/ws/session-messages`，`type=session.end`；HTTP `POST /api/scene-sessions/{sessionId}/end` 同样校验会话所有者
 - 用户/AI 完整消息保存到自由会话 Conversation Store
 - 长期用户档案通过用户偏好接口显式维护，不从会话记录自动生成
+- 昵称与七牛云头像管理、修改密码、全设备退出、30 天延期注销与到期前恢复
+- 成就定义与用户进度持久化；生产指标端口接入前保持定义 `INACTIVE`
+- 个人概览编排已完成；生产查询端口接齐后自动开放 HTTP Controller

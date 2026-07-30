@@ -23,6 +23,45 @@ BAILIAN_MODEL=qwen3.5-omni-flash-realtime
 Do not put API keys in a `VITE_` variable because Vite embeds those values in
 browser assets.
 
+## Qiniu avatar storage
+
+The backend uses the fixed Qiniu Java SDK version `7.19.0`. Configure these
+server-side variables in `deploy/env/.env`:
+
+```properties
+QINIU_ACCESS_KEY=replace-with-qiniu-access-key
+QINIU_SECRET_KEY=replace-with-qiniu-secret-key
+QINIU_AVATAR_BUCKET=unispeaking-avatars
+QINIU_AVATAR_DOMAIN=https://avatar.example.com
+QINIU_AVATAR_REGION=auto
+```
+
+`QINIU_AVATAR_DOMAIN` must include the `https://` scheme and must resolve to
+the configured bucket. The current implementation returns a direct public URL,
+so the avatar domain must allow public reads. Upload and delete credentials stay
+in the backend environment and must never use a `VITE_` prefix.
+
+Object keys use:
+
+```text
+avatars/{userId}/{uuid}.{jpg|png|webp}
+```
+
+The service account needs upload and delete permission only for the avatar
+bucket. Replacing an avatar uploads the new object first, commits the new key,
+then deletes the old object; Qiniu object-not-found during delete is treated as
+success. Do not configure a bucket lifecycle rule that deletes active avatar
+objects. Orphan cleanup may use a separate lifecycle/prefix policy only after it
+has been reviewed against the 30-day account-retention flow.
+
+`QINIU_AVATAR_REGION=auto` is the recommended default. Fixed values supported by
+the application are `z0`, `z1`, `z2`, `na0`, and `as0`.
+
+The backend can start without Qiniu credentials for non-avatar development.
+Avatar upload/delete then returns `AVATAR_STORAGE_UNAVAILABLE`; an account with
+an existing `avatar_object_key` also requires `QINIU_AVATAR_DOMAIN` to produce
+`avatarUrl`.
+
 ## Available settings
 
 The Spring Boot defaults live in

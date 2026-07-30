@@ -54,7 +54,7 @@ SessionService 不处理暂停、恢复、打断、DataChannel 绑定等过程�
 
 ## 2. 登录注册 HTTP 接口
 
-状态：建议新增。
+状态：已实现。
 
 ### 2.1 注册
 
@@ -66,19 +66,29 @@ POST /api/auth/register
 
 ```json
 {
-  "email": "name@example.com",
-  "password": "password123"
+  "username": "name@example.com",
+  "password": "password123",
+  "nickname": "Yufan"
 }
 ```
 
-响应：
+响应的 `data`：
 
 ```json
 {
-  "userId": "user_123",
-  "email": "name@example.com",
-  "emailVerified": false,
-  "nextStep": "VERIFY_EMAIL"
+  "tokenType": "Bearer",
+  "accessToken": "<jwt>",
+  "expiresAt": "2026-07-30T08:00:00Z",
+  "user": {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "username": "name@example.com",
+    "nickname": "Yufan",
+    "avatarUrl": null,
+    "role": "USER",
+    "status": "ACTIVE",
+    "lastLoginAt": null,
+    "createdAt": "2026-07-30T06:00:00Z"
+  }
 }
 ```
 
@@ -92,23 +102,12 @@ POST /api/auth/login
 
 ```json
 {
-  "email": "name@example.com",
+  "username": "name@example.com",
   "password": "password123"
 }
 ```
 
-响应：
-
-```json
-{
-  "accessToken": "jwt_or_session_token",
-  "user": {
-    "userId": "user_123",
-    "email": "name@example.com",
-    "displayName": "Yufan"
-  }
-}
-```
+响应同注册。用户名会转为小写并去除两端空白。
 
 ### 2.3 当前用户
 
@@ -121,10 +120,14 @@ Authorization: Bearer <accessToken>
 
 ```json
 {
-  "userId": "user_123",
-  "email": "name@example.com",
-  "displayName": "Yufan",
-  "emailVerified": true
+  "id": "22222222-2222-4222-8222-222222222222",
+  "username": "name@example.com",
+  "nickname": "Yufan",
+  "avatarUrl": "https://avatar.example.com/avatars/2222/avatar.png",
+  "role": "USER",
+  "status": "ACTIVE",
+  "lastLoginAt": "2026-07-30T06:30:00Z",
+  "createdAt": "2026-07-30T06:00:00Z"
 }
 ```
 
@@ -477,148 +480,165 @@ POST /api/custom-scenes/flows/complete
 
 ## 7. 个人中心 HTTP 接口
 
-状态：建议新增。
+账号资料、安全与成就持久化已实现。个人概览 Controller 只有在三个查询端口都有实现时才注册；端口未接齐时前端显示“真实数据不可用”及重试，不回退 Mock。
 
 ### 7.1 学习概览
 
 ```text
-GET /api/users/me/overview
+GET /api/profile/overview?yearMonth=2026-07
 Authorization: Bearer <accessToken>
 ```
 
-响应：
+`yearMonth` 可省略；传值时必须使用 `yyyy-MM`。响应的 `data`：
 
 ```json
 {
-  "weeklyMinutes": 183,
-  "assetCount": 12,
-  "streakDays": 7,
-  "calendar": [
-    {
-      "date": "2026-07-21",
-      "practiced": true,
-      "minutes": 31
-    }
-  ],
-  "milestones": [
-    {
-      "id": "first_free_chat",
-      "title": "开口先锋",
-      "unlocked": true
-    }
-  ]
-}
-```
-
-### 7.2 会员和额度
-
-```text
-GET /api/users/me/subscription
-Authorization: Bearer <accessToken>
-```
-
-响应：
-
-```json
-{
-  "plan": "free",
-  "freeChatQuota": {
-    "usedMinutesToday": 3,
-    "limitMinutesToday": 5
+  "summary": {
+    "weeklyMinutes": 183,
+    "savedAssetCount": 12,
+    "continuousLearningDays": 7
   },
-  "sceneQuota": {
-    "usedToday": 0,
-    "limitToday": 1
+  "calendar": {
+    "yearMonth": "2026-07",
+    "days": [
+      {
+        "date": "2026-07-21",
+        "learningMinutes": 31,
+        "practiceCount": 2,
+        "savedAssetCount": 3
+      }
+    ]
+  },
+  "achievements": {
+    "unlockedCount": 1,
+    "totalCount": 2,
+    "items": [
+      {
+        "code": "FIRST_CONVERSATION",
+        "name": "初次对话",
+        "description": "完成第一次英语对话",
+        "category": "CONVERSATION",
+        "iconKey": "message-circle",
+        "progressValue": 1,
+        "targetValue": 1,
+        "unlocked": true,
+        "unlockedAt": "2026-07-21T08:15:00Z"
+      }
+    ]
   }
 }
 ```
 
-### 7.3 学习资产列表
+### 7.2 修改昵称
 
 ```text
-GET /api/learning-assets
+PATCH /api/account/profile
 Authorization: Bearer <accessToken>
+Content-Type: application/json
 ```
-
-查询参数：
-
-```text
-category=普通场景|IELTS|英文面试
-page=1
-pageSize=20
-```
-
-响应：
 
 ```json
 {
-  "items": [
-    {
-      "assetId": "asset_123",
-      "title": "咖啡店点单",
-      "category": "普通场景",
-      "date": "2026-07-21",
-      "status": "COMPLETED",
-      "score": 84,
-      "itemCount": 4
-    }
-  ],
-  "page": 1,
-  "pageSize": 20,
-  "total": 1
+  "nickname": "Yufan"
 }
 ```
 
-### 7.4 学习资产详情
+响应包含 `id`、`username`、`nickname`、`avatarUrl` 和 `status`。昵称去除两端空白，长度为 1–32 个字符。
+
+### 7.3 上传头像
 
 ```text
-GET /api/learning-assets/{assetId}
+POST /api/account/avatar
 Authorization: Bearer <accessToken>
+Content-Type: multipart/form-data
 ```
 
-响应：
+```text
+avatar=<JPEG|PNG|WebP file>
+```
+
+限制为 2 MiB，并同时校验 MIME 与文件签名。数据库只保存对象键，响应不暴露对象键：
 
 ```json
 {
-  "assetId": "asset_123",
-  "title": "咖啡店点单",
-  "category": "普通场景",
-  "status": "COMPLETED",
-  "learningItems": [
-    {
-      "type": "短语",
-      "en": "with oat milk",
-      "zh": "换成燕麦奶"
-    }
-  ],
-  "conversation": [
-    {
-      "role": "USER",
-      "text": "Could you recommend something less sweet?",
-      "createdAt": "2026-07-21T08:15:40Z"
-    }
-  ],
-  "scoreReport": {
-    "totalScore": 84
-  }
+  "avatarUrl": "https://avatar.example.com/avatars/2222/avatar.png"
 }
 ```
 
-### 7.5 删除学习资产
+### 7.4 删除头像
 
 ```text
-DELETE /api/learning-assets/{assetId}
+DELETE /api/account/avatar
 Authorization: Bearer <accessToken>
 ```
 
-响应：
+先清空用户表中的对象键，再幂等删除七牛云对象。
+
+### 7.5 修改密码
+
+```text
+PUT /api/auth/password
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
 
 ```json
 {
-  "deleted": true
+  "currentPassword": "old-password",
+  "newPassword": "new-password"
 }
 ```
 
+成功后 `auth_version + 1`，所有设备上的旧 JWT 在下一次受保护请求时失效，前端立即清除本机 Token 并跳转登录页。
+
+### 7.6 申请注销
+
+```text
+DELETE /api/account
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+```json
+{
+  "currentPassword": "current-password"
+}
+```
+
+账号立即进入 `PENDING_DELETION`，记录申请时间与 30 天后的预计删除时间，并递增 `auth_version`。当前版本不会立即物理删除用户数据。
+
+### 7.7 撤销注销
+
+```text
+POST /api/auth/reactivate
+Content-Type: application/json
+```
+
+```json
+{
+  "username": "name@example.com",
+  "password": "current-password"
+}
+```
+
+只允许尚未到预计删除时间的 `PENDING_DELETION` 账号。成功后恢复 `ACTIVE`、清空注销时间、再次递增 `auth_version` 并返回与登录相同的 `AuthResponse`。
+
+### 7.8 稳定错误码
+
+| 错误码 | HTTP | 说明 |
+| --- | --- | --- |
+| `CURRENT_PASSWORD_INVALID` | 400 | 当前密码错误 |
+| `NEW_PASSWORD_SAME_AS_CURRENT` | 400 | 新旧密码相同 |
+| `ACCOUNT_PENDING_DELETION` | 403 | 登录账号处于待删除状态，可走恢复接口 |
+| `ACCOUNT_REACTIVATION_NOT_ALLOWED` | 400 | 状态或期限不允许恢复 |
+| `INVALID_AVATAR_FILE` | 400 | 图片类型或签名不合法 |
+| `AVATAR_TOO_LARGE` | 413 | 头像超过 2 MiB |
+| `AVATAR_STORAGE_UNAVAILABLE` | 503 | 七牛云配置不完整 |
+| `PROFILE_OVERVIEW_UNAVAILABLE` | 503 | 概览下游查询失败 |
+
+### 7.9 会员与学习资产边界
+
+会员、额度和支付仍使用现有前端演示逻辑，不新增后端接口。个人概览中的“已保存学习资产”只负责跳转到现有学习资产页面；资产列表、详情和删除接口仍由学习资产模块负责。
 ## 8. 评分接口
 
 状态：建议新增。
@@ -708,8 +728,8 @@ PENDING, READY, FAILED
 | --- | --- | --- |
 | 登录 | `POST /api/auth/login` | 无 |
 | 注册 | `POST /api/auth/register` | 无 |
-| Level 选择 | `PUT /api/users/me/onboarding` | 无 |
-| 老师选择 | `PUT /api/users/me/onboarding`, `PATCH /api/users/me/profile` | 无 |
+| Level 选择 | `PUT /api/user-preferences` | 无 |
+| 老师选择 | `PUT /api/user-preferences` | 无 |
 | 自由会话主页 | `POST /api/scene-sessions` | `WS /ws/session-messages` |
 | 自由会话结束 | `POST /api/scene-sessions/{sessionId}/end` 可选 | `session.end` |
 | 字幕/完整消息 | 无 | `session.message` |
@@ -717,8 +737,9 @@ PENDING, READY, FAILED
 | 自定义场景启动 | `POST /api/custom-scenes/start` | 无 |
 | 场景训练 | `POST /api/scene-sessions` | 无 |
 | 学习资产 | `GET /api/learning-assets` | 无 |
-| 个人中心 | `GET /api/users/me/overview`, `GET /api/users/me/profile` | 无 |
-| 会员额度 | `GET /api/users/me/subscription` | 无 |
+| 个人中心 | `GET /api/profile/overview`, `PATCH /api/account/profile`, `POST/DELETE /api/account/avatar` | 无 |
+| 账号安全 | `PUT /api/auth/password`, `DELETE /api/account`, `POST /api/auth/reactivate` | 无 |
+| 会员额度 | 当前保持前端演示逻辑 | 无 |
 | 评分结果 | `GET /api/scene-sessions/{sessionId}/score` | 无 |
 
 ## 10. 当前后端已实现清单
@@ -732,6 +753,9 @@ PENDING, READY, FAILED
 | Offer SDP 换 Answer SDP | 已通过模型 Registry 选择 Realtime Provider | `AiProviderRegistry` -> `QwenRealtimeProvider` |
 | 登录注册与 JWT 鉴权 | 已实现 | `AuthController`, `AuthService`, `JwtTokenService` |
 | 用户偏好与长期用户资料 | 已实现，MyBatis-Plus 持久化 | `UserPreferenceController`, `ProfileService` |
+| 昵称、七牛云头像与账号安全 | 已实现 | `AccountController`, `AuthController`, `AccountService` |
+| 可扩展成就持久化 | 已实现；定义默认 `INACTIVE`，待指标端口接入后逐项启用 | `AchievementService`, `AchievementRepository` |
+| 个人概览 | 编排与 HTTP 契约已实现；等待三个查询端口的生产实现 | `ProfileOverviewController`, `ProfileOverviewService` |
 | 字幕按需翻译 | 已实现，使用 `qwen3.5-plus` | `TranslationController`, `TranslationService`, `QwenLlmProvider` |
 | 自定义场景 | 已实现独立入口 | `CustomSceneController` |
 | 学习资产 | 未实现 | 建议新增 |
