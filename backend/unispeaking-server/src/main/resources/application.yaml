@@ -19,6 +19,10 @@ spring:
     init:
       mode: always
       schema-locations: classpath:db/schema.sql
+  servlet:
+    multipart:
+      max-file-size: 2MB
+      max-request-size: 3MB
 
 server:
   port: ${SERVER_PORT:8080}
@@ -45,6 +49,15 @@ auth:
     issuer: ${JWT_ISSUER:unispeaking}
     secret: ${JWT_SECRET:}
     access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:2h}
+
+profile:
+  avatar:
+    qiniu:
+      access-key: ${QINIU_ACCESS_KEY:}
+      secret-key: ${QINIU_SECRET_KEY:}
+      bucket: ${QINIU_AVATAR_BUCKET:}
+      domain: ${QINIU_AVATAR_DOMAIN:}
+      region: ${QINIU_AVATAR_REGION:auto}
 
 realtime:
   flow:

@@ -12,6 +12,7 @@ import com.unispeaking.domain.vo.auth.IssuedJwt;
 import com.unispeaking.exception.BusinessException;
 import com.unispeaking.repository.UserAccountRepository;
 import com.unispeaking.repository.UserProfileRepository;
+import com.unispeaking.service.account.AvatarUrlResolver;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.auth.JwtTokenService;
 import java.time.Instant;
@@ -32,16 +33,19 @@ public class AuthServiceImpl implements AuthService {
 	private final UserProfileRepository userProfileRepository;
 	private final PasswordEncoder passwordEncoder;
 	private final JwtTokenService jwtTokenService;
+	private final AvatarUrlResolver avatarUrlResolver;
 
 	public AuthServiceImpl(
 			UserAccountRepository userAccountRepository,
 			UserProfileRepository userProfileRepository,
 			PasswordEncoder passwordEncoder,
-			JwtTokenService jwtTokenService) {
+			JwtTokenService jwtTokenService,
+			AvatarUrlResolver avatarUrlResolver) {
 		this.userAccountRepository = userAccountRepository;
 		this.userProfileRepository = userProfileRepository;
 		this.passwordEncoder = passwordEncoder;
 		this.jwtTokenService = jwtTokenService;
+		this.avatarUrlResolver = avatarUrlResolver;
 	}
 
 	@Override
@@ -98,7 +102,10 @@ public class AuthServiceImpl implements AuthService {
 
 	@Override
 	public UserAccountResponse currentUser() {
-		return UserAccountResponse.from(requireAuthenticatedUser());
+		UserAccount user = requireAuthenticatedUser();
+		return UserAccountResponse.from(
+				user,
+				avatarUrlResolver.resolve(user.avatarObjectKey()));
 	}
 
 	@Override
@@ -138,7 +145,9 @@ public class AuthServiceImpl implements AuthService {
 				"Bearer",
 				issuedJwt.token(),
 				issuedJwt.expiresAt(),
-				UserAccountResponse.from(user));
+				UserAccountResponse.from(
+						user,
+						avatarUrlResolver.resolve(user.avatarObjectKey())));
 	}
 
 	private String normalizeUsername(String username) {

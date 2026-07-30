@@ -7,6 +7,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -18,7 +19,10 @@ public class GlobalExceptionHandler {
 					"INVALID_CREDENTIALS", "USER_NOT_ACTIVE" -> HttpStatus.UNAUTHORIZED;
 			case "SESSION_ACCESS_DENIED" -> HttpStatus.FORBIDDEN;
 			case "USERNAME_ALREADY_EXISTS" -> HttpStatus.CONFLICT;
-			case "PROFILE_OVERVIEW_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
+			case "USER_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+			case "AVATAR_TOO_LARGE" -> HttpStatus.PAYLOAD_TOO_LARGE;
+			case "PROFILE_OVERVIEW_UNAVAILABLE", "AVATAR_STORAGE_UNAVAILABLE",
+					"AVATAR_STORAGE_FAILED" -> HttpStatus.SERVICE_UNAVAILABLE;
 			default -> HttpStatus.BAD_REQUEST;
 		};
 		return ResponseEntity.status(status)
@@ -33,5 +37,11 @@ public class GlobalExceptionHandler {
 				.map(error -> error.getField() + " " + error.getDefaultMessage())
 				.orElse("Invalid request");
 		return ApiResponse.failure("VALIDATION_ERROR", message);
+	}
+
+	@ExceptionHandler(MaxUploadSizeExceededException.class)
+	@ResponseStatus(HttpStatus.PAYLOAD_TOO_LARGE)
+	public ApiResponse<Void> handleAvatarTooLarge(MaxUploadSizeExceededException exception) {
+		return ApiResponse.failure("AVATAR_TOO_LARGE", "头像不能超过 2 MiB");
 	}
 }

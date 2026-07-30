@@ -74,6 +74,11 @@
 			<artifactId>jump3r</artifactId>
 			<version>1.0.5</version>
 		</dependency>
+		<dependency>
+			<groupId>com.qiniu</groupId>
+			<artifactId>qiniu-java-sdk</artifactId>
+			<version>7.19.0</version>
+		</dependency>
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

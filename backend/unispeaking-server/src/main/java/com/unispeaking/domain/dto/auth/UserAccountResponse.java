@@ -8,16 +8,18 @@ public record UserAccountResponse(
 		UUID id,
 		String username,
 		String nickname,
+		String avatarUrl,
 		String role,
 		String status,
 		Instant lastLoginAt,
 		Instant createdAt) {
 
-	public static UserAccountResponse from(UserAccount user) {
+	public static UserAccountResponse from(UserAccount user, String avatarUrl) {
 		return new UserAccountResponse(
 				user.id(),
 				user.username(),
 				user.nickname(),
+				avatarUrl,
 				user.role().name(),
 				user.status().name(),
 				user.lastLoginAt(),

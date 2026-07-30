@@ -16,6 +16,7 @@ import com.unispeaking.domain.vo.auth.IssuedJwt;
 import com.unispeaking.exception.BusinessException;
 import com.unispeaking.repository.UserAccountRepository;
 import com.unispeaking.repository.UserProfileRepository;
+import com.unispeaking.service.account.AvatarUrlResolver;
 import com.unispeaking.service.auth.impl.AuthServiceImpl;
 import java.time.Instant;
 import java.util.Map;
@@ -42,6 +43,8 @@ class AuthServiceImplTest {
 	private PasswordEncoder passwordEncoder;
 	@Mock
 	private JwtTokenService jwtTokenService;
+	@Mock
+	private AvatarUrlResolver avatarUrlResolver;
 
 	@AfterEach
 	void clearSecurityContext() {
@@ -103,7 +106,8 @@ class AuthServiceImplTest {
 				userAccountRepository,
 				userProfileRepository,
 				passwordEncoder,
-				jwtTokenService);
+				jwtTokenService,
+				avatarUrlResolver);
 	}
 
 	private UserAccount user() {
