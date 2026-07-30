@@ -18,6 +18,7 @@ public class GlobalExceptionHandler {
 					"INVALID_CREDENTIALS", "USER_NOT_ACTIVE" -> HttpStatus.UNAUTHORIZED;
 			case "SESSION_ACCESS_DENIED" -> HttpStatus.FORBIDDEN;
 			case "USERNAME_ALREADY_EXISTS" -> HttpStatus.CONFLICT;
+			case "PROFILE_OVERVIEW_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
 			default -> HttpStatus.BAD_REQUEST;
 		};
 		return ResponseEntity.status(status)
