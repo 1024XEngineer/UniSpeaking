@@ -13,10 +13,11 @@ async function unwrap(response) {
 
 async function request(path, options = {}) {
   const token = getAccessToken();
+  const hasJsonBody = typeof options.body === "string";
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(hasJsonBody ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
@@ -73,6 +74,54 @@ export function updateUserPreference(preference) {
   return request("/api/user-preferences", {
     method: "PUT",
     body: JSON.stringify(preference),
+  });
+}
+
+export function getProfileOverview(yearMonth) {
+  const query = yearMonth ? `?yearMonth=${encodeURIComponent(yearMonth)}` : "";
+  return request(`/api/profile/overview${query}`);
+}
+
+export function updateAccountProfile({ nickname }) {
+  return request("/api/account/profile", {
+    method: "PATCH",
+    body: JSON.stringify({ nickname }),
+  });
+}
+
+export function uploadAvatar(file) {
+  const body = new FormData();
+  body.append("avatar", file);
+  return request("/api/account/avatar", {
+    method: "POST",
+    body,
+  });
+}
+
+export function deleteAvatar() {
+  return request("/api/account/avatar", {
+    method: "DELETE",
+  });
+}
+
+export function changePassword({ currentPassword, newPassword }) {
+  return request("/api/auth/password", {
+    method: "PUT",
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+}
+
+export function requestAccountDeletion({ currentPassword }) {
+  return request("/api/account", {
+    method: "DELETE",
+    body: JSON.stringify({ currentPassword }),
+  });
+}
+
+export function reactivateAccount({ username, password }) {
+  return request("/api/auth/reactivate", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
   });
 }
 
