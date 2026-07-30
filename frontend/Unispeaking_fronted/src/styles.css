@@ -176,6 +176,7 @@ svg { display: block; }
 .password-field button { position: absolute; top: 50%; right: 14px; transform: translateY(-50%); border: 0; background: none; color: #777; cursor: pointer; }
 .password-field svg { width: 20px; height: 20px; }
 .forgot-link { justify-self: end; margin-top: -10px; padding: 0; font-size: 13px; }
+.reactivate-link { justify-self: center; padding: 0; border: 0; background: transparent; color: #5d5d58; font-weight: 700; text-decoration: underline; cursor: pointer; }
 .auth-submit { width: 100%; margin-top: 10px; }
 .auth-switch { color: var(--muted); text-align: center; margin-top: 24px; font-size: 14px; }
 .auth-switch button { margin-left: 6px; border: 0; background: none; font-weight: 650; cursor: pointer; }
@@ -780,6 +781,27 @@ svg { display: block; }
 }
 
 .profile-layout { min-height: 100%; display: grid; grid-template-columns: 250px 1fr; }.profile-nav { border-right: 1px solid var(--line); padding: 38px 22px 28px; display: flex; flex-direction: column; }.profile-user { display: flex; align-items: center; gap: 12px; padding: 0 10px 32px; }.profile-user img { width: 48px; height: 48px; border-radius: 14px; object-fit: cover; object-position: top; }.profile-user strong, .profile-user small { display: block; }.profile-user small { color: var(--muted); margin-top: 5px; font-size: 10px; }.profile-nav nav { display: grid; gap: 7px; }.profile-nav nav button, .logout { height: 46px; padding: 0 13px; border: 0; border-radius: 10px; background: #fff; display: flex; align-items: center; gap: 10px; cursor: pointer; }.profile-nav nav button.is-active { background: var(--soft-2); font-weight: 650; }.profile-nav nav svg, .logout svg { width: 19px; height: 19px; }.logout { margin-top: auto; color: #555; }.profile-content { padding: 52px clamp(42px, 5vw, 84px) 60px; overflow: auto; }.stat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }.stat-grid article { min-height: 106px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; display: flex; gap: 14px; align-items: center; }.stat-grid article > svg { width: 22px; height: 22px; }.stat-grid small, .stat-grid strong { display: block; }.stat-grid small { color: var(--muted); }.stat-grid strong { font-size: 26px; margin-top: 7px; }.stat-grid em { font-style: normal; font-size: 11px; }
+.profile-user { position: relative; min-width: 0; }
+.profile-user > span { min-width: 0; }
+.profile-user strong, .profile-user small { overflow: hidden; text-overflow: ellipsis; }
+.profile-user__edit { position: absolute; right: 7px; bottom: 8px; padding: 0; border: 0; background: transparent; color: #777773; font-size: 10px; cursor: pointer; }
+.stat-grid > button { min-height: 106px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; display: flex; gap: 14px; align-items: center; color: inherit; background: #fff; text-align: left; cursor: pointer; }
+.stat-grid > button:hover { border-color: #aaa9a4; background: #fafaf8; }
+.stat-grid > button > svg { width: 22px; height: 22px; }
+.profile-data-state { min-height: 260px; display: grid; place-items: center; gap: 16px; padding: 40px; border: 1px solid var(--line); border-radius: 18px; color: var(--muted); text-align: center; }
+.profile-data-warning { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; padding: 12px 16px; border-radius: 10px; background: #f8f1ef; color: #8a4e46; font-size: 12px; }
+.profile-data-warning button { border: 0; background: transparent; color: inherit; font-weight: 700; cursor: pointer; }
+.profile-data-empty { grid-column: 1 / -1; margin: 20px 0; color: var(--muted); text-align: center; }
+.account-profile-editor { display: flex; align-items: center; gap: 18px; margin: 24px 0; }
+.account-profile-editor > img { width: 76px; height: 76px; border-radius: 18px; object-fit: cover; }
+.account-profile-editor input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.account-profile-editor > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.account-profile-editor button { min-height: 38px; display: flex; align-items: center; gap: 7px; padding: 0 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; cursor: pointer; }
+.account-profile-editor button svg { width: 16px; height: 16px; }
+.account-field, .account-modal-form > label:not(.account-confirm) { display: grid; gap: 8px; color: #555551; font-size: 12px; font-weight: 650; }
+.account-field input, .account-modal-form input[type="password"] { width: 100%; height: 46px; padding: 0 13px; border: 1px solid #d8d8d3; border-radius: 9px; background: #fff; }
+.account-modal-form { display: grid; gap: 16px; margin-top: 24px; }
+.account-confirm { display: flex; align-items: center; gap: 9px; color: #5f5f5b; font-size: 13px; }
 .overview-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(330px, .75fr); gap: 18px; margin-top: 18px; }
 .overview-grid > article { min-height: 440px; border: 1px solid var(--line); border-radius: 18px; padding: 26px; }
 .overview-grid h2 { margin: 7px 0 0; font-size: 24px; letter-spacing: -.03em; }
@@ -884,6 +906,12 @@ svg { display: block; }
 .account-actions button.danger { color: var(--danger); }
 .account-actions svg { width: 19px; height: 19px; }
 .settings-list > article:last-child { padding-block: 24px; }
+.privacy-memory__editor textarea { width: 100%; min-height: 118px; resize: vertical; padding: 14px; border: 1px solid #d8d8d3; border-radius: 12px; color: var(--ink); background: #fff; line-height: 1.6; }
+.privacy-memory__editor > div { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 9px; }
+.privacy-memory__editor small { margin-right: auto; color: var(--muted); }
+.privacy-memory__editor button { min-height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer; }
+.privacy-memory__editor button:last-child { border-color: #252524; background: #252524; color: #fff; }
+.privacy-memory__editor button:disabled { opacity: .45; cursor: not-allowed; }
 
 @media (max-width: 1250px) {
   .page { padding-inline: 48px; }

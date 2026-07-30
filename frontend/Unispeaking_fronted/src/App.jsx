@@ -54,19 +54,25 @@ import {
   MessagesSquare,
   PackageCheck,
   Sparkles,
-  Target,
   Trophy,
 } from "lucide-react";
 import { assetRecords, learningItems, levels, plans, recommendations, teachers } from "./data.js";
 import {
+  changePassword,
   clearAuthSession,
+  deleteAvatar,
   getCurrentUser,
+  getProfileOverview,
   getUserPreference,
   hasAuthSession,
   login,
+  reactivateAccount,
   register,
+  requestAccountDeletion,
   translateText,
+  updateAccountProfile,
   updateUserPreference,
+  uploadAvatar,
 } from "./apiClient.js";
 import { createRealtimeClient } from "./realtimeClient.js";
 import { IeltsAssets, IeltsTrainingCenter } from "./IeltsModule.jsx";
@@ -327,10 +333,12 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [canReactivate, setCanReactivate] = useState(false);
   const submit = async (event) => {
     event.preventDefault();
     setSubmitting(true);
     setError("");
+    setCanReactivate(false);
     try {
       const auth = mode === "signup"
         ? await register({ username, password })
@@ -338,6 +346,19 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
       await onSuccess(auth, mode);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "认证请求失败");
+      setCanReactivate(requestError?.code === "ACCOUNT_PENDING_DELETION");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const reactivate = async () => {
+    setSubmitting(true);
+    setError("");
+    try {
+      const auth = await reactivateAccount({ username, password });
+      await onSuccess(auth, "login");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "账号恢复失败");
     } finally {
       setSubmitting(false);
     }
@@ -357,9 +378,10 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
           <label>密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 6 位字符" minLength="6" maxLength="72" required /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>
           {mode === "login" && <button type="button" className="forgot-link">忘记密码？</button>}
           {error && <p className="call-error">{error}</p>}
+          {canReactivate && <button type="button" className="reactivate-link" disabled={submitting} onClick={reactivate}>撤销注销并登录</button>}
           <Button className="auth-submit" type="submit" disabled={submitting}>{submitting ? "请稍候" : mode === "signup" ? "注册" : "登录"}</Button>
         </form>
-        <p className="auth-switch">{mode === "signup" ? "已经有账号？" : "还没有账号？"}<button onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setError(""); }}>{mode === "signup" ? "直接登录" : "创建账号"}</button></p>
+        <p className="auth-switch">{mode === "signup" ? "已经有账号？" : "还没有账号？"}<button onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setError(""); setCanReactivate(false); }}>{mode === "signup" ? "直接登录" : "创建账号"}</button></p>
       </section>
     </main>
   );
@@ -419,7 +441,11 @@ function TeacherSetup({ selectedId, onSelect, onFinish }) {
   );
 }
 
-function AppShell({ page, setPage, teacher, children }) {
+function UserAvatar({ user, alt, className }) {
+  return <img className={className} src={user?.avatarUrl || "/brand/unispeaking-mark-user.jpg"} alt={alt} />;
+}
+
+function AppShell({ page, setPage, user, children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const items = [
     { id: "conversation", label: "自由对话", icon: Waveform },
@@ -432,7 +458,7 @@ function AppShell({ page, setPage, teacher, children }) {
       <aside className={cx("sidebar", sidebarOpen && "is-open")} onMouseEnter={() => setSidebarOpen(true)} onMouseLeave={() => setSidebarOpen(false)}>
         <Brand compact={!sidebarOpen} />
         <nav>{items.map(({ id, label, icon: Icon }) => <button key={id} className={cx("sidebar__item", activePage === id && "is-active")} onClick={() => setPage(id)} aria-label={label} title={label}><Icon weight={activePage === id ? "bold" : "regular"} /><span className="sidebar__label"><span>{label}</span></span></button>)}</nav>
-        <button className={cx("sidebar__avatar", ["profile", "membership", "settings"].includes(page) && "is-active")} onClick={() => setPage("profile")}><img src={teacher.image} alt="个人中心" /></button>
+        <button className={cx("sidebar__avatar", ["profile", "membership", "settings"].includes(page) && "is-active")} onClick={() => setPage("profile")}><UserAvatar user={user} alt="个人中心" /></button>
       </aside>
       <div className="app-main">{children}</div>
     </div>
@@ -1273,113 +1299,322 @@ function Assets({ onPractice, onRestart, onIelts, onInterview, onOpenRecord, onC
   );
 }
 
-function Profile({ section, setSection, user, teacher, speed, level, onSettingsChange, onLogout }) {
+function Profile({
+  section,
+  setSection,
+  user,
+  onUserChange,
+  teacher,
+  speed,
+  level,
+  preference,
+  onPreferenceChange,
+  onSettingsChange,
+  onSessionInvalidated,
+  onLogout,
+  onAssets,
+}) {
   const displayName = user?.nickname || user?.username?.split("@")[0] || "UniSpeaking User";
   const email = user?.username || "";
+  const [editOpen, setEditOpen] = useState(false);
+  const [nickname, setNickname] = useState(user?.nickname || "");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const avatarInputRef = useRef(null);
+
+  useEffect(() => {
+    setNickname(user?.nickname || "");
+  }, [user?.nickname]);
+
+  const saveNickname = async () => {
+    if (!nickname.trim()) return;
+    setSavingProfile(true);
+    try {
+      const response = await updateAccountProfile({ nickname: nickname.trim() });
+      onUserChange({ ...user, ...response });
+      setEditOpen(false);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "昵称保存失败");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const replaceAvatar = async (file) => {
+    if (!file) return;
+    setSavingProfile(true);
+    try {
+      const response = await uploadAvatar(file);
+      onUserChange({ ...user, avatarUrl: response.avatarUrl });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "头像上传失败");
+    } finally {
+      setSavingProfile(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    }
+  };
+
+  const removeAvatar = async () => {
+    setSavingProfile(true);
+    try {
+      await deleteAvatar();
+      onUserChange({ ...user, avatarUrl: null });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "头像删除失败");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   return (
-    <main className="profile-layout"><aside className="profile-nav"><div className="profile-user"><img src={teacher.image} alt={displayName} /><span><strong>{displayName}</strong><small>{email}</small></span></div><nav><button className={section === "profile" ? "is-active" : ""} onClick={() => setSection("profile")}><User />个人概览</button><button className={section === "membership" ? "is-active" : ""} onClick={() => setSection("membership")}><Crown />会员权益</button><button className={section === "settings" ? "is-active" : ""} onClick={() => setSection("settings")}><SlidersHorizontal />助手设置</button></nav><button className="logout" onClick={onLogout}><SignOut />退出登录</button></aside><section className="profile-content">{section === "profile" && <Overview />}{section === "membership" && <Membership />}{section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} />}</section></main>
+    <main className="profile-layout">
+      <aside className="profile-nav">
+        <div className="profile-user">
+          <UserAvatar user={user} alt={displayName} />
+          <span><strong>{displayName}</strong><small>{email}</small></span>
+          <button type="button" className="profile-user__edit" onClick={() => setEditOpen(true)}>编辑</button>
+        </div>
+        <nav>
+          <button className={section === "profile" ? "is-active" : ""} onClick={() => setSection("profile")}><User />个人概览</button>
+          <button className={section === "membership" ? "is-active" : ""} onClick={() => setSection("membership")}><Crown />会员权益</button>
+          <button className={section === "settings" ? "is-active" : ""} onClick={() => setSection("settings")}><SlidersHorizontal />助手设置</button>
+        </nav>
+        <button className="logout" onClick={onLogout}><SignOut />退出登录</button>
+      </aside>
+      <section className="profile-content">
+        {section === "profile" && <Overview onAssets={onAssets} />}
+        {section === "membership" && <Membership />}
+        {section === "settings" && (
+          <Settings
+            teacher={teacher}
+            speed={speed}
+            level={level}
+            preference={preference}
+            onPreferenceChange={onPreferenceChange}
+            onSettingsChange={onSettingsChange}
+            onSessionInvalidated={onSessionInvalidated}
+          />
+        )}
+      </section>
+      {editOpen && (
+        <Modal onClose={() => setEditOpen(false)}>
+          <p className="eyebrow">ACCOUNT PROFILE</p>
+          <h2>编辑账号资料</h2>
+          <div className="account-profile-editor">
+            <UserAvatar user={user} alt={displayName} />
+            <div>
+              <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={savingProfile} onChange={(event) => replaceAvatar(event.target.files?.[0])} />
+              <button type="button" disabled={savingProfile} onClick={() => avatarInputRef.current?.click()}><UploadSimple />更换头像</button>
+              {user?.avatarUrl && <button type="button" disabled={savingProfile} onClick={removeAvatar}><Trash />移除头像</button>}
+            </div>
+          </div>
+          <label className="account-field">昵称<input value={nickname} maxLength="32" disabled={savingProfile} onChange={(event) => setNickname(event.target.value)} /></label>
+          <div className="modal-actions"><Button variant="secondary" disabled={savingProfile} onClick={() => setEditOpen(false)}>取消</Button><Button disabled={savingProfile || !nickname.trim()} onClick={saveNickname}>{savingProfile ? "保存中…" : "保存"}</Button></div>
+        </Modal>
+      )}
+    </main>
   );
 }
 
-const learningMonths = [
-  {
-    key: "2026-05", year: 2026, month: 4, label: "2026 年 5 月",
-    records: { 2: [14, 1, 2], 5: [22, 2, 3], 8: [18, 1, 2], 12: [31, 2, 4], 13: [12, 1, 1], 17: [26, 2, 3], 20: [35, 3, 5], 24: [19, 1, 2], 27: [28, 2, 4], 30: [16, 1, 2] },
-  },
-  {
-    key: "2026-06", year: 2026, month: 5, label: "2026 年 6 月",
-    records: { 1: [20, 1, 2], 3: [28, 2, 3], 4: [16, 1, 2], 7: [34, 2, 4], 9: [15, 1, 2], 10: [25, 2, 3], 14: [38, 3, 5], 15: [18, 1, 2], 18: [31, 2, 4], 19: [12, 1, 1], 21: [27, 2, 3], 23: [35, 3, 5], 24: [22, 2, 3], 28: [29, 2, 4], 30: [17, 1, 2] },
-  },
-  {
-    key: "2026-07", year: 2026, month: 6, label: "2026 年 7 月",
-    records: { 1: [18, 1, 2], 2: [26, 2, 3], 4: [34, 2, 4], 5: [12, 1, 1], 7: [40, 3, 5], 8: [31, 2, 4], 9: [22, 2, 3], 11: [24, 2, 3], 12: [16, 1, 2], 14: [33, 2, 4], 15: [20, 1, 2], 16: [29, 2, 4], 17: [37, 3, 5], 18: [34, 2, 4], 19: [18, 1, 2], 20: [28, 2, 4] },
-  },
-];
+const achievementIcons = {
+  "message-circle": MessageCircleMore,
+  footprints: Footprints,
+  compass: Compass,
+  star: Sparkles,
+  mic: AudioLines,
+  bookmark: PackageCheck,
+  "messages-square": MessagesSquare,
+  blocks: Languages,
+  headphones: LucideHeadphones,
+  "calendar-check": CalendarCheck2,
+};
 
-const achievements = [
-  { id: "first-talk", title: "初次开口", desc: "完成首次自由对话", category: "开口", progress: 1, total: 1, icon: MessageCircleMore },
-  { id: "seven-days", title: "七日同行", desc: "连续学习 7 天", category: "连续", progress: 7, total: 7, icon: Footprints },
-  { id: "scene-explorer", title: "场景探索者", desc: "完成 5 个不同场景", category: "场景", progress: 5, total: 5, icon: Compass },
-  { id: "expression-star", title: "表达新星", desc: "单次表达评分达到 90", category: "成长", progress: 90, total: 90, icon: Sparkles },
-  { id: "pronunciation", title: "发音校准师", desc: "完成 30 次跟读评分", category: "成长", progress: 18, total: 30, icon: AudioLines },
-  { id: "asset-keeper", title: "资产收藏家", desc: "保存 20 个学习资产", category: "成长", progress: 12, total: 20, icon: PackageCheck },
-  { id: "conversation-regular", title: "对话常客", desc: "累计完成 20 次对话", category: "开口", progress: 9, total: 20, icon: MessagesSquare },
-  { id: "goal-hitter", title: "目标命中", desc: "连续 4 周完成周目标", category: "连续", progress: 2, total: 4, icon: Target },
-  { id: "language-builder", title: "表达拓荒者", desc: "掌握 100 个实用表达", category: "成长", progress: 46, total: 100, icon: Languages },
-  { id: "listener", title: "听力捕手", desc: "收听示范音频 50 次", category: "开口", progress: 32, total: 50, icon: LucideHeadphones },
-  { id: "full-month", title: "月度全勤", desc: "单月完成 20 天打卡", category: "连续", progress: 16, total: 20, icon: CalendarCheck2 },
-  { id: "speaking-master", title: "口语大师", desc: "解锁其余全部成就", category: "场景", progress: 4, total: 11, icon: Trophy },
-];
+const achievementCategoryLabels = {
+  CONVERSATION: "开口",
+  STREAK: "连续",
+  EXPLORATION: "场景",
+  EVALUATION: "成长",
+  ASSET: "成长",
+  LISTENING: "成长",
+};
 
-function LearningCalendar() {
-  const [monthIndex, setMonthIndex] = useState(learningMonths.length - 1);
-  const [selectedDay, setSelectedDay] = useState(20);
-  const month = learningMonths[monthIndex];
-  const daysInMonth = new Date(month.year, month.month + 1, 0).getDate();
-  const leadingDays = (new Date(month.year, month.month, 1).getDay() + 6) % 7;
-  const selectedRecord = month.records[selectedDay];
-  const changeMonth = (nextIndex) => {
-    const nextMonth = learningMonths[nextIndex];
-    const latestRecordedDay = Math.max(...Object.keys(nextMonth.records).map(Number));
-    setMonthIndex(nextIndex);
-    setSelectedDay(latestRecordedDay);
-  };
+const formatMonthLabel = (yearMonth) => {
+  const [year, month] = yearMonth.split("-");
+  return `${year} 年 ${Number(month)} 月`;
+};
+
+const shiftYearMonth = (yearMonth, offset) => {
+  const [year, month] = yearMonth.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1 + offset, 1));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+
+const currentYearMonth = () => {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}`;
+};
+
+const currentShanghaiDate = () => {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+};
+
+function LearningCalendar({ calendar, loading, onMonthChange }) {
+  const [year, monthNumber] = calendar.yearMonth.split("-").map(Number);
+  const monthIndex = monthNumber - 1;
+  const label = formatMonthLabel(calendar.yearMonth);
+  const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const leadingDays = (new Date(Date.UTC(year, monthIndex, 1)).getUTCDay() + 6) % 7;
+  const records = useMemo(
+    () => new Map((calendar.days || []).map((day) => [Number(day.date.slice(-2)), day])),
+    [calendar],
+  );
+  const practicedDays = [...records.entries()]
+    .filter(([, day]) => day.learningMinutes > 0 || day.practiceCount > 0 || day.savedAssetCount > 0)
+    .map(([day]) => day);
+  const [selectedDay, setSelectedDay] = useState(practicedDays.at(-1) || 1);
+
+  useEffect(() => {
+    setSelectedDay(practicedDays.at(-1) || 1);
+  }, [calendar.yearMonth]);
+
+  const selectedRecord = records.get(selectedDay);
+  const selectedPracticed = selectedRecord && (
+    selectedRecord.learningMinutes > 0
+    || selectedRecord.practiceCount > 0
+    || selectedRecord.savedAssetCount > 0
+  );
+  const today = currentShanghaiDate();
+
   return (
     <article className="calendar-card">
       <header className="calendar-card__header">
         <div><p className="eyebrow">LEARNING CALENDAR</p><h2>学习日历</h2></div>
         <div className="calendar-month-switcher">
-          <button type="button" aria-label="查看上一个月" disabled={monthIndex === 0} onClick={() => changeMonth(monthIndex - 1)}><ChevronLeft /></button>
-          <strong aria-live="polite">{month.label}</strong>
-          <button type="button" aria-label="查看下一个月" disabled={monthIndex === learningMonths.length - 1} onClick={() => changeMonth(monthIndex + 1)}><ChevronRight /></button>
+          <button type="button" aria-label="查看上一个月" disabled={loading} onClick={() => onMonthChange(shiftYearMonth(calendar.yearMonth, -1))}><ChevronLeft /></button>
+          <strong aria-live="polite">{label}</strong>
+          <button type="button" aria-label="查看下一个月" disabled={loading || calendar.yearMonth >= currentYearMonth()} onClick={() => onMonthChange(shiftYearMonth(calendar.yearMonth, 1))}><ChevronRight /></button>
         </div>
       </header>
       <div className="calendar-weekdays" aria-hidden="true">{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>周{day}</span>)}</div>
-      <div className="calendar-days" role="grid" aria-label={`${month.label}学习记录`}>
+      <div className="calendar-days" role="grid" aria-label={`${label}学习记录`}>
         {Array.from({ length: leadingDays }, (_, index) => <span key={`blank-${index}`} className="calendar-blank" />)}
         {Array.from({ length: daysInMonth }, (_, index) => {
           const day = index + 1;
-          const record = month.records[day];
-          const isToday = month.key === "2026-07" && day === 20;
+          const record = records.get(day);
+          const practiced = record && (record.learningMinutes > 0 || record.practiceCount > 0 || record.savedAssetCount > 0);
+          const date = `${calendar.yearMonth}-${String(day).padStart(2, "0")}`;
+          const isToday = date === today;
           return (
-            <button key={day} type="button" role="gridcell" aria-label={`${month.label}${day}日${record ? `，已打卡 ${record[0]} 分钟` : "，无学习记录"}`} className={cx(record && "is-practiced", isToday && "is-today", selectedDay === day && "is-selected")} onClick={() => setSelectedDay(day)}>
-              <span>{day}</span>{record && <i aria-hidden="true" />}{isToday && <small>今天</small>}
+            <button key={day} type="button" role="gridcell" aria-label={`${label}${day}日${practiced ? `，已打卡 ${record.learningMinutes} 分钟` : "，无学习记录"}`} className={cx(practiced && "is-practiced", isToday && "is-today", selectedDay === day && "is-selected")} onClick={() => setSelectedDay(day)}>
+              <span>{day}</span>{practiced && <i aria-hidden="true" />}{isToday && <small>今天</small>}
             </button>
           );
         })}
       </div>
-      <div className={cx("calendar-summary", selectedRecord && "is-complete")}>
-        <span className="calendar-summary__status"><CalendarCheck2 />{selectedRecord ? "已打卡" : "未打卡"}</span>
-        <div><strong>{month.month + 1} 月 {selectedDay} 日</strong><small>{selectedRecord ? `${selectedRecord[0]} 分钟 · ${selectedRecord[1]} 次练习 · ${selectedRecord[2]} 个学习资产` : "这一天还没有学习记录"}</small></div>
+      <div className={cx("calendar-summary", selectedPracticed && "is-complete")}>
+        <span className="calendar-summary__status"><CalendarCheck2 />{selectedPracticed ? "已打卡" : "未打卡"}</span>
+        <div><strong>{monthNumber} 月 {selectedDay} 日</strong><small>{selectedPracticed ? `${selectedRecord.learningMinutes} 分钟 · ${selectedRecord.practiceCount} 次练习 · ${selectedRecord.savedAssetCount} 个学习资产` : "这一天还没有学习记录"}</small></div>
       </div>
     </article>
   );
 }
 
-function AchievementSystem() {
+function AchievementSystem({ achievements }) {
   const [filter, setFilter] = useState("全部");
-  const filtered = filter === "全部" ? achievements : achievements.filter((item) => item.category === filter);
-  const unlockedCount = achievements.filter((item) => item.progress >= item.total).length;
+  const items = achievements?.items || [];
+  const decorated = items.map((item) => ({
+    ...item,
+    categoryLabel: achievementCategoryLabels[item.category] || item.category || "其他",
+  }));
+  const categories = ["全部", ...new Set(decorated.map((item) => item.categoryLabel))];
+  const filtered = filter === "全部" ? decorated : decorated.filter((item) => item.categoryLabel === filter);
+  const unlockedCount = achievements?.unlockedCount || 0;
+  const totalCount = achievements?.totalCount || 0;
   return (
     <section className="achievement-system">
       <header className="achievement-system__header">
         <div><p className="eyebrow">ACHIEVEMENTS</p><h2>成就图鉴</h2><p>每一种进步，都值得被单独记录。</p></div>
-        <div className="achievement-overall"><span><strong>{unlockedCount}</strong><small>/ {achievements.length} 已获得</small></span><progress value={unlockedCount} max={achievements.length} /></div>
+        <div className="achievement-overall"><span><strong>{unlockedCount}</strong><small>/ {totalCount} 已获得</small></span><progress value={unlockedCount} max={Math.max(totalCount, 1)} /></div>
       </header>
-      <nav className="achievement-filters" aria-label="成就分类">{["全部", "开口", "连续", "场景", "成长"].map((item) => <button key={item} type="button" className={filter === item ? "is-active" : ""} onClick={() => setFilter(item)}>{item}<small>{item === "全部" ? achievements.length : achievements.filter((achievement) => achievement.category === item).length}</small></button>)}</nav>
+      <nav className="achievement-filters" aria-label="成就分类">{categories.map((category) => <button key={category} type="button" className={filter === category ? "is-active" : ""} onClick={() => setFilter(category)}>{category}<small>{category === "全部" ? decorated.length : decorated.filter((achievement) => achievement.categoryLabel === category).length}</small></button>)}</nav>
       <div className="achievement-grid" aria-live="polite">
-        {filtered.map(({ icon: Icon, ...item }) => {
-          const unlocked = item.progress >= item.total;
-          const percentage = Math.min(100, Math.round((item.progress / item.total) * 100));
-          return <article key={item.id} className={cx("achievement-card", unlocked && "is-unlocked")}><div className="achievement-card__icon"><Icon strokeWidth={1.8} /></div><div className="achievement-card__copy"><span><strong>{item.title}</strong><em>{unlocked ? "已获得" : `${percentage}%`}</em></span><p>{item.desc}</p><div><progress value={item.progress} max={item.total} /><small>{item.progress} / {item.total}</small></div></div></article>;
+        {filtered.map((item) => {
+          const Icon = achievementIcons[item.iconKey] || Trophy;
+          const percentage = item.targetValue > 0 ? Math.min(100, Math.round((item.progressValue / item.targetValue) * 100)) : 0;
+          return <article key={item.code} className={cx("achievement-card", item.unlocked && "is-unlocked")}><div className="achievement-card__icon"><Icon strokeWidth={1.8} /></div><div className="achievement-card__copy"><span><strong>{item.name}</strong><em>{item.unlocked ? "已获得" : `${percentage}%`}</em></span><p>{item.description}</p><div><progress value={item.progressValue} max={Math.max(item.targetValue, 1)} /><small>{item.progressValue} / {item.targetValue}</small></div></div></article>;
         })}
+        {!filtered.length && <p className="profile-data-empty">暂无可展示的成就</p>}
       </div>
     </section>
   );
 }
 
-function Overview() {
-  return <><PageHeader eyebrow="PERSONAL OVERVIEW" title="你的学习空间" subtitle="把每一次开口变成看得见、可继续的成长记录。" /><div className="stat-grid"><article><Clock /><span><small>本周学习时长</small><strong>183 <em>分钟</em></strong></span></article><article><BookOpenText /><span><small>已保存学习资产</small><strong>12 <em>项</em></strong></span></article><article><Fire /><span><small>连续学习天数</small><strong>7 <em>天</em></strong></span></article></div><section className="overview-grid"><LearningCalendar /><article className="rhythm-card"><p className="eyebrow">LAST SEVEN DAYS</p><h2>练习节奏</h2><div className="bars">{[38, 62, 78, 26, 92, 70, 48].map((height, index) => <span key={index} style={{ height: `${height}%` }}><small>{[18, 26, 34, 12, 40, 31, 22][index]}m</small></span>)}</div></article></section><AchievementSystem /></>;
+function Overview({ onAssets }) {
+  const [requestedMonth, setRequestedMonth] = useState(currentYearMonth);
+  const [overview, setOverview] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [retryVersion, setRetryVersion] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    getProfileOverview(requestedMonth)
+      .then((response) => {
+        if (!cancelled) setOverview(response);
+      })
+      .catch((requestError) => {
+        if (!cancelled) setError(requestError instanceof Error ? requestError.message : "个人概览加载失败");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedMonth, retryVersion]);
+
+  if (!overview) {
+    return (
+      <>
+        <PageHeader eyebrow="PERSONAL OVERVIEW" title="你的学习空间" subtitle="把每一次开口变成看得见、可继续的成长记录。" />
+        <div className="profile-data-state" aria-live="polite">
+          {loading ? "正在加载真实学习数据…" : <><span>{error || "暂无个人概览数据"}</span><Button variant="secondary" onClick={() => setRetryVersion((value) => value + 1)}>重试</Button></>}
+        </div>
+      </>
+    );
+  }
+
+  const rhythmDays = (overview.calendar?.days || []).slice(-7);
+  const maxMinutes = Math.max(1, ...rhythmDays.map((day) => day.learningMinutes));
+  return (
+    <>
+      <PageHeader eyebrow="PERSONAL OVERVIEW" title="你的学习空间" subtitle="把每一次开口变成看得见、可继续的成长记录。" action={loading ? <span className="sync-state">更新中…</span> : null} />
+      {error && <div className="profile-data-warning"><span>{error}</span><button type="button" onClick={() => setRetryVersion((value) => value + 1)}>重试</button></div>}
+      <div className="stat-grid">
+        <article><Clock /><span><small>本周学习时长</small><strong>{overview.summary.weeklyMinutes} <em>分钟</em></strong></span></article>
+        <button type="button" className="stat-grid__link" onClick={onAssets}><BookOpenText /><span><small>已保存学习资产</small><strong>{overview.summary.savedAssetCount} <em>项</em></strong></span></button>
+        <article><Fire /><span><small>连续学习天数</small><strong>{overview.summary.continuousLearningDays} <em>天</em></strong></span></article>
+      </div>
+      <section className="overview-grid">
+        <LearningCalendar calendar={overview.calendar} loading={loading} onMonthChange={setRequestedMonth} />
+        <article className="rhythm-card"><p className="eyebrow">MONTH-END RHYTHM</p><h2>月末七日节奏</h2><div className="bars">{rhythmDays.map((day) => <span key={day.date} style={{ height: `${Math.max(8, Math.round((day.learningMinutes / maxMinutes) * 100))}%` }}><small>{day.learningMinutes}m</small></span>)}</div></article>
+      </section>
+      <AchievementSystem achievements={overview.achievements} />
+    </>
+  );
 }
 
 function Membership() {
@@ -1387,14 +1622,136 @@ function Membership() {
   return <><PageHeader eyebrow="MEMBERSHIP & PRICING" title="会员与订阅中心" subtitle="练习额度平时不会打扰你，只会在不足 20% 或无法开始时提醒。" /><div className="plan-grid">{plans.map((plan) => <article key={plan.id} className={cx("plan-card", plan.id === "pro" && "is-featured")}><div>{plan.id === "free" && <span className="plan-label">当前方案</span>}{plan.id === "pro" && <span className="plan-label">推荐</span>}<h2>{plan.name}</h2><p>{plan.desc}</p></div><p className="price"><small>¥</small><strong>{plan.price}</strong><span>{plan.suffix}</span></p><ul>{plan.features.map((feature) => <li key={feature}><Check />{feature}</li>)}</ul>{plan.id === "free" ? <div className="quota"><span><small>今日自由对话</small><strong>3 / 5 分钟</strong></span><progress value="3" max="5" /><span><small>今日普通场景</small><strong>0 / 1 次</strong></span></div> : <Button variant={plan.id === "pro" ? "primary" : "secondary"} onClick={() => setCheckout(plan)}>升级{plan.name}</Button>}</article>)}</div>{checkout && <Modal onClose={() => setCheckout(null)}><p className="eyebrow">MOCK PAYMENT</p><h2>确认升级至{checkout.name}</h2><p className="modal-lead">首版为支付演示。确认后仅展示成功状态，不会产生真实扣款。</p><dl className="checkout-summary"><div><dt>订阅方案</dt><dd>{checkout.name}</dd></div><div><dt>订阅金额</dt><dd>¥{checkout.price} / 月</dd></div><div><dt>生效时间</dt><dd>立即生效</dd></div></dl><Button onClick={() => setCheckout(null)}>模拟支付并完成</Button></Modal>}</>;
 }
 
-function Settings({ teacher, speed, level, onSettingsChange }) {
+function Settings({
+  teacher,
+  speed,
+  level,
+  preference,
+  onPreferenceChange,
+  onSettingsChange,
+  onSessionInvalidated,
+}) {
   const [syncPulse, setSyncPulse] = useState(0);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [deletionOpen, setDeletionOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [deletionPassword, setDeletionPassword] = useState("");
+  const [deletionConfirmed, setDeletionConfirmed] = useState(false);
+  const [memoryText, setMemoryText] = useState(preference?.memoryText || "");
+  const [savingAccount, setSavingAccount] = useState(false);
+
+  useEffect(() => {
+    setMemoryText(preference?.memoryText || "");
+  }, [preference?.memoryText]);
+
   const updateSettings = async (next) => {
     if (await onSettingsChange(next)) {
       setSyncPulse((current) => current + 1);
     }
   };
-  return <div className="assistant-settings-page"><PageHeader eyebrow="ASSISTANT SETTINGS" title="AI 助手设置" subtitle="只调整真正影响对话体验的选项。" action={<span key={syncPulse} className="sync-state"><CheckCircle />设置已同步</span>} /><section className="settings-list"><article><div><h2>对话语速</h2><p>选择更舒适的回应节奏。</p></div><SpeedSelector className="assistant-settings__speed" value={speed} onChange={(nextSpeed) => updateSettings({ speed: nextSpeed })} /></article><article><div><h2>英语水平</h2><p>新对话会按照该难度调整表达。</p></div><LevelSelect value={level} onChange={(nextLevel) => updateSettings({ level: nextLevel })} /></article><article className="teacher-settings"><div><h2>AI 老师</h2><p>每位老师有固定口音和陪练方式。</p></div><TeacherSelector className="assistant-settings__teachers" selectedId={teacher.id} onSelect={(nextTeacher) => updateSettings({ teacher: nextTeacher })} /></article><article><div><h2>账户与隐私</h2><p>管理密码与账户数据。</p></div><div className="account-actions"><button><Password />修改密码<CaretRight /></button><button className="danger"><Trash />删除账户<CaretRight /></button></div></article></section></div>;
+
+  const resetPasswordModal = () => {
+    setPasswordOpen(false);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+  };
+
+  const submitPassword = async (event) => {
+    event.preventDefault();
+    if (newPassword !== confirmPassword) {
+      window.alert("两次输入的新密码不一致");
+      return;
+    }
+    setSavingAccount(true);
+    try {
+      await changePassword({ currentPassword, newPassword });
+      resetPasswordModal();
+      onSessionInvalidated();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "密码修改失败");
+    } finally {
+      setSavingAccount(false);
+    }
+  };
+
+  const submitDeletion = async (event) => {
+    event.preventDefault();
+    if (!deletionConfirmed) return;
+    setSavingAccount(true);
+    try {
+      await requestAccountDeletion({ currentPassword: deletionPassword });
+      setDeletionOpen(false);
+      onSessionInvalidated();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "账户注销申请失败");
+    } finally {
+      setSavingAccount(false);
+    }
+  };
+
+  const saveMemory = async (nextMemoryText) => {
+    setSavingAccount(true);
+    try {
+      const nextPreference = await updateUserPreference({ memoryText: nextMemoryText });
+      onPreferenceChange(nextPreference);
+      setMemoryText(nextPreference.memoryText || "");
+      setSyncPulse((current) => current + 1);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "长期用户资料保存失败");
+    } finally {
+      setSavingAccount(false);
+    }
+  };
+
+  return (
+    <div className="assistant-settings-page">
+      <PageHeader eyebrow="ASSISTANT SETTINGS" title="AI 助手设置" subtitle="只调整真正影响对话体验的选项。" action={<span key={syncPulse} className="sync-state"><CheckCircle />设置已同步</span>} />
+      <section className="settings-list">
+        <article><div><h2>对话语速</h2><p>选择更舒适的回应节奏。</p></div><SpeedSelector className="assistant-settings__speed" value={speed} onChange={(nextSpeed) => updateSettings({ speed: nextSpeed })} /></article>
+        <article><div><h2>英语水平</h2><p>新对话会按照该难度调整表达。</p></div><LevelSelect value={level} onChange={(nextLevel) => updateSettings({ level: nextLevel })} /></article>
+        <article className="teacher-settings"><div><h2>AI 老师</h2><p>每位老师有固定口音和陪练方式。</p></div><TeacherSelector className="assistant-settings__teachers" selectedId={teacher.id} onSelect={(nextTeacher) => updateSettings({ teacher: nextTeacher })} /></article>
+        <article className="privacy-memory">
+          <div><h2>长期用户资料</h2><p>只保存你主动提供、希望 AI 老师长期记住的背景。可随时编辑或清空。</p></div>
+          <div className="privacy-memory__editor">
+            <textarea value={memoryText} maxLength="4000" disabled={savingAccount} placeholder="例如：希望被如何称呼、熟悉的工作背景、需要避开的话题…" onChange={(event) => setMemoryText(event.target.value)} />
+            <div><small>{memoryText.length}/4000</small><button type="button" disabled={savingAccount || !memoryText} onClick={() => saveMemory("")}>清空</button><button type="button" disabled={savingAccount || memoryText === (preference?.memoryText || "")} onClick={() => saveMemory(memoryText)}>保存</button></div>
+          </div>
+        </article>
+        <article>
+          <div><h2>账户与隐私</h2><p>修改密码会退出所有设备；注销后保留 30 天，期间可恢复。</p></div>
+          <div className="account-actions"><button type="button" onClick={() => setPasswordOpen(true)}><Password />修改密码<CaretRight /></button><button type="button" className="danger" onClick={() => setDeletionOpen(true)}><Trash />申请注销账户<CaretRight /></button></div>
+        </article>
+      </section>
+      {passwordOpen && (
+        <Modal onClose={resetPasswordModal}>
+          <p className="eyebrow">ACCOUNT SECURITY</p>
+          <h2>修改密码</h2>
+          <p className="modal-lead">修改成功后，当前设备和其他所有设备都会退出登录。</p>
+          <form className="account-modal-form" onSubmit={submitPassword}>
+            <label>当前密码<input type="password" minLength="6" maxLength="72" required value={currentPassword} disabled={savingAccount} onChange={(event) => setCurrentPassword(event.target.value)} /></label>
+            <label>新密码<input type="password" minLength="6" maxLength="72" required value={newPassword} disabled={savingAccount} onChange={(event) => setNewPassword(event.target.value)} /></label>
+            <label>确认新密码<input type="password" minLength="6" maxLength="72" required value={confirmPassword} disabled={savingAccount} onChange={(event) => setConfirmPassword(event.target.value)} /></label>
+            <div className="modal-actions"><Button type="button" variant="secondary" disabled={savingAccount} onClick={resetPasswordModal}>取消</Button><Button type="submit" disabled={savingAccount}>{savingAccount ? "修改中…" : "确认修改"}</Button></div>
+          </form>
+        </Modal>
+      )}
+      {deletionOpen && (
+        <Modal onClose={() => setDeletionOpen(false)}>
+          <p className="eyebrow">ACCOUNT DELETION</p>
+          <h2>申请注销账户</h2>
+          <p className="modal-lead">账号会立即停用并退出所有设备；数据保留 30 天，期限内可用邮箱和密码恢复。</p>
+          <form className="account-modal-form" onSubmit={submitDeletion}>
+            <label>当前密码<input type="password" minLength="6" maxLength="72" required value={deletionPassword} disabled={savingAccount} onChange={(event) => setDeletionPassword(event.target.value)} /></label>
+            <label className="account-confirm"><input type="checkbox" checked={deletionConfirmed} disabled={savingAccount} onChange={(event) => setDeletionConfirmed(event.target.checked)} />我已了解账号会立即停用</label>
+            <div className="modal-actions"><Button type="button" variant="secondary" disabled={savingAccount} onClick={() => setDeletionOpen(false)}>取消</Button><Button type="submit" disabled={savingAccount || !deletionConfirmed}>{savingAccount ? "提交中…" : "确认申请注销"}</Button></div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
 }
 
 function Paywall({ title, onClose, onMembership }) {
@@ -1405,6 +1762,7 @@ export function App() {
   const initialRoute = useMemo(() => resolveRoute(window.location), []);
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState(null);
+  const [preference, setPreference] = useState(null);
   const [flow, setFlow] = useState(initialRoute.flow);
   const [authMode, setAuthMode] = useState(initialRoute.authMode);
   const [level, setLevel] = useState("");
@@ -1443,6 +1801,7 @@ export function App() {
 
   const applyPreference = (preference) => {
     if (!preference) return;
+    setPreference(preference);
     const nextLevel = levels.find((item) => item.cefrLevel === preference.cefrLevel);
     const nextTeacher = teachers.find((item) => item.voiceId === preference.preferredVoice);
     if (nextLevel) setLevel(nextLevel.id);
@@ -1580,7 +1939,14 @@ export function App() {
   const logout = () => {
     clearAuthSession();
     setUser(null);
+    setPreference(null);
     goSplash();
+  };
+  const invalidateSession = () => {
+    clearAuthSession();
+    setUser(null);
+    setPreference(null);
+    navigate(paths.auth.login, { authMode: "login" }, true);
   };
   const startTraining = (title, initialStep = "learn", options = {}) => {
     setSceneTitle(title);
@@ -1606,6 +1972,6 @@ export function App() {
   else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBackToAssets={() => setMainPage("assets")} onInterviewAssets={() => setMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
   else if (page === "interview") content = <InterviewTrainingCenter route={interviewRoute} onNavigate={navigateInterview} onExit={() => setMainPage("scenes")} onAssets={() => navigateInterview(paths.interview.assets.root)} />;
   else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBackToAssets={() => setMainPage("assets")} onIeltsAssets={() => setMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} />;
-  else content = <Profile section={page} setSection={setMainPage} user={user} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onLogout={logout} />;
-  return <AppShell page={page} setPage={setMainPage} teacher={teacher}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}</AppShell>;
+  else content = <Profile section={page} setSection={setMainPage} user={user} onUserChange={setUser} teacher={teacher} speed={conversationSpeed} level={level} preference={preference} onPreferenceChange={applyPreference} onSettingsChange={persistSettings} onSessionInvalidated={invalidateSession} onLogout={logout} onAssets={() => setMainPage("assets")} />;
+  return <AppShell page={page} setPage={setMainPage} user={user}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}</AppShell>;
 }

@@ -6,7 +6,9 @@ async function unwrap(response) {
   const body = contentType.includes("application/json") ? await response.json() : await response.text();
   if (!response.ok || (body && typeof body === "object" && body.success === false)) {
     const message = body?.message || body?.code || `请求失败（${response.status}）`;
-    throw new Error(message);
+    const error = new Error(message);
+    error.code = body?.code;
+    throw error;
   }
   return body && typeof body === "object" && "success" in body ? body.data : body;
 }
@@ -118,11 +120,13 @@ export function requestAccountDeletion({ currentPassword }) {
   });
 }
 
-export function reactivateAccount({ username, password }) {
-  return request("/api/auth/reactivate", {
+export async function reactivateAccount({ username, password }) {
+  const auth = await request("/api/auth/reactivate", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
+  saveAuthSession(auth);
+  return auth;
 }
 
 export function translateText(text) {
