@@ -65,11 +65,21 @@ public class ProfileAccountServiceImpl implements ProfileAccountService {
 			safeDelete(key);
 			throw new BusinessException("PROFILE_UPDATE_CONFLICT", "头像已发生变化，请重试");
 		}
+		URI signed = signAvatar(key);
 		if (user.avatarObjectKey() != null) safeDelete(user.avatarObjectKey());
-		URI signed = storage.signGetUrl(key, properties.getSignedUrlTtl());
 		return new AvatarResponse(
-				signed.toString(),
-				Instant.now().plus(properties.getSignedUrlTtl()));
+				signed == null ? null : signed.toString(),
+				signed == null ? null : Instant.now().plus(properties.getSignedUrlTtl()));
+	}
+
+	private URI signAvatar(String key) {
+		try {
+			return storage.signGetUrl(key, properties.getSignedUrlTtl());
+		}
+		catch (BusinessException exception) {
+			LOGGER.warn("avatar url signing failed");
+			return null;
+		}
 	}
 
 	private void safeDelete(String key) {
