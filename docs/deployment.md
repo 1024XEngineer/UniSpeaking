@@ -18,12 +18,12 @@ session or using profile avatars:
 DASHSCOPE_API_KEY=replace-with-your-real-key
 BAILIAN_WORKSPACE_ID=replace-with-your-workspace-id
 BAILIAN_MODEL=qwen3.5-omni-flash-realtime
-ALIYUN_OSS_ENDPOINT=https://oss-cn-hangzhou.aliyuncs.com
-ALIYUN_OSS_BUCKET=replace-with-your-private-bucket
-ALIYUN_OSS_ACCESS_KEY_ID=replace-with-your-access-key-id
-ALIYUN_OSS_ACCESS_KEY_SECRET=replace-with-your-access-key-secret
-ALIYUN_OSS_AVATAR_PREFIX=avatars
-ALIYUN_OSS_SIGNED_URL_TTL=1h
+OSS_ENDPOINT=https://oss-cn-hangzhou.aliyuncs.com
+OSS_BUCKET=replace-with-your-private-bucket
+OSS_ACCESS_KEY_ID=replace-with-your-access-key-id
+OSS_ACCESS_KEY_SECRET=replace-with-your-access-key-secret
+OSS_AVATAR_PREFIX=avatars
+OSS_SIGNED_URL_TTL=1h
 PROFILE_TIME_ZONE=Asia/Shanghai
 ```
 
@@ -72,12 +72,12 @@ profile:
 
 object-storage:
   aliyun:
-    endpoint: ${ALIYUN_OSS_ENDPOINT:}
-    bucket: ${ALIYUN_OSS_BUCKET:}
-    access-key-id: ${ALIYUN_OSS_ACCESS_KEY_ID:}
-    access-key-secret: ${ALIYUN_OSS_ACCESS_KEY_SECRET:}
-    avatar-prefix: ${ALIYUN_OSS_AVATAR_PREFIX:avatars}
-    signed-url-ttl: ${ALIYUN_OSS_SIGNED_URL_TTL:1h}
+    endpoint: ${OSS_ENDPOINT:}
+    bucket: ${OSS_BUCKET:}
+    access-key-id: ${OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
+    avatar-prefix: ${OSS_AVATAR_PREFIX:avatars}
+    signed-url-ttl: ${OSS_SIGNED_URL_TTL:1h}
 ```
 
 The WebRTC SDP endpoint is derived automatically:
