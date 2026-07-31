@@ -1,5 +1,11 @@
 # UniSpeaking
 
+[![后端测试](https://github.com/1024XEngineer/UniSpeaking/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/1024XEngineer/UniSpeaking/actions/workflows/coverage.yml)
+[![后端覆盖率](https://codecov.io/gh/1024XEngineer/UniSpeaking/branch/main/graph/badge.svg?flag=backend)](https://codecov.io/gh/1024XEngineer/UniSpeaking)
+
+覆盖率目前统计后端 Java 代码，合并单元测试及 PostgreSQL、Redis 集成测试结果；
+前端尚未接入自动化测试覆盖率。
+
 UniSpeaking 是一个面向英语口语学习的 AI 实时陪练系统。当前仓库包含 React 前端、
 Spring Boot 后端、PostgreSQL 数据模型以及 Nginx/Docker 部署配置。
 
