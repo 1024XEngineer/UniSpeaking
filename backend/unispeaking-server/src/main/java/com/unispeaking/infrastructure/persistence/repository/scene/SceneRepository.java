@@ -16,4 +16,5 @@ public interface SceneRepository {
 	Optional<SceneGenerationResponse> findGeneratedById(String sceneId);
 	Optional<CustomSceneDefinition> findCustomDefinitionById(String sceneId);
 	List<SceneAssetSnapshot> findAssetsByUserId(String userId);
+	List<String> findAllIdsByUserId(String userId);
 }
