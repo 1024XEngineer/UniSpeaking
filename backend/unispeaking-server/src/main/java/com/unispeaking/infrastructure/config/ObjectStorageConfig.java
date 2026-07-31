@@ -13,7 +13,7 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class ObjectStorageConfig {
 
-	@Bean(destroyMethod = "")
+	@Bean(destroyMethod = "close")
 	ObjectStorageProvider objectStorageProvider(ObjectStorageProperties properties) {
 		if (!properties.configured()) {
 			return new UnavailableObjectStorageProvider();
@@ -22,22 +22,7 @@ public class ObjectStorageConfig {
 				properties.getEndpoint(),
 				properties.getAccessKeyId(),
 				properties.getAccessKeySecret());
-		return new ManagedAliyunProvider(client, properties);
-	}
-
-	private static final class ManagedAliyunProvider
-			extends AliyunOssObjectStorageProvider {
-		private final OSS client;
-
-		private ManagedAliyunProvider(OSS client, ObjectStorageProperties properties) {
-			super(client, properties);
-			this.client = client;
-		}
-
-		@SuppressWarnings("unused")
-		public void shutdown() {
-			client.shutdown();
-		}
+		return new AliyunOssObjectStorageProvider(client, properties);
 	}
 
 	private static final class UnavailableObjectStorageProvider
