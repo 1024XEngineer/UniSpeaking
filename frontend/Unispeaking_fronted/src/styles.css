@@ -82,10 +82,17 @@ svg { display: block; }
 .audio-toggle--mini svg { width: 22px; height: 22px; }
 .audio-toggle--mini:not(.is-muted) .audio-toggle__speaker { animation: audio-toggle-pop .5s; }
 .audio-toggle--mini.is-muted .audio-toggle__muted { animation: audio-toggle-pop .5s; }
+.audio-toggle--mini.is-playing { color: #55555d; background: #eeeeeb; }
+.audio-toggle--mini.is-playing svg { animation: audio-toggle-playing 1.1s ease-in-out infinite; }
+.audio-toggle--mini.has-error { color: #c3c3bf; cursor: not-allowed; }
 @keyframes audio-toggle-pop {
   0% { transform: rotate(0deg) scale(0); opacity: 0; }
   50% { transform: rotate(-10deg) scale(1.2); }
   100% { transform: rotate(0deg) scale(1); opacity: 1; }
+}
+@keyframes audio-toggle-playing {
+  0%, 100% { transform: scale(.92); }
+  50% { transform: scale(1.08); }
 }
 .audio-toggle__speaker, .audio-toggle__muted { position: absolute; inset: 0; display: grid; place-items: center; transition: opacity .3s, transform .3s; }
 .audio-toggle__muted { opacity: 0; transform: scale(.72); }

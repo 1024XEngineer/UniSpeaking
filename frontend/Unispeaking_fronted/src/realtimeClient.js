@@ -12,7 +12,8 @@ const DEFAULT_VOICE = "Katerina";
 const DEFAULT_MODEL = "qwen3.5-omni-flash-realtime";
 const DATA_CHANNEL_LABEL = "oai-events";
 const DEFAULT_SPEECH_SPEED = "NATURAL";
-const SCENARIO_COMPLETION_TIMEOUT_MS = 10_000;
+const SCENARIO_CLOSING_TIMEOUT_MS = 20_000;
+const SCENARIO_AUDIO_DRAIN_MS = 1_200;
 const SPEECH_SPEED_INSTRUCTIONS = {
   SLOWER: "Voice delivery rule: speak distinctly and very slowly, around 70 English words per minute, with clear pauses between short phrases.",
   MODERATE: "Voice delivery rule: speak at a calm moderate pace, around 120 English words per minute, with clear pauses between ideas.",
@@ -176,7 +177,7 @@ export function buildRealtimeSessionConfig({
       type: String(model || DEFAULT_MODEL).startsWith("qwen3.5-omni-") ? "semantic_vad" : "server_vad",
       threshold: 0.5,
       prefix_padding_ms: 500,
-      silence_duration_ms: 800,
+      silence_duration_ms: 600,
       create_response: Boolean(automaticTurnResponses),
       interrupt_response: true,
     },
@@ -217,6 +218,10 @@ export function createRealtimeClient({
   let scenarioCompletionPending = false;
   let scenarioCompletionEmitted = false;
   let scenarioCompletionTimer = null;
+  let scenarioAudioDrainTimer = null;
+  let responsePending = false;
+  let closingResponseRequested = false;
+  let statePipeline = Promise.resolve();
 
   const emit = (event) => onEvent(event);
 
@@ -374,6 +379,14 @@ export function createRealtimeClient({
 
   function emitScenarioCompleted() {
     if (!scenarioCompletionPending || scenarioCompletionEmitted) return;
+    if (scenarioCompletionTimer) {
+      window.clearTimeout(scenarioCompletionTimer);
+      scenarioCompletionTimer = null;
+    }
+    if (scenarioAudioDrainTimer) {
+      window.clearTimeout(scenarioAudioDrainTimer);
+      scenarioAudioDrainTimer = null;
+    }
     scenarioCompletionEmitted = true;
     emit({ type: "local.scenario_completed" });
     void stop({ reason: "state_machine" }).catch((error) => {
@@ -389,14 +402,35 @@ export function createRealtimeClient({
     scenarioCompletionTimer = window.setTimeout(() => {
       scenarioCompletionTimer = null;
       emitScenarioCompleted();
-    }, SCENARIO_COMPLETION_TIMEOUT_MS);
+    }, SCENARIO_CLOSING_TIMEOUT_MS);
   }
 
-  function requestTurnResponse() {
-    sendProviderEvent({
-      event_id: eventId("turn_response"),
-      type: "response.create",
-    });
+  function scheduleScenarioCompletionAfterAudioDrain() {
+    if (!scenarioCompletionPending || scenarioAudioDrainTimer) return;
+    scenarioAudioDrainTimer = window.setTimeout(() => {
+      scenarioAudioDrainTimer = null;
+      emitScenarioCompleted();
+    }, SCENARIO_AUDIO_DRAIN_MS);
+  }
+
+  function requestTurnResponse({ closing = false } = {}) {
+    if (responsePending) return false;
+    responsePending = true;
+    if (closing) {
+      closingResponseRequested = true;
+      armScenarioCompletionTimeout();
+    }
+    try {
+      sendProviderEvent({
+        event_id: eventId(closing ? "closing_response" : "turn_response"),
+        type: "response.create",
+      });
+    } catch (error) {
+      responsePending = false;
+      if (closing) closingResponseRequested = false;
+      throw error;
+    }
+    return true;
   }
 
   function applyScenarioState(state) {
@@ -419,6 +453,9 @@ export function createRealtimeClient({
     if (segmentActive) {
       currentTurnAudio = segmentRecorder?.stopSegment() || Promise.resolve(null);
       segmentActive = false;
+    }
+    if (!responsePending) {
+      requestTurnResponse({ closing: true });
     }
   }
 
@@ -455,7 +492,11 @@ export function createRealtimeClient({
 
     if (isActiveResponseConflict(event)) {
       initialResponseStarted = true;
-      inputReady = true;
+      if (scenarioCompletionPending && closingResponseRequested) {
+        closingResponseRequested = false;
+      }
+      responsePending = true;
+      inputReady = !customSceneId && !scenarioCompletionPending;
       if (initialResponseFallbackTimer) {
         window.clearTimeout(initialResponseFallbackTimer);
         initialResponseFallbackTimer = null;
@@ -514,6 +555,7 @@ export function createRealtimeClient({
 
     if (event.type === "response.created") {
       initialResponseStarted = true;
+      responsePending = true;
       inputReady = !customSceneId;
       if (initialResponseFallbackTimer) {
         window.clearTimeout(initialResponseFallbackTimer);
@@ -535,21 +577,26 @@ export function createRealtimeClient({
         currentTurnAudio = segmentRecorder?.stopSegment() || Promise.resolve(null);
         segmentActive = false;
       }
-      const persisted = await addSessionMessage(
+      const persistenceOperation = addSessionMessage(
         1,
         transcript,
         event.item_id || event.item?.id || event.event_id,
       );
+      if (customSceneId) {
+        requestTurnResponse();
+      }
+      const persisted = await persistenceOperation;
       if (customSceneId && persisted) {
         const turnNo = ++learnerTurnNo;
         const wavAudio = await currentTurnAudio;
         currentTurnAudio = Promise.resolve(null);
-        const stateOperation = advanceCustomDialogueState(
+        const stateOperation = statePipeline.then(() => advanceCustomDialogueState(
           customSceneId,
           sessionId,
           turnNo,
           transcript,
-        );
+        ));
+        statePipeline = stateOperation.catch(() => null);
         const evaluationOperation = evaluateCustomDialogueTurn(
           customSceneId,
           sessionId,
@@ -578,15 +625,12 @@ export function createRealtimeClient({
         try {
           const scenarioState = await stateOperation;
           applyScenarioState(scenarioState);
-          requestTurnResponse();
-          if (scenarioState?.completed) armScenarioCompletionTimeout();
         } catch (error) {
           emit({
             type: "local.scenario_state_error",
             turnNo,
             message: error instanceof Error ? error.message : "场景状态推进失败",
           });
-          requestTurnResponse();
         } finally {
           pendingOperations.delete(stateOperation);
         }
@@ -603,12 +647,17 @@ export function createRealtimeClient({
       );
     }
     if (event.type === "response.done") {
+      responsePending = false;
       if (scenarioCompletionPending) {
-        if (scenarioCompletionTimer) {
-          window.clearTimeout(scenarioCompletionTimer);
-          scenarioCompletionTimer = null;
+        if (closingResponseRequested) {
+          if (scenarioCompletionTimer) {
+            window.clearTimeout(scenarioCompletionTimer);
+            scenarioCompletionTimer = null;
+          }
+          scheduleScenarioCompletionAfterAudioDrain();
+        } else {
+          requestTurnResponse({ closing: true });
         }
-        emitScenarioCompleted();
       } else if (customSceneId) {
         inputReady = true;
         setTrackEnabled();
@@ -804,6 +853,7 @@ export function createRealtimeClient({
     } finally {
       try { sessionSocket?.close?.(); } catch { /* already closed */ }
       if (scenarioCompletionTimer) window.clearTimeout(scenarioCompletionTimer);
+      if (scenarioAudioDrainTimer) window.clearTimeout(scenarioAudioDrainTimer);
       peer = null;
       channel = null;
       sessionSocket = null;
@@ -820,6 +870,10 @@ export function createRealtimeClient({
       scenarioCompletionPending = false;
       scenarioCompletionEmitted = false;
       scenarioCompletionTimer = null;
+      scenarioAudioDrainTimer = null;
+      responsePending = false;
+      closingResponseRequested = false;
+      statePipeline = Promise.resolve();
       pendingAcks = [];
       persistedMessageIds = new Set();
       sessionUpdateAcknowledged = false;

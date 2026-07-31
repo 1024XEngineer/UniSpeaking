@@ -90,6 +90,6 @@ assert.equal(fasterHarvey.voice, "Harvey");
 assert.match(fasterHarvey.instructions, /210 English words per minute/);
 assert.equal(fasterHarvey.input_audio_transcription.model, "qwen3-asr-flash-realtime");
 assert.equal(fasterHarvey.turn_detection.type, "semantic_vad");
-assert.equal(fasterHarvey.turn_detection.silence_duration_ms, 800);
+assert.equal(fasterHarvey.turn_detection.silence_duration_ms, 600);
 
 console.log("Realtime event normalization checks passed.");

@@ -17,7 +17,7 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class ScenarioDialogueEventExtractor {
 
-	private static final int RECENT_MESSAGE_LIMIT = 16;
+	private static final int RECENT_MESSAGE_LIMIT = 8;
 
 	private final AiProviderRegistry providerRegistry;
 	private final ObjectMapper objectMapper;
