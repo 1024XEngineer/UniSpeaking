@@ -20,6 +20,18 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+profile:
+  time-zone: ${PROFILE_TIME_ZONE:Asia/Shanghai}
+
+object-storage:
+  aliyun:
+    endpoint: ${OSS_ENDPOINT:}
+    bucket: ${OSS_BUCKET:}
+    access-key-id: ${OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
+    avatar-prefix: ${OSS_AVATAR_PREFIX:avatars}
+    signed-url-ttl: ${OSS_SIGNED_URL_TTL:1h}
+
 prompt:
   templates:
     directory: ${PROMPT_TEMPLATE_DIR:}
