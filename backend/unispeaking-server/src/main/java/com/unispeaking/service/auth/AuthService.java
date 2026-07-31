@@ -11,6 +11,8 @@ public interface AuthService {
 	AuthResponse register(RegisterRequest request);
 	AuthResponse login(LoginRequest request);
 	UserAccountResponse currentUser();
-	ChangePasswordResponse changePassword(ChangePasswordRequest request);
+	default ChangePasswordResponse changePassword(ChangePasswordRequest request) {
+		throw new UnsupportedOperationException("Password change is not supported");
+	}
 	String requireUserId(String requestedUserId);
 }
