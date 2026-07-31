@@ -19,7 +19,10 @@ public class AvatarImageProcessor {
 			throw error("AVATAR_FILE_REQUIRED", "请选择头像文件");
 		}
 		if (input.length > MAX_BYTES) {
-			throw error("AVATAR_FILE_TOO_LARGE", "头像不能超过 2 MB");
+			throw error("AVATAR_FILE_TOO_LARGE", "头像不能超过 2 MiB");
+		}
+		if (!hasJpegHeader(input) && !hasPngHeader(input)) {
+			throw error("AVATAR_TYPE_UNSUPPORTED", "仅支持 JPEG 和 PNG 头像");
 		}
 		try {
 			BufferedImage image = ImageIO.read(new ByteArrayInputStream(input));
@@ -43,6 +46,22 @@ public class AvatarImageProcessor {
 		catch (IOException exception) {
 			throw error("AVATAR_CONTENT_INVALID", "头像内容无法识别");
 		}
+	}
+
+	private boolean hasJpegHeader(byte[] input) {
+		return input.length >= 3
+				&& (input[0] & 0xff) == 0xff
+				&& (input[1] & 0xff) == 0xd8
+				&& (input[2] & 0xff) == 0xff;
+	}
+
+	private boolean hasPngHeader(byte[] input) {
+		byte[] signature = {(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+		if (input.length < signature.length) return false;
+		for (int index = 0; index < signature.length; index++) {
+			if (input[index] != signature[index]) return false;
+		}
+		return true;
 	}
 
 	private BusinessException error(String code, String message) {
