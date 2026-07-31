@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  core:
+    name: PR 核心检查
+    if: github.event.pull_request.draft == false
+    uses: ./.github/workflows/ci-core.yml
+    with:
+      pr_number: ${{ format('{0}', github.event.pull_request.number) }}
+      base_sha: ${{ github.event.pull_request.base.sha }}
+      head_sha: ${{ github.event.pull_request.head.sha }}
+      merge_sha: ${{ github.sha }}
