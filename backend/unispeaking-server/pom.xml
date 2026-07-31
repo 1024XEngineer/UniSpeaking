@@ -26,9 +26,10 @@
 		<tag/>
 		<url/>
 	</scm>
-	<properties>
-		<java.version>21</java.version>
-		<mybatis-plus.version>3.5.17</mybatis-plus.version>
+		<properties>
+			<java.version>21</java.version>
+			<mybatis-plus.version>3.5.17</mybatis-plus.version>
+			<aliyun-oss.version>3.18.5</aliyun-oss.version>
 	</properties>
 		<dependencies>
 			<dependency>
@@ -60,11 +61,16 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
 		</dependency>
-		<dependency>
-			<groupId>org.postgresql</groupId>
-			<artifactId>postgresql</artifactId>
-			<scope>runtime</scope>
-		</dependency>
+			<dependency>
+				<groupId>org.postgresql</groupId>
+				<artifactId>postgresql</artifactId>
+				<scope>runtime</scope>
+			</dependency>
+			<dependency>
+				<groupId>com.aliyun.oss</groupId>
+				<artifactId>aliyun-sdk-oss</artifactId>
+				<version>${aliyun-oss.version}</version>
+			</dependency>
 		<dependency>
 			<groupId>de.sciss</groupId>
 			<artifactId>jump3r</artifactId>
