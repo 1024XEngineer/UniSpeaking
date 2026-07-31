@@ -5,7 +5,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -15,17 +14,20 @@ import com.unispeaking.domain.dto.scene.SceneGenerationRequest;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
-import com.unispeaking.domain.vo.realtime.ProviderType;
+import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.scene.SceneConfig;
 import com.unispeaking.domain.vo.scene.SceneType;
-import com.unispeaking.repository.SceneRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
+import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.profile.ProfileService;
-import com.unispeaking.service.prompt.FiveLayerPromptService;
+import com.unispeaking.common.prompt.FiveLayerPromptBuilder;
 import com.unispeaking.service.scene.impl.SceneServiceImpl;
+import com.unispeaking.service.scene.impl.CustomSceneGenerator;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
 
 class SceneServiceImplTest {
 
@@ -35,9 +37,8 @@ class SceneServiceImplTest {
 		AuthService authService = mock(AuthService.class);
 		ProfileService profileService = mock(ProfileService.class);
 		SceneRepository repository = mock(SceneRepository.class);
-		FiveLayerPromptService promptService = mock(FiveLayerPromptService.class);
-		CustomSceneGenerationService generationService =
-				mock(CustomSceneGenerationService.class);
+		FiveLayerPromptBuilder promptService = mock(FiveLayerPromptBuilder.class);
+		CustomSceneGenerator generator = mock(CustomSceneGenerator.class);
 		UserProfile profile = new UserProfile(
 				userId,
 				"B",
@@ -72,7 +73,7 @@ class SceneServiceImplTest {
 		when(profileService.getProfile(userId)).thenReturn(profile);
 		when(repository.findByType(SceneType.CUSTOM_SCENE))
 				.thenReturn(Optional.of(config));
-		when(generationService.generate(
+		when(generator.generate(
 				any(String.class),
 				eq(userId),
 				eq("酒店办理入住"),
@@ -109,9 +110,11 @@ class SceneServiceImplTest {
 		var service = new SceneServiceImpl(
 				authService,
 				profileService,
-				repository,
-				promptService,
-				generationService);
+					repository,
+					promptService,
+					generator,
+					mock(AiProviderRegistry.class),
+					new ObjectMapper());
 
 		SceneGenerationResponse response = service.generateScene(
 				new SceneGenerationRequest(
@@ -127,7 +130,6 @@ class SceneServiceImplTest {
 		verify(repository).saveCustomScene(
 				any(CustomSceneDefinition.class),
 				same(response));
-		verify(repository, never()).saveGenerated(any());
 	}
 
 	private List<LearningContentItem> items(String prefix, int count) {

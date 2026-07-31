@@ -1,6 +1,6 @@
 package com.unispeaking.domain.dto.auth;
 
-import com.unispeaking.domain.po.user.UserAccount;
+import com.unispeaking.domain.po.auth.UserAccount;
 import java.time.Instant;
 import java.util.UUID;
 

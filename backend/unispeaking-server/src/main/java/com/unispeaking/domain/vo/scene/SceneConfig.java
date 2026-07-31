@@ -1,6 +1,6 @@
 package com.unispeaking.domain.vo.scene;
 
-import com.unispeaking.domain.vo.realtime.ProviderType;
+import com.unispeaking.domain.vo.provider.ProviderType;
 
 public record SceneConfig(
 		SceneType type,

@@ -1,6 +1,6 @@
 package com.unispeaking.provider;
 
-import com.unispeaking.exception.BusinessException;
+import com.unispeaking.common.exception.BusinessException;
 import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;

@@ -1,6 +1,6 @@
 package com.unispeaking.infrastructure.ai.qwen;
 
-import com.unispeaking.exception.BusinessException;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.TtsProvider;
 import java.io.ByteArrayOutputStream;
@@ -53,7 +53,7 @@ public class QwenTtsProvider extends TtsProvider {
 			@Value("${DASHSCOPE_API_KEY:}") String apiKey,
 			@Value("${QWEN_TTS_ENDPOINT:" + DEFAULT_ENDPOINT + "}") String endpoint,
 			@Value("${QWEN_TTS_MODEL:qwen3-tts-flash}") String model,
-			@Value("${QWEN_TTS_VOICE:Cherry}") String voice,
+			@Value("${QWEN_TTS_VOICE:Aiden}") String voice,
 			@Value("${QWEN_TTS_LANGUAGE_TYPE:English}") String languageType,
 			@Value("${QWEN_TTS_CONNECT_TIMEOUT_SECONDS:10}") int connectTimeoutSeconds,
 			@Value("${QWEN_TTS_READ_TIMEOUT_SECONDS:60}") int readTimeoutSeconds,

@@ -1,6 +1,6 @@
 package com.unispeaking.provider;
 
-import com.unispeaking.domain.vo.ai.AiCapability;
+import com.unispeaking.domain.vo.provider.AiCapability;
 import java.util.Set;
 
 public abstract class TtsProvider extends AbstractAiProvider {

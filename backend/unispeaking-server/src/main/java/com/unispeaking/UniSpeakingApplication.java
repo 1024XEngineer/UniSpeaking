@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan
-@MapperScan("com.unispeaking.infrastructure.persistence.mybatis.mapper")
+@MapperScan("com.unispeaking.infrastructure.persistence.mapper")
 public class UniSpeakingApplication {
 
 	public static void main(String[] args) {

@@ -1,10 +1,18 @@
 import { getAccessToken } from "./apiClient.js";
+import {
+  advanceCustomDialogueState,
+  completeCustomDialogue,
+  evaluateCustomDialogueTurn,
+  getCustomDialogueEvaluation,
+} from "./apiClient.js";
+import { createPcmWavSegmentRecorder } from "./audioRecorder.js";
 
 const DEFAULT_API_BASE = "";
 const DEFAULT_VOICE = "Katerina";
 const DEFAULT_MODEL = "qwen3.5-omni-flash-realtime";
 const DATA_CHANNEL_LABEL = "oai-events";
 const DEFAULT_SPEECH_SPEED = "NATURAL";
+const SCENARIO_COMPLETION_TIMEOUT_MS = 10_000;
 const SPEECH_SPEED_INSTRUCTIONS = {
   SLOWER: "Voice delivery rule: speak distinctly and very slowly, around 70 English words per minute, with clear pauses between short phrases.",
   MODERATE: "Voice delivery rule: speak at a calm moderate pace, around 120 English words per minute, with clear pauses between ideas.",
@@ -150,6 +158,7 @@ export function buildRealtimeSessionConfig({
   voice = DEFAULT_VOICE,
   model = DEFAULT_MODEL,
   speechSpeed = DEFAULT_SPEECH_SPEED,
+  automaticTurnResponses = true,
 } = {}) {
   const selectedSpeechSpeed = normalizedSpeechSpeed(speechSpeed);
   return {
@@ -168,7 +177,7 @@ export function buildRealtimeSessionConfig({
       threshold: 0.5,
       prefix_padding_ms: 500,
       silence_duration_ms: 800,
-      create_response: true,
+      create_response: Boolean(automaticTurnResponses),
       interrupt_response: true,
     },
   };
@@ -176,6 +185,7 @@ export function buildRealtimeSessionConfig({
 
 export function createRealtimeClient({
   apiBase = import.meta.env?.VITE_BACKEND_URL || DEFAULT_API_BASE,
+  sceneId: customSceneId = null,
   onEvent = () => {},
   onRemoteStream = () => {},
 } = {}) {
@@ -198,6 +208,15 @@ export function createRealtimeClient({
   let initialResponseStarted = false;
   let initialResponseFallbackTimer = null;
   let stopPromise = null;
+  let segmentRecorder = null;
+  let segmentActive = false;
+  let currentTurnAudio = Promise.resolve(null);
+  let learnerTurnNo = 0;
+  let pendingOperations = new Set();
+  let baseSessionInstructions = "";
+  let scenarioCompletionPending = false;
+  let scenarioCompletionEmitted = false;
+  let scenarioCompletionTimer = null;
 
   const emit = (event) => onEvent(event);
 
@@ -283,7 +302,7 @@ export function createRealtimeClient({
     return ack;
   }
 
-  function addSessionMessage(owner, content, providerMessageId) {
+  async function addSessionMessage(owner, content, providerMessageId) {
     const text = String(content || "").trim();
     if (!text) return false;
     const messageKey = providerMessageId ? `${owner}:${providerMessageId}` : null;
@@ -295,15 +314,22 @@ export function createRealtimeClient({
       itemId: providerMessageId || eventId("transcript"),
       text,
     });
-    void sendSessionFrame("message", {
+    const operation = sendSessionFrame("message", {
       owner,
       content: text,
       audio: null,
     }).catch((error) => {
       if (messageKey) persistedMessageIds.delete(messageKey);
       emit({ type: "local.backend_warning", message: error.message });
+      throw error;
     });
-    return true;
+    pendingOperations.add(operation);
+    try {
+      await operation;
+      return true;
+    } finally {
+      pendingOperations.delete(operation);
+    }
   }
 
   function sendProviderEvent(event) {
@@ -346,9 +372,62 @@ export function createRealtimeClient({
     }, 5_000);
   }
 
+  function emitScenarioCompleted() {
+    if (!scenarioCompletionPending || scenarioCompletionEmitted) return;
+    scenarioCompletionEmitted = true;
+    emit({ type: "local.scenario_completed" });
+    void stop({ reason: "state_machine" }).catch((error) => {
+      emit({
+        type: "local.scenario_completion_error",
+        message: error instanceof Error ? error.message : "场景自动结束失败",
+      });
+    });
+  }
+
+  function armScenarioCompletionTimeout() {
+    if (!scenarioCompletionPending || scenarioCompletionTimer) return;
+    scenarioCompletionTimer = window.setTimeout(() => {
+      scenarioCompletionTimer = null;
+      emitScenarioCompleted();
+    }, SCENARIO_COMPLETION_TIMEOUT_MS);
+  }
+
+  function requestTurnResponse() {
+    sendProviderEvent({
+      event_id: eventId("turn_response"),
+      type: "response.create",
+    });
+  }
+
+  function applyScenarioState(state) {
+    if (!state) return;
+    emit({ type: "local.scenario_state", state });
+    const instruction = String(state.controlInstruction || "").trim();
+    if (instruction && sessionConfig && channel?.readyState === "open") {
+      sessionConfig = {
+        ...sessionConfig,
+        instructions: [baseSessionInstructions, instruction]
+          .filter(Boolean)
+          .join("\n\n"),
+      };
+      sendSessionUpdate();
+    }
+    if (!state.completed) return;
+    scenarioCompletionPending = true;
+    inputReady = false;
+    setTrackEnabled();
+    if (segmentActive) {
+      currentTurnAudio = segmentRecorder?.stopSegment() || Promise.resolve(null);
+      segmentActive = false;
+    }
+  }
+
   async function postStart({ offerSdp, voice, model }) {
     const accessToken = getAccessToken();
-    const response = await fetch(`${base}/api/scene-sessions`, {
+    const path = customSceneId
+      ? `/api/custom-scenes/${encodeURIComponent(customSceneId)}/sessions`
+      : "/api/scene-sessions";
+    const response = await fetch(`${base}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -412,19 +491,30 @@ export function createRealtimeClient({
         window.clearTimeout(sessionUpdateRetryTimer);
         sessionUpdateRetryTimer = null;
       }
-      inputReady = true;
+      inputReady = !customSceneId;
       setTrackEnabled();
       requestInitialResponse();
       return;
     }
 
     if (event.type === "input_audio_buffer.speech_started") {
+      if (scenarioCompletionPending) return;
+      segmentRecorder?.startSegment();
+      segmentActive = Boolean(segmentRecorder);
+      return;
+    }
+
+    if (event.type === "input_audio_buffer.speech_stopped") {
+      if (segmentActive) {
+        currentTurnAudio = segmentRecorder?.stopSegment() || Promise.resolve(null);
+        segmentActive = false;
+      }
       return;
     }
 
     if (event.type === "response.created") {
       initialResponseStarted = true;
-      inputReady = true;
+      inputReady = !customSceneId;
       if (initialResponseFallbackTimer) {
         window.clearTimeout(initialResponseFallbackTimer);
         initialResponseFallbackTimer = null;
@@ -434,21 +524,95 @@ export function createRealtimeClient({
     }
 
     if (event.type === "conversation.item.input_audio_transcription.completed") {
-      addSessionMessage(
+      if (scenarioCompletionPending) return;
+      const transcript = String(event.transcript || event.text || "").trim();
+      if (!transcript) return;
+      if (customSceneId) {
+        inputReady = false;
+        setTrackEnabled();
+      }
+      if (segmentActive) {
+        currentTurnAudio = segmentRecorder?.stopSegment() || Promise.resolve(null);
+        segmentActive = false;
+      }
+      const persisted = await addSessionMessage(
         1,
-        event.transcript || event.text,
+        transcript,
         event.item_id || event.item?.id || event.event_id,
       );
+      if (customSceneId && persisted) {
+        const turnNo = ++learnerTurnNo;
+        const wavAudio = await currentTurnAudio;
+        currentTurnAudio = Promise.resolve(null);
+        const stateOperation = advanceCustomDialogueState(
+          customSceneId,
+          sessionId,
+          turnNo,
+          transcript,
+        );
+        const evaluationOperation = evaluateCustomDialogueTurn(
+          customSceneId,
+          sessionId,
+          turnNo,
+          transcript,
+          wavAudio,
+        );
+        pendingOperations.add(stateOperation);
+        pendingOperations.add(evaluationOperation);
+        void evaluationOperation.then((turnResult) => {
+          const evaluation = turnResult?.evaluation || turnResult;
+          emit({
+            type: "local.turn_evaluation",
+            evaluation,
+            scenarioState: null,
+          });
+        }).catch((error) => {
+          emit({
+            type: "local.turn_evaluation_error",
+            turnNo,
+            message: error instanceof Error ? error.message : "本轮评分失败",
+          });
+        }).finally(() => {
+          pendingOperations.delete(evaluationOperation);
+        });
+        try {
+          const scenarioState = await stateOperation;
+          applyScenarioState(scenarioState);
+          requestTurnResponse();
+          if (scenarioState?.completed) armScenarioCompletionTimeout();
+        } catch (error) {
+          emit({
+            type: "local.scenario_state_error",
+            turnNo,
+            message: error instanceof Error ? error.message : "场景状态推进失败",
+          });
+          requestTurnResponse();
+        } finally {
+          pendingOperations.delete(stateOperation);
+        }
+      }
       return;
     }
 
     const completedAssistantMessage = extractCompletedAssistantMessage(event);
     if (completedAssistantMessage) {
-      addSessionMessage(
+      await addSessionMessage(
         0,
         completedAssistantMessage.text,
         completedAssistantMessage.id,
       );
+    }
+    if (event.type === "response.done") {
+      if (scenarioCompletionPending) {
+        if (scenarioCompletionTimer) {
+          window.clearTimeout(scenarioCompletionTimer);
+          scenarioCompletionTimer = null;
+        }
+        emitScenarioCompleted();
+      } else if (customSceneId) {
+        inputReady = true;
+        setTrackEnabled();
+      }
     }
   }
 
@@ -473,6 +637,9 @@ export function createRealtimeClient({
       localStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
+      if (customSceneId) {
+        segmentRecorder = await createPcmWavSegmentRecorder(localStream);
+      }
       const audioTrack = localStream.getAudioTracks()[0];
       audioTrack.enabled = false;
       audioSender = peer.addTrack(audioTrack, localStream);
@@ -504,7 +671,9 @@ export function createRealtimeClient({
         voice: backend.voiceId || DEFAULT_VOICE,
         model,
         speechSpeed,
+        automaticTurnResponses: !customSceneId,
       });
+      baseSessionInstructions = sessionConfig.instructions;
 
       await connectSessionSocket();
       await peer.setRemoteDescription({ type: "answer", sdp: normalizeSdp(backend.answerSdp) });
@@ -544,6 +713,22 @@ export function createRealtimeClient({
     emit({ type: "local.interrupted" });
   }
 
+  async function waitForPendingOperations(maxWaitMs) {
+    const operations = [...pendingOperations];
+    if (!operations.length) return;
+    let timeout = null;
+    try {
+      await Promise.race([
+        Promise.allSettled(operations),
+        new Promise((resolve) => {
+          timeout = window.setTimeout(resolve, maxWaitMs);
+        }),
+      ]);
+    } finally {
+      if (timeout) window.clearTimeout(timeout);
+    }
+  }
+
   async function performStop({
     notifyBackend = true,
     reason = "user_stop",
@@ -555,30 +740,96 @@ export function createRealtimeClient({
     setTrackEnabled();
     localStream?.getTracks?.().forEach((track) => track.stop());
 
+    await waitForPendingOperations(reason === "user_stop" ? 3_000 : 15_000);
+    const stopTime = new Date().toISOString();
+    const endingSessionId = sessionId;
     const endRequest = notifyBackend && sessionId
-      ? sendSessionFrame("end", null, new Date().toISOString()).catch((error) => {
-        emit({ type: "local.backend_warning", message: error.message });
-      })
-      : Promise.resolve();
+      ? customSceneId
+        ? completeCustomDialogue(customSceneId, sessionId, stopTime)
+        : sendSessionFrame("end", null, stopTime)
+      : Promise.resolve(null);
 
     try { channel?.close?.(); } catch { /* already closed */ }
     try { peer?.close?.(); } catch { /* already closed */ }
-    await endRequest;
-    try { sessionSocket?.close?.(); } catch { /* already closed */ }
-    peer = null;
-    channel = null;
-    sessionSocket = null;
-    localStream = null;
-    audioSender = null;
-    sessionId = null;
-    sessionConfig = null;
-    pendingAcks = [];
-    persistedMessageIds = new Set();
-    sessionUpdateAcknowledged = false;
-    initialResponseStarted = false;
-    paused = false;
-    muted = false;
-    if (emitEnded) emit({ type: "local.ended", reason });
+    let completion = null;
+    let completionError = null;
+    try {
+      completion = await endRequest;
+      if (completion?.evaluation) {
+        emit({ type: "local.session_evaluation", evaluation: completion.evaluation });
+      }
+    } catch (error) {
+      emit({
+        type: "local.backend_warning",
+        message: error instanceof Error ? error.message : "会话结束失败",
+      });
+      if (customSceneId && endingSessionId) {
+        let recoveredEvaluation = null;
+        for (const delay of [0, 400, 1_200]) {
+          if (delay) {
+            await new Promise((resolve) => window.setTimeout(resolve, delay));
+          }
+          try {
+            recoveredEvaluation = await getCustomDialogueEvaluation(
+              customSceneId,
+              endingSessionId,
+            );
+            break;
+          } catch {
+            // The completion request may have persisted the report just after
+            // its response was interrupted. Retry the idempotent query briefly.
+          }
+        }
+        if (recoveredEvaluation) {
+          completion = {
+            sceneId: customSceneId,
+            sessionId: endingSessionId,
+            stopTime,
+            evaluation: recoveredEvaluation,
+            state: null,
+          };
+          emit({
+            type: "local.session_evaluation",
+            evaluation: recoveredEvaluation,
+          });
+        } else {
+          completionError = error;
+        }
+      } else {
+        completionError = error;
+      }
+    }
+    try {
+      await segmentRecorder?.close?.();
+    } finally {
+      try { sessionSocket?.close?.(); } catch { /* already closed */ }
+      if (scenarioCompletionTimer) window.clearTimeout(scenarioCompletionTimer);
+      peer = null;
+      channel = null;
+      sessionSocket = null;
+      localStream = null;
+      audioSender = null;
+      sessionId = null;
+      sessionConfig = null;
+      segmentRecorder = null;
+      segmentActive = false;
+      currentTurnAudio = Promise.resolve(null);
+      learnerTurnNo = 0;
+      pendingOperations = new Set();
+      baseSessionInstructions = "";
+      scenarioCompletionPending = false;
+      scenarioCompletionEmitted = false;
+      scenarioCompletionTimer = null;
+      pendingAcks = [];
+      persistedMessageIds = new Set();
+      sessionUpdateAcknowledged = false;
+      initialResponseStarted = false;
+      paused = false;
+      muted = false;
+    }
+    if (completionError && customSceneId) throw completionError;
+    if (emitEnded) emit({ type: "local.ended", reason, completion });
+    return completion;
   }
 
   function stop(options = {}) {

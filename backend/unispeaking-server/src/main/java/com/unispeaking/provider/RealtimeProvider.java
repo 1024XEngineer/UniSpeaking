@@ -1,7 +1,7 @@
 package com.unispeaking.provider;
 
-import com.unispeaking.domain.vo.ai.AiCapability;
-import com.unispeaking.domain.vo.realtime.ProviderType;
+import com.unispeaking.domain.vo.provider.AiCapability;
+import com.unispeaking.domain.vo.provider.ProviderType;
 import java.util.Set;
 
 public abstract class RealtimeProvider extends AbstractAiProvider {

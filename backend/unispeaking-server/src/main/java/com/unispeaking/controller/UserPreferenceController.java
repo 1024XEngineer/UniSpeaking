@@ -2,7 +2,7 @@ package com.unispeaking.controller;
 
 import com.unispeaking.domain.dto.profile.UpdateUserPreferenceRequest;
 import com.unispeaking.domain.dto.profile.UserPreferenceResponse;
-import com.unispeaking.domain.dto.response.ApiResponse;
+import com.unispeaking.common.response.ApiResponse;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.profile.ProfileService;
 import jakarta.validation.Valid;

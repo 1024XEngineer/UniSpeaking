@@ -1,12 +1,13 @@
 package com.unispeaking.infrastructure.ai.iflytek;
 
-import com.unispeaking.exception.BusinessException;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.ScoringProvider;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.net.http.WebSocketHandshakeException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.time.Duration;
@@ -181,11 +182,11 @@ public class IflytekScoringProvider extends ScoringProvider {
 
 		WebSocket socket = null;
 		boolean completed = false;
+		CompletableFuture<String> result =
+				new CompletableFuture<>();
 		long deadlineNanos =
 				System.nanoTime() + readTimeout.toNanos();
 		try {
-			CompletableFuture<String> result =
-					new CompletableFuture<>();
 			RawSuntoneListener listener =
 					new RawSuntoneListener(result);
 			socket = connector.connect(
@@ -219,13 +220,34 @@ public class IflytekScoringProvider extends ScoringProvider {
 					"iFlytek pronunciation evaluation was interrupted");
 		}
 		catch (ExecutionException | CompletionException exception) {
-			Throwable cause = exception.getCause();
+			Throwable cause = unwrapCompletionFailure(exception);
+			if (result.isDone()) {
+				try {
+					String response = result.join();
+					completed = true;
+					return response;
+				}
+				catch (CompletionException resultFailure) {
+					cause = unwrapCompletionFailure(resultFailure);
+				}
+			}
 			if (cause instanceof BusinessException businessException) {
 				throw businessException;
 			}
+			if (cause instanceof WebSocketHandshakeException handshakeException) {
+				throw nonRetryableFailure(
+						"IFLYTEK_SUNTONE_HANDSHAKE_REJECTED",
+						"iFlytek pronunciation evaluation rejected the "
+								+ "WebSocket handshake with HTTP "
+								+ handshakeException.getResponse()
+										.statusCode());
+			}
 			throw retryableFailure(
 					"IFLYTEK_SUNTONE_CONNECTION_FAILED",
-					"Failed to communicate with iFlytek pronunciation evaluation");
+					"Failed to communicate with iFlytek pronunciation "
+							+ "evaluation ("
+							+ cause.getClass().getSimpleName()
+							+ ")");
 		}
 		catch (JacksonException exception) {
 			throw retryableFailure(
@@ -244,6 +266,16 @@ public class IflytekScoringProvider extends ScoringProvider {
 				}
 			}
 		}
+	}
+
+	private Throwable unwrapCompletionFailure(Throwable failure) {
+		Throwable cause = failure;
+		while ((cause instanceof ExecutionException
+				|| cause instanceof CompletionException)
+				&& cause.getCause() != null) {
+			cause = cause.getCause();
+		}
+		return cause;
 	}
 
 	private void sendAudio(
@@ -559,6 +591,30 @@ public class IflytekScoringProvider extends ScoringProvider {
 				message);
 	}
 
+	private BusinessException suntoneRequestFailure(int providerCode) {
+		return switch (providerCode) {
+			case 11200 -> nonRetryableFailure(
+					"IFLYTEK_SUNTONE_NOT_AUTHORIZED",
+					"iFlytek Suntone is not authorized or its total "
+							+ "quota has been exhausted");
+			case 11201 -> nonRetryableFailure(
+					"IFLYTEK_SUNTONE_DAILY_QUOTA_EXHAUSTED",
+					"iFlytek Suntone daily request quota has been "
+							+ "exhausted");
+			case 11202 -> retryableFailure(
+					"IFLYTEK_SUNTONE_RATE_LIMITED",
+					"iFlytek Suntone per-second request limit was "
+							+ "exceeded");
+			case 11203 -> nonRetryableFailure(
+					"IFLYTEK_SUNTONE_AUTHORIZATION_EXPIRED",
+					"iFlytek Suntone authorization has expired");
+			default -> retryableFailure(
+					"IFLYTEK_SUNTONE_REQUEST_FAILED",
+					"iFlytek pronunciation evaluation failed with "
+							+ "code " + providerCode);
+		};
+	}
+
 	private void requireCredentials() {
 		if (appId.isBlank()
 				|| apiKey.isBlank()
@@ -693,10 +749,7 @@ public class IflytekScoringProvider extends ScoringProvider {
 				int code = header.path("code").asInt(-1);
 				if (code != 0) {
 					result.completeExceptionally(
-							retryableFailure(
-									"IFLYTEK_SUNTONE_REQUEST_FAILED",
-									"iFlytek pronunciation evaluation "
-											+ "failed with code " + code));
+							suntoneRequestFailure(code));
 					return;
 				}
 				int headerStatus =

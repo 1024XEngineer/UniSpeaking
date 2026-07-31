@@ -1,25 +1,29 @@
 package com.unispeaking.service.scene.impl;
 
+import com.unispeaking.common.util.SceneIdGenerator;
+import com.unispeaking.domain.dto.scene.CustomSceneRequest;
+import com.unispeaking.domain.dto.scene.CustomSceneGenerationResponse;
 import com.unispeaking.domain.dto.scene.SceneGenerationRequest;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
-import com.unispeaking.domain.dto.scene.LearningContentItem;
+import com.unispeaking.domain.dto.scene.TranslateTextResponse;
 import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.vo.scene.SceneConfig;
 import com.unispeaking.domain.vo.scene.SceneType;
-import com.unispeaking.exception.SceneNotFoundException;
-import com.unispeaking.repository.SceneRepository;
+import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.common.exception.SceneNotFoundException;
+import com.unispeaking.provider.AiProviderRegistry;
+import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.profile.ProfileService;
-import com.unispeaking.service.prompt.FiveLayerPromptService;
+import com.unispeaking.common.prompt.FiveLayerPromptBuilder;
 import com.unispeaking.service.scene.SceneService;
-import com.unispeaking.service.scene.CustomSceneGenerationService;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class SceneServiceImpl implements SceneService {
@@ -29,20 +33,26 @@ public class SceneServiceImpl implements SceneService {
 	private final AuthService authService;
 	private final ProfileService profileService;
 	private final SceneRepository sceneRepository;
-	private final FiveLayerPromptService promptService;
-	private final CustomSceneGenerationService customSceneGenerationService;
+	private final FiveLayerPromptBuilder promptService;
+	private final CustomSceneGenerator customSceneGenerator;
+	private final AiProviderRegistry providerRegistry;
+	private final ObjectMapper objectMapper;
 
 	public SceneServiceImpl(
 			AuthService authService,
 			ProfileService profileService,
 			SceneRepository sceneRepository,
-			FiveLayerPromptService promptService,
-			CustomSceneGenerationService customSceneGenerationService) {
+			FiveLayerPromptBuilder promptService,
+			CustomSceneGenerator customSceneGenerator,
+			AiProviderRegistry providerRegistry,
+			ObjectMapper objectMapper) {
 		this.authService = authService;
 		this.profileService = profileService;
 		this.sceneRepository = sceneRepository;
 		this.promptService = promptService;
-		this.customSceneGenerationService = customSceneGenerationService;
+		this.customSceneGenerator = customSceneGenerator;
+		this.providerRegistry = providerRegistry;
+		this.objectMapper = objectMapper;
 	}
 
 	@Override
@@ -53,7 +63,7 @@ public class SceneServiceImpl implements SceneService {
 				.orElseThrow(() -> new SceneNotFoundException(sceneType.name()));
 		UserProfile profile = profileService.getProfile(userId);
 		String sceneInput = request.sceneInput() == null ? "" : request.sceneInput().trim();
-		String sceneId = generateSceneId(sceneType);
+		String sceneId = SceneIdGenerator.generate(sceneType);
 		if (sceneType == SceneType.CUSTOM_SCENE) {
 			return generateCustomScene(
 					sceneId,
@@ -63,25 +73,98 @@ public class SceneServiceImpl implements SceneService {
 					profile,
 					sceneConfig);
 		}
-		List<LearningContentItem> wordList = buildWordList(sceneType, sceneInput);
-		List<LearningContentItem> phraseList = buildPhraseList(sceneType, sceneInput);
-		List<LearningContentItem> sentenceList = buildSentenceList(sceneType, sceneInput);
+		if (sceneType != SceneType.FREE_CHAT) {
+			throw new BusinessException(
+					"SCENE_TYPE_NOT_IMPLEMENTED",
+					"当前场景类型尚未实现: " + sceneType);
+		}
 		String scenePrompt = String.join("\n\n", promptService.compose(
 				profile,
 				sceneConfig,
 				sceneType,
 				sceneInput,
 				request.userPreference(),
-				wordList,
-				phraseList,
-				sentenceList));
+				List.of(),
+				List.of(),
+				List.of()));
 		SceneGenerationResponse response = new SceneGenerationResponse(
 				sceneId,
-				wordList,
-				phraseList,
-				sentenceList,
+				List.of(),
+				List.of(),
+				List.of(),
 				scenePrompt);
-		return sceneRepository.saveGenerated(response);
+		return response;
+	}
+
+	@Override
+	public CustomSceneGenerationResponse generateCustomScene(CustomSceneRequest request) {
+		SceneGenerationResponse generated = generateScene(new SceneGenerationRequest(
+				request.userId(),
+				request.userPreference(),
+				SceneType.CUSTOM_SCENE,
+				request.sceneInput()));
+		CustomSceneDefinition definition = sceneRepository
+				.findCustomDefinitionById(generated.sceneId())
+				.orElseThrow(() -> new BusinessException(
+						"CUSTOM_SCENE_NOT_FOUND",
+						"生成的自定义场景不存在"));
+		return new CustomSceneGenerationResponse(
+				generated.sceneId(),
+				definition.title(),
+				definition.background(),
+				definition.aiRole(),
+				definition.userRole(),
+				definition.learningGoal(),
+				estimatedMinutes(definition.successFactorJson()),
+				generated.wordList(),
+				generated.phraseList(),
+				generated.sentenceList(),
+				generated.scenePrompt());
+	}
+
+	@Override
+	public byte[] synthesizeSpeech(String sceneId, String text, String model) {
+		requireOwnedCustomScene(sceneId);
+		if (text == null || text.isBlank()) {
+			throw new BusinessException("TTS_TEXT_REQUIRED", "朗读文本不能为空");
+		}
+		Byte[] boxed = model == null || model.isBlank()
+				? providerRegistry.generateSpeechAudio(text.strip(), null)
+				: providerRegistry.generateSpeechAudio(model, text.strip(), null);
+		if (boxed == null || boxed.length == 0) {
+			throw new BusinessException("TTS_AUDIO_EMPTY", "TTS 未返回音频");
+		}
+		byte[] audio = new byte[boxed.length];
+		for (int index = 0; index < boxed.length; index++) {
+			if (boxed[index] == null) {
+				throw new BusinessException("TTS_AUDIO_INVALID", "TTS 返回的音频无效");
+			}
+			audio[index] = boxed[index];
+		}
+		return audio;
+	}
+
+	@Override
+	public TranslateTextResponse translate(String sceneId, String text) {
+		requireOwnedCustomScene(sceneId);
+		String source = requireTranslationText(text);
+		String prompt = """
+				Translate the text enclosed in <source> into natural Simplified Chinese.
+				Preserve the original meaning, tone, names, numbers, and punctuation.
+				Return only the translation. Do not explain, annotate, or quote the source.
+
+				<source>
+				%s
+				</source>
+				""".formatted(source);
+		String translated = providerRegistry.executeLlmTask(
+				AiProviderRegistry.QWEN_LLM_PLUS,
+				prompt,
+				null);
+		if (translated == null || translated.isBlank()) {
+			throw new BusinessException("TRANSLATION_EMPTY", "翻译模型没有返回有效文本");
+		}
+		return new TranslateTextResponse(source, translated.strip(), "zh-CN");
 	}
 
 	private SceneGenerationResponse generateCustomScene(
@@ -93,7 +176,7 @@ public class SceneServiceImpl implements SceneService {
 			SceneConfig sceneConfig) {
 		long totalStartedAt = System.nanoTime();
 		long generationStartedAt = System.nanoTime();
-		CustomSceneDefinition definition = customSceneGenerationService.generate(
+		CustomSceneDefinition definition = customSceneGenerator.generate(
 				sceneId,
 				userId,
 				sceneInput,
@@ -118,14 +201,14 @@ public class SceneServiceImpl implements SceneService {
 				definition.phraseList(),
 				definition.sentenceList(),
 				scenePrompt);
-		long cacheStartedAt = System.nanoTime();
+		long persistenceStartedAt = System.nanoTime();
 		SceneGenerationResponse saved = sceneRepository.saveCustomScene(definition, response);
 		LOGGER.info(
-				"custom scene ready sceneId={} generationMs={} promptMs={} cacheAndScheduleMs={} totalMs={}",
+				"custom scene ready sceneId={} generationMs={} promptMs={} persistenceMs={} totalMs={}",
 				sceneId,
 				generationMillis,
 				promptMillis,
-				elapsedMillis(cacheStartedAt),
+				elapsedMillis(persistenceStartedAt),
 				elapsedMillis(totalStartedAt));
 		return saved;
 	}
@@ -134,97 +217,41 @@ public class SceneServiceImpl implements SceneService {
 		return (System.nanoTime() - startedAt) / 1_000_000;
 	}
 
-	private String generateSceneId(SceneType sceneType) {
-		String randomPart = UUID.randomUUID().toString().replace("-", "");
-		return sceneType.sceneIdPrefix() + "_" + randomPart;
+	private CustomSceneDefinition requireOwnedCustomScene(String sceneId) {
+		String userId = authService.requireUserId(null);
+		CustomSceneDefinition definition = sceneRepository
+				.findCustomDefinitionById(sceneId)
+				.orElseThrow(() -> new BusinessException(
+						"CUSTOM_SCENE_NOT_FOUND",
+						"自定义场景不存在"));
+		if (!userId.equals(definition.userId())) {
+			throw new BusinessException(
+					"CUSTOM_SCENE_ACCESS_DENIED",
+					"当前用户无权访问该场景");
+		}
+		return definition;
 	}
 
-	private List<LearningContentItem> buildWordList(SceneType sceneType, String sceneInput) {
-		if (sceneType == SceneType.FREE_CHAT) {
-			return List.of();
+	private String requireTranslationText(String text) {
+		if (text == null || text.isBlank()) {
+			throw new BusinessException("TRANSLATION_TEXT_REQUIRED", "待翻译文本不能为空");
 		}
-		List<LearningContentItem> items = new ArrayList<>();
-		items.add(item("word", 1, focusWord(sceneInput), "核心话题词"));
-		items.add(item("word", 2, "schedule", "时间安排"));
-		items.add(item("word", 3, "recommendation", "推荐"));
-		items.add(item("word", 4, "preference", "偏好"));
-		return List.copyOf(items);
+		String normalized = text.strip();
+		if (normalized.length() > 4000) {
+			throw new BusinessException("TRANSLATION_TEXT_TOO_LONG", "待翻译文本不能超过4000个字符");
+		}
+		return normalized;
 	}
 
-	private List<LearningContentItem> buildPhraseList(SceneType sceneType, String sceneInput) {
-		if (sceneType == SceneType.FREE_CHAT) {
-			return List.of();
+	private int estimatedMinutes(String successFactorJson) {
+		try {
+			JsonNode root = objectMapper.readTree(successFactorJson);
+			int value = root.path("estimated_minutes").intValue();
+			return value >= 3 && value <= 10 ? value : 6;
 		}
-		String topic = englishTopic(sceneInput);
-		return List.of(
-				item("phrase", 1, "Could you tell me more about " + topic + "?", "你能多介绍一下这个场景吗？"),
-				item("phrase", 2, "I would like to ask about the options.", "我想了解有哪些选择。"),
-				item("phrase", 3, "What would you recommend for me?", "你会给我什么建议？"));
+		catch (RuntimeException exception) {
+			return 6;
+		}
 	}
 
-	private List<LearningContentItem> buildSentenceList(SceneType sceneType, String sceneInput) {
-		if (sceneType == SceneType.FREE_CHAT) {
-			return List.of();
-		}
-		String topic = englishTopic(sceneInput);
-		return List.of(
-				item("sentence", 1, "Hi, I would like to practice a conversation about " + topic + ".", "你好，我想练习关于这个场景的对话。"),
-				item("sentence", 2, "Could you explain the details and help me choose?", "你能解释细节并帮我选择吗？"),
-				item("sentence", 3, "That sounds helpful. What should I do next?", "听起来很有帮助。下一步我该怎么做？"));
-	}
-
-	private String focusWord(String sceneInput) {
-		String input = sceneInput == null ? "" : sceneInput.toLowerCase();
-		if (input.contains("gym") || input.contains("健身")) {
-			return "membership";
-		}
-		if (input.contains("coffee") || input.contains("cafe") || input.contains("咖啡")) {
-			return "recommendation";
-		}
-		if (input.contains("airport") || input.contains("机场")) {
-			return "boarding";
-		}
-		if (input.contains("hotel") || input.contains("酒店")) {
-			return "reservation";
-		}
-		if (input.contains("interview") || input.contains("面试")) {
-			return "experience";
-		}
-		if (input.contains("restaurant") || input.contains("餐厅") || input.contains("饭店")) {
-			return "order";
-		}
-		if (input.contains("doctor") || input.contains("hospital") || input.contains("医院")) {
-			return "appointment";
-		}
-		return "conversation";
-	}
-
-	private String englishTopic(String sceneInput) {
-		String topic = normalizedTopic(sceneInput);
-		if (!topic.matches(".*[A-Za-z].*") || !topic.matches("^[\\p{ASCII}]+$")) {
-			return "this situation";
-		}
-		return topic;
-	}
-
-	private String normalizedTopic(String sceneInput) {
-		if (sceneInput == null || sceneInput.isBlank()) {
-			return "this situation";
-		}
-		String topic = sceneInput.trim()
-				.replaceAll("[\\r\\n\\t]+", " ")
-				.replaceAll("\\s+", " ");
-		if (topic.length() > 48) {
-			return topic.substring(0, 48).trim();
-		}
-		return topic;
-	}
-
-	private LearningContentItem item(String prefix, int index, String englishText, String chineseText) {
-		return new LearningContentItem(
-				prefix + "_" + index,
-				englishText,
-				chineseText,
-				"");
-	}
 }

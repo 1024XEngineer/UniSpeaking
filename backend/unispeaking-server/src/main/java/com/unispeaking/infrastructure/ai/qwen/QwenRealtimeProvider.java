@@ -1,7 +1,7 @@
 package com.unispeaking.infrastructure.ai.qwen;
 
 import com.unispeaking.common.logging.RealtimeFlowLog;
-import com.unispeaking.domain.vo.realtime.ProviderType;
+import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.RealtimeProvider;
 import java.io.IOException;

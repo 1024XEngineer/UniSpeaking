@@ -8,7 +8,7 @@ import com.unispeaking.domain.dto.auth.AuthResponse;
 import com.unispeaking.domain.dto.auth.LoginRequest;
 import com.unispeaking.domain.dto.auth.RegisterRequest;
 import com.unispeaking.domain.dto.auth.UserAccountResponse;
-import com.unispeaking.exception.BusinessException;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.service.auth.AuthService;
 import java.util.HashMap;
 import org.junit.jupiter.api.Test;

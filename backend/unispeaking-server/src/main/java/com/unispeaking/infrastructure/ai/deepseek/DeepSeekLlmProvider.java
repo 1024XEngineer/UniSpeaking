@@ -1,6 +1,6 @@
 package com.unispeaking.infrastructure.ai.deepseek;
 
-import com.unispeaking.exception.BusinessException;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.LlmProvider;
 import java.io.ByteArrayOutputStream;

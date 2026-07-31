@@ -250,7 +250,7 @@ Profile 和偏好，固定以 `FREE_CHAT` 调用 `SceneService` 和
   "sentenceList": [],
   "currentStage": "DIALOGUE",
   "scoringEnabled": false,
-  "sessionId": "scene_801cca60-5b30-49ce-be9c-54a55655754a",
+  "sessionId": "freechat_session_801cca605b3049cebe9c54a55655754a",
   "providerSessionId": null,
   "answerSdp": "Qwen 返回的 WebRTC Answer SDP",
   "credentialExpiresAt": "2026-07-21T08:20:07Z",
@@ -304,16 +304,16 @@ WS /ws/session-messages?access_token=<JWT>
 | `content` | 用户或模型的一条完整文本，不传流式 delta |
 | `audio` | 用户说话音频，使用 base64 字符串；模型消息通常为空 |
 
-后端只在 `content` 是非空最终文本时追加消息。自由聊天消息按收到顺序写入
-Redis List，`owner=1` 表示用户、`owner=0` 表示 AI；音频不会写入 Redis，
-流式 transcription/audio delta 也不会保存。
+后端只接受 `content` 为非空最终文本的消息。自由聊天内容不做持久化，也不写入
+Redis 或数据库；流式 transcription/audio delta 同样不会保存。自定义场景的
+完整消息才会写入 `session_message`。
 
 响应：
 
 ```json
 {
   "type": "session.message.accepted",
-  "sessionId": "scene_801cca60-5b30-49ce-be9c-54a55655754a",
+  "sessionId": "freechat_session_801cca605b3049cebe9c54a55655754a",
   "success": true,
   "code": "OK",
   "message": "success",

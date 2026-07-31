@@ -568,9 +568,20 @@ svg { display: block; }
 .microphone-toggle__active { display: none; }
 .microphone-toggle.is-active .microphone-toggle__slash { display: none; }
 .microphone-toggle.is-active .microphone-toggle__active { display: block; animation: microphone-fill .5s; }
+.microphone-toggle.is-active { --microphone-color: #d34f43; border-color: #e3aaa5; background: #fff7f6; box-shadow: 0 0 0 8px rgba(211,79,67,.08); }
+.microphone-toggle.is-busy { cursor: wait; opacity: .58; }
 .microphone-toggle:not(.is-active) .microphone-toggle__slash { animation: microphone-fill .5s; }
 @keyframes microphone-fill { 0% { opacity: 0; transform: rotate(0) scale(0); } 50% { transform: rotate(-10deg) scale(1.2); } 100% { opacity: 1; transform: rotate(0) scale(1); } }
 .read-stage h3 { margin: 27px 0 0; }.read-stage > p:last-of-type { font-size: 13px; }
+.sentence-score-text { letter-spacing: 0 !important; }
+.sentence-score-word { padding: 0; color: inherit; background: none; border-bottom: 3px solid transparent; }
+.sentence-score-word.is-correct { color: #248454; border-bottom-color: rgba(36,132,84,.24); }
+.sentence-score-word.is-incorrect { color: #d14d43; border-bottom-color: rgba(209,77,67,.25); }
+.sentence-reading-error { max-width: 620px; margin: 10px 0 0 !important; color: #bd4037 !important; font-size: 13px !important; line-height: 1.55; }
+.read-demo { min-height: 38px; display: inline-flex; align-items: center; gap: 7px; margin-top: 15px; color: #777773; font-size: 13px; font-weight: 650; }
+.sentence-score-summary { position: absolute; top: 24px; right: 30px; display: flex; align-items: baseline; color: #777773; }
+.sentence-score-summary strong { color: var(--ink); font-size: 34px; letter-spacing: 0; }
+.sentence-score-summary span { margin-left: 3px; font-size: 12px; font-weight: 700; }
 .read-replay { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin-top: 20px; padding: 0 20px; border: 1px solid #d9d9d5; border-radius: 999px; background: #fff; color: #30302e; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; transition: border-color .2s, background .2s, transform .2s; }
 .read-replay svg { width: 17px; height: 17px; color: #99999f; }
 .read-replay:hover { border-color: #a9a9a4; background: #fafaf8; }

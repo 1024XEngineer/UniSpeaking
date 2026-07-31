@@ -4,7 +4,7 @@ import com.unispeaking.domain.dto.auth.AuthResponse;
 import com.unispeaking.domain.dto.auth.LoginRequest;
 import com.unispeaking.domain.dto.auth.RegisterRequest;
 import com.unispeaking.domain.dto.auth.UserAccountResponse;
-import com.unispeaking.domain.dto.response.ApiResponse;
+import com.unispeaking.common.response.ApiResponse;
 import com.unispeaking.service.auth.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;

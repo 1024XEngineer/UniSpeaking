@@ -1,3 +1,7 @@
+![[企业微信截图_856d95a0-b55d-4eb1-a489-88e7f551cea4 1.png]]
+# 一、SceneService
+```java
+package com.unispeaking.SceneService;
 
 public interface SceneService {
 
@@ -21,8 +25,6 @@ LearningContentItem {
     String phonetic;
 }
 SceneGenerationRequest {
-    String userId;
-    String userPreference;
     SceneType sceneType;
     String sceneInput;
 }
@@ -34,6 +36,12 @@ SceneGenerationResponse {
     String scenePrompt;
 }
 
+```
+
+# 二、SceneFlowService
+```java
+package com.unispeaking.SceneFlowService;
+
 public interface SceneFlowService {
     // 为已经生成完成的场景创建流程。
     SceneFlowResponse createFlow(
@@ -44,8 +52,9 @@ public interface SceneFlowService {
 
     void completeFlow(Boolean completed);
 
-    // 获取当前阶段的学习内容。
-    List<LearningContentItem> getByCurrentStage(SceneFlowStage stage);
+    //获取当前阶段的内容
+    List<T> getByCurrentStage(SceneFlowStage stage);
+
 }
 enum SceneFlowStage {
     WORD_LEARNING,
@@ -54,16 +63,21 @@ enum SceneFlowStage {
     DIALOGUE,
     COMPLETED
 }
+
 SceneFlowResponse {
     String sceneId;
     SceneFlowStage stage;
     Boolean completed;
 }
+```
 
-package com.unispeaking.session;
+
+# 三、SessionService
+```java
+package com.unispeaking.SessionService;
 
 public interface SessionService {
-
+	List<Message> dialogue;
     /**
      * 开始一次业务会话，生成 sessionId 并记录开始时间。
      */
@@ -80,7 +94,7 @@ public interface SessionService {
     /**
      * 结束当前业务会话，记录结束时间。
      */
-    void endSession(String sessionId, String stopTime);
+    void endSession(String sessionId,String stopTime);
 }
 StartSessionResponse {
     String sessionId;
@@ -91,349 +105,468 @@ Message {
     String content;   // 用户或模型的完整文本
     byte[] audio;     // 可选音频，模型消息通常为空
 }
-
-自由聊天的 `addMessage(Message)` 将用户和 AI 的最终文本按顺序暂存到
-Redis List；音频和流式 delta 不进入 Redis，消息通过 TTL 自动过期。
+```
+# 四、EvaluationService
+```java
+package com.unispeaking.EvaluationService;
 
 public interface EvaluationService {
-    SentenceEvaluationResponse evaluateSentenceReading(
-        String sentenceId, byte[] audio
+
+		SentenceEvaluationResponse evaluateSentenceReading(
+		String sentenceId,byte[] audio
+		);
+
+	DialogueTurnEvaluationResult evaluateDialogueTurn(
+		DialogueTurnEvaluationCommand command
+		);
+
+	DialogueReportResult generateDialogueReport(
+		String sessionId,List<Message> dialogue
+		);
+
+	DialogueEvaluationResult getDialogueEvaluation(
+		String sessionId
+		);
+}
+
+SentenceEvaluationResponse(
+	BigDecimal overallScore,
+	Boolean passed,
+	List<WordPronunciationScore> words
+)
+
+WordPronunciationScore(
+	String word,
+	BigDecimal wordScore,
+	List<PhonemeScore> phonemes
+)
+
+PhonemeScore(
+	String expectedPhoneme,
+	String actualPhoneme,
+	BigDecimal score
+)
+
+DialogueTurnEvaluationCommand(
+	String sessionId,
+	Integer turnNo,
+	byte[] audio,
+	String transcript
+)
+// 保存的单轮评分
+DialogueTurnEvaluationResult(
+	Integer turnNo,
+	String transcript,
+	BigDecimal overallScore,
+	BigDecimal rhythmScore,
+	BigDecimal toneScore,
+	BigDecimal integrityScore,
+	BigDecimal pronunciationScore,
+	BigDecimal fluencyScore,
+	String feedbackSummary,
+	String suggestedExpression,
+	List<WordPronunciationScore> words
+)
+
+DialogueReportResult(
+	BigDecimal accuracyScore,
+	BigDecimal fluencyScore,
+	BigDecimal grammarScore,
+	BigDecimal vocabularyScore,
+	BigDecimal naturalnessScore,
+	BigDecimal finalScore,
+	String summary,
+	List<String> strengths,
+	List<String> improvements
+)
+
+DialogueEvaluationResult(
+	List<Message> dialogue,
+	List<DialogueTurnEvaluationResult> turnEvaluation
+)
+```
+# 五、AiProvider
+```java
+package com.unispeaking.AiProvider;
+
+public interface AiProvider {
+
+    /**
+     * 完成 Realtime 模型的 Offer SDP / Answer SDP 交换。
+     */
+    String exchangeRealtimeSdp(String offerSdp,String token);
+
+    /**
+     * 将文本转换为语音音频。
+     */
+    Byte[]  generateSpeechAudio(String text,String token);
+
+    /**
+     * 调用 LLM 执行场景生成、文本评分等任务。
+     */
+    String executeLlmTask(String prompt,String token);
+
+    /**
+     * 将音频转换为文字。
+     */
+    String convertAudioToText(Byte[] audio,String token);
+
+    /**
+     * 评估用户跟读音频的发音和音素表现。
+     */
+    StrievaluatePronunciation(
+        String text,Byte[] audio,String token
     );
-    DialogueTurnEvaluationResult evaluateDialogueTurn(
-        DialogueTurnEvaluationCommand command
-    );
-    DialogueReportResult generateDialogueReport(
-        String sessionId, List<Message> dialogue
-    );
-    DialogueEvaluationResult getDialogueEvaluation(String sessionId);
-}
-
-整场报告仅包含 accuracy、fluency、grammar、vocabulary、naturalness 和
-finalScore 六个分数。详细字段和公式以 `docs/EvaluationService设计.md` 为准。
-
-package com.unispeaking.provider;
-
-public abstract class AiProvider {
-    ProviderType type();
-    AiCapability capability();
-    Set<String> supportedModels();
-}
-public abstract class RealtimeProvider extends AiProvider {
-    RealtimeSdpExchangeResponse exchangeRealtimeSdp(
-        RealtimeSdpExchangeRequest request
-    );
-}
-public abstract class LlmProvider extends AiProvider {
-    LlmTaskResponse executeLlmTask(LlmTaskRequest request);
-}
-public abstract class ScoringProvider extends AiProvider {
-    PronunciationEvaluationResponse evaluatePronunciation(
-        PronunciationEvaluationRequest request
-    );
-}
-public abstract class TtsProvider extends AiProvider {
-    SpeechAudioResponse generateSpeechAudio(SpeechAudioRequest request);
-}
-
-public class QwenRealtimeProvider extends RealtimeProvider {}
-public class QwenLlmProvider extends LlmProvider {}
-public class DeepSeekLlmProvider extends LlmProvider {}
-public class IflytekScoringProvider extends ScoringProvider {}
-public class AliyunTtsProvider extends TtsProvider {}
-public class MiniMaxTtsProvider extends TtsProvider {}
-
-public class AiProviderRegistry {
-    RealtimeProvider getRealtimeProvider(String modelId);
-    LlmProvider getLlmProvider(String modelId);
-    ScoringProvider getScoringProvider(String modelId);
-    TtsProvider getTtsProvider(String modelId);
-}
-
-AiCallContext {
-    String userId;
-    String businessId;
-    <!-- 
-    Realtime：businessId = localSessionId
-    场景生成：businessId = sceneId
-    文本评分：businessId = evaluationId
-    音素评分：businessId = practiceId 
-    -->
-}
-AudioInput {
-    byte[] audioData;
-    String audioFormat;
-}
-RealtimeSdpExchangeRequest {
-    AiCallContext context;
-    String offerSdp;
-    String apiKey;
-}
-RealtimeSdpExchangeResponse {
-    String answerSdp;
-}
-SpeechAudioRequest {
-    AiCallContext context;
-    String text;
-    String apiKey;
-}
-SpeechAudioResponse {
-    byte[] audioData;
-    String audioFormat;
-    String contentType;
-}
-LlmTaskRequest {
-    AiCallContext context;
-    String prompt;
-    String apiKey;
-}
-LlmTaskResponse {
-    JsonNode data;
-}
-AudioTranscriptionRequest {
-    AiCallContext context;
-    AudioInput audio;
-    String apiKey;
-}
-AudioTranscriptionResponse {
-    String text;
-}
-PronunciationEvaluationRequest {
-    AiCallContext context;
-    AudioInput audio;
-    String referenceText;
-}
-PronunciationEvaluationResponse {
-    Integer totalScore;
-    Integer fluency；
-    Integer pronunciation;
-    Integer rhythm;
-    Integer tone;
 
 }
 
+```
 
-【场景生成】
+# 六、自定义场景伪代码
+```java
+【一、场景生成】
 
 SceneService.generateScene(
-    userId = "user_1001",
-    userPreference = "英语基础一般，喜欢慢速对话",
-    sceneType = CUSTOM_SCENE,
-    sceneInput = "咖啡店点单"
+    request = SceneGenerationRequest {
+        userId = "user_1001",
+        userPreference = "英语基础一般，喜欢慢速对话",
+        sceneType = CUSTOM_SCENE,
+        sceneInput = "咖啡店点单"
+    }
 )
-    └── AiProviderRegistry.getLlmProvider("qwen3.5-plus").executeLlmTask(
-            context.userId = "user_1001",
-            context.businessId = "custom_2001",
-            prompt = "生成咖啡店点单的单词、词组、句子和对话Prompt"
+    └── AiProvider.executeLlmTask(
+            prompt = "根据用户偏好生成咖啡店点单场景的单词、词组、句子和对话 Prompt",
+            token = "LLM调用Token"
         )
-        → LlmTaskResponse {
-            data = { wordList, phraseList, sentenceList, scenePrompt }
-        }
+        → String sceneGenerationJson
 
 → SceneGenerationResponse {
-    sceneId = "custom_2001",
-    wordList,
-    phraseList,
-    sentenceList,
+    // 格式：场景类型_随机唯一字符串
+    sceneId = "custom_jcoeow1232",
+    wordList = [
+        LearningContentItem {
+            contentId = "word_001",
+            englishText = "coffee",
+            chineseText = "咖啡",
+            phonetic = "/ˈkɒfi/"
+        }
+    ],
+    phraseList = [
+        LearningContentItem {
+            contentId = "phrase_001",
+            englishText = "a cup of coffee",
+            chineseText = "一杯咖啡",
+            phonetic = null
+        }
+    ],
+    sentenceList = [
+        LearningContentItem {
+            contentId = "sentence_001",
+            englishText = "Could I have a cup of coffee?",
+            chineseText = "我可以要一杯咖啡吗？",
+            phonetic = null
+        }
+    ],
     scenePrompt = "你是一名咖啡店店员……"
 }
 
 
-【创建场景流程】
+【二、创建场景流程】
 
 SceneFlowService.createFlow(
-    sceneId = "custom_2001"
+    sceneId = "custom_jcoeow1232"
 )
 → SceneFlowResponse {
-    sceneId = "custom_2001",
+    sceneId = "custom_jcoeow1232",
     stage = WORD_LEARNING,
     completed = false
 }
 
 
-【单词学习】
+【三、单词学习】
 
-AiProviderRegistry.getTtsProvider("aliyun-tts").generateSpeechAudio(
-    context.userId = "user_1001",
-    context.businessId = "custom_2001",
-    text = "coffee"
+SceneFlowService.getByCurrentStage(
+    stage = WORD_LEARNING
 )
-→ SpeechAudioResponse {
-    audioData = "单词音频",
-    audioFormat = "mp3"
-}
+→ List<LearningContentItem> wordList
+
+AiProvider.generateSpeechAudio(
+    text = wordList[0].englishText,
+    token = "TTS调用Token"
+)
+→ Byte[] wordAudio
 
 SceneFlowService.advanceStage(
     stage = WORD_LEARNING
 )
 → SceneFlowResponse {
-    sceneId = "custom_2001",
+    sceneId = "custom_jcoeow1232",
     stage = PHRASE_LEARNING,
     completed = false
 }
 
 
-【词组学习】
+【四、词组学习】
 
-AiProviderRegistry.getTtsProvider("aliyun-tts").generateSpeechAudio(
-    context.userId = "user_1001",
-    context.businessId = "custom_2001",
-    text = "a cup of coffee"
+SceneFlowService.getByCurrentStage(
+    stage = PHRASE_LEARNING
 )
-→ SpeechAudioResponse {
-    audioData = "词组音频",
-    audioFormat = "mp3"
-}
+→ List<LearningContentItem> phraseList
+
+AiProvider.generateSpeechAudio(
+    text = phraseList[0].englishText,
+    token = "TTS调用Token"
+)
+→ Byte[] phraseAudio
 
 SceneFlowService.advanceStage(
     stage = PHRASE_LEARNING
 )
 → SceneFlowResponse {
-    sceneId = "custom_2001",
+    sceneId = "custom_jcoeow1232",
     stage = SENTENCE_LEARNING,
     completed = false
 }
 
 
-【句子学习】
+【五、句子学习与跟读评分】
 
-AiProviderRegistry.getTtsProvider("aliyun-tts").generateSpeechAudio(
-    context.userId = "user_1001",
-    context.businessId = "custom_2001",
-    text = "Could I have a cup of coffee?"
+SceneFlowService.getByCurrentStage(
+    stage = SENTENCE_LEARNING
 )
-→ SpeechAudioResponse {
-    audioData = "标准句子音频",
-    audioFormat = "mp3"
-}
+→ List<LearningContentItem> sentenceList
+
+AiProvider.generateSpeechAudio(
+    text = sentenceList[0].englishText,
+    token = "TTS调用Token"
+)
+→ Byte[] sentenceAudio
 
 EvaluationService.evaluateSentenceReading(
-    sentenceId = "sentence UUID",
-    audio = "用户 16 kHz 单声道 PCM WAV 跟读音频"
+    sentenceId = sentenceList[0].contentId,
+    audio = byte[]("用户跟读音频")
 )
-    └── AiProviderRegistry.getScoringProvider(
-            "iflytek-pronunciation-evaluation"
-        ).evaluatePronunciation(
-            context.businessId = "practice_4001",
-            audio.audioData = "用户跟读音频",
-            referenceText = "Could I have a cup of coffee?"
+    └── AiProvider.evaluatePronunciation(
+            text = sentenceList[0].englishText,
+            audio = Byte[]("用户跟读音频"),
+            token = "发音评测Token"
         )
-        → PronunciationEvaluationResponse {
-            totalScore = 86
-        }
+        → String pronunciationEvaluationJson
 
 → SentenceEvaluationResponse {
-    overallScore = 86.0,
+    overallScore = 86,
     passed = true,
-    words = [...]
+    words = [
+        WordPronunciationScore {
+            word = "coffee",
+            wordScore = 82,
+            phonemes = [
+                PhonemeScore {
+                    expectedPhoneme = "ɒ",
+                    actualPhoneme = "ɔː",
+                    score = 76
+                }
+            ]
+        }
+    ]
 }
 
 SceneFlowService.advanceStage(
     stage = SENTENCE_LEARNING
 )
 → SceneFlowResponse {
-    sceneId = "custom_2001",
+    sceneId = "custom_jcoeow1232",
     stage = DIALOGUE,
     completed = false
 }
 
 
-【开始场景会话】
+【六、开始场景会话】
 
 SessionService.startSession(
-    "你是一名咖啡店店员……"
+    prompt = "你是一名咖啡店店员……"
 )
 → StartSessionResponse {
     sessionId = "session_5001",
     startTime = "2026-07-24 10:30:00"
 }
 
-AiProviderRegistry.getRealtimeProvider(
-    "qwen3.5-omni-flash-realtime"
-).exchangeRealtimeSdp(
-    context.userId = "user_1001",
-    context.businessId = "session_5001",
-    offerSdp = "客户端Offer SDP",
-    apiKey = "Realtime临时API Key"
+AiProvider.exchangeRealtimeSdp(
+    offerSdp = "客户端 Offer SDP",
+    token = "Realtime临时Token"
 )
-→ RealtimeSdpExchangeResponse {
-    answerSdp = "模型Answer SDP",
-}
+→ String answerSdp
 
 
-【保存对话内容】
+【七、保存对话内容】
 
 SessionService.addMessage(
-    owner = 0,
-    content = "What would you like to order?",
-    audio = null
+    message = Message {
+        owner = 0,
+        content = "What would you like to order?",
+        audio = null
+    }
 )
 → void
 
 SessionService.addMessage(
-    owner = 1,
-    content = "I would like a cup of coffee.",
-    audio = "用户本轮音频"
+    message = Message {
+        owner = 1,
+        content = "I would like a cup of coffee.",
+        audio = byte[]("用户本轮音频")
+    }
 )
 → void
 
 
-【单轮对话评分】
+【八、单轮对话评分】
 
 EvaluationService.evaluateDialogueTurn(
-    sessionId = "session_5001",
-    turnNo = 1,
-    audio = "用户本轮 PCM WAV 音频",
-    transcript = "I would like a cup of coffee."
+    command = DialogueTurnEvaluationCommand {
+        sessionId = "session_5001",
+        turnNo = 1,
+        audio = byte[]("用户本轮音频"),
+        transcript = "I would like a cup of coffee."
+    }
 )
+    ├── AiProvider.evaluatePronunciation(
+            text = "I would like a cup of coffee.",
+            audio = Byte[]("用户本轮音频"),
+            token = "发音评测Token"
+        )
+        → String pronunciationEvaluationJson
+
+    └── AiProvider.executeLlmTask(
+            prompt = "结合本轮转写文本和发音评测结果，评估节奏、语调、完整度、发音和流利度",
+            token = "LLM调用Token"
+        )
+        → String dialogueTurnEvaluationJson
+
 → DialogueTurnEvaluationResult {
     turnNo = 1,
     transcript = "I would like a cup of coffee.",
-    overallScore = 84.0,
-    rhythmScore = 82.0,
-    toneScore = 80.0,
-    integrityScore = 100.0,
-    pronunciationScore = 86.0,
-    fluencyScore = 83.0,
-    feedbackSummary = "表达清楚，用词自然。",
-    suggestedExpression = "I’d like a cup of coffee, please.",
+    overallScore = 84,
+    rhythmScore = 83,
+    toneScore = 82,
+    integrityScore = 88,
+    pronunciationScore = 86,
+    fluencyScore = 83,
+    feedbackSummary = "表达完整，语速基本自然，但重音仍需改善。",
+    suggestedExpression = "I'd like a cup of coffee, please.",
     words = [...]
 }
 
 
-【结束会话】
+【九、结束会话】
 
 SessionService.endSession(
     sessionId = "session_5001",
-    stopTime = "2026-07-24T10:42:00Z"
+    stopTime = "2026-07-24 10:42:00"
 )
 → void
 
 
-【生成最终报告】
+【十、会话结束后生成五维评分】
 
 EvaluationService.generateDialogueReport(
     sessionId = "session_5001",
-    dialogue = [
-        { owner = 0, content = "What would you like to order?" },
-        { owner = 1, content = "I would like a cup of coffee." }
-    ]
+    dialogue = SessionService.dialogue
 )
+    └── AiProvider.executeLlmTask(
+            prompt = "根据完整对话和各轮评分生成对话总报告",
+            token = "LLM调用Token"
+        )
+        → String dialogueReportJson
+
 → DialogueReportResult {
-    accuracyScore = 84.0,
-    fluencyScore = 81.0,
-    grammarScore = 86.0,
-    vocabularyScore = 79.0,
-    naturalnessScore = 83.0,
-    finalScore = 83.0,
+    accuracyScore = 85,
+    fluencyScore = 81,
+    grammarScore = 86,
+    vocabularyScore = 79,
+    naturalnessScore = 80,
+    pronunciationScore = 84,
+    languageQualityScore = 83,
+    goalCoverageScore = 90,
+    communicationEffectivenessScore = 87,
+    interactionCompletionScore = 88,
+    taskCompletionScore = 90,
+    finalScore = 85,
     summary = "用户能够完成咖啡店点单交流……",
-    strengths = [...],
-    improvements = [...]
+    strengths = [
+        "能够清楚表达点单需求",
+        "主要句型使用正确"
+    ],
+    improvements = [
+        "加强单词重音练习",
+        "使用更自然、礼貌的点单表达"
+    ]
+}
+
+→ 前端弹出本次会话评分 {
+    finalScore = 85,
+    dimensionScore = {
+        pronunciation = 84,
+        fluency = 81,
+        grammar = 86,
+        vocabulary = 79,
+        communication = 87
+    },
+    summary = "用户能够完成咖啡店点单交流……"
 }
 
 
-【完成流程】
+【十一、进入学习资产页面查看对话详情】
+
+EvaluationService.getDialogueEvaluation(
+    sessionId = "session_5001"
+)
+→ DialogueEvaluationResult {
+    // 展示本次会话的完整对话内容
+    dialogue = [
+        Message {
+            owner = 0,
+            content = "What would you like to order?",
+            audio = null
+        },
+        Message {
+            owner = 1,
+            content = "I would like a cup of coffee.",
+            audio = byte[]("用户本轮音频")
+        }
+    ],
+
+    // 只针对用户每一轮表达展示纠错信息和推荐表达
+    turnEvaluation = [
+        DialogueTurnEvaluationResult {
+            turnNo = 1,
+            transcript = "I would like a cup of coffee.",
+            feedbackSummary = "表达正确，但礼貌性和自然度可以进一步提升。",
+            suggestedExpression = "I'd like a cup of coffee, please.",
+            overallScore = 84,
+            rhythmScore = 83,
+            toneScore = 82,
+            integrityScore = 88,
+            pronunciationScore = 86,
+            fluencyScore = 83,
+            words = [...]
+        }
+    ]
+}
+
+
+【十二、完成场景流程】
+
+SceneFlowService.advanceStage(
+    stage = DIALOGUE
+)
+→ SceneFlowResponse {
+    sceneId = "custom_jcoeow1232",
+    stage = COMPLETED,
+    completed = true
+}
 
 SceneFlowService.completeFlow(
     completed = true
 )
 → void
+```

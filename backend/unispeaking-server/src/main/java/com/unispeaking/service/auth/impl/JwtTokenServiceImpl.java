@@ -1,6 +1,6 @@
 package com.unispeaking.service.auth.impl;
 
-import com.unispeaking.domain.po.user.UserAccount;
+import com.unispeaking.domain.po.auth.UserAccount;
 import com.unispeaking.domain.vo.auth.IssuedJwt;
 import com.unispeaking.infrastructure.config.JwtProperties;
 import com.unispeaking.service.auth.JwtTokenService;
