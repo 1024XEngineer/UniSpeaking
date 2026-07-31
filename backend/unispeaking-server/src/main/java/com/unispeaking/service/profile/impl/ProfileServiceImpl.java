@@ -3,7 +3,7 @@ package com.unispeaking.service.profile.impl;
 import com.unispeaking.domain.dto.profile.UpdateUserPreferenceRequest;
 import com.unispeaking.domain.dto.profile.UserPreferenceResponse;
 import com.unispeaking.domain.po.profile.UserProfile;
-import com.unispeaking.repository.UserProfileRepository;
+import com.unispeaking.infrastructure.persistence.repository.user.UserProfileRepository;
 import com.unispeaking.service.profile.ProfileService;
 import org.springframework.stereotype.Service;
 

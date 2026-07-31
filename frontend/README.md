@@ -1,230 +1,121 @@
-# UniSpeaking
+# UniSpeaking Frontend
 
-UniSpeaking 是一个 AI 英语口语陪练产品。目前仓库中的前端界面仍在按模块持续设计、修改与定稿。本文档记录截至 **2026-07-23** 的可联调状态。
+前端项目位于 [`Unispeaking_fronted`](Unispeaking_fronted)，使用 React 19 和
+Vite 6。
 
-## 当前进度
+## 当前联调状态
 
-当前版本已覆盖自由对话、场景广场、自定义场景“学 → 读 → 说”、IELTS 口语特训、英文模拟面试、三类学习资产和个人中心主要页面。除特别说明外，业务数据仍为前端 Mock，不能视为接口已经接入。
+已经连接后端的功能：
 
-| 模块 | 状态 |
-| --- | --- |
-| 自由对话 | 视觉与交互定稿；字幕逐句翻译已恢复 |
-| 场景广场 | 主页与自定义场景学习流程基本定稿 |
-| 学 / 读 / 说训练 | 三步流程、朗读评分弹窗、模拟对话和结果弹窗已完成 |
-| 场景学习资产 | 资产主页、统一记录侧栏、录音播放、删除和快速复练入口已完成 |
-| IELTS 口语 | 训练中心、Part 1/2/3、考官选择、全真模考、单次报告和能力趋势已完成 |
-| IELTS 学习资产 | 概览、训练记录、报告、录音、删除、快速复练和能力趋势已完成 |
-| 英文模拟面试 | 简历/JD 准备、时长选择、实时面试、报告和学习资产已完成 |
-| 个人主页 | 设置页、月历、学习统计和成就系统已完成当前设计，仍可能微调 |
-| 会员权益 | 原型可用，支付和额度均未接真实服务 |
+- 注册、登录、JWT 本地会话。
+- 用户等级、AI 老师、音色和语速偏好。
+- Qwen Realtime 自由对话、字幕、翻译和结束会话。
+- 自定义场景生成及“学 → 读 → 说”流程。
+- 单词、词组、句子展示和 TTS 示范。
+- 句子音频采集与朗读评分。
+- 自定义场景对话、状态机、逐轮评分、五维报告。
+- 学习资产列表、详情和场景复练。
 
-当前后端可优先对接自由对话、场景训练和学习资产三条主链路；个人主页和会员模块的数据契约可随后补齐。
+仍以页面和演示数据为主的功能：
 
-## 前端目录
+- IELTS 训练及报告。
+- 英文模拟面试。
+- 个人主页统计与成就。
+- 会员、额度和支付。
 
-当前前端项目位于 `Unispeaking_fronted/`。
+## 本地启动
 
-## 本地运行
-
-建议使用 Node.js 20 或更高版本。
+要求 Node.js 20 或更高版本。
 
 ```bash
-cd Unispeaking_fronted
+cd frontend/Unispeaking_fronted
 npm install
-npm run dev -- --port 5174
+VITE_BACKEND_URL=http://localhost:8080 npm run dev
 ```
 
-生产构建检查：
+默认地址：
+
+```text
+http://localhost:5173
+```
+
+`VITE_BACKEND_URL` 同时用于 REST 和认证 WebSocket。留空时请求会发送到前端源，
+只有经过 Nginx 同源代理的生产部署才应使用 `/backend`。
+
+浏览器麦克风需要 `localhost` 或 HTTPS，并需要用户授权。
+
+## 构建和契约检查
 
 ```bash
 npm run build
+npm run check:routes
+npm run check:realtime-events
 ```
 
-主要技术依赖：React 19、Vite 6、Phosphor Icons、Lucide React。当前项目是 JavaScript + JSX，尚未引入 TypeScript。
-
-## 代码结构
+## 目录
 
 ```text
-Unispeaking_fronted/
-├── public/
-│   ├── brand/           # UniSpeaking 品牌图形与字标
-│   ├── examiner/        # IELTS 考官头像
-│   └── teachers/        # 六位 AI 老师的静态透明底头像
-├── src/
-│   ├── App.jsx          # 应用主流程、场景训练、通用学习资产和个人模块
-│   ├── IeltsModule.jsx  # IELTS 训练、报告和学习资产
-│   ├── InterviewModule.jsx # 英文模拟面试和面试学习资产
-│   ├── NewtonsCradle.jsx # 全站统一加载动画
-│   ├── data.js          # 老师、等级、场景、学习资产和会员方案 Mock 数据
-│   ├── main.jsx         # React 应用入口
-│   └── styles.css       # 全局样式及交互动效
-├── index.html
-├── package.json
-└── vite.config.mjs
+Unispeaking_fronted
+├── public
+│   ├── brand
+│   ├── examiner
+│   └── teachers
+├── scripts
+│   ├── check-realtime-events.mjs
+│   └── check-routes.mjs
+├── src
+│   ├── App.jsx
+│   ├── IeltsModule.jsx
+│   ├── InterviewModule.jsx
+│   ├── apiClient.js
+│   ├── realtimeClient.js
+│   ├── router.js
+│   └── styles.css
+├── Dockerfile
+├── nginx.conf
+└── package.json
 ```
 
-当前为了快速确认 UI，通用页面和业务状态仍主要集中在 `App.jsx` 中；IELTS 与英文面试已拆为独立模块。正式合并时建议继续按业务域拆分，并单独建立正式路由、API Client、状态管理与数据类型层。
+- `apiClient.js`：HTTP API、JWT Header 和统一响应解包。
+- `realtimeClient.js`：WebRTC、DataChannel、WebSocket 和实时事件归一化。
+- `router.js`：页面路径生成和解析。
+- `App.jsx`：自由对话、自定义场景、学习流程和主要页面状态。
+- `IeltsModule.jsx`、`InterviewModule.jsx`：尚在完善后端接口的独立模块。
 
-## 当前前端状态流
+## 主要路由
 
-应用当前没有使用 React Router。顶层 `App` 使用 History API 与本地 React state 切换以下流程：
-
-```text
-启动页 → 注册/登录 → 邮箱验证 → 英语水平选择 → AI 老师选择 → 应用主界面
-```
-
-应用主界面内包括：
-
-- 自由对话；
-- 场景广场及“学 → 读 → 说”训练流程；
-- 训练结果和学习资产；
-- 个人概览、会员权益与助手设置。
-
-主要页面已有 `/conversation`、`/scenes`、`/training`、`/assets`、`/ielts`、`/ielts/assets`、`/interview`、`/interview/assets`、`/profile`、`/membership` 和 `/settings` 等可刷新路径，但仍未建立正式路由层。刷新后业务 state 会恢复为演示默认值，当前没有接入 Local Storage、服务端 Session 或数据库。
-
-## IELTS 与英文面试入口
-
-| 路径 | 页面 |
+| 路由 | 页面 |
 | --- | --- |
-| `/ielts` | IELTS 口语训练中心 |
-| `/ielts/part1`、`/ielts/part2`、`/ielts/part3` | 分项练习话题列表 |
-| `/ielts/mock` | 全真模考 |
-| `/ielts/assets` | IELTS 学习资产概览 |
-| `/ielts/assets/history` | IELTS 训练记录 |
-| `/ielts/assets/trends` | IELTS 能力趋势 |
-| `/interview` | 英文模拟面试准备页 |
-| `/interview/assets` | 英文面试学习资产 |
-| `/interview/assets/history` | 英文面试历史记录 |
+| `/conversation` | 自由对话入口 |
+| `/conversation/{sessionId}` | 当前自由对话 |
+| `/scenes` | 场景广场 |
+| `/scenes/{sceneId}/word` | 单词学习 |
+| `/scenes/{sceneId}/phrase` | 词组学习 |
+| `/scenes/{sceneId}/sentence` | 句子朗读 |
+| `/scenes/{sceneId}/session/{sessionId}` | 自定义场景对话 |
+| `/scenes/{sceneId}/assets` | 场景学习资产 |
+| `/assets` | 学习资产首页 |
+| `/ielts` | IELTS 模块 |
+| `/interview` | 英文面试模块 |
+| `/profile` | 个人主页 |
+| `/settings` | 用户设置 |
 
-IELTS Part 1/2/3 允许从训练记录快速复练；全真模考的考官和题目随机，不提供复练。IELTS 单次报告只保留总结、优先改进项和四项百分制能力反馈，不提供回答优化版、词汇资源或泛化的下一步建议。
+路由契约由 `npm run check:routes` 校验。页面切换必须使用 `router.js` 中的路径
+生成器，不能重新退回只改 React state、不更新浏览器地址的方式。
 
-开发和视觉检查可使用以下查询参数直接打开指定界面：
+## 鉴权与实时连接
 
-| 地址参数 | 界面 |
-| --- | --- |
-| `?preview=teacher` | AI 老师选择 |
-| `?preview=conversation` | 自由对话 |
-| `?preview=scenes` | 场景广场 |
-| `?preview=training` | 场景训练 |
-| `?preview=result` | 训练结果 |
-| `?preview=assets` | 学习资产 |
-| `?preview=profile` | 个人概览 |
-| `?preview=membership` | 会员权益 |
-| `?preview=settings` | 助手设置 |
+- Access Token 保存在 `localStorage` 的 `unispeaking.accessToken`。
+- HTTP 使用 `Authorization: Bearer <token>`。
+- WebSocket 使用
+  `/ws/session-messages?access_token=<token>`。
+- WebRTC 音频和 Realtime DataChannel 由浏览器直接连接 Qwen。
+- 暂停、恢复和打断属于前端与 Realtime 模型的交互。
+- 后端 WebSocket 只接收需要保存的完整轮次消息和结束事件。
 
-这些参数仅用于前端预览，不应作为正式路由方案。
+任何 `VITE_` 变量都会进入浏览器构建产物，禁止放入 API Key、数据库密码或 JWT
+Secret。
 
-学习资产对话详情可通过 `/assets?view=detail` 直接预览。完成一次场景模拟后，“前往学习资产”也必须进入这一详情状态，而不是回到学习资产主页。
-
-## 已定稿的自由对话模块
-
-自由对话模块目前已完成前端视觉和交互定稿，包括：
-
-- 待机界面、开始/结束对话状态；
-- AI 老师、英语水平和对话语速设置；
-- 有字幕与无字幕两种对话布局；
-- 麦克风开关、字幕开关、结束对话控制；
-- 字幕翻译展开/收起；
-- 字幕自动跟随最新内容，并允许用户向上滚动查看历史；
-- 对话开始后显示声纹和时间；
-- 侧边栏折叠、悬浮展开及导航动效。
-
-当前声纹会通过浏览器 `navigator.mediaDevices.getUserMedia()` 读取麦克风音量；若权限不可用则回退为 CSS 动画。组件卸载时会停止媒体轨道并关闭 `AudioContext`。除此之外，自由对话目前没有连接语音识别、实时模型、TTS 或后端会话服务。
-
-产品要求自由对话内容不保存。后端接入时仍可建立临时会话以承载实时通信和用量统计，但不要把自由对话的音频、逐字稿或消息历史写入长期学习资产；如因安全、风控或故障排查必须保留数据，需要先与产品确认保存范围和生命周期。
-
-学习路径中的模拟对话复用自由对话的字幕模式：老师头像、通话计时、双方字幕、逐句翻译、麦克风和挂断控件保持一致。学习路径本身仍显示“学 / 读 / 说”进度；从学习资产进入的单独复练不显示进度条。
-
-## 场景训练与学习资产交接约束
-
-- 训练内容包含单词、短语和句子，并提供标准示范音频入口；首次显示“听标准示范”，播放过后显示“再听一次标准示范”。
-- 朗读完成后以精简弹窗展示单句百分制得分、简短建议和发音定位，不在主页面堆叠评分小字。
-- 模拟对话结束后先展示总分与五维雷达图；五个维度为发音清晰度、流利度、表达完整度、互动回应和自然度。
-- “前往学习资产”直接打开本次对话详情。详情需保留完整对话，并在每一句用户发言后展示 AI 评价。
-- AI 评价当前需要三个结构化字段：`recommendedExpression`（建议表达）、`explanation`（表达提示）和 `naturalAlternative`（地道说法）。
-- “复练场景”直接进入无进度条的模拟对话；悬浮菜单中的“重新学习”从 Learn 阶段开始，并复用已有单词、短语、句子和音频资产，不重新生成。
-- 普通场景、IELTS 和英文面试学习资产保持独立，通过统一的“其他资产”展开菜单切换。
-- 三类训练记录统一使用左侧记录列表、右侧报告详情的布局；录音按钮采用统一的播放/暂停动效，并在旁边提供删除入口。
-
-## 当前 Mock 与后端待接能力
-
-| 功能 | 当前实现 | 后端合并时需要处理 |
-| --- | --- | --- |
-| 注册、登录、退出 | 仅切换前端状态，表单不会提交 | 用户认证、Token/Session、错误状态、邮箱验证与重发 |
-| 用户资料 | 固定为 `Yufan / yufan@example.com` | 当前用户资料查询与更新 |
-| 英语水平和 AI 老师 | 保存在内存 state，刷新丢失 | 用户偏好读取、保存及枚举映射 |
-| 对话语速 | 保存在内存 state | 持久化设置，并映射到 TTS/模型参数 |
-| 自由对话 | 固定字幕和本地计时 | 临时会话创建、实时 ASR/LLM/TTS、消息事件、计时与结束会话 |
-| 字幕翻译 | 使用固定中文文案 | 按消息 ID 请求或接收翻译结果 |
-| 麦克风按钮 | 只控制声纹是否读取麦克风 | 同步控制采集、上行音频和实时连接状态 |
-| 音频播放按钮 | 只切换图标状态 | TTS 音频 URL/流、播放状态和失败重试 |
-| 场景生成 | `setTimeout` 后返回固定结构 | 场景生成接口、任务状态及错误处理 |
-| 推荐场景 | `data.js` 静态数据 | 每日推荐列表接口 |
-| 学/读/说训练 | 本地步骤切换，朗读分数固定 | 训练内容、ASR、发音评分、模拟对话与进度保存 |
-| 训练结果 | 固定分数和反馈 | 结果生成、完成/未完成状态及报告查询 |
-| 学习资产 | 静态列表、本地模拟删除和固定对话详情 | 列表、详情、删除、音频、复练入口、逐句 AI 评价及分页 |
-| 个人概览 | 固定统计、日历和成就 | 学习统计、日历、连续天数及成就接口 |
-| IELTS 训练 | 本地题库、计时、录音状态和固定报告 | 题库、训练会话、录音存储、四项百分制评分、报告和趋势数据 |
-| 英文模拟面试 | 本地简历文件状态、JD、计时和固定报告 | 文件上传、JD 解析、实时面试、录音、评分和历史报告 |
-| 会员与额度 | 固定套餐和用量 | 套餐、订阅状态、配额校验和用量接口 |
-| 支付 | 明确标记为 Mock，不会扣款 | 创建订单、支付回调、订阅更新与幂等处理 |
-| 修改密码/删除账户 | 只有按钮 | 安全验证、密码修改、账户注销及二次确认 |
-
-## 建议的后端接口边界
-
-下面是为了方便联调建议的资源边界，不是已经锁定的最终接口路径；字段和鉴权方式需要前后端共同确认。
-
-| 资源 | 建议能力 |
-| --- | --- |
-| `/auth/*` | 注册、登录、退出、刷新会话、邮箱验证、重发验证邮件 |
-| `/me` | 当前用户资料、学习偏好、默认老师和英语等级 |
-| `/teachers` | 老师列表、口音、人物设定、可用声音标识 |
-| `/conversation-sessions` | 创建/结束临时自由对话、返回实时连接凭证和用量 |
-| 实时通道 | 双向音频、ASR partial/final、用户消息、AI 消息、TTS 状态、错误与结束事件 |
-| `/translations` | 按消息 ID 获取字幕翻译；也可由实时通道推送 |
-| `/scenes` | 推荐场景、场景详情、自定义场景生成 |
-| `/training-sessions` | 创建训练、读取步骤内容、提交朗读、模拟对话、结束或中断训练 |
-| `/training-results` | 评分、维度反馈、纠错建议和完成状态 |
-| `/learning-assets` | 学习资产列表、详情、删除和复练；详情需关联最近一次模拟对话 |
-| `/learning-assets/{id}/conversation` | 完整消息列表及每条用户消息的结构化 AI 评价 |
-| `/stats` | 学习时长、连续天数、日历和成就 |
-| `/plans`、`/subscription`、`/usage` | 套餐、订阅和配额 |
-| `/payments` | 订单创建、支付状态和服务端回调 |
-
-自由对话建议使用 WebSocket 或 WebRTC 承载实时事件。无论采用哪种方式，建议统一定义以下客户端状态：`idle`、`connecting`、`listening`、`thinking`、`speaking`、`reconnecting`、`ended`、`error`，避免前端仅使用当前的 `inCall` 布尔值判断所有状态。
-
-## 建议优先确认的数据契约
-
-合并前建议前后端优先锁定以下稳定 ID 和枚举，避免直接传递中文展示文案：
-
-- 老师：`clara`、`james`、`leo`、`david`、`emily`、`arthur`；
-- 英语等级：`starter`、`basic`、`independent`、`fluent`；
-- 对话语速：建议改为稳定枚举，例如 `slow`、`moderate`、`natural`、`fast`；
-- 训练阶段：`learn`、`read`、`speak`；
-- 训练状态：建议至少包含 `in_progress`、`completed`、`abandoned`；
-- 消息字段：建议至少包含 `id`、`sessionId`、`speaker`、`text`、`translation`、`status`、`createdAt`；场景消息还需关联 `feedback`；
-- 学习资产：建议至少包含 `id`、`sceneId`、`trainingSessionId`、`title`、`status`、`score`、`learningItems`、`conversationId`、`completedAt`；
-- 时间字段统一使用 ISO 8601；分数需明确量纲，例如百分制或 IELTS band score。
-
-建议所有异步接口统一返回可识别的错误码；前端需要据此补充加载、空数据、断网、权限拒绝、配额不足、服务超时和重试状态。
-
-## 合并注意事项
-
-1. 当前 `App.jsx` 是 UI 原型，不建议后端同事直接在组件内分散添加 `fetch`。请先建立统一的 API Client 和环境变量配置。
-2. 当前没有正式路由。若合并到已有 React/Next.js 项目，应将各页面映射到现有路由体系，不要保留 `preview` 参数作为生产入口。
-3. `public/teachers/` 下的文件名与老师 `id` 一致，当前头像为静态透明底 PNG。请保持现有裁切和展示尺寸，不要由后端返回会改变比例的临时图片。
-4. 品牌资源位于 `public/brand/`。如果宿主项目设置了非根路径部署，需要调整当前以 `/brand/...` 和 `/teachers/...` 开头的绝对资源路径。
-5. 浏览器麦克风需要 HTTPS 或 localhost 安全上下文，并需要用户授权。生产环境必须处理拒绝授权、设备缺失、设备切换和连接中断。
-6. 当前没有 `.env` 文件，也没有开发代理配置。接入后端时应补充 `.env.example`，只公开允许进入前端构建的变量，禁止提交密钥。
-7. 自由对话的计时、字幕和会话内容当前都是演示值。联调时应由服务端会话与实时事件驱动，不要继续依赖前端固定数组。
-8. 个人主页与会员模块仍可能继续修改。后端合并时，建议优先稳定自由对话、场景训练和学习资产的数据契约，同时保持展示组件可替换。
-
-## 当前已知限制
-
-- 仅针对桌面端界面进行主要设计与验证；移动端尚未定稿。
-- 页面刷新会丢失所有演示状态。
-- 没有自动化单元测试或端到端测试配置。
-- 没有统一错误边界、请求 Loading、Toast 或全局网络状态处理。
-- 没有无障碍完整审计和多语言架构。
-- IELTS 与英文面试已完成当前桌面端 UI，但题库、录音、评分、报告和趋势仍为 Mock。
-- 个人主页和会员模块仍可能继续微调，相关统计和订阅字段尚未锁定。
+完整接口以
+[`docs/frontend-backend-interface-contract.md`](../docs/frontend-backend-interface-contract.md)
+为准。

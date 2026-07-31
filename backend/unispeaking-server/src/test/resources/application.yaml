@@ -10,9 +10,10 @@ spring:
     init:
       mode: never
 
-conversation:
-  redis:
-    enabled: false
+logging:
+  level:
+    com.baomidou.mybatisplus.core.metadata.TableInfoHelper: ERROR
+    com.baomidou.mybatisplus.core.injector.DefaultSqlInjector: ERROR
 
 auth:
   jwt:

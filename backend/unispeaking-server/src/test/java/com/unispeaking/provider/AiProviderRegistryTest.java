@@ -5,10 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.unispeaking.domain.vo.ai.AiCapability;
-import com.unispeaking.domain.vo.ai.AiModelDefinition;
-import com.unispeaking.domain.vo.realtime.ProviderType;
-import com.unispeaking.exception.BusinessException;
+import com.unispeaking.domain.vo.provider.AiCapability;
+import com.unispeaking.domain.vo.provider.AiModelDefinition;
+import com.unispeaking.domain.vo.provider.ProviderType;
+import com.unispeaking.common.exception.BusinessException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;

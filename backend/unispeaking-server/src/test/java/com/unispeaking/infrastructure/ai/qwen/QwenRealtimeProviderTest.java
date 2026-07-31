@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.unispeaking.exception.BusinessException;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.infrastructure.ai.aliyun.AliyunTtsProvider;
 import com.unispeaking.infrastructure.ai.deepseek.DeepSeekLlmProvider;
 import com.unispeaking.infrastructure.ai.doubao.DoubaoAsrProvider;
@@ -325,7 +325,7 @@ class QwenRealtimeProviderTest {
 						"https://dashscope.aliyuncs.com/api/v1/services/aigc/"
 								+ "multimodal-generation/generation"),
 				"qwen3-tts-flash",
-				"Cherry",
+				"Aiden",
 				"English",
 				Duration.ofSeconds(20),
 				1_048_576);
@@ -346,7 +346,7 @@ class QwenRealtimeProviderTest {
 		String body = readBody(request);
 		assertTrue(body.contains("\"model\":\"qwen3-tts-flash\""));
 		assertTrue(body.contains("\"text\":\"Practice makes progress.\""));
-		assertTrue(body.contains("\"voice\":\"Cherry\""));
+		assertTrue(body.contains("\"voice\":\"Aiden\""));
 		assertTrue(body.contains("\"language_type\":\"English\""));
 		assertFalse(body.contains("dashscope-key"));
 		assertFalse(body.contains("must-not-be-used"));

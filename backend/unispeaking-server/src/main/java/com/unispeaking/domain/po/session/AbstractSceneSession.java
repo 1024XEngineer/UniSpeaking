@@ -1,8 +1,8 @@
 package com.unispeaking.domain.po.session;
 
-import com.unispeaking.domain.po.conversation.ConversationMessage;
-import com.unispeaking.domain.vo.prompt.SessionPrompt;
-import com.unispeaking.domain.vo.realtime.ProviderType;
+import com.unispeaking.domain.po.session.ConversationMessage;
+import com.unispeaking.domain.vo.session.SessionPrompt;
+import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
 import java.time.Instant;

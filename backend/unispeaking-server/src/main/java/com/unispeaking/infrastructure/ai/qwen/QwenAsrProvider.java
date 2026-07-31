@@ -1,7 +1,7 @@
 package com.unispeaking.infrastructure.ai.qwen;
 
 import com.unispeaking.domain.vo.evaluation.AudioInput;
-import com.unispeaking.exception.BusinessException;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.TranscriptionProvider;
 import java.io.ByteArrayOutputStream;

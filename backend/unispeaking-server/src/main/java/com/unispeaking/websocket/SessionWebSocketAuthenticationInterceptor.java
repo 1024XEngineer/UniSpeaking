@@ -1,6 +1,6 @@
 package com.unispeaking.websocket;
 
-import com.unispeaking.exception.BusinessException;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.service.auth.AuthService;
 import java.util.Map;
 import org.springframework.http.HttpStatus;

@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.unispeaking.domain.dto.scene.SceneFlowResponse;
 import com.unispeaking.domain.dto.scene.SceneGenerationRequest;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
-import com.unispeaking.domain.dto.scene.StartSceneSessionResponse;
+import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
 import com.unispeaking.domain.vo.scene.SceneType;

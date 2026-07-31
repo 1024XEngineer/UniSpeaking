@@ -1,9 +1,9 @@
 package com.unispeaking.provider;
 
-import com.unispeaking.domain.vo.ai.AiCapability;
-import com.unispeaking.domain.vo.ai.AiModelDefinition;
-import com.unispeaking.domain.vo.realtime.ProviderType;
-import com.unispeaking.exception.BusinessException;
+import com.unispeaking.domain.vo.provider.AiCapability;
+import com.unispeaking.domain.vo.provider.AiModelDefinition;
+import com.unispeaking.domain.vo.provider.ProviderType;
+import com.unispeaking.common.exception.BusinessException;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;

@@ -8,17 +8,14 @@ spring:
     username: ${DATABASE_USERNAME:postgres}
     password: ${DATABASE_PASSWORD:}
     driver-class-name: org.postgresql.Driver
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:63790}
-      password: ${REDIS_PASSWORD:}
-      connect-timeout: ${REDIS_CONNECT_TIMEOUT:2s}
-      timeout: ${REDIS_COMMAND_TIMEOUT:2s}
   sql:
     init:
       mode: always
       schema-locations: classpath:db/schema.sql
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
 
 server:
   port: ${SERVER_PORT:8080}
@@ -27,18 +24,19 @@ prompt:
   templates:
     directory: ${PROMPT_TEMPLATE_DIR:}
 
-conversation:
-  redis:
-    enabled: ${FREE_CHAT_REDIS_ENABLED:true}
-    key-prefix: ${FREE_CHAT_REDIS_KEY_PREFIX:unispeaking:free-chat:session}
-    ttl: ${FREE_CHAT_REDIS_TTL:24h}
-
 mybatis-plus:
-  type-handlers-package: com.unispeaking.infrastructure.persistence.mybatis.typehandler
+  type-handlers-package: com.unispeaking.infrastructure.persistence.typehandler
   configuration:
     map-underscore-to-camel-case: true
   global-config:
     banner: false
+
+# MyBatis-Plus cannot model composite @TableId values. The affected entities
+# use full-key wrappers and are guarded by CompositeKeyEntityTest.
+logging:
+  level:
+    com.baomidou.mybatisplus.core.metadata.TableInfoHelper: ERROR
+    com.baomidou.mybatisplus.core.injector.DefaultSqlInjector: ERROR
 
 auth:
   jwt:

@@ -1,6 +1,6 @@
 package com.unispeaking.infrastructure.ai.minimax;
 
-import com.unispeaking.exception.BusinessException;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.TtsProvider;
 import java.io.ByteArrayOutputStream;

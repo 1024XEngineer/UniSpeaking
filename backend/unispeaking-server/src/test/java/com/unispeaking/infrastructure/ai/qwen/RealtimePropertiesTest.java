@@ -5,9 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
-import com.unispeaking.domain.vo.realtime.ProviderType;
-import com.unispeaking.exception.BusinessException;
-import com.unispeaking.service.realtime.impl.RealtimeCredentialServiceImpl;
+import com.unispeaking.domain.vo.provider.ProviderType;
+import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.infrastructure.realtime.RealtimeCredentialIssuer;
 import java.net.Authenticator;
 import java.net.CookieHandler;
 import java.net.ProxySelector;
@@ -53,11 +53,11 @@ class RealtimePropertiesTest {
 				Duration.ofSeconds(20));
 		properties.validate();
 
-		var service = new RealtimeCredentialServiceImpl(
+		var service = new RealtimeCredentialIssuer(
 				httpClient,
 				new ObjectMapper(),
 				properties);
-		var credential = service.getCredential(ProviderType.QWEN);
+		var credential = service.issue(ProviderType.QWEN);
 
 		assertEquals("POST", httpClient.request.method());
 		assertEquals("expire_in_seconds=300", httpClient.request.uri().getQuery());
@@ -80,12 +80,12 @@ class RealtimePropertiesTest {
 				Duration.ofSeconds(20));
 		properties.validate();
 
-		var service = new RealtimeCredentialServiceImpl(
+		var service = new RealtimeCredentialIssuer(
 				httpClient,
 				new ObjectMapper(),
 				properties);
 		Instant before = Instant.now().plusSeconds(295);
-		var credential = service.getCredential(ProviderType.QWEN);
+		var credential = service.issue(ProviderType.QWEN);
 		Instant after = Instant.now().plusSeconds(305);
 
 		assertFalse(credential.expiresAt().isBefore(before));
@@ -112,13 +112,13 @@ class RealtimePropertiesTest {
 				Duration.ofSeconds(20));
 		properties.validate();
 
-		var service = new RealtimeCredentialServiceImpl(
+		var service = new RealtimeCredentialIssuer(
 				httpClient,
 				new ObjectMapper(),
 				properties);
 		BusinessException exception = assertThrows(
 				BusinessException.class,
-				() -> service.getCredential(ProviderType.QWEN));
+				() -> service.issue(ProviderType.QWEN));
 
 		assertEquals("QWEN_TEMPORARY_KEY_INVALID", exception.code());
 	}
