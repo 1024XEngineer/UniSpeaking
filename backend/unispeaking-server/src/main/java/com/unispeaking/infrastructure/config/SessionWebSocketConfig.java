@@ -24,6 +24,9 @@ public class SessionWebSocketConfig implements WebSocketConfigurer {
 	@Override
 	public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
 		registry.addHandler(sessionMessageWebSocketHandler, "/ws/session-messages")
-				.addInterceptors(authenticationInterceptor);
+				.addInterceptors(authenticationInterceptor)
+				.setAllowedOriginPatterns(
+						"http://localhost:*",
+						"http://127.0.0.1:*");
 	}
 }

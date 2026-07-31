@@ -8,6 +8,7 @@
     "build": "vite build",
     "check:realtime-events": "node scripts/check-realtime-events.mjs",
     "check:routes": "node scripts/check-routes.mjs",
+    "generate:teacher-previews": "node scripts/generate-teacher-previews.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

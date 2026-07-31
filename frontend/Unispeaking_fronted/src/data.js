@@ -7,6 +7,7 @@ export const teachers = [
     method: "会放慢节奏，用轻松追问帮助你继续说下去。",
     intro: "Hi, I’m Clara. Take your time — we’ll make speaking English feel natural and easy.",
     image: "/teachers/clara.png",
+    previewAudio: "/teachers/audio/clara.wav",
     voiceId: "Katerina",
   },
   {
@@ -17,6 +18,7 @@ export const teachers = [
     method: "擅长梳理表达逻辑，适合希望说得更有条理的学习者。",
     intro: "Hello, I’m James. Let’s turn your ideas into clear, confident English.",
     image: "/teachers/james.png",
+    previewAudio: "/teachers/audio/james.wav",
     voiceId: "Harvey",
   },
   {
@@ -27,6 +29,7 @@ export const teachers = [
     method: "像朋友一样自然聊天，快速降低开口压力。",
     intro: "Hey, I’m Leo! Don’t overthink it — just speak, and we’ll have a great chat.",
     image: "/teachers/leo.png",
+    previewAudio: "/teachers/audio/leo.wav",
     voiceId: "Raymond",
   },
   {
@@ -37,6 +40,7 @@ export const teachers = [
     method: "关注表达效率，适合职场沟通与面试准备。",
     intro: "Hi, I’m David. We’ll make your English concise, natural, and ready for work.",
     image: "/teachers/david.png",
+    previewAudio: "/teachers/audio/david.wav",
     voiceId: "Aiden",
   },
   {
@@ -47,6 +51,7 @@ export const teachers = [
     method: "善于从日常话题展开，让对话持续而不尴尬。",
     intro: "Hi, I’m Emily. Let’s talk about everyday life and enjoy the conversation.",
     image: "/teachers/emily.png",
+    previewAudio: "/teachers/audio/emily.wav",
     voiceId: "Tina",
   },
   {
@@ -57,6 +62,7 @@ export const teachers = [
     method: "提供更成熟的表达方式，适合进阶交流。",
     intro: "Good to meet you. I’m Arthur. Let’s give your English more depth and confidence.",
     image: "/teachers/arthur.png",
+    previewAudio: "/teachers/audio/arthur.wav",
     voiceId: "Dolce",
   },
 ];
