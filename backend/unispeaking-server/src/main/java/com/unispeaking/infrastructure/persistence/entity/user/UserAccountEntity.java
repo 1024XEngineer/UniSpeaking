@@ -20,6 +20,7 @@ public class UserAccountEntity {
 	private String username;
 	private String passwordHash;
 	private String nickname;
+	private String avatarObjectKey;
 	private String role;
 	private String status;
 	private Long authVersion;
