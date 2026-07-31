@@ -66,6 +66,34 @@ export function getCurrentUser() {
   return request("/api/auth/me");
 }
 
+export function getProfileOverview(month) {
+  const query = month ? `?month=${encodeURIComponent(month)}` : "";
+  return request(`/api/profile/overview${query}`);
+}
+
+export function updateProfile({ nickname }) {
+  return request("/api/profile", {
+    method: "PATCH",
+    body: JSON.stringify({ nickname }),
+  });
+}
+
+export function uploadProfileAvatar(file) {
+  const formData = new FormData();
+  formData.append("avatar", file);
+  return request("/api/profile/avatar", {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export function changePassword({ currentPassword, newPassword }) {
+  return request("/api/auth/password", {
+    method: "PUT",
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+}
+
 export function getUserPreference() {
   return request("/api/user-preferences");
 }
