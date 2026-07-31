@@ -2,6 +2,82 @@
 
 本文档用于前端和后端对齐接口。当前后端已实现登录注册、JWT 鉴权、用户偏好、字幕翻译、自由会话开始、WebSocket 追加完整消息和结束；其他未实现接口会单独标记。
 
+## 个人主页与账户安全接口
+
+以下接口均从 JWT 获取当前用户，不接收客户端传入的 `userId`。
+
+### 获取个人主页
+
+```text
+GET /api/profile/overview?month=2026-07
+Authorization: Bearer <accessToken>
+```
+
+`month` 可省略，格式为 `yyyy-MM`，省略时按 `Asia/Shanghai` 返回当前月；未来月份不允许查询。日历的打卡依据是该用户场景下已经持久化的五维评分报告，同一天多份报告只返回一个日期。
+
+```json
+{
+  "account": {
+    "userId": "11111111-1111-4111-8111-111111111111",
+    "email": "name@example.com",
+    "nickname": "Sunny",
+    "displayName": "Sunny",
+    "avatarUrl": "https://signed-oss-url.example/avatar.jpg",
+    "avatarUrlExpiresAt": "2026-07-31T08:00:00Z"
+  },
+  "calendar": {
+    "month": "2026-07",
+    "checkedDates": ["2026-07-02", "2026-07-15"],
+    "checkedInToday": true
+  }
+}
+```
+
+`avatarUrl` 是短期签名地址，未上传头像或对象存储暂不可用时为 `null`。
+
+### 修改用户名（昵称）
+
+```text
+PATCH /api/profile
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+```json
+{
+  "nickname": "Sunny"
+}
+```
+
+这里只修改展示昵称，不修改登录邮箱。昵称去除首尾空白后长度必须为 1～80。
+
+### 上传头像
+
+```text
+POST /api/profile/avatar
+Authorization: Bearer <accessToken>
+Content-Type: multipart/form-data
+```
+
+表单字段名为 `avatar`。仅接受 JPEG/PNG，文件不超过 2 MiB，宽高均为 128～4096 像素。后端会解码并重新编码后写入阿里云 OSS，响应包含一小时有效的签名 URL。
+
+### 修改密码
+
+```text
+PUT /api/auth/password
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+```json
+{
+  "currentPassword": "old-password",
+  "newPassword": "new-password"
+}
+```
+
+新密码长度为 6～72，且不能与当前密码相同。成功响应中的 `reauthenticationRequired` 为 `true`；服务端同时递增 `auth_version`，使该用户所有现有 JWT（包括当前请求所用 JWT）失效，前端必须清除 Token 并跳转登录页。
+
 ## 1. 基础约定
 
 ### 1.1 Base URL
