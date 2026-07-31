@@ -527,12 +527,26 @@ src/test/java/com/unispeaking/{same-package}
 - 真实供应商手工测试不放在默认 `src/test`，避免依赖密钥、网络和本机文件。
 - 未引用夹具、旧包路径测试和已删除功能测试必须同步删除。
 - Bug 修复必须添加能复现问题的回归测试。
+- 每次修改生产代码时，必须同步新增或更新对应测试文件，覆盖新增行为、受影响分支和
+  兼容性边界；不得以“改动较小”或“后续补测”为由只提交实现代码。
+- 后端自动化测试的全局行覆盖率不得低于 80%。启动类、纯 DTO、简单属性绑定类和明确
+  生成代码可以按 CI 约定排除，Service、Controller、Repository、Provider、鉴权、
+  会话、评分和状态机等核心业务代码不得通过排除规则规避覆盖率要求。
+- 当前 CI 的强制门槛暂时保持为 70%，用于降低建设初期的协作阻力。这是过渡性自动
+  门禁，不代表开发质量标准降低；测试基线稳定达到 80% 后，再单独调整 CI 阈值。
 
 提交前至少执行：
 
 ```bash
 cd backend/unispeaking-server
-./mvnw test
+./mvnw --batch-mode --no-transfer-progress clean verify
+./mvnw --batch-mode --no-transfer-progress \
+  -Pci-integration -DskipUnitTests verify
+./mvnw --batch-mode --no-transfer-progress \
+  -Pcoverage-aggregate \
+  -DskipUnitTests \
+  -DskipIntegrationTests \
+  verify
 ```
 
 修改前端接口契约时，还须执行前端构建和路由/实时协议检查。
@@ -559,5 +573,6 @@ cd backend/unispeaking-server
 - 持久化仅使用 MyBatis-Plus，复合主键使用完整条件。
 - 认证、授权、输入校验、超时和错误转换完整。
 - 配置无真实密钥，日志无敏感数据。
-- 新增行为有测试，默认测试不依赖外网或真实账号。
-- `./mvnw test` 全部通过。
+- 所有生产代码改动均同步补齐测试，默认测试不依赖外网或真实账号。
+- 全局行覆盖率达到 80% 的开发质量标准；CI 在过渡期仍按 70% 自动门禁执行。
+- 单元测试、容器集成测试和覆盖率检查全部通过。
