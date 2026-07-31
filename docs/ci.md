@@ -13,6 +13,7 @@ Redis 引入生产运行时。
 | `ci-refresh.yml` | `main` 更新后查找全部开放 PR，并行发起重检 |
 | `ci-refresh-pr.yml` | 等待包含最新 `main` 的 merge SHA，跳过冲突或已变化的 PR |
 | `ci-status.yml` | 在可信上下文校验当前 base、head、merge SHA 后发布 `CI / required` |
+| `coverage.yml` | `main` 后端变更后生成 JaCoCo 聚合报告并通过 OIDC 上传到 Codecov |
 
 同一 PR 的核心检查使用 `ci-pr-<PR 编号>` 并发组。出现新提交或 `main` 更新时，旧检查
 会自动取消；不同 PR 可以并行执行。PR 工作流只使用只读权限，不接收仓库 Secrets。
@@ -73,6 +74,18 @@ GitHub Actions 在对应运行的 Artifacts 中保留以下内容 30 天：
 
 PR 不上传后端 JAR、前端 `dist` 或 Docker 镜像。用于在任务间合并覆盖率和校验 merge SHA
 的临时数据只保留 1 天。
+
+根目录 README 显示 `main` 分支的后端测试状态和 Codecov 覆盖率。覆盖率合并单元测试
+及 PostgreSQL、Redis 集成测试所执行的后端 Java 代码；它不是数据库表或 SQL 语句的
+覆盖率。前端尚未建立自动化测试覆盖率，因此 README 暂不显示前端覆盖率。
+`coverage.yml` 上传的是 JaCoCo 聚合报告
+`backend/unispeaking-server/target/site/jacoco-aggregate/jacoco.xml`，同时使用
+`backend` flag 标记报告。上传通过 GitHub OIDC 鉴权，不需要配置 `CODECOV_TOKEN`。
+
+首次启用前，仓库管理员需要在 Codecov 中安装 GitHub App 并激活
+`1024XEngineer/UniSpeaking`。工作流合入 `main` 后会自动进行首次上传；也可以在
+Actions 的 Coverage 工作流中手动运行。首次上传成功前，README 徽章可能显示
+`unknown`。
 
 ## 首次启用与分支保护
 
