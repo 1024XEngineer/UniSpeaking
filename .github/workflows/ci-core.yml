@@ -19,11 +19,6 @@ on:
         description: GitHub-generated merge commit to test
         required: true
         type: string
-      publish_status:
-        description: Publish CI / required from the trusted main refresh path
-        required: false
-        type: boolean
-        default: false
 
 concurrency:
   group: ci-pr-${{ inputs.pr_number }}
@@ -463,7 +458,6 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      statuses: write
     steps:
       - name: 汇总所有必要任务
         id: summary
@@ -518,42 +512,6 @@ jobs:
           require_job compose "$COMPOSE_RESULT" "$COMPOSE_REQUIRED"
           require_job nginx "$NGINX_RESULT" "$NGINX_REQUIRED"
           require_job dependency_review "$DEPENDENCY_RESULT" "$DEPENDENCY_REQUIRED"
-
-      - name: 发布 main 更新重检状态
-        if: always() && inputs.publish_status
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MERGE_SHA: ${{ inputs.merge_sha }}
-          SUMMARY_OUTCOME: ${{ steps.summary.outcome }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          state=failure
-          description="UniSpeaking 必要 CI 检查未通过"
-          if [[ "$SUMMARY_OUTCOME" == success ]]; then
-            state=success
-            description="UniSpeaking 必要 CI 检查已通过"
-          fi
-
-          jq -n \
-            --arg state "$state" \
-            --arg context "CI / required" \
-            --arg description "$description" \
-            --arg target_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            '{
-              state: $state,
-              context: $context,
-              description: $description,
-              target_url: $target_url
-            }' > "$RUNNER_TEMP/status.json"
-
-          curl --fail-with-body --silent --show-error \
-            --request POST \
-            --header "Authorization: Bearer $GH_TOKEN" \
-            --header "Accept: application/vnd.github+json" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            --data-binary "@$RUNNER_TEMP/status.json" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$MERGE_SHA"
 
       - name: 执行最终门禁
         if: always() && steps.summary.outcome != 'success'
