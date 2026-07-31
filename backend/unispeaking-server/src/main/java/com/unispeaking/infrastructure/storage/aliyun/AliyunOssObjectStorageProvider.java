@@ -62,6 +62,11 @@ public class AliyunOssObjectStorageProvider implements ObjectStorageProvider {
 		return true;
 	}
 
+	@Override
+	public void close() {
+		client.shutdown();
+	}
+
 	private BusinessException storageFailure() {
 		return new BusinessException("AVATAR_STORAGE_FAILED", "头像存储服务暂时不可用");
 	}
