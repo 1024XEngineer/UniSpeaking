@@ -25,6 +25,18 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+profile:
+  time-zone: ${PROFILE_TIME_ZONE:Asia/Shanghai}
+
+object-storage:
+  qiniu:
+    access-key: ${QINIU_ACCESS_KEY:}
+    secret-key: ${QINIU_SECRET_KEY:}
+    bucket: ${QINIU_BUCKET:}
+    domain: ${QINIU_DOMAIN:}
+    avatar-prefix: ${QINIU_AVATAR_PREFIX:avatars}
+    signed-url-ttl: ${QINIU_SIGNED_URL_TTL:1h}
+
 prompt:
   templates:
     directory: ${PROMPT_TEMPLATE_DIR:}

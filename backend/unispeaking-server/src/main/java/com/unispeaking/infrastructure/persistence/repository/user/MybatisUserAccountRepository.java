@@ -1,6 +1,7 @@
 package com.unispeaking.infrastructure.persistence.repository.user;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.unispeaking.domain.po.auth.UserAccount;
 import com.unispeaking.domain.po.auth.UserRole;
 import com.unispeaking.domain.po.auth.UserStatus;
@@ -53,12 +54,52 @@ public class MybatisUserAccountRepository implements UserAccountRepository {
 		mapper.updateById(entity);
 	}
 
+	@Override
+	public boolean updateNickname(UUID id, String nickname) {
+		return mapper.update(null, Wrappers.<UserAccountEntity>lambdaUpdate()
+				.eq(UserAccountEntity::getId, id)
+				.set(UserAccountEntity::getNickname, nickname)
+				.set(UserAccountEntity::getUpdatedAt, OffsetDateTime.now(ZoneOffset.UTC))) == 1;
+	}
+
+	@Override
+	public boolean updateAvatarObjectKey(
+			UUID id,
+			String expectedObjectKey,
+			String newObjectKey) {
+		LambdaUpdateWrapper<UserAccountEntity> update = Wrappers.lambdaUpdate();
+		update.eq(UserAccountEntity::getId, id);
+		if (expectedObjectKey == null) {
+			update.isNull(UserAccountEntity::getAvatarObjectKey);
+		}
+		else {
+			update.eq(UserAccountEntity::getAvatarObjectKey, expectedObjectKey);
+		}
+		update.set(UserAccountEntity::getAvatarObjectKey, newObjectKey)
+				.set(UserAccountEntity::getUpdatedAt, OffsetDateTime.now(ZoneOffset.UTC));
+		return mapper.update(null, update) == 1;
+	}
+
+	@Override
+	public boolean updatePasswordAndAuthVersion(
+			UUID id,
+			long expectedAuthVersion,
+			String passwordHash) {
+		return mapper.update(null, Wrappers.<UserAccountEntity>lambdaUpdate()
+				.eq(UserAccountEntity::getId, id)
+				.eq(UserAccountEntity::getAuthVersion, expectedAuthVersion)
+				.set(UserAccountEntity::getPasswordHash, passwordHash)
+				.set(UserAccountEntity::getAuthVersion, expectedAuthVersion + 1)
+				.set(UserAccountEntity::getUpdatedAt, OffsetDateTime.now(ZoneOffset.UTC))) == 1;
+	}
+
 	private UserAccountEntity toEntity(UserAccount user) {
 		UserAccountEntity entity = new UserAccountEntity();
 		entity.setId(user.id());
 		entity.setUsername(user.username());
 		entity.setPasswordHash(user.passwordHash());
 		entity.setNickname(user.nickname());
+		entity.setAvatarObjectKey(user.avatarObjectKey());
 		entity.setRole(user.role().name());
 		entity.setStatus(user.status().name());
 		entity.setAuthVersion(user.authVersion());
@@ -74,6 +115,7 @@ public class MybatisUserAccountRepository implements UserAccountRepository {
 				entity.getUsername(),
 				entity.getPasswordHash(),
 				entity.getNickname(),
+				entity.getAvatarObjectKey(),
 				UserRole.valueOf(entity.getRole()),
 				UserStatus.valueOf(entity.getStatus()),
 				entity.getAuthVersion(),

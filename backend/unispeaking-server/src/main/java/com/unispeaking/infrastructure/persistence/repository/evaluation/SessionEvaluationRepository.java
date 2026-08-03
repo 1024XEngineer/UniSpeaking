@@ -96,6 +96,24 @@ public class SessionEvaluationRepository {
 		}
 	}
 
+	public List<OffsetDateTime> findCreatedAtBySceneIdsBetween(
+			List<String> sceneIds,
+			OffsetDateTime start,
+			OffsetDateTime end) {
+		if (sceneIds == null || sceneIds.isEmpty()) {
+			return List.of();
+		}
+		return mapper.selectList(new LambdaQueryWrapper<SessionEvaluationEntity>()
+						.select(SessionEvaluationEntity::getCreatedAt)
+						.in(SessionEvaluationEntity::getSceneId, sceneIds)
+						.ge(SessionEvaluationEntity::getCreatedAt, start)
+						.lt(SessionEvaluationEntity::getCreatedAt, end)
+						.orderByAsc(SessionEvaluationEntity::getCreatedAt))
+				.stream()
+				.map(SessionEvaluationEntity::getCreatedAt)
+				.toList();
+	}
+
 	private SessionEvaluationEntity toEntity(
 			String sceneId,
 			String sessionId,

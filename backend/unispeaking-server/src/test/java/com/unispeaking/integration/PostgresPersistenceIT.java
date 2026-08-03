@@ -129,7 +129,7 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(1, migrationCount);
+		assertEquals(2, migrationCount);
 		assertEquals("jsonb", successFactorType);
 	}
 
@@ -388,7 +388,7 @@ class PostgresPersistenceIT {
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
 		assertEquals(
-				List.of("0", "1"),
+				List.of("0", "1", "2"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version

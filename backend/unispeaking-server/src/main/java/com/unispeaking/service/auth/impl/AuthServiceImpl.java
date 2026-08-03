@@ -1,6 +1,8 @@
 package com.unispeaking.service.auth.impl;
 
 import com.unispeaking.domain.dto.auth.AuthResponse;
+import com.unispeaking.domain.dto.auth.ChangePasswordRequest;
+import com.unispeaking.domain.dto.auth.ChangePasswordResponse;
 import com.unispeaking.domain.dto.auth.LoginRequest;
 import com.unispeaking.domain.dto.auth.RegisterRequest;
 import com.unispeaking.domain.dto.auth.UserAccountResponse;
@@ -96,6 +98,24 @@ public class AuthServiceImpl implements AuthService {
 	@Override
 	public UserAccountResponse currentUser() {
 		return UserAccountResponse.from(requireAuthenticatedUser());
+	}
+
+	@Override
+	@Transactional
+	public ChangePasswordResponse changePassword(ChangePasswordRequest request) {
+		UserAccount user = requireAuthenticatedUser();
+		if (!passwordEncoder.matches(request.currentPassword(), user.passwordHash())) {
+			throw new BusinessException("CURRENT_PASSWORD_INVALID", "当前密码不正确");
+		}
+		if (passwordEncoder.matches(request.newPassword(), user.passwordHash())) {
+			throw new BusinessException("NEW_PASSWORD_SAME_AS_CURRENT", "新密码不能与当前密码相同");
+		}
+		String encoded = passwordEncoder.encode(request.newPassword());
+		if (!userAccountRepository.updatePasswordAndAuthVersion(
+				user.id(), user.authVersion(), encoded)) {
+			throw new BusinessException("PASSWORD_UPDATE_CONFLICT", "账号已发生变化，请重新登录后再试");
+		}
+		return ChangePasswordResponse.required();
 	}
 
 	@Override

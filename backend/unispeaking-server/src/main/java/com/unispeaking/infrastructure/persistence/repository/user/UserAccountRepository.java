@@ -10,4 +10,10 @@ public interface UserAccountRepository {
 	Optional<UserAccount> findByUsername(String username);
 	UserAccount create(UserAccount user);
 	void updateLastLoginAt(UUID id, Instant lastLoginAt);
+	boolean updateNickname(UUID id, String nickname);
+	boolean updateAvatarObjectKey(UUID id, String expectedObjectKey, String newObjectKey);
+	boolean updatePasswordAndAuthVersion(
+			UUID id,
+			long expectedAuthVersion,
+			String passwordHash);
 }

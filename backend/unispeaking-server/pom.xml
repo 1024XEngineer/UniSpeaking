@@ -26,15 +26,18 @@
 		<tag/>
 		<url/>
 	</scm>
+
 	<properties>
 		<java.version>21</java.version>
 		<mybatis-plus.version>3.5.17</mybatis-plus.version>
+		<qiniu-java-sdk.version>7.19.0</qiniu-java-sdk.version>
 		<jacoco.version>0.8.13</jacoco.version>
 		<testcontainers.version>2.0.5</testcontainers.version>
 		<skipUnitTests>false</skipUnitTests>
 		<skipIntegrationTests>true</skipIntegrationTests>
 		<jacoco.unit.argLine/>
 		<jacoco.integration.argLine/>
+
 	</properties>
 		<dependencies>
 			<dependency>
@@ -66,11 +69,16 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
 		</dependency>
-		<dependency>
-			<groupId>org.postgresql</groupId>
-			<artifactId>postgresql</artifactId>
-			<scope>runtime</scope>
-		</dependency>
+			<dependency>
+				<groupId>org.postgresql</groupId>
+				<artifactId>postgresql</artifactId>
+				<scope>runtime</scope>
+			</dependency>
+			<dependency>
+				<groupId>com.qiniu</groupId>
+				<artifactId>qiniu-java-sdk</artifactId>
+				<version>${qiniu-java-sdk.version}</version>
+			</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-flyway</artifactId>

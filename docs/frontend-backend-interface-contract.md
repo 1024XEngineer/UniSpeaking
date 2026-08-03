@@ -2,6 +2,102 @@
 
 本文档用于前端和后端对齐接口。当前后端已实现登录注册、JWT 鉴权、用户偏好、字幕翻译、自由会话开始、WebSocket 追加完整消息和结束；其他未实现接口会单独标记。
 
+## 个人主页与账户安全接口
+
+以下接口均从 JWT 获取当前用户，不接收客户端传入的 `userId`。
+
+### 获取个人主页
+
+```text
+GET /api/profile/overview?month=2026-07
+Authorization: Bearer <accessToken>
+```
+
+`month` 可省略，格式为 `yyyy-MM`，省略时按 `Asia/Shanghai` 返回当前月；未来月份不允许查询。日历的打卡依据是该用户场景下已经持久化的五维评分报告，同一天多份报告只返回一个日期。学习时长来自所有场景共用的 `practice_session`，不依赖是否生成评分报告。
+
+```json
+{
+  "account": {
+    "userId": "11111111-1111-4111-8111-111111111111",
+    "email": "name@example.com",
+    "nickname": "Sunny",
+    "displayName": "Sunny",
+    "avatarUrl": "https://signed-oss-url.example/avatar.jpg",
+    "avatarUrlExpiresAt": "2026-07-31T08:00:00Z"
+  },
+  "statistics": {
+    "weeklyPracticeSeconds": 10980,
+    "trainingRecordCount": 12,
+    "consecutiveLearningDays": 7,
+    "lastSevenDays": [
+      {"date": "2026-07-25", "practiceSeconds": 1080},
+      {"date": "2026-07-26", "practiceSeconds": 1560},
+      {"date": "2026-07-27", "practiceSeconds": 0}
+    ]
+  },
+  "calendar": {
+    "month": "2026-07",
+    "checkedDates": ["2026-07-02", "2026-07-15"],
+    "checkedInToday": true
+  }
+}
+```
+
+`avatarUrl` 是短期签名地址，未上传头像或对象存储暂不可用时为 `null`。
+
+统计口径：
+
+- `weeklyPracticeSeconds`：本周一 00:00 至当前时刻的有效学习秒数。
+- `trainingRecordCount`：未软删除训练记录条数，同一记录复练多次仍计为一项。
+- `consecutiveLearningDays`：由五维报告自动打卡日期计算；当天未打卡时从昨天向前计算。
+- `lastSevenDays`：今天及之前六个上海自然日的有效学习秒数，按日期升序返回。
+- 单次完整会话不足 30 秒时不计入任何时长；达到 30 秒时全部计入。
+- 有效会话跨越上海零点时，时长按每个自然日实际覆盖区间拆分。
+- 接口始终返回精确秒数；当前页面对非零有效秒数按分钟向上展示，因此 30～59 秒显示为 1 分钟。
+
+### 修改用户名（昵称）
+
+```text
+PATCH /api/profile
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+```json
+{
+  "nickname": "Sunny"
+}
+```
+
+这里只修改展示昵称，不修改登录邮箱。昵称去除首尾空白后长度必须为 1～80。
+
+### 上传头像
+
+```text
+POST /api/profile/avatar
+Authorization: Bearer <accessToken>
+Content-Type: multipart/form-data
+```
+
+表单字段名为 `avatar`。仅接受 JPEG/PNG，文件不超过 2 MiB，宽高均为 128～4096 像素。后端会解码并重新编码后写入七牛云 Kodo 私有空间，响应包含一小时有效的签名 URL。
+
+### 修改密码
+
+```text
+PUT /api/auth/password
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+```json
+{
+  "currentPassword": "old-password",
+  "newPassword": "new-password"
+}
+```
+
+新密码长度为 6～72，且不能与当前密码相同。成功响应中的 `reauthenticationRequired` 为 `true`；服务端同时递增 `auth_version`，使该用户所有现有 JWT（包括当前请求所用 JWT）失效，前端必须清除 Token 并跳转登录页。
+
 ## 1. 基础约定
 
 ### 1.1 Base URL
@@ -266,7 +362,9 @@ Profile 和偏好，固定以 `FREE_CHAT` 调用 `SceneService` 和
 `systemPrompt` 是后端在 `SceneService.generateScene(...)` 中完成权限校验、
 用户 Profile 注入和用户偏好注入后的完整五层提示词。前端必须将它放入
 DataChannel `session.update.session.instructions`，不得使用客户端默认提示词替代。
-`SessionService.startSession(prompt)` 只创建业务会话并记录开始时间。
+`SessionService.startSession(sceneType, sceneId, prompt)` 创建业务会话，同时在
+`practice_session` 中保存服务器开始时间。自由对话和自定义场景已经接入该统一入口；
+雅思、面试及后续场景接入时必须复用同一生命周期。
 `RealtimeSessionConnector` 使用 `offerSdp/model/voice` 调用
 `RealtimeConnectionService`，内部申请短期凭证并交换 Answer SDP。`systemPrompt`
 就是 `SceneService` 生成的 `scenePrompt`，启动响应只保留这一个提示词字段。
@@ -355,8 +453,11 @@ HTTP `POST /api/scene-sessions/{sessionId}/end` 目前保留，方便调试和�
 后端行为：
 
 1. 会话状态变为 `COMPLETED`。
-2. 结算用量。
-3. 保留本次完整消息；不更新用户长期 `memory_text`。
+2. 后端使用服务器当前时间更新 `practice_session.ended_at`；请求中的 `stopTime`
+   只为旧客户端兼容，不作为学习时长依据。
+3. 单次会话完整时长达到 30 秒后，才会进入个人主页学习时长与七日节奏统计。
+4. 自由对话不保存消息正文；自定义场景保留本次完整消息；两者都不更新用户长期
+   `memory_text`。
 
 ## 6. 自定义场景接口
 

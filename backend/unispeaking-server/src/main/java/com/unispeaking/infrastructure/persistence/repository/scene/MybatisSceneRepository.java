@@ -120,6 +120,37 @@ public class MybatisSceneRepository implements SceneRepository {
 				.toList();
 	}
 
+	@Override
+	public long countActiveByUserId(String userId) {
+		UUID ownerId;
+		try {
+			ownerId = UUID.fromString(userId);
+		}
+		catch (IllegalArgumentException exception) {
+			return 0;
+		}
+		return sceneMapper.selectCount(new LambdaQueryWrapper<SceneEntity>()
+				.eq(SceneEntity::getUserId, ownerId)
+				.isNull(SceneEntity::getDeletedAt));
+	}
+
+	@Override
+	public List<String> findAllIdsByUserId(String userId) {
+		UUID ownerId;
+		try {
+			ownerId = UUID.fromString(userId);
+		}
+		catch (IllegalArgumentException exception) {
+			return List.of();
+		}
+		return sceneMapper.selectList(new LambdaQueryWrapper<SceneEntity>()
+						.select(SceneEntity::getId)
+						.eq(SceneEntity::getUserId, ownerId))
+				.stream()
+				.map(SceneEntity::getId)
+				.toList();
+	}
+
 	private CustomSceneDefinition toDefinition(SceneEntity scene) {
 		return new CustomSceneDefinition(
 				scene.getId(),

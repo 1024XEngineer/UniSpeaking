@@ -1,6 +1,8 @@
 package com.unispeaking.controller;
 
 import com.unispeaking.domain.dto.auth.AuthResponse;
+import com.unispeaking.domain.dto.auth.ChangePasswordRequest;
+import com.unispeaking.domain.dto.auth.ChangePasswordResponse;
 import com.unispeaking.domain.dto.auth.LoginRequest;
 import com.unispeaking.domain.dto.auth.RegisterRequest;
 import com.unispeaking.domain.dto.auth.UserAccountResponse;
@@ -9,6 +11,7 @@ import com.unispeaking.service.auth.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -36,5 +39,11 @@ public class AuthController {
 	@GetMapping("/me")
 	public ApiResponse<UserAccountResponse> me() {
 		return ApiResponse.success(authService.currentUser());
+	}
+
+	@PutMapping("/password")
+	public ApiResponse<ChangePasswordResponse> changePassword(
+			@Valid @RequestBody ChangePasswordRequest request) {
+		return ApiResponse.success(authService.changePassword(request));
 	}
 }

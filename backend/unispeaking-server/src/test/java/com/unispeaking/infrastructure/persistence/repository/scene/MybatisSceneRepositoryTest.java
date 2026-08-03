@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
@@ -86,6 +87,24 @@ class MybatisSceneRepositoryTest {
 		assertTrue(sentence.getAllValues().stream()
 				.allMatch(value -> value.getSceneId().equals("custom_abc123")
 						&& value.getSentenceId().startsWith("sentence_")));
+	}
+
+	@Test
+	void countsOnlyActiveTrainingRecords() {
+		SceneMapper sceneMapper = mock(SceneMapper.class);
+		when(sceneMapper.selectCount(any())).thenReturn(3L);
+		var repository = new MybatisSceneRepository(
+				sceneMapper,
+				mock(SceneWordMapper.class),
+				mock(ScenePhraseMapper.class),
+				mock(SceneSentenceMapper.class),
+				mock(CustomScenePersistence.class));
+
+		long count = repository.countActiveByUserId(
+				"11111111-1111-4111-8111-111111111111");
+
+		assertEquals(3, count);
+		verify(sceneMapper).selectCount(any());
 	}
 
 	private Fixture fixture() {
