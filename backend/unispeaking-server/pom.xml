@@ -30,7 +30,7 @@
 	<properties>
 		<java.version>21</java.version>
 		<mybatis-plus.version>3.5.17</mybatis-plus.version>
-		<aliyun-oss.version>3.18.5</aliyun-oss.version>
+		<qiniu-java-sdk.version>7.19.0</qiniu-java-sdk.version>
 		<jacoco.version>0.8.13</jacoco.version>
 		<testcontainers.version>2.0.5</testcontainers.version>
 		<skipUnitTests>false</skipUnitTests>
@@ -75,9 +75,9 @@
 				<scope>runtime</scope>
 			</dependency>
 			<dependency>
-				<groupId>com.aliyun.oss</groupId>
-				<artifactId>aliyun-sdk-oss</artifactId>
-				<version>${aliyun-oss.version}</version>
+				<groupId>com.qiniu</groupId>
+				<artifactId>qiniu-java-sdk</artifactId>
+				<version>${qiniu-java-sdk.version}</version>
 			</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

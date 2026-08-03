@@ -29,13 +29,13 @@ profile:
   time-zone: ${PROFILE_TIME_ZONE:Asia/Shanghai}
 
 object-storage:
-  aliyun:
-    endpoint: ${OSS_ENDPOINT:}
-    bucket: ${OSS_BUCKET:}
-    access-key-id: ${OSS_ACCESS_KEY_ID:}
-    access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
-    avatar-prefix: ${OSS_AVATAR_PREFIX:avatars}
-    signed-url-ttl: ${OSS_SIGNED_URL_TTL:1h}
+  qiniu:
+    access-key: ${QINIU_ACCESS_KEY:}
+    secret-key: ${QINIU_SECRET_KEY:}
+    bucket: ${QINIU_BUCKET:}
+    domain: ${QINIU_DOMAIN:}
+    avatar-prefix: ${QINIU_AVATAR_PREFIX:avatars}
+    signed-url-ttl: ${QINIU_SIGNED_URL_TTL:1h}
 
 prompt:
   templates:

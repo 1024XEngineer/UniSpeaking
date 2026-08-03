@@ -3,27 +3,27 @@ package com.unispeaking.infrastructure.config;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-@ConfigurationProperties("object-storage.aliyun")
+@ConfigurationProperties("object-storage.qiniu")
 public class ObjectStorageProperties {
-	private String endpoint = "";
 	private String bucket = "";
-	private String accessKeyId = "";
-	private String accessKeySecret = "";
+	private String accessKey = "";
+	private String secretKey = "";
+	private String domain = "";
 	private String avatarPrefix = "avatars";
 	private Duration signedUrlTtl = Duration.ofHours(1);
 
 	public boolean configured() {
-		return !endpoint.isBlank() && !bucket.isBlank()
-				&& !accessKeyId.isBlank() && !accessKeySecret.isBlank();
+		return !bucket.isBlank() && !accessKey.isBlank()
+				&& !secretKey.isBlank() && !domain.isBlank();
 	}
-	public String getEndpoint() { return endpoint; }
-	public void setEndpoint(String value) { endpoint = value == null ? "" : value.trim(); }
 	public String getBucket() { return bucket; }
 	public void setBucket(String value) { bucket = value == null ? "" : value.trim(); }
-	public String getAccessKeyId() { return accessKeyId; }
-	public void setAccessKeyId(String value) { accessKeyId = value == null ? "" : value.trim(); }
-	public String getAccessKeySecret() { return accessKeySecret; }
-	public void setAccessKeySecret(String value) { accessKeySecret = value == null ? "" : value.trim(); }
+	public String getAccessKey() { return accessKey; }
+	public void setAccessKey(String value) { accessKey = value == null ? "" : value.trim(); }
+	public String getSecretKey() { return secretKey; }
+	public void setSecretKey(String value) { secretKey = value == null ? "" : value.trim(); }
+	public String getDomain() { return domain; }
+	public void setDomain(String value) { domain = value == null ? "" : value.trim(); }
 	public String getAvatarPrefix() { return avatarPrefix; }
 	public void setAvatarPrefix(String value) { avatarPrefix = value == null ? "avatars" : value.trim(); }
 	public Duration getSignedUrlTtl() { return signedUrlTtl; }
