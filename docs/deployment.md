@@ -44,10 +44,24 @@ Before deploying the profile feature to an existing database, apply:
 psql "$DATABASE_URL" -f deploy/postgres/profile.sql
 ```
 
-The migration adds only `user.avatar_object_key`; check-in dates continue to be
-derived from persisted `session_evaluation` reports, so no check-in table and no
-Redis data structure are required. New databases receive the same definition
-from `backend/unispeaking-server/src/main/resources/db/schema.sql`.
+The migration adds `user.avatar_object_key` and the `practice_session` session
+fact table. Check-in dates continue to be derived from persisted
+`session_evaluation` reports, so no check-in table and no Redis data structure
+are required. Learning duration is calculated from completed practice sessions;
+sessions shorter than 180 seconds are excluded at query time. New databases use
+the Flyway migrations in
+`backend/unispeaking-server/src/main/resources/db/migration`.
+
+Spring Boot runs `V2__practice_session.sql` automatically on startup. For an
+existing environment, either let Flyway apply V2 or run `profile.sql` manually;
+do not run both concurrently. Verify the migration with:
+
+```sql
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'practice_session'
+ORDER BY ordinal_position;
+```
 
 ## Available settings
 
