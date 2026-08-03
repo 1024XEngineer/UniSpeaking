@@ -1,5 +1,11 @@
 # UniSpeaking
 
+[![后端测试](https://github.com/1024XEngineer/UniSpeaking/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/1024XEngineer/UniSpeaking/actions/workflows/coverage.yml)
+[![后端覆盖率](https://codecov.io/gh/1024XEngineer/UniSpeaking/branch/main/graph/badge.svg?flag=backend)](https://codecov.io/gh/1024XEngineer/UniSpeaking)
+
+覆盖率目前统计后端 Java 代码，合并单元测试及 PostgreSQL、Redis 集成测试结果；
+前端尚未接入自动化测试覆盖率。
+
 UniSpeaking 是一个面向英语口语学习的 AI 实时陪练系统。当前仓库包含 React 前端、
 Spring Boot 后端、PostgreSQL 数据模型以及 Nginx/Docker 部署配置。
 
@@ -54,8 +60,7 @@ IELTS、英文面试、个人主页统计和会员页面目前主要完成了前
 ├── deploy
 │   ├── docker-compose.yml
 │   ├── env
-│   ├── nginx
-│   └── postgres                独立建表脚本
+│   └── nginx
 ├── docs                        架构、接口和部署文档
 └── CLAUDE.md                   后端架构与开发规范
 ```
@@ -153,9 +158,10 @@ createdb -U postgres unispeaking
 CREATE DATABASE unispeaking;
 ```
 
-后端启动时会执行
-[`src/main/resources/db/schema.sql`](backend/unispeaking-server/src/main/resources/db/schema.sql)
-创建或补齐当前表结构。运行账号必须具有建表和建索引权限。
+后端启动时由 Flyway 执行
+[`V1__baseline.sql`](backend/unispeaking-server/src/main/resources/db/migration/V1__baseline.sql)
+创建或补齐当前表结构。新库直接执行 V1；已有数据库会先以版本 0 纳入管理，再执行
+幂等迁移并保留现有数据。运行账号必须具有建表、建索引和管理 Flyway 历史表的权限。
 
 当前主要数据表：
 
@@ -322,10 +328,13 @@ Browser <========= authenticated WebSocket ==========> Spring Boot
 
 ```bash
 cd backend/unispeaking-server
-./mvnw test
+./mvnw --batch-mode --no-transfer-progress clean verify
+./mvnw --batch-mode --no-transfer-progress \
+  -Pci-integration -DskipUnitTests verify
 ```
 
-当前测试基线：181 项测试通过。
+当前测试基线：186 项单元测试、7 项 PostgreSQL/Redis 容器集成测试通过，合并后的
+JaCoCo 全局行覆盖率为 73.80%。
 
 前端：
 
@@ -342,12 +351,13 @@ npm run check:realtime-events
 - [完整业务架构](docs/UniSpeaking架构设计（完整版）.md)
 - [前后端接口文档](docs/frontend-backend-interface-contract.md)
 - [部署与配置](docs/deployment.md)
+- [持续集成与分支保护](docs/ci.md)
 - [用户、场景与会话标识](docs/用户会话标识与用量归属流程.md)
 
 ## 当前边界
 
 - PostgreSQL 是持久化真相来源；运行时代码只允许使用 MyBatis-Plus。
-- Redis 和消息队列尚未启用。
+- Redis 仅用于 CI 容器烟测，生产运行时和消息队列尚未启用。
 - 自由聊天内容不进入长期存储。
 - 自定义场景、学习内容、逐轮评分和会话报告写入 PostgreSQL。
 - IELTS、面试、个人统计和会员功能尚需继续开发后端接口。

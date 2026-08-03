@@ -1,0 +1,69 @@
+name: CI Refresh
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  discover:
+    name: 查找开放 PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      prs: ${{ steps.prs.outputs.prs }}
+    steps:
+      - name: 查询以 main 为目标的开放 PR
+        id: prs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          all='[]'
+          page=1
+          while true; do
+            response=$(curl --fail-with-body --silent --show-error \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Accept: application/vnd.github+json" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/pulls?state=open&base=main&per_page=100&page=$page")
+            all=$(jq -cn \
+              --argjson all "$all" \
+              --argjson batch "$response" \
+              '$all + $batch')
+            count=$(jq 'length' <<< "$response")
+            if (( count < 100 )); then
+              break
+            fi
+            ((page += 1))
+          done
+
+          prs=$(jq -c \
+            '[.[] | select(.draft == false) | {
+              number: (.number | tostring),
+              initial_head_sha: .head.sha
+            }]' <<< "$all")
+          echo "prs=$prs" >> "$GITHUB_OUTPUT"
+
+  refresh:
+    name: 重检 PR
+    needs: discover
+    if: needs.discover.outputs.prs != '[]'
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        pr: ${{ fromJSON(needs.discover.outputs.prs) }}
+    uses: ./.github/workflows/ci-refresh-pr.yml
+    with:
+      pr_number: ${{ matrix.pr.number }}
+      initial_head_sha: ${{ matrix.pr.initial_head_sha }}
+      main_sha: ${{ github.sha }}

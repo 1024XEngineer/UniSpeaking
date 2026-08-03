@@ -11,12 +11,13 @@ import java.net.http.WebSocketHandshakeException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -52,6 +53,11 @@ public class IflytekScoringProvider extends ScoringProvider {
 			"cn-east-1.ws-api.xf-yun.com";
 	private static final String SUNTONE_PATH =
 			"/v1/private/s8e098720";
+	private static final DateTimeFormatter HTTP_DATE_FORMATTER =
+			DateTimeFormatter.ofPattern(
+					"EEE, dd MMM yyyy HH:mm:ss 'GMT'",
+					Locale.US)
+					.withZone(ZoneOffset.UTC);
 
 	private final ObjectMapper objectMapper;
 	private final WebSocketConnector connector;
@@ -444,8 +450,7 @@ public class IflytekScoringProvider extends ScoringProvider {
 	private URI signedEndpoint(String signingApiKey) {
 		try {
 			String host = endpoint.getHost();
-			String date = ZonedDateTime.now(ZoneOffset.UTC)
-					.format(DateTimeFormatter.RFC_1123_DATE_TIME);
+			String date = formatHttpDate(Instant.now());
 			String requestLine =
 					"GET " + endpoint.getRawPath() + " HTTP/1.1";
 			String signatureOrigin =
@@ -480,6 +485,12 @@ public class IflytekScoringProvider extends ScoringProvider {
 					"IFLYTEK_SUNTONE_SIGNATURE_FAILED",
 					"Failed to sign the iFlytek pronunciation request");
 		}
+	}
+
+	static String formatHttpDate(Instant instant) {
+		return HTTP_DATE_FORMATTER.format(Objects.requireNonNull(
+				instant,
+				"iFlytek signature instant is required"));
 	}
 
 	private byte[] wavPayload(byte[] wav) {

@@ -1,3 +1,4 @@
+-- Flyway V1: current production schema plus idempotent legacy upgrades.
 CREATE TABLE IF NOT EXISTS "user" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username VARCHAR(254) NOT NULL UNIQUE,

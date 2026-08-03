@@ -1,7 +1,10 @@
 FROM eclipse-temurin:21-jdk AS build
 WORKDIR /workspace
 COPY . .
-RUN ./mvnw package -DskipTests
+RUN ./mvnw --batch-mode --no-transfer-progress \
+    -DskipUnitTests \
+    -DskipIntegrationTests \
+    package
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app

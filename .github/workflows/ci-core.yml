@@ -1,0 +1,518 @@
+name: CI Core
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: Pull request number used for concurrency and artifacts
+        required: true
+        type: string
+      base_sha:
+        description: Base commit used to calculate changed paths
+        required: true
+        type: string
+      head_sha:
+        description: Pull request head commit
+        required: true
+        type: string
+      merge_sha:
+        description: GitHub-generated merge commit to test
+        required: true
+        type: string
+
+concurrency:
+  group: ci-pr-${{ inputs.pr_number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: 识别变更范围
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.paths.outputs.backend }}
+      frontend: ${{ steps.paths.outputs.frontend }}
+      docker_backend: ${{ steps.paths.outputs.docker_backend }}
+      docker_frontend: ${{ steps.paths.outputs.docker_frontend }}
+      compose: ${{ steps.paths.outputs.compose }}
+      nginx: ${{ steps.paths.outputs.nginx }}
+      dependencies: ${{ steps.paths.outputs.dependencies }}
+    steps:
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+          fetch-depth: 0
+
+      - name: 计算条件任务
+        id: paths
+        env:
+          BASE_SHA: ${{ inputs.base_sha }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+
+          backend=false
+          frontend=false
+          docker_backend=false
+          docker_frontend=false
+          compose=false
+          nginx=false
+          dependencies=false
+          force_all=false
+
+          while IFS= read -r file; do
+            case "$file" in
+              .github/workflows/*)
+                force_all=true
+                ;;
+              backend/*)
+                backend=true
+                docker_backend=true
+                ;;
+              frontend/Unispeaking_fronted/*)
+                frontend=true
+                docker_frontend=true
+                ;;
+            esac
+            case "$file" in
+              backend/unispeaking-server/pom.xml|backend/unispeaking-server/.mvn/*|backend/unispeaking-server/mvnw)
+                dependencies=true
+                ;;
+              frontend/Unispeaking_fronted/package.json|frontend/Unispeaking_fronted/package-lock.json)
+                dependencies=true
+                ;;
+              deploy/docker-compose.yml|deploy/docker-compose.yaml|deploy/compose.yml|deploy/compose.yaml|deploy/env/.env.example)
+                compose=true
+                ;;
+              deploy/nginx/*)
+                nginx=true
+                ;;
+            esac
+          done < "$RUNNER_TEMP/changed-files"
+
+          if [[ "$force_all" == true ]]; then
+            backend=true
+            frontend=true
+            docker_backend=true
+            docker_frontend=true
+            compose=true
+            nginx=true
+            dependencies=true
+          fi
+
+          {
+            echo "backend=$backend"
+            echo "frontend=$frontend"
+            echo "docker_backend=$docker_backend"
+            echo "docker_frontend=$docker_frontend"
+            echo "compose=$compose"
+            echo "nginx=$nginx"
+            echo "dependencies=$dependencies"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 记录本次待测对象
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+          MERGE_SHA: ${{ inputs.merge_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ci-metadata"
+          jq -n \
+            --arg pr_number "$PR_NUMBER" \
+            --arg base_sha "$BASE_SHA" \
+            --arg head_sha "$HEAD_SHA" \
+            --arg merge_sha "$MERGE_SHA" \
+            '{
+              pr_number: $pr_number,
+              base_sha: $base_sha,
+              head_sha: $head_sha,
+              merge_sha: $merge_sha
+            }' > "$RUNNER_TEMP/ci-metadata/metadata.json"
+
+      - name: 保存待测对象元数据
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-metadata-${{ inputs.pr_number }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/ci-metadata/metadata.json
+          if-no-files-found: error
+          retention-days: 1
+
+  backend:
+    name: 后端编译、单测与打包
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 配置 Java 21
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: backend/unispeaking-server/pom.xml
+
+      - name: 编译、测试并打包
+        working-directory: backend/unispeaking-server
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          ./mvnw --batch-mode --no-transfer-progress clean verify 2>&1 \
+            | tee ci-logs/backend-unit.log
+
+      - name: 保存单元测试与覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backend-unit-reports-${{ inputs.pr_number }}
+          path: |
+            backend/unispeaking-server/target/surefire-reports
+            backend/unispeaking-server/target/site/jacoco-unit
+            backend/unispeaking-server/ci-logs/backend-unit.log
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 传递单元测试覆盖率数据
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backend-unit-coverage-${{ inputs.pr_number }}
+          path: |
+            backend/unispeaking-server/target/jacoco-unit.exec
+            backend/unispeaking-server/target/classes
+          if-no-files-found: error
+          retention-days: 1
+
+  integration:
+    name: PostgreSQL 与 Redis 集成测试
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 配置 Java 21
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: backend/unispeaking-server/pom.xml
+
+      - name: 运行容器集成测试
+        working-directory: backend/unispeaking-server
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          ./mvnw --batch-mode --no-transfer-progress \
+            -Pci-integration -DskipUnitTests verify 2>&1 \
+            | tee ci-logs/backend-integration.log
+
+      - name: 保存集成测试报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backend-integration-reports-${{ inputs.pr_number }}
+          path: |
+            backend/unispeaking-server/target/failsafe-reports
+            backend/unispeaking-server/target/site/jacoco-integration
+            backend/unispeaking-server/ci-logs/backend-integration.log
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 传递集成测试覆盖率数据
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backend-integration-coverage-${{ inputs.pr_number }}
+          path: backend/unispeaking-server/target/jacoco-integration.exec
+          if-no-files-found: error
+          retention-days: 1
+
+  coverage:
+    name: 合并覆盖率并检查 70% 门槛
+    needs:
+      - changes
+      - backend
+      - integration
+    if: >-
+      always() &&
+      needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 确认前置任务成功
+        if: needs.backend.result != 'success' || needs.integration.result != 'success'
+        run: exit 1
+
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 配置 Java 21
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: backend/unispeaking-server/pom.xml
+
+      - name: 下载单元测试覆盖率数据
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: backend-unit-coverage-${{ inputs.pr_number }}
+          path: backend/unispeaking-server/target
+
+      - name: 下载集成测试覆盖率数据
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: backend-integration-coverage-${{ inputs.pr_number }}
+          path: backend/unispeaking-server/target
+
+      - name: 合并报告并执行覆盖率门禁
+        working-directory: backend/unispeaking-server
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          ./mvnw --batch-mode --no-transfer-progress \
+            -Pcoverage-aggregate \
+            -DskipUnitTests \
+            -DskipIntegrationTests \
+            verify 2>&1 | tee ci-logs/backend-coverage.log
+
+      - name: 保存合并覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backend-coverage-${{ inputs.pr_number }}
+          path: |
+            backend/unispeaking-server/target/site/jacoco-aggregate
+            backend/unispeaking-server/ci-logs/backend-coverage.log
+          if-no-files-found: error
+          retention-days: 30
+
+  frontend:
+    name: 前端依赖与生产构建
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend/Unispeaking_fronted
+    steps:
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 配置 Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/Unispeaking_fronted/package-lock.json
+
+      - name: 安装锁定依赖
+        run: npm ci
+
+      - name: 检查路由
+        run: npm run check:routes
+
+      - name: 检查 Realtime 事件
+        run: npm run check:realtime-events
+
+      - name: 生产构建
+        run: npm run build
+
+  docker_backend:
+    name: 构建后端镜像
+    needs: changes
+    if: needs.changes.outputs.docker_backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 验证后端镜像构建
+        run: >-
+          docker build
+          --file backend/unispeaking-server/Dockerfile
+          --tag unispeaking-backend:ci
+          backend/unispeaking-server
+
+  docker_frontend:
+    name: 构建前端镜像
+    needs: changes
+    if: needs.changes.outputs.docker_frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 验证前端镜像构建
+        run: >-
+          docker build
+          --file frontend/Unispeaking_fronted/Dockerfile
+          --tag unispeaking-frontend:ci
+          frontend/Unispeaking_fronted
+
+  compose:
+    name: 校验 Compose 配置
+    needs: changes
+    if: needs.changes.outputs.compose == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 准备 CI 环境模板
+        run: cp deploy/env/.env.example deploy/env/.env
+
+      - name: 校验配置
+        run: docker compose --env-file deploy/env/.env.example -f deploy/docker-compose.yml config --quiet
+
+  nginx:
+    name: 校验 Nginx 配置
+    needs: changes
+    if: needs.changes.outputs.nginx == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 执行 nginx -t
+        run: >-
+          docker run --rm
+          --add-host backend:127.0.0.1
+          --add-host frontend:127.0.0.1
+          --volume "$PWD/deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
+          nginx:1.27-alpine
+          nginx -t
+
+  dependency_review:
+    name: 审查新增依赖漏洞
+    needs: changes
+    if: needs.changes.outputs.dependencies == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: 审查依赖差异
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          base-ref: ${{ inputs.base_sha }}
+          head-ref: ${{ inputs.head_sha }}
+          fail-on-severity: high
+          comment-summary-in-pr: never
+
+  required:
+    name: 核心检查汇总
+    if: always()
+    needs:
+      - changes
+      - backend
+      - integration
+      - coverage
+      - frontend
+      - docker_backend
+      - docker_frontend
+      - compose
+      - nginx
+      - dependency_review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: 汇总所有必要任务
+        id: summary
+        continue-on-error: true
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          DOCKER_BACKEND_RESULT: ${{ needs.docker_backend.result }}
+          DOCKER_FRONTEND_RESULT: ${{ needs.docker_frontend.result }}
+          COMPOSE_RESULT: ${{ needs.compose.result }}
+          NGINX_RESULT: ${{ needs.nginx.result }}
+          DEPENDENCY_RESULT: ${{ needs.dependency_review.result }}
+          BACKEND_REQUIRED: ${{ needs.changes.outputs.backend }}
+          FRONTEND_REQUIRED: ${{ needs.changes.outputs.frontend }}
+          DOCKER_BACKEND_REQUIRED: ${{ needs.changes.outputs.docker_backend }}
+          DOCKER_FRONTEND_REQUIRED: ${{ needs.changes.outputs.docker_frontend }}
+          COMPOSE_REQUIRED: ${{ needs.changes.outputs.compose }}
+          NGINX_REQUIRED: ${{ needs.changes.outputs.nginx }}
+          DEPENDENCY_REQUIRED: ${{ needs.changes.outputs.dependencies }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$CHANGES_RESULT" != success ]]; then
+            echo "变更识别任务未成功：$CHANGES_RESULT"
+            exit 1
+          fi
+
+          require_job() {
+            local name="$1"
+            local result="$2"
+            local required="$3"
+            if [[ "$required" == true && "$result" != success ]]; then
+              echo "$name 为必要任务，但结果为 $result"
+              return 1
+            fi
+            if [[ "$required" != true && "$result" != skipped && "$result" != success ]]; then
+              echo "$name 非必要任务，但出现异常结果 $result"
+              return 1
+            fi
+          }
+
+          require_job backend "$BACKEND_RESULT" "$BACKEND_REQUIRED"
+          require_job integration "$INTEGRATION_RESULT" "$BACKEND_REQUIRED"
+          require_job coverage "$COVERAGE_RESULT" "$BACKEND_REQUIRED"
+          require_job frontend "$FRONTEND_RESULT" "$FRONTEND_REQUIRED"
+          require_job docker_backend "$DOCKER_BACKEND_RESULT" "$DOCKER_BACKEND_REQUIRED"
+          require_job docker_frontend "$DOCKER_FRONTEND_RESULT" "$DOCKER_FRONTEND_REQUIRED"
+          require_job compose "$COMPOSE_RESULT" "$COMPOSE_REQUIRED"
+          require_job nginx "$NGINX_RESULT" "$NGINX_REQUIRED"
+          require_job dependency_review "$DEPENDENCY_RESULT" "$DEPENDENCY_REQUIRED"
+
+      - name: 执行最终门禁
+        if: always() && steps.summary.outcome != 'success'
+        run: exit 1
