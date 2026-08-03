@@ -820,8 +820,8 @@ svg { display: block; }
 .profile-user strong, .profile-user small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-user strong { font-size: 18px; line-height: 1.25; }
 .profile-user small { color: var(--muted); margin-top: 7px; font-size: 11px; }
-.profile-user__edit { position: absolute; top: -3px; right: -3px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 3px solid #fff; border-radius: 50%; background: #252524; color: #fff; box-shadow: 0 4px 12px rgba(20,20,19,.18); cursor: pointer; transition: transform .2s, background .2s; }
-.profile-user__edit:hover { background: #565652; transform: scale(1.08); }
+.profile-user__edit { position: absolute; top: -3px; right: -3px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 1px solid rgba(255,255,255,.88); border-radius: 50%; background: rgba(255,255,255,.62); color: rgba(37,37,36,.82); box-shadow: 0 4px 12px rgba(20,20,19,.15); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); cursor: pointer; transition: transform .2s, background .2s, color .2s; }
+.profile-user__edit:hover { background: rgba(255,255,255,.84); color: #252524; transform: scale(1.08); }
 .profile-user__edit:focus-visible { outline: 2px solid #252524; outline-offset: 2px; }
 .profile-user__edit svg { width: 13px; height: 13px; }
 .profile-nav nav { display: grid; gap: 7px; }
@@ -830,7 +830,7 @@ svg { display: block; }
 .profile-nav nav svg, .logout svg { width: 19px; height: 19px; }
 .logout { flex: 0 0 46px; margin-top: auto; color: #555; }
 .profile-content { min-width: 0; min-height: 0; padding: 52px clamp(42px, 5vw, 84px) 60px; overflow: auto; }
-.stat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }.stat-grid article { min-height: 106px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; display: flex; gap: 14px; align-items: center; }.stat-grid article > svg { width: 22px; height: 22px; }.stat-grid small, .stat-grid strong { display: block; }.stat-grid small { color: var(--muted); }.stat-grid strong { font-size: 26px; margin-top: 7px; }.stat-grid em { font-style: normal; font-size: 11px; }
+.stat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }.stat-grid article, .stat-grid > button { min-height: 106px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; display: flex; gap: 14px; align-items: center; }.stat-grid > button { width: 100%; background: #fff; color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color .2s, box-shadow .2s, transform .2s; }.stat-grid > button:hover { border-color: #b9b9b3; box-shadow: 0 9px 24px rgba(20,20,19,.08); transform: translateY(-2px); }.stat-grid > button:focus-visible { outline: 2px solid #252524; outline-offset: 3px; }.stat-grid article > svg, .stat-grid > button > svg { width: 22px; height: 22px; }.stat-grid small, .stat-grid strong { display: block; }.stat-grid small { color: var(--muted); }.stat-grid strong { font-size: 26px; margin-top: 7px; }.stat-grid em { font-style: normal; font-size: 11px; }
 .today-checkin, .result-checkin { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border-radius: 999px; background: #20201f; color: #fff; font-size: 12px; font-weight: 700; }
 .today-checkin svg, .result-checkin svg { width: 16px; height: 16px; }
 .result-checkin { margin-top: 13px; }
