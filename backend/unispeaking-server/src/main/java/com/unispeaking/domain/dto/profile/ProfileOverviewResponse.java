@@ -5,7 +5,10 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
-public record ProfileOverviewResponse(Account account, Calendar calendar) {
+public record ProfileOverviewResponse(
+		Account account,
+		PracticeStatistics statistics,
+		Calendar calendar) {
 	public record Account(
 			UUID userId,
 			String email,
@@ -22,5 +25,18 @@ public record ProfileOverviewResponse(Account account, Calendar calendar) {
 		public Calendar {
 			checkedDates = List.copyOf(checkedDates);
 		}
+	}
+
+	public record PracticeStatistics(
+			long weeklyPracticeSeconds,
+			long trainingRecordCount,
+			int consecutiveLearningDays,
+			List<DailyPractice> lastSevenDays) {
+		public PracticeStatistics {
+			lastSevenDays = List.copyOf(lastSevenDays);
+		}
+	}
+
+	public record DailyPractice(LocalDate date, long practiceSeconds) {
 	}
 }
