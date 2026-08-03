@@ -20,6 +20,7 @@ import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.po.session.AbstractSceneSession;
 import com.unispeaking.domain.po.session.CustomSceneSession;
 import com.unispeaking.domain.po.session.FreeChatSceneSession;
+import com.unispeaking.domain.po.session.PracticeSessionRecord;
 import com.unispeaking.domain.vo.session.SpeakerType;
 import com.unispeaking.domain.vo.session.SessionPrompt;
 import com.unispeaking.domain.vo.provider.ProviderType;
@@ -30,6 +31,7 @@ import com.unispeaking.domain.vo.session.SessionStatus;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.exception.SessionNotFoundException;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
+import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
 import com.unispeaking.component.session.ActiveSessionRegistry;
@@ -44,7 +46,6 @@ import com.unispeaking.service.scene.SceneService;
 import com.unispeaking.service.scene.impl.ScenarioDialogueStateMachine;
 import com.unispeaking.service.session.SessionService;
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -58,6 +59,7 @@ public class SessionServiceImpl implements SessionService {
 	private final SceneRepository sceneRepository;
 	private final ActiveSessionRegistry activeSessionRegistry;
 	private final SessionMessageRepository sessionMessageRepository;
+	private final PracticeSessionRepository practiceSessionRepository;
 	private final RealtimeSdpExchange realtimeSdpExchange;
 	private final EvaluationService evaluationService;
 	private final ScenarioDialogueStateMachine stateMachine;
@@ -73,6 +75,7 @@ public class SessionServiceImpl implements SessionService {
 			SceneRepository sceneRepository,
 			ActiveSessionRegistry activeSessionRegistry,
 			SessionMessageRepository sessionMessageRepository,
+			PracticeSessionRepository practiceSessionRepository,
 			RealtimeSdpExchange realtimeSdpExchange,
 			EvaluationService evaluationService,
 			ScenarioDialogueStateMachine stateMachine,
@@ -86,6 +89,7 @@ public class SessionServiceImpl implements SessionService {
 		this.sceneRepository = sceneRepository;
 		this.activeSessionRegistry = activeSessionRegistry;
 		this.sessionMessageRepository = sessionMessageRepository;
+		this.practiceSessionRepository = practiceSessionRepository;
 		this.realtimeSdpExchange = realtimeSdpExchange;
 		this.evaluationService = evaluationService;
 		this.stateMachine = stateMachine;
@@ -96,7 +100,10 @@ public class SessionServiceImpl implements SessionService {
 	}
 
 	@Override
-	public StartSessionResponse startSession(SceneType sceneType, String prompt) {
+	public StartSessionResponse startSession(
+			SceneType sceneType,
+			String sceneId,
+			String prompt) {
 		String userId = authService.requireUserId(null);
 		SceneType type = sceneType == null ? SceneType.FREE_CHAT : sceneType;
 		String sessionId = SessionIdGenerator.generate(type);
@@ -104,7 +111,16 @@ public class SessionServiceImpl implements SessionService {
 				? new FreeChatSceneSession(sessionId, userId)
 				: new CustomSceneSession(sessionId, userId);
 		session.setSceneType(type);
+		session.setSceneId(sceneId);
 		session.setPrompt(new SessionPrompt(requirePrompt(prompt)));
+		practiceSessionRepository.create(new PracticeSessionRecord(
+				session.getId(),
+				UUID.fromString(userId),
+				sceneId,
+				type,
+				session.getStatus(),
+				session.getCreatedAt(),
+				null));
 		activeSessionRegistry.save(session);
 		RealtimeFlowLog.info(
 				"session.start sessionId={} userId={} sceneType={} startTime={} prompt={}",
@@ -129,6 +145,7 @@ public class SessionServiceImpl implements SessionService {
 		SceneFlowResponse flow = sceneFlowService.createFlow(scene.sceneId());
 		StartSessionResponse started = startSession(
 				SceneType.FREE_CHAT,
+				scene.sceneId(),
 				scene.scenePrompt());
 		RealtimeConnectionResult connection = connect(
 				started.sessionId(),
@@ -166,6 +183,7 @@ public class SessionServiceImpl implements SessionService {
 		String basePrompt = resolvePrompt(scene, definition, userId);
 		StartSessionResponse started = startSession(
 				SceneType.CUSTOM_SCENE,
+				sceneId,
 				basePrompt);
 		stateMachine.start(started.sessionId(), definition);
 		try {
@@ -241,7 +259,12 @@ public class SessionServiceImpl implements SessionService {
 	public void endSession(String userId, String sessionId, String stopTime) {
 		AbstractSceneSession session = requireOwnedSession(userId, sessionId);
 		if (session.getStatus() != SessionStatus.COMPLETED) {
-			session.complete(parseStopTime(stopTime));
+			Instant endedAt = Instant.now();
+			practiceSessionRepository.complete(
+					sessionId,
+					UUID.fromString(userId),
+					endedAt);
+			session.complete(endedAt);
 			activeSessionRegistry.save(session);
 		}
 		RealtimeFlowLog.info(
@@ -267,10 +290,8 @@ public class SessionServiceImpl implements SessionService {
 				stateMachine.findState(sessionId)
 						.map(ignored -> stateMachine.beginClosing(sessionId))
 						.orElse(null);
-		String endedAt = stopTime == null || stopTime.isBlank()
-				? Instant.now().toString()
-				: stopTime.trim();
-		endSession(userId, sessionId, endedAt);
+		endSession(userId, sessionId, stopTime);
+		String endedAt = session.getEndedAt().toString();
 		RealtimeFlowLog.info(
 				"evaluation.report.start sceneId={} sessionId={}",
 				sceneId,
@@ -417,6 +438,10 @@ public class SessionServiceImpl implements SessionService {
 		}
 		catch (RuntimeException exception) {
 			session.fail("REALTIME_CONNECTION_FAILED", exception.getMessage());
+			practiceSessionRepository.fail(
+					sessionId,
+					UUID.fromString(session.getUserId()),
+					session.getEndedAt());
 			activeSessionRegistry.remove(sessionId);
 			throw exception;
 		}
@@ -532,17 +557,4 @@ public class SessionServiceImpl implements SessionService {
 		return prompt;
 	}
 
-	private Instant parseStopTime(String stopTime) {
-		if (stopTime == null || stopTime.isBlank()) {
-			return Instant.now();
-		}
-		try {
-			return Instant.parse(stopTime.trim());
-		}
-		catch (DateTimeParseException exception) {
-			throw new BusinessException(
-					"INVALID_STOP_TIME",
-					"stopTime must use ISO-8601 format");
-		}
-	}
 }

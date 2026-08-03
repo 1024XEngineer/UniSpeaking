@@ -12,7 +12,10 @@ import com.unispeaking.domain.vo.scene.SceneType;
 
 public interface SessionService {
 
-	StartSessionResponse startSession(SceneType sceneType, String prompt);
+	StartSessionResponse startSession(
+			SceneType sceneType,
+			String sceneId,
+			String prompt);
 
 	StartSceneSessionResponse startFreeChat(StartFreeChatRequest request);
 

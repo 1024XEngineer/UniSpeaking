@@ -3,6 +3,7 @@ package com.unispeaking.service.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -19,6 +20,7 @@ import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.domain.vo.session.RealtimeConnectionResult;
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
+import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.realtime.RealtimeSdpExchange;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.service.asset.impl.ObsoleteDialogueCleanup;
@@ -38,7 +40,7 @@ class SessionServiceImplRepracticeTest {
 
 	@Test
 	void repracticeStartsWithoutAnInMemorySceneFlow() {
-		String userId = "user_1";
+		String userId = "f76889ee-7f7c-4dae-bcc2-61b85a63dcec";
 		String sceneId = "custom_repeat123";
 		String prompt = "layer 1\n\nlayer 2\n\nlayer 3\n\nlayer 4\n\nlayer 5";
 		AuthService authService = mock(AuthService.class);
@@ -48,6 +50,8 @@ class SessionServiceImplRepracticeTest {
 		ScenarioDialogueStateMachine stateMachine =
 				mock(ScenarioDialogueStateMachine.class);
 		ActiveSessionRegistry sessions = new ActiveSessionRegistry();
+		PracticeSessionRepository practiceSessions =
+				mock(PracticeSessionRepository.class);
 		CustomSceneDefinition definition = new CustomSceneDefinition(
 				sceneId,
 				userId,
@@ -89,6 +93,7 @@ class SessionServiceImplRepracticeTest {
 				sceneRepository,
 				sessions,
 				mock(SessionMessageRepository.class),
+				practiceSessions,
 				realtimeSdpExchange,
 				mock(EvaluationService.class),
 				stateMachine,
@@ -110,6 +115,14 @@ class SessionServiceImplRepracticeTest {
 		assertEquals(SceneFlowStage.DIALOGUE, response.currentStage());
 		assertEquals("answer-sdp", response.answerSdp());
 		assertNotNull(response.sessionId());
+		service.endSession(
+				userId,
+				response.sessionId(),
+				"2000-01-01T00:00:00Z");
+		verify(practiceSessions).complete(
+				eq(response.sessionId()),
+				eq(java.util.UUID.fromString(userId)),
+				any(Instant.class));
 		verify(sceneFlowService, never()).getByCurrentStage(
 				any(),
 				any());

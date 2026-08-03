@@ -1,22 +1,3 @@
-BEGIN;
-
-ALTER TABLE "user"
-ADD COLUMN IF NOT EXISTS avatar_object_key VARCHAR(512);
-
-ALTER TABLE "user"
-DROP CONSTRAINT IF EXISTS user_avatar_object_key_check;
-
-ALTER TABLE "user"
-ADD CONSTRAINT user_avatar_object_key_check
-CHECK (avatar_object_key IS NULL OR BTRIM(avatar_object_key) <> '');
-
-COMMENT ON COLUMN "user".avatar_object_key IS
-'用户头像在对象存储中的对象 Key；不保存签名 URL、Bucket 密钥或完整访问地址';
-
-COMMIT;
-
-BEGIN;
-
 CREATE TABLE IF NOT EXISTS practice_session (
     session_id VARCHAR(64) PRIMARY KEY,
     user_id UUID NOT NULL,
@@ -29,12 +10,21 @@ CREATE TABLE IF NOT EXISTS practice_session (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT practice_session_scene_type_check
         CHECK (scene_type IN (
-            'FREE_CHAT', 'CUSTOM_SCENE', 'INTERVIEW_SCENE', 'IELTS_SCENE'
+            'FREE_CHAT',
+            'CUSTOM_SCENE',
+            'INTERVIEW_SCENE',
+            'IELTS_SCENE'
         )),
     CONSTRAINT practice_session_status_check
         CHECK (status IN (
-            'CREATED', 'CONNECTING', 'WAITING_CLIENT', 'ACTIVE',
-            'PAUSED', 'INTERRUPTED', 'COMPLETED', 'FAILED'
+            'CREATED',
+            'CONNECTING',
+            'WAITING_CLIENT',
+            'ACTIVE',
+            'PAUSED',
+            'INTERRUPTED',
+            'COMPLETED',
+            'FAILED'
         )),
     CONSTRAINT practice_session_time_check
         CHECK (ended_at IS NULL OR ended_at >= started_at)
@@ -50,4 +40,9 @@ WHERE status = 'COMPLETED' AND ended_at IS NOT NULL;
 COMMENT ON TABLE practice_session IS
 '全场景练习会话事实；学习时长由 started_at 与 ended_at 计算，不保存聚合统计值';
 
-COMMIT;
+COMMENT ON COLUMN practice_session.user_id IS
+'逻辑关联 user.id，不设置数据库外键';
+
+COMMENT ON COLUMN practice_session.scene_id IS
+'场景业务 ID；自由对话和后续无需持久化场景定义的类型也允许记录';
+
