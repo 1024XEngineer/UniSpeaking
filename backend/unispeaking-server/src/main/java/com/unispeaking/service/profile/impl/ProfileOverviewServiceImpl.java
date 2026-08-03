@@ -26,6 +26,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -40,6 +41,7 @@ public class ProfileOverviewServiceImpl implements ProfileOverviewService {
 	private final Clock clock;
 	private final PracticeDurationCalculator durationCalculator;
 
+	@Autowired
 	public ProfileOverviewServiceImpl(
 			UserAccountRepository accounts,
 			SceneRepository scenes,
