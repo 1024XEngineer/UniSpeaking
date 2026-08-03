@@ -59,7 +59,7 @@ Authorization: Bearer <accessToken>
 Content-Type: multipart/form-data
 ```
 
-表单字段名为 `avatar`。仅接受 JPEG/PNG，文件不超过 2 MiB，宽高均为 128～4096 像素。后端会解码并重新编码后写入阿里云 OSS，响应包含一小时有效的签名 URL。
+表单字段名为 `avatar`。仅接受 JPEG/PNG，文件不超过 2 MiB，宽高均为 128～4096 像素。后端会解码并重新编码后写入七牛云 Kodo 私有空间，响应包含一小时有效的签名 URL。
 
 ### 修改密码
 

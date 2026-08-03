@@ -352,7 +352,7 @@ infrastructure/messaging/{rabbitmq|kafka}/{module}
 ```text
 infrastructure/storage
 ├── ObjectStorageProvider.java
-└── aliyun
+└── qiniu
 infrastructure/cdn
 infrastructure/config/ObjectStorageProperties.java
 infrastructure/config/CdnProperties.java

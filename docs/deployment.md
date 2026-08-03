@@ -18,22 +18,23 @@ session or using profile avatars:
 DASHSCOPE_API_KEY=replace-with-your-real-key
 BAILIAN_WORKSPACE_ID=replace-with-your-workspace-id
 BAILIAN_MODEL=qwen3.5-omni-flash-realtime
-OSS_ENDPOINT=https://oss-cn-hangzhou.aliyuncs.com
-OSS_BUCKET=replace-with-your-private-bucket
-OSS_ACCESS_KEY_ID=replace-with-your-access-key-id
-OSS_ACCESS_KEY_SECRET=replace-with-your-access-key-secret
-OSS_AVATAR_PREFIX=avatars
-OSS_SIGNED_URL_TTL=1h
+QINIU_ACCESS_KEY=replace-with-your-access-key
+QINIU_SECRET_KEY=replace-with-your-secret-key
+QINIU_BUCKET=replace-with-your-private-bucket
+QINIU_DOMAIN=https://replace-with-your-https-download-domain
+QINIU_AVATAR_PREFIX=avatars
+QINIU_SIGNED_URL_TTL=1h
 PROFILE_TIME_ZONE=Asia/Shanghai
 ```
 
 Do not put API keys in a `VITE_` variable because Vite embeds those values in
 browser assets.
 
-The OSS bucket must remain private. The backend stores only the object key in
-PostgreSQL and returns a short-lived signed download URL to the browser. Grant
-the configured RAM identity only the object read/write/delete permissions
-required for the avatar prefix.
+The Qiniu Kodo bucket must remain private. `QINIU_DOMAIN` must be the bucket's
+HTTPS download domain and must not contain a path, query, or fragment. The
+backend stores only the object key in PostgreSQL and returns a short-lived
+signed download URL to the browser. Grant the configured Qiniu key only the
+upload, download, and delete permissions required for this bucket.
 
 ## Profile database migration
 
@@ -71,13 +72,13 @@ profile:
   time-zone: ${PROFILE_TIME_ZONE:Asia/Shanghai}
 
 object-storage:
-  aliyun:
-    endpoint: ${OSS_ENDPOINT:}
-    bucket: ${OSS_BUCKET:}
-    access-key-id: ${OSS_ACCESS_KEY_ID:}
-    access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
-    avatar-prefix: ${OSS_AVATAR_PREFIX:avatars}
-    signed-url-ttl: ${OSS_SIGNED_URL_TTL:1h}
+  qiniu:
+    access-key: ${QINIU_ACCESS_KEY:}
+    secret-key: ${QINIU_SECRET_KEY:}
+    bucket: ${QINIU_BUCKET:}
+    domain: ${QINIU_DOMAIN:}
+    avatar-prefix: ${QINIU_AVATAR_PREFIX:avatars}
+    signed-url-ttl: ${QINIU_SIGNED_URL_TTL:1h}
 ```
 
 The WebRTC SDP endpoint is derived automatically:
