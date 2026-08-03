@@ -5,4 +5,3 @@ import com.unispeaking.infrastructure.persistence.entity.session.PracticeSession
 
 public interface PracticeSessionMapper extends BaseMapper<PracticeSessionEntity> {
 }
-

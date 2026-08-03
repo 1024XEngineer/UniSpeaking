@@ -14,4 +14,3 @@ public record PracticeSessionRecord(
 		Instant startedAt,
 		Instant endedAt) {
 }
-

@@ -45,4 +45,3 @@ COMMENT ON COLUMN practice_session.user_id IS
 
 COMMENT ON COLUMN practice_session.scene_id IS
 '场景业务 ID；自由对话和后续无需持久化场景定义的类型也允许记录';
-

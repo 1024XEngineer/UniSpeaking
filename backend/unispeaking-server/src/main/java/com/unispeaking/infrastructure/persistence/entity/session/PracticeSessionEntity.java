@@ -29,4 +29,3 @@ public class PracticeSessionEntity {
 	private OffsetDateTime createdAt;
 	private OffsetDateTime updatedAt;
 }
-

@@ -84,4 +84,3 @@ public class PracticeDurationCalculator {
 		return end.isAfter(start) ? Duration.between(start, end).getSeconds() : 0;
 	}
 }
-
