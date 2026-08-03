@@ -811,15 +811,18 @@ svg { display: block; }
 }
 
 .app-main:has(.profile-layout) { overflow: hidden; }
-.profile-layout { height: 100%; min-height: 0; display: grid; grid-template-columns: 250px minmax(0, 1fr); }
+.profile-layout { height: 100%; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
 .profile-nav { min-height: 0; height: 100%; border-right: 1px solid var(--line); padding: 38px 22px 28px; display: flex; flex-direction: column; background: #fff; }
-.profile-user { position: relative; min-height: 94px; display: flex; align-items: flex-start; gap: 12px; padding: 0 6px 42px 10px; }
-.profile-user > img { flex: 0 0 auto; width: 48px; height: 48px; border-radius: 14px; object-fit: cover; object-position: center; }
-.profile-user > span { min-width: 0; flex: 1; padding-top: 2px; }
+.profile-user { min-height: 112px; display: flex; align-items: center; gap: 17px; padding: 0 7px 30px 10px; }
+.profile-user__avatar { position: relative; flex: 0 0 72px; width: 72px; height: 72px; }
+.profile-user__avatar > img { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; object-position: center; background: var(--soft); }
+.profile-user > span { min-width: 0; flex: 1; }
 .profile-user strong, .profile-user small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.profile-user small { color: var(--muted); margin-top: 5px; font-size: 10px; }
-.profile-user__edit { position: absolute; right: 6px; bottom: 8px; display: inline-flex; align-items: center; gap: 3px; padding: 6px; border: 0; border-radius: 8px; background: transparent; color: #777772; font-size: 10px; cursor: pointer; }
-.profile-user__edit:hover { background: var(--soft-2); color: var(--ink); }
+.profile-user strong { font-size: 18px; line-height: 1.25; }
+.profile-user small { color: var(--muted); margin-top: 7px; font-size: 11px; }
+.profile-user__edit { position: absolute; top: -3px; right: -3px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 3px solid #fff; border-radius: 50%; background: #252524; color: #fff; box-shadow: 0 4px 12px rgba(20,20,19,.18); cursor: pointer; transition: transform .2s, background .2s; }
+.profile-user__edit:hover { background: #565652; transform: scale(1.08); }
+.profile-user__edit:focus-visible { outline: 2px solid #252524; outline-offset: 2px; }
 .profile-user__edit svg { width: 13px; height: 13px; }
 .profile-nav nav { display: grid; gap: 7px; }
 .profile-nav nav button, .logout { height: 46px; padding: 0 13px; border: 0; border-radius: 10px; background: #fff; display: flex; align-items: center; gap: 10px; cursor: pointer; }
@@ -867,7 +870,11 @@ svg { display: block; }
 .bars { flex: 1; min-height: 270px; display: flex; align-items: end; justify-content: space-around; gap: 12px; padding: 48px 4px 34px; }
 .bars > span { width: 24px; min-height: 12px; background: linear-gradient(180deg, #686863 0%, #d6d6d0 100%); border-radius: 7px 7px 2px 2px; position: relative; transition: filter .2s, transform .2s; }
 .bars > span:hover { filter: brightness(.88) contrast(1.04); transform: scaleX(1.08); }
+.bars > span.is-zero { background: #e5e5e0; }
 .bars small { position: absolute; bottom: -25px; left: 50%; transform: translateX(-50%); color: #666662; font-size: 9px; }
+.bars em { position: absolute; bottom: -42px; left: 50%; transform: translateX(-50%); color: #aaa9a5; font-size: 8px; font-style: normal; white-space: nowrap; }
+.bars.is-empty { align-items: center; justify-content: center; }
+.bars.is-empty > p { max-width: 210px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.7; text-align: center; }
 .achievement-system { margin-top: 18px; padding: 28px; border: 1px solid var(--line); border-radius: 18px; }
 .achievement-system__header { display: flex; justify-content: space-between; align-items: flex-end; gap: 28px; }
 .achievement-system__header .eyebrow { margin: 0 0 7px; }
