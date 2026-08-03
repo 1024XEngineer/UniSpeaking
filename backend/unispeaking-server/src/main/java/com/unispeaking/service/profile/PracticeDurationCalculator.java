@@ -11,7 +11,7 @@ import java.util.List;
 
 public class PracticeDurationCalculator {
 
-	public static final long MINIMUM_PRACTICE_SECONDS = 180;
+	public static final long MINIMUM_PRACTICE_SECONDS = 30;
 
 	public ProfileOverviewResponse.PracticeStatistics calculate(
 			List<PracticeSessionRecord> records,

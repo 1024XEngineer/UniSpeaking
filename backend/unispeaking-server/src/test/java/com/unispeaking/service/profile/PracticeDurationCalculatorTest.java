@@ -19,13 +19,13 @@ class PracticeDurationCalculatorTest {
 			new PracticeDurationCalculator();
 
 	@Test
-	void excludesSessionsShorterThanThreeMinutes() {
+	void excludesSessionsShorterThanThirtySeconds() {
 		var result = calculate(List.of(
-				record("2026-08-03T01:00:00Z", "2026-08-03T01:02:59Z"),
-				record("2026-08-03T02:00:00Z", "2026-08-03T02:03:00Z")));
+				record("2026-08-03T01:00:00Z", "2026-08-03T01:00:29Z"),
+				record("2026-08-03T02:00:00Z", "2026-08-03T02:00:30Z")));
 
-		assertEquals(180, result.weeklyPracticeSeconds());
-		assertEquals(180, result.lastSevenDays().getLast().practiceSeconds());
+		assertEquals(30, result.weeklyPracticeSeconds());
+		assertEquals(30, result.lastSevenDays().getLast().practiceSeconds());
 	}
 
 	@Test

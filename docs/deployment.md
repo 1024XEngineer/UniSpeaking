@@ -48,7 +48,7 @@ The migration adds `user.avatar_object_key` and the `practice_session` session
 fact table. Check-in dates continue to be derived from persisted
 `session_evaluation` reports, so no check-in table and no Redis data structure
 are required. Learning duration is calculated from completed practice sessions;
-sessions shorter than 180 seconds are excluded at query time. New databases use
+sessions shorter than 30 seconds are excluded at query time. New databases use
 the Flyway migrations in
 `backend/unispeaking-server/src/main/resources/db/migration`.
 
