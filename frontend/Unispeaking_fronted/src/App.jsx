@@ -25,6 +25,7 @@ import {
   PaperPlaneTilt,
   Pause,
   Password,
+  PencilSimple,
   PhoneDisconnect,
   Play,
   Plus,
@@ -2063,24 +2064,74 @@ function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRe
   );
 }
 
+function ProfileEditModal({ account, user, avatarUrl, onClose, onNicknameChange, onAvatarChange }) {
+  const currentNickname = account?.nickname || user?.nickname || "";
+  const [nickname, setNickname] = useState(currentNickname);
+  const [avatar, setAvatar] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(avatarUrl);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!avatar) {
+      setPreviewUrl(avatarUrl);
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(avatar);
+    setPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [avatar, avatarUrl]);
+
+  const selectAvatar = (event) => {
+    const file = event.target.files?.[0] || null;
+    event.target.value = "";
+    if (!file) return;
+    if (!["image/jpeg", "image/png"].includes(file.type) || file.size > 2 * 1024 * 1024) {
+      setError("请选择不超过 2 MiB 的 JPEG 或 PNG 图片");
+      return;
+    }
+    setError("");
+    setAvatar(file);
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    const normalizedNickname = nickname.trim();
+    if (!normalizedNickname) {
+      setError("用户名不能为空");
+      return;
+    }
+    const nicknameChanged = normalizedNickname !== currentNickname;
+    if (!nicknameChanged && !avatar) {
+      onClose();
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    if (nicknameChanged && !(await onNicknameChange(normalizedNickname))) {
+      setError("用户名修改失败，请稍后重试");
+      setSubmitting(false);
+      return;
+    }
+    if (avatar && !(await onAvatarChange(avatar))) {
+      setError("头像修改失败，请稍后重试");
+      setSubmitting(false);
+      return;
+    }
+    onClose();
+  };
+
+  return <Modal onClose={submitting ? undefined : onClose} className="profile-edit-modal"><p className="eyebrow">EDIT PROFILE</p><h2>编辑个人资料</h2><p className="modal-lead">修改你的展示用户名或个人头像。</p><form className="profile-edit-form" onSubmit={submit}><div className="profile-edit-avatar"><img src={previewUrl} alt="头像预览" /><div><strong>个人头像</strong><small>支持 JPEG、PNG，文件不超过 2 MiB</small><label className="profile-avatar-picker">选择新头像<input type="file" accept="image/jpeg,image/png" disabled={submitting} onChange={selectAvatar} /></label></div></div><label className="profile-edit-name">用户名<input type="text" minLength={1} maxLength={80} required disabled={submitting} value={nickname} onChange={(event) => setNickname(event.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><Button type="button" variant="secondary" disabled={submitting} onClick={onClose}>取消</Button><Button type="submit" disabled={submitting}>{submitting ? "正在保存" : "保存修改"}</Button></div></form></Modal>;
+}
+
 function Profile({ section, setSection, user, profile, teacher, speed, level, onSettingsChange, onMonthChange, onNicknameChange, onAvatarChange, onPasswordChange, onLogout }) {
   const account = profile?.account;
   const displayName = account?.displayName || user?.nickname || user?.username?.split("@")[0] || "UniSpeaking User";
   const email = account?.email || user?.username || "";
   const avatarUrl = account?.avatarUrl || teacher.image;
-  const avatarInputRef = useRef(null);
-  const editNickname = async () => {
-    const nickname = window.prompt("请输入新的用户名（昵称）", account?.nickname || user?.nickname || "");
-    if (nickname === null) return;
-    await onNicknameChange(nickname.trim());
-  };
-  const selectAvatar = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (file) await onAvatarChange(file);
-  };
+  const [profileEditOpen, setProfileEditOpen] = useState(false);
   return (
-    <main className="profile-layout"><aside className="profile-nav"><div className="profile-user"><img src={avatarUrl} alt={displayName} /><span><strong>{displayName}</strong><small>{email}</small></span></div><div className="profile-user-actions"><button type="button" onClick={editNickname}>修改用户名</button><button type="button" onClick={() => avatarInputRef.current?.click()}>更换头像</button><input ref={avatarInputRef} type="file" accept="image/jpeg,image/png" onChange={selectAvatar} /></div><nav><button className={section === "profile" ? "is-active" : ""} onClick={() => setSection("profile")}><User />个人概览</button><button className={section === "membership" ? "is-active" : ""} onClick={() => setSection("membership")}><Crown />会员权益</button><button className={section === "settings" ? "is-active" : ""} onClick={() => setSection("settings")}><SlidersHorizontal />助手设置</button></nav><button className="logout" onClick={onLogout}><SignOut />退出登录</button></aside><section className="profile-content">{section === "profile" && <Overview calendar={profile?.calendar} onMonthChange={onMonthChange} />}{section === "membership" && <Membership />}{section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} onPasswordChange={onPasswordChange} />}</section></main>
+    <main className="profile-layout"><aside className="profile-nav"><div className="profile-user"><img src={avatarUrl} alt={displayName} /><span><strong>{displayName}</strong><small>{email}</small></span><button type="button" className="profile-user__edit" onClick={() => setProfileEditOpen(true)}><PencilSimple />编辑</button></div><nav><button className={section === "profile" ? "is-active" : ""} onClick={() => setSection("profile")}><User />个人概览</button><button className={section === "membership" ? "is-active" : ""} onClick={() => setSection("membership")}><Crown />会员权益</button><button className={section === "settings" ? "is-active" : ""} onClick={() => setSection("settings")}><SlidersHorizontal />助手设置</button></nav><button className="logout" onClick={onLogout}><SignOut />退出登录</button></aside><section className="profile-content">{section === "profile" && <Overview calendar={profile?.calendar} onMonthChange={onMonthChange} />}{section === "membership" && <Membership />}{section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} onPasswordChange={onPasswordChange} />}</section>{profileEditOpen && <ProfileEditModal account={account} user={user} avatarUrl={avatarUrl} onClose={() => setProfileEditOpen(false)} onNicknameChange={onNicknameChange} onAvatarChange={onAvatarChange} />}</main>
   );
 }
 
