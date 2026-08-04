@@ -49,14 +49,10 @@ import {
   ChevronRight,
   Compass,
   Footprints,
-  Headphones as LucideHeadphones,
-  Languages,
-  MessageCircleMore,
   MessagesSquare,
   PackageCheck,
   Sparkles,
   Target,
-  Trophy,
 } from "lucide-react";
 import { learningItems, levels, plans, recommendations, teachers } from "./data.js";
 import {
@@ -66,6 +62,7 @@ import {
   createCustomSceneFlow,
   evaluateSentenceReading,
   generateCustomScene,
+  getAchievementOverview,
   getCurrentUser,
   getLearningAsset,
   getLearningAssets,
@@ -82,6 +79,7 @@ import {
   uploadProfileAvatar,
 } from "./apiClient.js";
 import { createPcmWavRecorder } from "./audioRecorder.js";
+import { useAchievementNotifications } from "./AchievementNotifications.jsx";
 import { createRealtimeClient } from "./realtimeClient.js";
 import { IeltsAssets, IeltsTrainingCenter } from "./IeltsModule.jsx";
 import { InterviewAssets, InterviewTrainingCenter } from "./InterviewModule.jsx";
@@ -2176,20 +2174,24 @@ function Profile({ section, setSection, user, profile, teacher, speed, level, on
   );
 }
 
-const achievements = [
-  { id: "first-talk", title: "初次开口", desc: "完成首次自由对话", category: "开口", progress: 1, total: 1, icon: MessageCircleMore },
-  { id: "seven-days", title: "七日同行", desc: "连续学习 7 天", category: "连续", progress: 7, total: 7, icon: Footprints },
-  { id: "scene-explorer", title: "场景探索者", desc: "完成 5 个不同场景", category: "场景", progress: 5, total: 5, icon: Compass },
-  { id: "expression-star", title: "表达新星", desc: "单次表达评分达到 90", category: "成长", progress: 90, total: 90, icon: Sparkles },
-  { id: "pronunciation", title: "发音校准师", desc: "完成 30 次跟读评分", category: "成长", progress: 18, total: 30, icon: AudioLines },
-  { id: "asset-keeper", title: "资产收藏家", desc: "保存 20 个学习资产", category: "成长", progress: 12, total: 20, icon: PackageCheck },
-  { id: "conversation-regular", title: "对话常客", desc: "累计完成 20 次对话", category: "开口", progress: 9, total: 20, icon: MessagesSquare },
-  { id: "goal-hitter", title: "目标命中", desc: "连续 4 周完成周目标", category: "连续", progress: 2, total: 4, icon: Target },
-  { id: "language-builder", title: "表达拓荒者", desc: "掌握 100 个实用表达", category: "成长", progress: 46, total: 100, icon: Languages },
-  { id: "listener", title: "听力捕手", desc: "收听示范音频 50 次", category: "开口", progress: 32, total: 50, icon: LucideHeadphones },
-  { id: "full-month", title: "月度全勤", desc: "单月完成 20 天打卡", category: "连续", progress: 16, total: 20, icon: CalendarCheck2 },
-  { id: "speaking-master", title: "口语大师", desc: "解锁其余全部成就", category: "场景", progress: 4, total: 11, icon: Trophy },
-];
+const achievementSeriesIcons = {
+  conversation: MessagesSquare,
+  streak: Footprints,
+  "scene-exploration": Compass,
+  "expression-score": Sparkles,
+  "pronunciation-attempt": AudioLines,
+  "asset-collection": PackageCheck,
+  "monthly-checkin": CalendarCheck2,
+  "practice-duration": Clock,
+  "active-days": Fire,
+  "quality-sessions": Target,
+};
+
+function formatAchievementValue(value) {
+  const numericValue = Number(value ?? 0);
+  if (!Number.isFinite(numericValue)) return "0";
+  return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 }).format(numericValue);
+}
 
 function LearningCalendar({ calendar, onMonthChange }) {
   const monthKey = calendar?.month || new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" }).slice(0, 7);
@@ -2245,22 +2247,154 @@ function LearningCalendar({ calendar, onMonthChange }) {
 
 function AchievementSystem() {
   const [filter, setFilter] = useState("全部");
-  const filtered = filter === "全部" ? achievements : achievements.filter((item) => item.category === filter);
-  const unlockedCount = achievements.filter((item) => item.progress >= item.total).length;
+  const [expandedSeriesId, setExpandedSeriesId] = useState(null);
+  const [series, setSeries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [retryVersion, setRetryVersion] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    getAchievementOverview()
+      .then((overview) => {
+        if (cancelled) return;
+        setSeries(Array.isArray(overview?.series) ? overview.series : []);
+      })
+      .catch((requestError) => {
+        if (cancelled) return;
+        setError(requestError instanceof Error ? requestError.message : "成就数据加载失败");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [retryVersion]);
+
+  const categories = ["全部", ...new Set(series.map((item) => item.category).filter(Boolean))];
+  const filtered = filter === "全部"
+    ? series
+    : series.filter((item) => item.category === filter);
+  const milestones = series.flatMap((item) => Array.isArray(item.milestones) ? item.milestones : []);
+  const unlockedCount = milestones.filter((item) => item.unlocked).length;
+  const categoryCount = (category) => category === "全部"
+    ? series.length
+    : series.filter((item) => item.category === category).length;
+
   return (
     <section className="achievement-system">
       <header className="achievement-system__header">
-        <div><p className="eyebrow">ACHIEVEMENTS</p><h2>成就图鉴</h2><p>每一种进步，都值得被单独记录。</p></div>
-        <div className="achievement-overall"><span><strong>{unlockedCount}</strong><small>/ {achievements.length} 已获得</small></span><progress value={unlockedCount} max={achievements.length} /></div>
+        <div><p className="eyebrow">ACHIEVEMENTS</p><h2>成就图鉴</h2><p>每一级进步，都由你真实的练习记录点亮。</p></div>
+        <div className="achievement-overall">
+          <span><strong>{loading ? "—" : unlockedCount}</strong><small>/ {loading ? "—" : milestones.length} 已获得</small></span>
+          <progress value={loading ? 0 : unlockedCount} max={Math.max(1, milestones.length)} />
+        </div>
       </header>
-      <nav className="achievement-filters" aria-label="成就分类">{["全部", "开口", "连续", "场景", "成长"].map((item) => <button key={item} type="button" className={filter === item ? "is-active" : ""} onClick={() => setFilter(item)}>{item}<small>{item === "全部" ? achievements.length : achievements.filter((achievement) => achievement.category === item).length}</small></button>)}</nav>
-      <div className="achievement-grid" aria-live="polite">
-        {filtered.map(({ icon: Icon, ...item }) => {
-          const unlocked = item.progress >= item.total;
-          const percentage = Math.min(100, Math.round((item.progress / item.total) * 100));
-          return <article key={item.id} className={cx("achievement-card", unlocked && "is-unlocked")}><div className="achievement-card__icon"><Icon strokeWidth={1.8} /></div><div className="achievement-card__copy"><span><strong>{item.title}</strong><em>{unlocked ? "已获得" : `${percentage}%`}</em></span><p>{item.desc}</p><div><progress value={item.progress} max={item.total} /><small>{item.progress} / {item.total}</small></div></div></article>;
-        })}
-      </div>
+      {!loading && !error && series.length > 0 && (
+        <nav className="achievement-filters" aria-label="成就分类">
+          {categories.map((item) => <button key={item} type="button" aria-pressed={filter === item} className={filter === item ? "is-active" : ""} onClick={() => { setFilter(item); setExpandedSeriesId(null); }}>{item}<small>{categoryCount(item)}</small></button>)}
+        </nav>
+      )}
+      {loading && (
+        <div className="achievement-loading" aria-live="polite" aria-busy="true">
+          <span>正在计算你的成就进度…</span>
+          <div>{Array.from({ length: 4 }, (_, index) => <i key={index} />)}</div>
+        </div>
+      )}
+      {!loading && error && (
+        <div className="achievement-error" role="alert">
+          <Target />
+          <div><strong>成就进度暂时无法加载</strong><p>{error}</p></div>
+          <button type="button" onClick={() => setRetryVersion((current) => current + 1)}>重新加载</button>
+        </div>
+      )}
+      {!loading && !error && series.length === 0 && (
+        <div className="achievement-empty">成就目录暂时为空</div>
+      )}
+      {!loading && !error && filtered.length > 0 && (
+        <div className="achievement-series-grid" aria-live="polite">
+          {filtered.map((item) => {
+            const Icon = achievementSeriesIcons[item.seriesId] || Target;
+            const itemMilestones = Array.isArray(item.milestones) ? item.milestones : [];
+            const lastMilestone = itemMilestones[itemMilestones.length - 1];
+            const currentMilestone = itemMilestones.find((milestone) => milestone.level === item.currentLevel) || null;
+            const progressMaximum = Number(item.nextThreshold ?? lastMilestone?.threshold ?? 1);
+            const progressValue = Number(item.currentValue ?? 0);
+            const expanded = expandedSeriesId === item.seriesId;
+            const detailId = `achievement-series-${item.seriesId}-levels`;
+            const levelClass = `achievement-level-${Math.min(5, Math.max(0, Number(item.currentLevel) || 0))}`;
+            return (
+              <div key={item.seriesId} className="achievement-series-entry">
+                <article className={cx("achievement-series-card", levelClass, item.completed && "is-completed", expanded && "is-expanded")}>
+                  <button
+                    type="button"
+                    className="achievement-series-card__trigger"
+                    aria-label={`${expanded ? "收起" : "查看"}${item.title}全部等级`}
+                    aria-expanded={expanded}
+                    aria-controls={detailId}
+                    onClick={() => setExpandedSeriesId((current) => current === item.seriesId ? null : item.seriesId)}
+                  />
+                  <header>
+                    <div className="achievement-series-card__icon"><Icon strokeWidth={1.8} /></div>
+                    <div><span>{item.category}</span><h3>{item.title}</h3></div>
+                    <em>{item.completed ? "全部达成" : `Lv.${item.currentLevel || 0}`}</em>
+                  </header>
+                  <div className="achievement-series-current">
+                    <span>{currentMilestone ? "当前最高等级" : "当前等级"}</span>
+                    <strong>{currentMilestone?.title || "尚未解锁"}</strong>
+                    <p>{currentMilestone?.description || `完成“${item.nextTitle || "第一阶段"}”后即可点亮该系列`}</p>
+                  </div>
+                  <div className="achievement-series-progress">
+                    <div>
+                      <span><small>当前进度</small><strong>{formatAchievementValue(item.currentValue)} <i>{item.unit}</i></strong></span>
+                      <span><small>{item.completed ? "完成状态" : "下一阶段"}</small><strong>{item.completed ? "已完成全部等级" : item.nextTitle || "待解锁"}</strong></span>
+                    </div>
+                    <progress aria-label={`${item.title}当前进度`} value={Math.min(progressValue, progressMaximum)} max={Math.max(1, progressMaximum)} />
+                    <small>{item.completed ? "该系列所有成就已解锁" : `距离 ${item.nextTitle} · ${formatAchievementValue(item.nextThreshold)} ${item.unit}`}</small>
+                  </div>
+                  <footer><span>查看全部 {itemMilestones.length} 个等级</span><CaretDown weight="bold" /></footer>
+                </article>
+                {expanded && (
+                  <section id={detailId} className="achievement-level-panel" aria-label={`${item.title}全部等级`}>
+                    <header>
+                      <div><span>{item.category} · {item.title}</span><h3>等级进阶路径</h3><p>按等级顺序查看全部成就节点。</p></div>
+                      <button type="button" aria-label={`收起${item.title}等级`} onClick={() => setExpandedSeriesId(null)}><X weight="bold" /></button>
+                    </header>
+                    <div className="achievement-level-track">
+                      <ol>
+                        {itemMilestones.map((milestone) => {
+                          const current = milestone.level === item.currentLevel;
+                          const next = !milestone.unlocked && milestone.level === item.nextLevel;
+                          const status = current ? "当前等级" : milestone.unlocked ? "已获得" : next ? "下一目标" : "待解锁";
+                          return (
+                            <li
+                              key={milestone.achievementId}
+                              className={cx(
+                                `achievement-level-${Math.min(5, Math.max(1, Number(milestone.level) || 1))}`,
+                                milestone.unlocked && "is-unlocked",
+                                current && "is-current",
+                                next && "is-next",
+                                !milestone.unlocked && !next && "is-locked",
+                              )}
+                              aria-current={current ? "step" : undefined}
+                            >
+                              <div className="achievement-level-marker"><span>Lv.{milestone.level}</span>{milestone.unlocked ? <Check weight="bold" /> : null}</div>
+                              <div className="achievement-level-copy"><em>{status}</em><strong>{milestone.title}</strong><p>{milestone.description}</p><small>{formatAchievementValue(milestone.threshold)} {item.unit}</small></div>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    </div>
+                  </section>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
@@ -2320,6 +2454,10 @@ function Paywall({ title, onClose, onMembership }) {
 
 export function App() {
   const initialRoute = useMemo(() => resolveRoute(window.location), []);
+  const {
+    synchronizeAchievements,
+    clearAchievementNotifications,
+  } = useAchievementNotifications();
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState(null);
   const [profileOverview, setProfileOverview] = useState(null);
@@ -2418,6 +2556,8 @@ export function App() {
         setUser(currentUser);
         setProfileOverview(profile);
         applyPreference(preference);
+        await synchronizeAchievements();
+        if (cancelled) return;
         if (initialRoute.flow === "app" && !preference.cefrLevel) {
           navigate(paths.auth.level, {}, true);
         } else if (initialRoute.flow === "app" && !preference.preferredVoice) {
@@ -2451,6 +2591,7 @@ export function App() {
     ]);
     setProfileOverview(profile);
     applyPreference(preference);
+    await synchronizeAchievements();
     if (mode === "signup" || !preference.cefrLevel) {
       goLevel();
     } else if (!preference.preferredVoice) {
@@ -2515,6 +2656,7 @@ export function App() {
     }
   };
   const logout = () => {
+    clearAchievementNotifications();
     clearAuthSession();
     setUser(null);
     setProfileOverview(null);
@@ -2568,6 +2710,7 @@ export function App() {
   };
   const updatePassword = async (passwords) => {
     await changePassword(passwords);
+    clearAchievementNotifications();
     clearAuthSession();
     setUser(null);
     setProfileOverview(null);
@@ -2640,6 +2783,7 @@ export function App() {
     if (evaluation) {
       void getProfileOverview().then(setProfileOverview).catch(() => undefined);
     }
+    void synchronizeAchievements({ revealNotifications: true });
   };
   const setMainPage = (next) => navigate(hrefForPage(next), { page: next, authMode, training: null, result: null });
   const navigateIelts = (path) => navigate(path, { authMode });
@@ -2658,7 +2802,7 @@ export function App() {
   if (flow === "teacher") return <TeacherSetup selectedId={teacher.id} onSelect={(id) => setTeacher(teachers.find((item) => item.id === id))} onFinish={saveTeacherAndEnter} />;
   let content;
   if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={showResult} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
-  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={() => navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true)} />;
+  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={() => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); void synchronizeAchievements({ revealNotifications: true }); }} />;
   else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={() => setMainPage("ielts")} onInterview={() => setMainPage("interview")} />;
   else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => setMainPage("ielts-assets")} onInterview={() => setMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(scene) => startTraining(scene, "learn", { returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;

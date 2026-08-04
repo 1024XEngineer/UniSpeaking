@@ -62,4 +62,33 @@ class PracticeSessionRepositoryTest {
 		assertEquals(entity.getStartedAt().toInstant(), records.getFirst().startedAt());
 		assertEquals(entity.getEndedAt().toInstant(), records.getFirst().endedAt());
 	}
+
+	@Test
+	void listsAllCompletedSessionsForAchievementMetrics() {
+		PracticeSessionMapper mapper = mock(PracticeSessionMapper.class);
+		PracticeSessionEntity entity = completedEntity();
+		when(mapper.selectList(any())).thenReturn(List.of(entity));
+		PracticeSessionRepository repository = new PracticeSessionRepository(mapper);
+
+		List<PracticeSessionRecord> records =
+				repository.findCompletedByUserId(entity.getUserId());
+
+		assertEquals(1, records.size());
+		assertEquals("freechat_session_1", records.getFirst().sessionId());
+		assertEquals(SessionStatus.COMPLETED, records.getFirst().status());
+	}
+
+	private PracticeSessionEntity completedEntity() {
+		PracticeSessionEntity entity = new PracticeSessionEntity();
+		entity.setSessionId("freechat_session_1");
+		entity.setUserId(UUID.randomUUID());
+		entity.setSceneId("freechat_scene1");
+		entity.setSceneType(SceneType.FREE_CHAT.name());
+		entity.setStatus(SessionStatus.COMPLETED.name());
+		entity.setStartedAt(Instant.parse("2026-08-03T02:00:00Z")
+				.atOffset(java.time.ZoneOffset.UTC));
+		entity.setEndedAt(Instant.parse("2026-08-03T02:05:00Z")
+				.atOffset(java.time.ZoneOffset.UTC));
+		return entity;
+	}
 }

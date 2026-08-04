@@ -132,6 +132,17 @@ class PostgresPersistenceIT {
 				WHERE title ~* '^(describe|what|why|how|do |did |are |is |have |would |talk about|tell me)'
 				""",
 				Integer.class);
+		Integer achievementTableCount = jdbcTemplate.queryForObject(
+				"""
+				SELECT COUNT(*)
+				FROM information_schema.tables
+				WHERE table_schema = 'public'
+				  AND table_name IN (
+				      'user_achievement_unlock',
+				      'user_achievement_state'
+				  )
+				""",
+				Integer.class);
 		String successFactorType = jdbcTemplate.queryForObject(
 				"""
 				SELECT data_type
@@ -142,10 +153,11 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(3, migrationCount);
+		assertEquals(4, migrationCount);
 		assertEquals(303, topicCount);
 		assertEquals(1771, questionCount);
 		assertEquals(0, questionLikeTitleCount);
+		assertEquals(2, achievementTableCount);
 		assertEquals("jsonb", successFactorType);
 	}
 
@@ -404,7 +416,7 @@ class PostgresPersistenceIT {
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
 		assertEquals(
-				List.of("0", "1", "2", "3"),
+				List.of("0", "1", "2", "3", "4"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version

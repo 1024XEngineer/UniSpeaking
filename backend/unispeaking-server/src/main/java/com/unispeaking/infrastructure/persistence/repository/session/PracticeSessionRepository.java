@@ -87,6 +87,25 @@ public class PracticeSessionRepository {
 		}
 	}
 
+	public List<PracticeSessionRecord> findCompletedByUserId(UUID userId) {
+		try {
+			return mapper.selectList(
+						new LambdaQueryWrapper<PracticeSessionEntity>()
+								.eq(PracticeSessionEntity::getUserId, userId)
+								.eq(
+										PracticeSessionEntity::getStatus,
+										SessionStatus.COMPLETED.name())
+								.isNotNull(PracticeSessionEntity::getEndedAt)
+								.orderByAsc(PracticeSessionEntity::getStartedAt))
+					.stream()
+					.map(this::toDomain)
+					.toList();
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
 	private void updateTerminalStatus(
 			String sessionId,
 			UUID userId,

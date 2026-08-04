@@ -71,6 +71,26 @@ export function getProfileOverview(month) {
   return request(`/api/profile/overview${query}`);
 }
 
+export function getAchievementOverview() {
+  return request("/api/achievements");
+}
+
+export function syncAchievementUnlocks() {
+  return request("/api/achievement-unlocks", {
+    method: "POST",
+  });
+}
+
+export function acknowledgeAchievementUnlock(achievementId) {
+  return request(
+    `/api/achievement-unlocks/${encodeURIComponent(achievementId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ acknowledged: true }),
+    },
+  );
+}
+
 export function updateProfile({ nickname }) {
   return request("/api/profile", {
     method: "PATCH",

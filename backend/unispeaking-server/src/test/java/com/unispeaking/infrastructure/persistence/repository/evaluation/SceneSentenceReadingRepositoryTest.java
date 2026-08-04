@@ -9,6 +9,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SceneSentenceReadingRepository;
 import com.unispeaking.infrastructure.persistence.codec.evaluation.EvaluationJsonbCodec;
@@ -22,11 +24,20 @@ import com.unispeaking.common.evaluation.model.PronunciationWordResult;
 import com.unispeaking.common.evaluation.model.WordReadStatus;
 import java.math.BigDecimal;
 import java.util.List;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
 
 class SceneSentenceReadingRepositoryTest {
+
+	@BeforeAll
+	static void initializeMybatisMetadata() {
+		TableInfoHelper.initTableInfo(
+				new MapperBuilderAssistant(new MybatisConfiguration(), "test"),
+				SentenceEvaluationEntity.class);
+	}
 
 	@Test
 	void insertsANewSentenceEvaluationRowForEveryReading() {
@@ -71,6 +82,25 @@ class SceneSentenceReadingRepositoryTest {
 		assertEquals(
 				assessment.overallScore(),
 				codec.decodeReadingDetails(first.getScoreDetail()).overallScore());
+	}
+
+	@Test
+	void countsAttemptsAcrossOwnedScenes() {
+		SentenceEvaluationMapper evaluationMapper =
+				mock(SentenceEvaluationMapper.class);
+		when(evaluationMapper.selectCount(any())).thenReturn(12L);
+		SceneSentenceReadingRepository repository =
+				new SceneSentenceReadingRepository(
+						mock(SceneSentenceMapper.class),
+						evaluationMapper,
+						new EvaluationJsonbCodec(new ObjectMapper()));
+
+		assertEquals(
+				12,
+				repository.countAttemptsBySceneIds(
+						List.of("scene-1", "scene-1", "scene-2")));
+		assertEquals(0, repository.countAttemptsBySceneIds(List.of()));
+		assertEquals(0, repository.countAttemptsBySceneIds(null));
 	}
 
 	private PronunciationAssessmentResult assessment() {

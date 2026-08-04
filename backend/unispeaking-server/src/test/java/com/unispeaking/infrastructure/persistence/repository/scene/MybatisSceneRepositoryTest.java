@@ -107,6 +107,24 @@ class MybatisSceneRepositoryTest {
 		verify(sceneMapper).selectCount(any());
 	}
 
+	@Test
+	void countsHistoricalAssetsIncludingSoftDeletedScenes() {
+		SceneMapper sceneMapper = mock(SceneMapper.class);
+		when(sceneMapper.selectCount(any())).thenReturn(7L);
+		var repository = new MybatisSceneRepository(
+				sceneMapper,
+				mock(SceneWordMapper.class),
+				mock(ScenePhraseMapper.class),
+				mock(SceneSentenceMapper.class),
+				mock(CustomScenePersistence.class));
+
+		assertEquals(
+				7,
+				repository.countAllByUserId(
+						"11111111-1111-4111-8111-111111111111"));
+		assertEquals(0, repository.countAllByUserId("invalid-user-id"));
+	}
+
 	private Fixture fixture() {
 		String sceneId = "custom_abc123";
 		List<LearningContentItem> words = items("word", 5);

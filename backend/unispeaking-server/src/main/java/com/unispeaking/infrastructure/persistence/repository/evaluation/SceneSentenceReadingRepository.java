@@ -92,6 +92,29 @@ public class SceneSentenceReadingRepository {
 		}
 	}
 
+	public long countAttemptsBySceneIds(List<String> sceneIds) {
+		if (sceneIds == null || sceneIds.isEmpty()) {
+			return 0;
+		}
+		List<String> ownedSceneIds = sceneIds.stream()
+				.filter(sceneId -> sceneId != null && !sceneId.isBlank())
+				.distinct()
+				.toList();
+		if (ownedSceneIds.isEmpty()) {
+			return 0;
+		}
+		try {
+			return evaluationMapper.selectCount(
+					new LambdaQueryWrapper<SentenceEvaluationEntity>()
+							.in(
+									SentenceEvaluationEntity::getSceneId,
+									ownedSceneIds));
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
 	private ReadingDetailsJson toReadingDetails(
 			PronunciationAssessmentResult assessment) {
 		List<ReadingDetailsJson.Word> words = assessment.words().stream()
