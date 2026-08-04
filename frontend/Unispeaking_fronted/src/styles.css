@@ -1490,6 +1490,146 @@ svg { display: block; }
   .ielts-setup-footer { align-items: flex-start; flex-direction: column; }
 }
 
+/* Achievement notifications */
+.achievement-popup {
+  width: min(430px, calc(100vw - 32px));
+  min-height: 390px;
+  position: fixed;
+  z-index: 200;
+  top: 50%;
+  left: 50%;
+  padding: 44px 42px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 1px solid rgba(207, 191, 145, .75);
+  border-radius: 28px;
+  color: #24211a;
+  background:
+    radial-gradient(circle at 50% 0, rgba(255, 246, 205, .9), transparent 42%),
+    linear-gradient(145deg, #fffef9 0%, #f8f3e6 100%);
+  box-shadow: 0 30px 90px rgba(35, 29, 15, .24), 0 4px 18px rgba(35, 29, 15, .08);
+  text-align: center;
+  transform: translate(-50%, -50%);
+  animation: achievement-popup-enter .46s cubic-bezier(.2, .85, .25, 1.15) both;
+  overflow: hidden;
+}
+.achievement-popup::before {
+  content: "";
+  width: 250px;
+  height: 250px;
+  position: absolute;
+  top: -172px;
+  left: 50%;
+  border: 1px solid rgba(188, 158, 75, .22);
+  border-radius: 50%;
+  box-shadow: 0 0 0 28px rgba(188, 158, 75, .06), 0 0 0 58px rgba(188, 158, 75, .035);
+  transform: translateX(-50%);
+}
+.achievement-popup__close {
+  width: 36px;
+  height: 36px;
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #777065;
+  background: rgba(255, 255, 255, .62);
+  cursor: pointer;
+  transition: color .2s, background .2s, transform .2s;
+}
+.achievement-popup__close:hover {
+  color: #24211a;
+  background: #fff;
+  transform: rotate(5deg);
+}
+.achievement-popup__close svg { width: 17px; height: 17px; }
+.achievement-popup__badge {
+  width: 96px;
+  height: 96px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d8c388;
+  border-radius: 50%;
+  color: #fff8df;
+  background: linear-gradient(145deg, #d5b45d, #96762c);
+  box-shadow: 0 14px 28px rgba(145, 111, 32, .25), inset 0 1px 0 rgba(255, 255, 255, .55);
+}
+.achievement-popup__badge > svg { width: 45px; height: 45px; }
+.achievement-popup__badge span {
+  width: 29px;
+  height: 29px;
+  position: absolute;
+  right: -2px;
+  bottom: 3px;
+  display: grid;
+  place-items: center;
+  border: 3px solid #fbf7ea;
+  border-radius: 50%;
+  color: #fff;
+  background: #4f7657;
+}
+.achievement-popup__badge span svg { width: 13px; height: 13px; }
+.achievement-popup__eyebrow {
+  margin: 25px 0 8px;
+  color: #a17c28;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .2em;
+}
+.achievement-popup h2 { margin: 0; font-size: 31px; letter-spacing: -.045em; }
+.achievement-popup > strong { margin-top: 18px; font-size: 20px; }
+.achievement-popup__description {
+  max-width: 320px;
+  margin: 8px 0 0;
+  color: #777065;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.achievement-popup__meta {
+  margin-top: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: #8a806f;
+  font-size: 10px;
+  font-weight: 700;
+}
+.achievement-popup__meta i { width: 3px; height: 3px; border-radius: 50%; background: #b5a98f; }
+.achievement-popup__remaining { margin-top: 13px; color: #a17c28; font-size: 9px; }
+.achievement-popup__timer {
+  height: 3px;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(90deg, #c7a34b, #8b6d29);
+  transform-origin: left;
+  animation: achievement-popup-timer 5s linear both;
+}
+@keyframes achievement-popup-enter {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 24px)) scale(.95); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes achievement-popup-timer {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+@media (max-width: 560px) {
+  .achievement-popup { min-height: 360px; padding: 38px 24px 28px; border-radius: 22px; }
+  .achievement-popup__badge { width: 84px; height: 84px; }
+  .achievement-popup h2 { font-size: 27px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .achievement-popup { animation-duration: .01ms; }
+  .achievement-popup__timer { animation: none; }
+}
+
 /* Realtime interview */
 .interview-page { min-height: 100%; padding: 48px clamp(48px, 6.5vw, 104px) 70px; color: var(--ink); background: #fff; }
 .interview-page button, .interview-live-page button { font: inherit; cursor: pointer; }
