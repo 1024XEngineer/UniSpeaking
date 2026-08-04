@@ -119,8 +119,28 @@ public class AuthServiceImpl implements AuthService {
 	}
 
 	@Override
+	public String currentUserIdOrNull() {
+		Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+		if (authentication == null
+				|| !authentication.isAuthenticated()
+				|| !(authentication.getPrincipal() instanceof Jwt)) {
+			return null;
+		}
+		return requireAuthenticatedUser().id().toString();
+	}
+
+	@Override
 	public String requireUserId(String requestedUserId) {
 		return requireAuthenticatedUser().id().toString();
+	}
+
+	@Override
+	public String requireAdminUserId() {
+		UserAccount user = requireAuthenticatedUser();
+		if (user.role() != UserRole.ADMIN) {
+			throw new BusinessException("ADMIN_ACCESS_DENIED", "当前账号没有反馈处理权限");
+		}
+		return user.id().toString();
 	}
 
 	private UserAccount requireAuthenticatedUser() {

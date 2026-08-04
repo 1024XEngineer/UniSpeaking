@@ -46,6 +46,8 @@ public class SecurityConfig {
 				.authorizeHttpRequests(authorize -> authorize
 						.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 						.requestMatchers("/api/auth/register", "/api/auth/login").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/feedbacks").permitAll()
+						.requestMatchers(HttpMethod.GET, "/api/feedbacks/lookup/*").permitAll()
 						.anyRequest().authenticated())
 				.oauth2ResourceServer(resourceServer -> resourceServer
 						.bearerTokenResolver(bearerTokenResolver)
@@ -98,7 +100,10 @@ public class SecurityConfig {
 				"http://localhost:*",
 				"http://127.0.0.1:*"));
 		configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+		configuration.setAllowedHeaders(List.of(
+				"Authorization",
+				"Content-Type",
+				"X-Feedback-Lookup-Code"));
 		configuration.setAllowCredentials(true);
 		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
 		source.registerCorsConfiguration("/**", configuration);
