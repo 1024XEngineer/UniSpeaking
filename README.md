@@ -163,6 +163,11 @@ CREATE DATABASE unispeaking;
 创建或补齐当前表结构。新库直接执行 V1；已有数据库会先以版本 0 纳入管理，再执行
 幂等迁移并保留现有数据。运行账号必须具有建表、建索引和管理 Flyway 历史表的权限。
 
+雅思题库的表结构、索引及完整初始化数据统一保存在
+[`V3__ielts_question_bank.sql`](backend/unispeaking-server/src/main/resources/db/migration/V3__ielts_question_bank.sql)。
+新数据库首次启动时会自动写入 303 个训练主题和 1771 道 Part 1、Part 2、Part 3
+题目，不需要额外运行导入脚本。
+
 当前主要数据表：
 
 - `user`
@@ -175,6 +180,8 @@ CREATE DATABASE unispeaking;
 - `session_message`
 - `turn_evaluation`
 - `session_evaluation`
+- `ielts_topic`
+- `ielts_question`
 
 ### 4. 启动后端
 

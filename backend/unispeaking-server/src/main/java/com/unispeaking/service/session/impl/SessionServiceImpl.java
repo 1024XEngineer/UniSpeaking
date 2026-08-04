@@ -43,7 +43,7 @@ import com.unispeaking.common.prompt.FiveLayerPromptBuilder;
 import com.unispeaking.infrastructure.realtime.RealtimeSdpExchange;
 import com.unispeaking.service.scene.SceneFlowService;
 import com.unispeaking.service.scene.SceneService;
-import com.unispeaking.service.scene.impl.ScenarioDialogueStateMachine;
+import com.unispeaking.component.statemachine.ScenarioDialogueStateMachine;
 import com.unispeaking.service.session.SessionService;
 import java.time.Instant;
 import java.util.List;
@@ -185,7 +185,11 @@ public class SessionServiceImpl implements SessionService {
 				SceneType.CUSTOM_SCENE,
 				sceneId,
 				basePrompt);
-		stateMachine.start(started.sessionId(), definition);
+		stateMachine.start(
+				started.sessionId(),
+				definition.sceneId(),
+				definition.successFactorJson(),
+				definition.learningGoal());
 		try {
 			RealtimeConnectionResult connection = connect(
 					started.sessionId(),

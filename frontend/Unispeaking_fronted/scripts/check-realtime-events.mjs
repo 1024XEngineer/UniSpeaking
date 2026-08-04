@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   buildRealtimeSessionConfig,
+  createTurnAudioCaptureController,
   extractCompletedAssistantMessage,
   isActiveResponseConflict,
   normalizeBaseUrl,
@@ -91,5 +92,29 @@ assert.match(fasterHarvey.instructions, /210 English words per minute/);
 assert.equal(fasterHarvey.input_audio_transcription.model, "qwen3-asr-flash-realtime");
 assert.equal(fasterHarvey.turn_detection.type, "semantic_vad");
 assert.equal(fasterHarvey.turn_detection.silence_duration_ms, 600);
+
+let segmentStartCount = 0;
+let segmentStopCount = 0;
+const expectedAudio = { type: "audio/wav" };
+const turnAudioCapture = createTurnAudioCaptureController({
+  startSegment() {
+    segmentStartCount += 1;
+  },
+  async stopSegment() {
+    segmentStopCount += 1;
+    return expectedAudio;
+  },
+});
+
+assert.equal(turnAudioCapture.start(), true);
+assert.equal(turnAudioCapture.start(), false);
+assert.equal(segmentStartCount, 1);
+assert.equal(turnAudioCapture.stop(), true);
+assert.equal(turnAudioCapture.start(), false);
+assert.equal(await turnAudioCapture.take(), expectedAudio);
+assert.equal(turnAudioCapture.start(), true);
+assert.equal(segmentStartCount, 2);
+assert.equal(await turnAudioCapture.take(), expectedAudio);
+assert.equal(segmentStopCount, 2);
 
 console.log("Realtime event normalization checks passed.");
