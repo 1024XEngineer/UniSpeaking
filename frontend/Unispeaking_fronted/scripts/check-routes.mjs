@@ -22,6 +22,10 @@ const cases = [
   [paths.interview.reportPartial, "interview"],
   [paths.interview.assets.trends, "interview-assets"],
   [paths.interview.assets.record("product-manager"), "interview-assets"],
+  [paths.help.root, "help"],
+  [paths.help.category("quick-start"), "help"],
+  [paths.help.article("start-free-conversation"), "help"],
+  [paths.help.feedback, "help"],
 ];
 
 for (const [pathname, expectedPage] of cases) {
@@ -42,5 +46,10 @@ assert.equal(route(paths.scenes.phrase("custom_1")).training.stage, "phrase");
 assert.equal(route(paths.scenes.sentence("custom_1")).training.initialStep, "read");
 assert.equal(route(paths.scenes.session("custom_1", "session/1")).sessionId, "session/1");
 assert.equal(route(paths.scenes.assets("custom_1")).assetSceneId, "custom_1");
+assert.equal(route(paths.help.root).helpRoute.screen, "home");
+assert.equal(route(paths.help.category("麦克风 音频")).helpRoute.categoryId, "麦克风 音频");
+assert.equal(route(paths.help.article("修改 密码")).helpRoute.articleId, "修改 密码");
+assert.equal(route(paths.help.feedback).helpRoute.screen, "feedback");
+assert.equal(route("/help/unknown/path").canonicalPath, paths.help.root);
 
-console.log(`Route contract passed: ${cases.length + 14} assertions`);
+console.log(`Route contract passed: ${cases.length + 19} assertions`);
