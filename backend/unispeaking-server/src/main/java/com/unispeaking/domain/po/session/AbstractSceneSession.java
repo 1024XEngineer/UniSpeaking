@@ -71,8 +71,12 @@ public abstract class AbstractSceneSession {
 	}
 
 	public void fail() {
+		fail(Instant.now());
+	}
+
+	public void fail(Instant stopTime) {
 		status = SessionStatus.FAILED;
-		endedAt = Instant.now();
+		endedAt = stopTime == null ? Instant.now() : stopTime;
 	}
 
 	public void fail(String errorCode, String errorMessage) {

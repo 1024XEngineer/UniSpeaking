@@ -7,8 +7,11 @@ import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
 import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
+import com.unispeaking.domain.po.session.AbstractSceneSession;
 import com.unispeaking.domain.dto.scene.TranslateTextResponse;
 import com.unispeaking.domain.vo.scene.SceneType;
+import com.unispeaking.domain.vo.session.SessionStatus;
+import java.time.Instant;
 
 public interface SessionService {
 
@@ -16,6 +19,14 @@ public interface SessionService {
 			SceneType sceneType,
 			String sceneId,
 			String prompt);
+
+	void registerSceneSession(AbstractSceneSession session);
+
+	void terminateSceneSession(
+			String userId,
+			String sessionId,
+			SessionStatus terminalStatus,
+			Instant endedAt);
 
 	StartSceneSessionResponse startFreeChat(StartFreeChatRequest request);
 

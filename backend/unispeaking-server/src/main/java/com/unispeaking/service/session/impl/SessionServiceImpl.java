@@ -113,15 +113,7 @@ public class SessionServiceImpl implements SessionService {
 		session.setSceneType(type);
 		session.setSceneId(sceneId);
 		session.setPrompt(new SessionPrompt(requirePrompt(prompt)));
-		practiceSessionRepository.create(new PracticeSessionRecord(
-				session.getId(),
-				UUID.fromString(userId),
-				sceneId,
-				type,
-				session.getStatus(),
-				session.getCreatedAt(),
-				null));
-		activeSessionRegistry.save(session);
+		registerSceneSession(session);
 		RealtimeFlowLog.info(
 				"session.start sessionId={} userId={} sceneType={} startTime={} prompt={}",
 				session.getId(),
@@ -132,6 +124,76 @@ public class SessionServiceImpl implements SessionService {
 		return new StartSessionResponse(
 				session.getId(),
 				session.getCreatedAt().toString());
+	}
+
+	@Override
+	public void registerSceneSession(AbstractSceneSession session) {
+		UUID userId = validateSceneSessionBinding(session);
+		if (!activeSessionRegistry.registerIfAbsent(session)) {
+			throw new BusinessException(
+					"SESSION_ALREADY_REGISTERED",
+					"同一会话标识已注册");
+		}
+		try {
+			practiceSessionRepository.create(new PracticeSessionRecord(
+					session.getId(),
+					userId,
+					session.getSceneId(),
+					session.getSceneType(),
+					session.getStatus(),
+					session.getCreatedAt(),
+					session.getEndedAt()));
+		}
+		catch (RuntimeException exception) {
+			activeSessionRegistry.remove(session.getId(), session);
+			throw exception;
+		}
+	}
+
+	@Override
+	public void terminateSceneSession(
+			String userId,
+			String sessionId,
+			SessionStatus terminalStatus,
+			Instant endedAt) {
+		UUID ownerId = requireUserUuid(userId);
+		if (endedAt == null) {
+			throw new BusinessException(
+					"SESSION_END_TIME_REQUIRED",
+					"会话结束时间不能为空");
+		}
+		if (terminalStatus != SessionStatus.COMPLETED
+				&& terminalStatus != SessionStatus.FAILED) {
+			throw new BusinessException(
+					"INVALID_SESSION_TERMINAL_STATUS",
+					"会话终态只允许 COMPLETED 或 FAILED");
+		}
+		AbstractSceneSession session = requireOwnedSession(userId, sessionId);
+		synchronized (session) {
+			if (session.getStatus() == terminalStatus) {
+				return;
+			}
+			if (session.getStatus() == SessionStatus.COMPLETED
+					|| session.getStatus() == SessionStatus.FAILED) {
+				throw new BusinessException(
+						"SESSION_ALREADY_TERMINATED",
+						"会话已进入其他终态");
+			}
+			if (terminalStatus == SessionStatus.COMPLETED) {
+				practiceSessionRepository.complete(
+						sessionId,
+						ownerId,
+						endedAt);
+				session.complete(endedAt);
+			}
+			else {
+				practiceSessionRepository.fail(
+						sessionId,
+						ownerId,
+						endedAt);
+				session.fail(endedAt);
+			}
+		}
 	}
 
 	@Override
@@ -500,6 +562,9 @@ public class SessionServiceImpl implements SessionService {
 		if (userId == null || userId.isBlank()) {
 			throw new BusinessException("AUTHENTICATION_REQUIRED", "请先登录");
 		}
+		if (sessionId == null || sessionId.isBlank()) {
+			throw new SessionNotFoundException(sessionId);
+		}
 		AbstractSceneSession session = activeSessionRegistry.findById(sessionId)
 				.orElseThrow(() -> new SessionNotFoundException(sessionId));
 		if (!userId.equals(session.getUserId())) {
@@ -508,6 +573,45 @@ public class SessionServiceImpl implements SessionService {
 					"当前用户无权访问该会话");
 		}
 		return session;
+	}
+
+	private UUID validateSceneSessionBinding(AbstractSceneSession session) {
+		if (session == null
+				|| session.getId() == null
+				|| session.getId().isBlank()
+				|| session.getUserId() == null
+				|| session.getUserId().isBlank()
+				|| session.getSceneId() == null
+				|| session.getSceneId().isBlank()
+				|| session.getSceneType() == null
+				|| session.getStatus() == null
+				|| session.getCreatedAt() == null) {
+			throw new BusinessException(
+					"INVALID_SCENE_SESSION_BINDING",
+					"Scene 会话缺少必填绑定");
+		}
+		try {
+			return UUID.fromString(session.getUserId());
+		}
+		catch (IllegalArgumentException exception) {
+			throw new BusinessException(
+					"INVALID_SCENE_SESSION_BINDING",
+					"Scene 会话用户标识必须是 UUID");
+		}
+	}
+
+	private UUID requireUserUuid(String userId) {
+		if (userId == null || userId.isBlank()) {
+			throw new BusinessException("AUTHENTICATION_REQUIRED", "请先登录");
+		}
+		try {
+			return UUID.fromString(userId);
+		}
+		catch (IllegalArgumentException exception) {
+			throw new BusinessException(
+					"INVALID_USER_ID",
+					"用户标识必须是 UUID");
+		}
 	}
 
 	private void requireCustomSceneBinding(
