@@ -52,13 +52,13 @@ public class ProfileAccountServiceImpl implements ProfileAccountService {
 	@Override
 	public AvatarResponse replaceAvatar(String userId, byte[] content) {
 		if (!storage.available()) {
-			throw new BusinessException("AVATAR_STORAGE_UNAVAILABLE", "头像存储尚未配置");
+			throw new BusinessException("OBJECT_STORAGE_UNAVAILABLE", "对象存储尚未配置");
 		}
 		UUID id = UUID.fromString(userId);
 		UserAccount user = accounts.findById(id)
 				.orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "用户不存在"));
 		var avatar = images.process(content);
-		String prefix = properties.getAvatarPrefix().replaceAll("^/+|/+$", "");
+		String prefix = properties.getAvatarPrefix();
 		String key = prefix + "/" + userId + "/" + UUID.randomUUID() + "." + avatar.extension();
 		storage.put(key, avatar.content(), avatar.contentType());
 		if (!accounts.updateAvatarObjectKey(id, user.avatarObjectKey(), key)) {

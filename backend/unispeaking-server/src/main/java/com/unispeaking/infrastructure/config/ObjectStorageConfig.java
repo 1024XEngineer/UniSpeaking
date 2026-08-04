@@ -39,8 +39,8 @@ public class ObjectStorageConfig {
 		@Override public boolean available() { return false; }
 		private BusinessException unavailable() {
 			return new BusinessException(
-					"AVATAR_STORAGE_UNAVAILABLE",
-					"头像存储尚未配置");
+					"OBJECT_STORAGE_UNAVAILABLE",
+					"对象存储尚未配置");
 		}
 	}
 }
