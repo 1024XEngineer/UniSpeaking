@@ -10,6 +10,22 @@ class GlobalExceptionHandlerTest {
 	private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
 
 	@Test
+	void mapsGenericObjectStorageErrors() {
+		assertEquals(
+				HttpStatus.BAD_GATEWAY,
+				handler.handleBusinessException(new BusinessException(
+						"OBJECT_STORAGE_FAILED",
+						"对象存储服务暂时不可用"))
+						.getStatusCode());
+		assertEquals(
+				HttpStatus.SERVICE_UNAVAILABLE,
+				handler.handleBusinessException(new BusinessException(
+						"OBJECT_STORAGE_UNAVAILABLE",
+						"对象存储尚未配置"))
+						.getStatusCode());
+	}
+
+	@Test
 	void mapsAchievementNotFoundAndPersistenceFailures() {
 		var missing = handler.handleBusinessException(new BusinessException(
 				"ACHIEVEMENT_UNLOCK_NOT_FOUND",
