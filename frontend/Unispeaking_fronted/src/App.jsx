@@ -18,6 +18,7 @@ import {
   Fire,
   GearSix,
   Headphones,
+  Lifebuoy,
   LockKey,
   Medal,
   Microphone,
@@ -83,6 +84,7 @@ import { useAchievementNotifications } from "./AchievementNotifications.jsx";
 import { createRealtimeClient } from "./realtimeClient.js";
 import { IeltsAssets, IeltsTrainingCenter } from "./IeltsModule.jsx";
 import { InterviewAssets, InterviewTrainingCenter } from "./InterviewModule.jsx";
+import { HelpCenter } from "./help/HelpCenter.jsx";
 import { NewtonsCradle } from "./NewtonsCradle.jsx";
 import { hrefForPage, paths, resolveRoute } from "./router.js";
 
@@ -696,7 +698,7 @@ function AppShell({ page, setPage, teacher, avatarUrl, children }) {
       <aside className={cx("sidebar", sidebarOpen && "is-open")} onMouseEnter={() => setSidebarOpen(true)} onMouseLeave={() => setSidebarOpen(false)}>
         <Brand compact={!sidebarOpen} />
         <nav>{items.map(({ id, label, icon: Icon }) => <button key={id} className={cx("sidebar__item", activePage === id && "is-active")} onClick={() => { if (activePage !== id) setPage(id); }} aria-label={label} title={label}><Icon weight={activePage === id ? "bold" : "regular"} /><span className="sidebar__label"><span>{label}</span></span></button>)}</nav>
-        <button className={cx("sidebar__avatar", ["profile", "membership", "settings"].includes(page) && "is-active")} onClick={() => setPage("profile")}><img src={avatarUrl || teacher.image} alt="个人中心" /></button>
+        <button className={cx("sidebar__avatar", ["profile", "membership", "settings", "help"].includes(page) && "is-active")} onClick={() => setPage("profile")}><img src={avatarUrl || teacher.image} alt="个人中心" /></button>
       </aside>
       <div className="app-main">{children}</div>
     </div>
@@ -2163,14 +2165,38 @@ function ProfileEditModal({ account, user, avatarUrl, onClose, onNicknameChange,
   return <Modal onClose={submitting ? undefined : onClose} className="profile-edit-modal"><p className="eyebrow">EDIT PROFILE</p><h2>编辑个人资料</h2><p className="modal-lead">修改你的展示用户名或个人头像。</p><form className="profile-edit-form" onSubmit={submit}><div className="profile-edit-avatar"><img src={previewUrl} alt="头像预览" /><div><strong>个人头像</strong><small>支持 JPEG、PNG，文件不超过 2 MiB</small><label className="profile-avatar-picker">选择新头像<input type="file" accept="image/jpeg,image/png" disabled={submitting} onChange={selectAvatar} /></label></div></div><label className="profile-edit-name">用户名<input type="text" minLength={1} maxLength={80} required disabled={submitting} value={nickname} onChange={(event) => setNickname(event.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><Button type="button" variant="secondary" disabled={submitting} onClick={onClose}>取消</Button><Button type="submit" disabled={submitting}>{submitting ? "正在保存" : "保存修改"}</Button></div></form></Modal>;
 }
 
-function Profile({ section, setSection, user, profile, teacher, speed, level, onSettingsChange, onMonthChange, onNicknameChange, onAvatarChange, onPasswordChange, onAssets, onLogout }) {
+function Profile({ section, setSection, helpRoute, onHelpNavigate, user, profile, teacher, speed, level, onSettingsChange, onMonthChange, onNicknameChange, onAvatarChange, onPasswordChange, onAssets, onLogout }) {
   const account = profile?.account;
   const displayName = account?.displayName || user?.nickname || user?.username?.split("@")[0] || "UniSpeaking User";
   const email = account?.email || user?.username || "";
   const avatarUrl = account?.avatarUrl || teacher.image;
   const [profileEditOpen, setProfileEditOpen] = useState(false);
   return (
-    <main className="profile-layout"><aside className="profile-nav"><div className="profile-user"><div className="profile-user__avatar"><img src={avatarUrl} alt={displayName} /><button type="button" className="profile-user__edit" aria-label="编辑用户名和头像" title="编辑用户名和头像" onClick={() => setProfileEditOpen(true)}><PencilSimple weight="bold" /></button></div><span><strong>{displayName}</strong><small>{email}</small></span></div><nav><button className={section === "profile" ? "is-active" : ""} onClick={() => setSection("profile")}><User />个人概览</button><button className={section === "membership" ? "is-active" : ""} onClick={() => setSection("membership")}><Crown />会员权益</button><button className={section === "settings" ? "is-active" : ""} onClick={() => setSection("settings")}><SlidersHorizontal />助手设置</button></nav><button className="logout" onClick={onLogout}><SignOut />退出登录</button></aside><section className="profile-content">{section === "profile" && <Overview calendar={profile?.calendar} statistics={profile?.statistics} onMonthChange={onMonthChange} onAssets={onAssets} />}{section === "membership" && <Membership />}{section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} onPasswordChange={onPasswordChange} />}</section>{profileEditOpen && <ProfileEditModal account={account} user={user} avatarUrl={avatarUrl} onClose={() => setProfileEditOpen(false)} onNicknameChange={onNicknameChange} onAvatarChange={onAvatarChange} />}</main>
+    <main className="profile-layout">
+      <aside className="profile-nav">
+        <div className="profile-user">
+          <div className="profile-user__avatar">
+            <img src={avatarUrl} alt={displayName} />
+            <button type="button" className="profile-user__edit" aria-label="编辑用户名和头像" title="编辑用户名和头像" onClick={() => setProfileEditOpen(true)}><PencilSimple weight="bold" /></button>
+          </div>
+          <span><strong>{displayName}</strong><small>{email}</small></span>
+        </div>
+        <nav aria-label="个人中心导航">
+          <button className={section === "profile" ? "is-active" : ""} onClick={() => setSection("profile")}><User />个人概览</button>
+          <button className={section === "membership" ? "is-active" : ""} onClick={() => setSection("membership")}><Crown />会员权益</button>
+          <button className={section === "settings" ? "is-active" : ""} onClick={() => setSection("settings")}><SlidersHorizontal />助手设置</button>
+          <button className={section === "help" ? "is-active" : ""} onClick={() => setSection("help")}><Lifebuoy />帮助与反馈</button>
+        </nav>
+        <button className="logout" onClick={onLogout}><SignOut />退出登录</button>
+      </aside>
+      <section className={cx("profile-content", section === "help" && "profile-content--help")}>
+        {section === "profile" && <Overview calendar={profile?.calendar} statistics={profile?.statistics} onMonthChange={onMonthChange} onAssets={onAssets} />}
+        {section === "membership" && <Membership />}
+        {section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} onPasswordChange={onPasswordChange} />}
+        {section === "help" && <HelpCenter route={helpRoute} onNavigate={onHelpNavigate} />}
+      </section>
+      {profileEditOpen && <ProfileEditModal account={account} user={user} avatarUrl={avatarUrl} onClose={() => setProfileEditOpen(false)} onNicknameChange={onNicknameChange} onAvatarChange={onAvatarChange} />}
+    </main>
   );
 }
 
@@ -2477,6 +2503,7 @@ export function App() {
   const [assetSceneId, setAssetSceneId] = useState(initialRoute.assetSceneId || null);
   const [ieltsRoute, setIeltsRoute] = useState(initialRoute.ieltsRoute || null);
   const [interviewRoute, setInterviewRoute] = useState(initialRoute.interviewRoute || null);
+  const [helpRoute, setHelpRoute] = useState(initialRoute.helpRoute || null);
   const [paywall, setPaywall] = useState(null);
   const preferenceWriteChainRef = useRef(Promise.resolve());
   const preferenceWriteVersionRef = useRef(0);
@@ -2491,6 +2518,7 @@ export function App() {
     setAssetSceneId(route.assetSceneId || null);
     setIeltsRoute(route.ieltsRoute || null);
     setInterviewRoute(route.interviewRoute || null);
+    setHelpRoute(route.helpRoute || null);
     setPaywall(null);
     const routeSceneId = route.sceneId || route.assetSceneId;
     if (routeSceneId) {
@@ -2788,6 +2816,7 @@ export function App() {
   const setMainPage = (next) => navigate(hrefForPage(next), { page: next, authMode, training: null, result: null });
   const navigateIelts = (path) => navigate(path, { authMode });
   const navigateInterview = (path) => navigate(path, { authMode });
+  const navigateHelp = (path) => navigate(path, { authMode });
   const openCompletedAssetDetail = (requestedSceneId = null) => {
     const explicitSceneId = typeof requestedSceneId === "string" ? requestedSceneId : null;
     const sceneId = explicitSceneId || training?.sceneId || generatedScene?.sceneId || assetSceneId;
@@ -2809,6 +2838,6 @@ export function App() {
   else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBackToAssets={() => setMainPage("assets")} onInterviewAssets={() => setMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
   else if (page === "interview") content = <InterviewTrainingCenter route={interviewRoute} onNavigate={navigateInterview} onExit={() => setMainPage("scenes")} onAssets={() => navigateInterview(paths.interview.assets.root)} />;
   else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBackToAssets={() => setMainPage("assets")} onIeltsAssets={() => setMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} />;
-  else content = <Profile section={page} setSection={setMainPage} user={user} profile={profileOverview} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onMonthChange={loadProfileMonth} onNicknameChange={updateNickname} onAvatarChange={updateAvatar} onPasswordChange={updatePassword} onAssets={() => setMainPage("assets")} onLogout={logout} />;
+  else content = <Profile section={page} setSection={setMainPage} helpRoute={helpRoute} onHelpNavigate={navigateHelp} user={user} profile={profileOverview} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onMonthChange={loadProfileMonth} onNicknameChange={updateNickname} onAvatarChange={updateAvatar} onPasswordChange={updatePassword} onAssets={() => setMainPage("assets")} onLogout={logout} />;
   return <AppShell page={page} setPage={setMainPage} teacher={teacher} avatarUrl={profileOverview?.account?.avatarUrl}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}</AppShell>;
 }

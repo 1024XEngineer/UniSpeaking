@@ -6,6 +6,7 @@ const baseRoute = {
   sessionId: null,
   conversationSessionId: null,
   assetSceneId: null,
+  helpRoute: null,
 };
 
 const appRoute = (page, extra = {}) => ({
@@ -26,6 +27,7 @@ export const APP_PAGES = [
   "profile",
   "membership",
   "settings",
+  "help",
 ];
 
 export const PAGE_PATHS = {
@@ -35,6 +37,7 @@ export const PAGE_PATHS = {
   profile: "/profile",
   membership: "/membership",
   settings: "/settings",
+  help: "/help",
   ielts: "/ielts",
   "ielts-assets": "/ielts/assets",
   interview: "/interview",
@@ -97,6 +100,12 @@ export const paths = {
       trends: "/interview/assets/trends",
       record: (recordId) => `/interview/assets/${encodeURIComponent(recordId)}`,
     },
+  },
+  help: {
+    root: "/help",
+    category: (categoryId) => `/help/category/${encodeURIComponent(categoryId)}`,
+    article: (articleId) => `/help/article/${encodeURIComponent(articleId)}`,
+    feedback: "/help/feedback",
   },
 };
 
@@ -244,6 +253,32 @@ export function parseSceneRoute(pathname) {
   return appRoute("scenes", { canonicalPath: paths.app.scenes });
 }
 
+export function parseHelpRoute(pathname) {
+  const path = normalizePath(pathname);
+  const segments = path.split("/").filter(Boolean);
+  if (segments[0] !== "help") return null;
+  if (segments.length === 1) {
+    return appRoute("help", { helpRoute: { screen: "home" } });
+  }
+  if (segments.length === 2 && segments[1] === "feedback") {
+    return appRoute("help", { helpRoute: { screen: "feedback" } });
+  }
+  if (segments.length === 3 && segments[1] === "category") {
+    return appRoute("help", {
+      helpRoute: { screen: "category", categoryId: safeDecode(segments[2]) },
+    });
+  }
+  if (segments.length === 3 && segments[1] === "article") {
+    return appRoute("help", {
+      helpRoute: { screen: "article", articleId: safeDecode(segments[2]) },
+    });
+  }
+  return appRoute("help", {
+    helpRoute: { screen: "home" },
+    canonicalPath: paths.help.root,
+  });
+}
+
 function previewRoute(preview) {
   if (!preview) return null;
   if (preview === "teacher") return { ...baseRoute, flow: "teacher", page: "conversation" };
@@ -308,6 +343,8 @@ export function resolveRoute(locationLike = window.location) {
   if (ieltsRoute) return ieltsRoute;
   const interviewRoute = parseInterviewRoute(pathname);
   if (interviewRoute) return interviewRoute;
+  const helpRoute = parseHelpRoute(pathname);
+  if (helpRoute) return helpRoute;
 
   const page = Object.entries(PAGE_PATHS).find(([, routePath]) => routePath === pathname)?.[0];
   if (page) return appRoute(page, {
