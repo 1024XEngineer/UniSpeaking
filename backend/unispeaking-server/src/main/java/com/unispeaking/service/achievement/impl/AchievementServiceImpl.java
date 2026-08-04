@@ -62,7 +62,6 @@ public class AchievementServiceImpl implements AchievementService {
 	}
 
 	@Override
-	@Transactional
 	public AchievementSyncResponse synchronize(UUID userId) {
 		AchievementMetricSnapshot metrics = metricCalculator.calculate(userId);
 		List<AchievementDefinition> reached = progressCalculator.calculate(metrics)

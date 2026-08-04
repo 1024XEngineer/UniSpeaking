@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -154,6 +155,31 @@ class AchievementServiceImplTest {
 
 		assertTrue(response.newlyUnlocked().isEmpty());
 		assertEquals(1, response.pendingNotifications().size());
+	}
+
+	@Test
+	void recoversPartiallyPersistedUnlocksWithoutCreatingDuplicates() {
+		UserAchievementUnlock first = unlock("conversation-1", UNLOCKED_AT);
+		UserAchievementUnlock partiallyCreated = pending(
+				"conversation-2",
+				UNLOCKED_AT.plusSeconds(5));
+		List<UserAchievementUnlock> existing =
+				List.of(first, partiallyCreated);
+		when(metricCalculator.calculate(userId)).thenReturn(metrics(5));
+		when(unlocks.findState(userId)).thenReturn(Optional.of(
+				new UserAchievementState(userId, UNLOCKED_AT)));
+		when(unlocks.findAll(userId)).thenReturn(existing);
+		when(unlocks.findPending(userId)).thenReturn(List.of(partiallyCreated));
+
+		AchievementSyncResponse response = service.synchronize(userId);
+
+		assertTrue(response.newlyUnlocked().isEmpty());
+		assertEquals(
+				List.of("conversation-2"),
+				response.pendingNotifications().stream()
+						.map(item -> item.achievementId())
+						.toList());
+		verify(unlocks, never()).create(any(UserAchievementUnlock.class));
 	}
 
 	@Test
