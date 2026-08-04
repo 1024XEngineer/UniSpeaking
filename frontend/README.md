@@ -144,6 +144,7 @@ npm run android
 ```
 
 移动端使用 TypeScript、Expo SDK 57 和 Expo Router，应用包名为
-`com.unispeaking.mobile`。当前包含自由对话、场景训练、IELTS、英文面试、学习资产和
-个人中心等完整前端流程，但后端数据接入范围与 Web 端不同。继续联调前请先阅读
+`com.unispeaking.mobile`。当前只有自由对话、场景广场和学习资产完成前端定稿；
+IELTS、英文面试和个人主页仍需继续开发与定稿，仓库中的相关页面只是阶段性原型。
+移动端后端数据接入范围也与 Web 端不同，继续开发前请先阅读
 [`mobile/HANDOFF.md`](mobile/HANDOFF.md)。
