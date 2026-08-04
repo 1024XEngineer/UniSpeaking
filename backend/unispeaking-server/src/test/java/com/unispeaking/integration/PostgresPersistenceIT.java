@@ -2,6 +2,7 @@ package com.unispeaking.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -34,12 +35,14 @@ import com.unispeaking.infrastructure.persistence.repository.user.MybatisUserPro
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -112,6 +115,9 @@ class PostgresPersistenceIT {
 				    session_evaluation,
 				    turn_evaluation,
 				    session_message,
+				    interview_report,
+				    interview_question,
+				    interview,
 				    sentence,
 				    phrase,
 				    "word",
@@ -123,9 +129,14 @@ class PostgresPersistenceIT {
 
 	@Test
 	void migratesEmptyDatabaseAndRegistersFlywayHistory() {
-		Integer migrationCount = jdbcTemplate.queryForObject(
-				"SELECT COUNT(*) FROM flyway_schema_history WHERE success",
-				Integer.class);
+		List<String> migrationVersions = jdbcTemplate.queryForList(
+				"""
+				SELECT version
+				FROM flyway_schema_history
+				WHERE success
+				ORDER BY installed_rank
+				""",
+				String.class);
 		Integer topicCount = jdbcTemplate.queryForObject(
 				"SELECT COUNT(*) FROM ielts_topic",
 				Integer.class);
@@ -161,12 +172,203 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(5, migrationCount);
+		assertEquals(List.of("1", "2", "3", "4", "5", "6"), migrationVersions);
 		assertEquals(303, topicCount);
 		assertEquals(1771, questionCount);
 		assertEquals(0, questionLikeTitleCount);
 		assertEquals(3, helpTableCount);
 		assertEquals("jsonb", successFactorType);
+	}
+
+	@Test
+	void createsInterviewTablesWithExactColumnsAndRelationships() {
+		assertEquals(
+				List.of(
+						"id|character varying|64|||NO",
+						"user_id|uuid||||NO",
+						"session_id|character varying|64|||NO",
+						"job_title|character varying|255|||NO",
+						"difficulty|character varying|16|||NO",
+						"role_summary|jsonb||||NO",
+						"recording_object_key|character varying|512|||YES",
+						"recording_duration_seconds|integer||32|0|YES",
+						"completed_at|timestamp with time zone||||YES",
+						"created_at|timestamp with time zone||||NO",
+						"updated_at|timestamp with time zone||||NO"),
+				columnDefinitions("interview"));
+		assertEquals(
+				List.of(
+						"interview_id|character varying|64|||NO",
+						"question_no|integer||32|0|NO",
+						"question_type|character varying|16|||NO",
+						"question_text|text||||NO",
+						"created_at|timestamp with time zone||||NO",
+						"updated_at|timestamp with time zone||||NO"),
+				columnDefinitions("interview_question"));
+		assertEquals(
+				List.of(
+						"interview_id|character varying|64|||NO",
+						"report_type|character varying|16|||NO",
+						"overall_score|numeric||4|1|NO",
+						"overall_summary|text||||NO",
+						"fluency_score|numeric||4|1|NO",
+						"fluency_evaluation|text||||NO",
+						"fluency_action_suggestion|text||||NO",
+						"logic_coherence_score|numeric||4|1|NO",
+						"logic_coherence_evaluation|text||||NO",
+						"logic_coherence_action_suggestion|text||||NO",
+						"grammar_control_score|numeric||4|1|NO",
+						"grammar_control_evaluation|text||||NO",
+						"grammar_control_action_suggestion|text||||NO",
+						"pronunciation_intelligibility_score|numeric||4|1|NO",
+						"pronunciation_intelligibility_evaluation|text||||NO",
+						"pronunciation_intelligibility_action_suggestion|text||||NO",
+						"vocabulary_expression_score|numeric||4|1|NO",
+						"vocabulary_expression_evaluation|text||||NO",
+						"vocabulary_expression_action_suggestion|text||||NO",
+						"created_at|timestamp with time zone||||NO",
+						"updated_at|timestamp with time zone||||NO"),
+				columnDefinitions("interview_report"));
+
+		assertEquals(
+				Map.of(
+						"interview", "id",
+						"interview_question", "interview_id,question_no",
+						"interview_report", "interview_id"),
+				jdbcTemplate.query(
+						"""
+						SELECT tc.table_name,
+						       STRING_AGG(kcu.column_name, ',' ORDER BY kcu.ordinal_position)
+						FROM information_schema.table_constraints tc
+						JOIN information_schema.key_column_usage kcu
+						  ON kcu.constraint_schema = tc.constraint_schema
+						 AND kcu.constraint_name = tc.constraint_name
+						WHERE tc.table_schema = 'public'
+						  AND tc.table_name IN ('interview', 'interview_question', 'interview_report')
+						  AND tc.constraint_type = 'PRIMARY KEY'
+						GROUP BY tc.table_name
+						""",
+						resultSet -> {
+							Map<String, String> keys = new java.util.HashMap<>();
+							while (resultSet.next()) {
+								keys.put(resultSet.getString(1), resultSet.getString(2));
+							}
+							return keys;
+						}));
+		assertEquals(
+				List.of("session_id"),
+				jdbcTemplate.queryForList(
+						"""
+						SELECT kcu.column_name
+						FROM information_schema.table_constraints tc
+						JOIN information_schema.key_column_usage kcu
+						  ON kcu.constraint_schema = tc.constraint_schema
+						 AND kcu.constraint_name = tc.constraint_name
+						WHERE tc.table_schema = 'public'
+						  AND tc.table_name = 'interview'
+						  AND tc.constraint_type = 'UNIQUE'
+						""",
+						String.class));
+		String completedAssetIndex = jdbcTemplate.queryForObject(
+				"""
+				SELECT indexdef
+				FROM pg_indexes
+				WHERE schemaname = 'public'
+				  AND tablename = 'interview'
+				  AND indexname = 'idx_interview_user_completed_at'
+				""",
+				String.class);
+		assertTrue(completedAssetIndex.contains("(user_id, completed_at DESC)"));
+		assertTrue(completedAssetIndex.contains("WHERE (completed_at IS NOT NULL)"));
+		assertEquals(
+				0,
+				jdbcTemplate.queryForObject(
+						"""
+						SELECT COUNT(*)
+						FROM information_schema.table_constraints
+						WHERE table_schema = 'public'
+						  AND table_name IN ('interview', 'interview_question', 'interview_report')
+						  AND constraint_type = 'FOREIGN KEY'
+						""",
+						Integer.class));
+	}
+
+	@Test
+	void enforcesInterviewSchemaChecksAndSessionUniqueness() {
+		insertInterview("interview_valid", "session_valid", "STANDARD", 0);
+
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> insertInterview(
+						"interview_bad_difficulty",
+						"session_bad_difficulty",
+						"EXPERT",
+						0));
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> insertInterview(
+						"interview_bad_duration",
+						"session_bad_duration",
+						"BASIC",
+						-1));
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> insertInterview(
+						"interview_duplicate_session",
+						"session_valid",
+						"CHALLENGE",
+						1));
+
+		jdbcTemplate.update(
+				"""
+				INSERT INTO interview_question
+				    (interview_id, question_no, question_type, question_text)
+				VALUES ('interview_valid', 1, 'MAIN', 'Tell me about yourself.')
+				""");
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> jdbcTemplate.update("""
+						INSERT INTO interview_question
+						    (interview_id, question_no, question_type, question_text)
+						VALUES ('interview_bad_no', 0, 'MAIN', 'Invalid number')
+						"""));
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> jdbcTemplate.update("""
+						INSERT INTO interview_question
+						    (interview_id, question_no, question_type, question_text)
+						VALUES ('interview_bad_type', 1, 'OPTIONAL', 'Invalid type')
+						"""));
+
+		insertReport("report_valid", "FULL");
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> insertReport("report_bad_type", "DRAFT"));
+		List<String> scoreColumns = List.of(
+				"overall_score",
+				"fluency_score",
+				"logic_coherence_score",
+				"grammar_control_score",
+				"pronunciation_intelligibility_score",
+				"vocabulary_expression_score");
+		for (int index = 0; index < scoreColumns.size(); index++) {
+			String interviewId = "report_bad_score_" + index;
+			String scoreColumn = scoreColumns.get(index);
+			insertReport(interviewId, "PARTIAL");
+			assertThrows(
+					DataIntegrityViolationException.class,
+					() -> jdbcTemplate.update(
+							"UPDATE interview_report SET " + scoreColumn
+									+ " = 100.1 WHERE interview_id = ?",
+							interviewId));
+		}
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> jdbcTemplate.update("""
+						UPDATE interview_report
+						SET overall_score = -0.1
+						WHERE interview_id = 'report_valid'
+						"""));
 	}
 
 	@Test
@@ -459,8 +661,8 @@ class PostgresPersistenceIT {
 				jdbcTemplate.queryForObject(
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
-		assertEquals(
-				List.of("0", "1", "2", "3", "4", "5"),
+	assertEquals(
+				List.of("0", "1", "2", "3", "4", "5", "6"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version
@@ -477,8 +679,82 @@ class PostgresPersistenceIT {
 				  AND table_name = 'scene'
 				""",
 				String.class).isEmpty());
+		assertFalse(jdbcTemplate.queryForList(
+				"""
+				SELECT table_name
+				FROM information_schema.tables
+				WHERE table_schema = 'legacy_ci'
+				  AND table_name = 'interview_report'
+				""",
+				String.class).isEmpty());
 
 		jdbcTemplate.execute("DROP SCHEMA " + schema + " CASCADE");
+	}
+
+	private List<String> columnDefinitions(String tableName) {
+		return jdbcTemplate.queryForList(
+				"""
+				SELECT CONCAT_WS(
+				           '|',
+				           column_name,
+				           data_type,
+				           COALESCE(character_maximum_length::TEXT, ''),
+				           COALESCE(numeric_precision::TEXT, ''),
+				           COALESCE(numeric_scale::TEXT, ''),
+				           is_nullable)
+				FROM information_schema.columns
+				WHERE table_schema = 'public'
+				  AND table_name = ?
+				ORDER BY ordinal_position
+				""",
+				String.class,
+				tableName);
+	}
+
+	private void insertInterview(
+			String interviewId,
+			String sessionId,
+			String difficulty,
+			Integer recordingDurationSeconds) {
+		jdbcTemplate.update(
+				"""
+				INSERT INTO interview
+				    (id, user_id, session_id, job_title, difficulty, role_summary,
+				     recording_duration_seconds)
+				VALUES (?, '11111111-1111-4111-8111-111111111111', ?,
+				        'Product Manager', ?, '{}'::JSONB, ?)
+				""",
+				interviewId,
+				sessionId,
+				difficulty,
+				recordingDurationSeconds);
+	}
+
+	private void insertReport(String interviewId, String reportType) {
+		jdbcTemplate.update(
+				"""
+				INSERT INTO interview_report (
+				    interview_id, report_type, overall_score, overall_summary,
+				    fluency_score, fluency_evaluation, fluency_action_suggestion,
+				    logic_coherence_score, logic_coherence_evaluation,
+				    logic_coherence_action_suggestion,
+				    grammar_control_score, grammar_control_evaluation,
+				    grammar_control_action_suggestion,
+				    pronunciation_intelligibility_score,
+				    pronunciation_intelligibility_evaluation,
+				    pronunciation_intelligibility_action_suggestion,
+				    vocabulary_expression_score, vocabulary_expression_evaluation,
+				    vocabulary_expression_action_suggestion)
+				VALUES (
+				    ?, ?, 80.0, 'summary',
+				    80.0, 'evaluation', 'action',
+				    80.0, 'evaluation', 'action',
+				    80.0, 'evaluation', 'action',
+				    80.0, 'evaluation', 'action',
+				    80.0, 'evaluation', 'action')
+				""",
+				interviewId,
+				reportType);
 	}
 
 	private CustomSceneDefinition sceneDefinition() {
