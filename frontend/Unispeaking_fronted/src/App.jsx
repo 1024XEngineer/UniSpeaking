@@ -1111,7 +1111,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   );
 }
 
-function Scenes({ onStartTraining, onIelts, onInterview, onAchievementSync }) {
+function Scenes({ onStartTraining, onIelts, onInterview }) {
   const [prompt, setPrompt] = useState("");
   const promptRef = useRef(null);
   const previewSceneIdRef = useRef("");
@@ -1142,7 +1142,6 @@ function Scenes({ onStartTraining, onIelts, onInterview, onAchievementSync }) {
       setPreview(scene);
       setPreviewDisplay(null);
       prefetchPronunciationAudio(scene.sceneId, scene.wordList, 2);
-      onAchievementSync?.();
       void buildSceneDisplaySummary(scene).then((display) => {
         if (previewSceneIdRef.current === scene.sceneId) setPreviewDisplay(display);
       });
@@ -1323,7 +1322,6 @@ function CustomSceneConversation({
   ended = false,
   onSessionStarted,
   onComplete,
-  onAchievementSync,
 }) {
   const [status, setStatus] = useState("正在连接场景");
   const [error, setError] = useState("");
@@ -1399,7 +1397,6 @@ function CustomSceneConversation({
         delta: event.delta || event.text || "",
       });
     } else if (event.type === "local.turn_evaluation") {
-      onAchievementSync?.();
       const state = event.scenarioState;
       const completedOutcomes = state?.outcomes?.filter((item) => item.satisfied).length;
       const totalOutcomes = state?.outcomes?.length;
@@ -1671,7 +1668,7 @@ function ReadScoreModal({ feedback, item, onClose }) {
   );
 }
 
-function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed, initialStep = "learn", initialStage = "word", standaloneSpeak = false, result, onExit, onComplete, onBack, onAssets, onStageChange, onAchievementSync }) {
+function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed, initialStep = "learn", initialStage = "word", standaloneSpeak = false, result, onExit, onComplete, onBack, onAssets, onStageChange }) {
   const generatedWordItems = useMemo(() => (sceneContent?.wordList || []).map((entry) => ({ id: entry.contentId, type: "单词", en: entry.englishText, zh: entry.chineseText, phonetic: entry.phonetic })), [sceneContent]);
   const generatedPhraseItems = useMemo(() => (sceneContent?.phraseList || []).map((entry) => ({ id: entry.contentId, type: "词组", en: entry.englishText, zh: entry.chineseText, phonetic: entry.phonetic })), [sceneContent]);
   const generatedSentenceItems = useMemo(() => (sceneContent?.sentenceList || []).map((entry) => ({ id: entry.contentId, type: "句子", en: entry.englishText, zh: entry.chineseText, phonetic: entry.phonetic })), [sceneContent]);
@@ -1830,7 +1827,6 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
         passed: Boolean(normalized.passed),
         words: normalized.words,
       });
-      onAchievementSync?.();
     } catch (error) {
       const message = error instanceof Error ? error.message : "朗读评分失败";
       setReadError(message);
@@ -1895,8 +1891,8 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
       {step === "read" && generatedMode && <section className="training-workspace"><aside className="lesson-list"><div><span>场景句子</span><small>{readIndex + 1} / {readItems.length}</small></div>{readItems.map((readItem, index) => <button key={readItem.id || readItem.en} type="button" disabled className={cx(index === readIndex && "is-active", readEvaluations[index]?.passed && "is-done")}><small>句子</small><strong>{readItem.en}</strong><span>{readEvaluations[index]?.passed ? <Check weight="bold" /> : index + 1}</span></button>)}</aside><article className="read-stage"><h1 className={cx(readEvaluation && "sentence-score-text")}><ScoredSentence sentence={item.en} words={readEvaluation?.words} /></h1><p>{item.zh}</p><SentenceRecorder sentenceId={item.id} busy={readSubmitting} onSubmit={submitGeneratedRead} onError={setReadError} /><h3>{readSubmitting ? "正在评分" : score === null ? "点击麦克风开始朗读" : readEvaluation?.passed ? "朗读通过" : "再试一次"}</h3>{score === null && !readError && <p>再次点击麦克风结束录音并提交评分。</p>}{readError && <p className="sentence-reading-error" role="alert">{readError}</p>}<div className="read-demo"><span>听标准示范</span><PronunciationAudioButton sceneId={sceneId} text={item.en} label={`播放 ${item.en} 的标准发音`} /></div>{score !== null && <div className="sentence-score-summary"><strong>{score}</strong><span>/100</span></div>}<div className="stage-footer read-stage-footer"><ExpandingCta direction="back" disabled={readIndex === 0 || readSubmitting} onClick={() => setReadIndex(readIndex - 1)}>上一句</ExpandingCta><ExpandingCta disabled={!readEvaluation?.passed || readSubmitting} onClick={nextRead}>{readIndex === readItems.length - 1 ? "进入模拟" : "下一句"}</ExpandingCta></div></article></section>}
       {step === "read" && !generatedMode && <section className="training-workspace"><aside className="lesson-list"><div><span>完整表达</span><small>{readIndex + 1} / {learningItems.length}</small></div>{learningItems.map((learningItem, index) => <button key={learningItem.en} className={cx(index === readIndex && "is-active", (readScores[index] ?? 0) >= 80 && "is-done")} onClick={() => setReadIndex(index)}><small>句子</small><strong>{learningItem.en}</strong><span>{(readScores[index] ?? 0) >= 80 ? <Check weight="bold" /> : index + 1}</span></button>)}</aside><article className="read-stage"><h1>{item.en}</h1><p>{item.zh}</p><div className="rhythm"><span>节奏重点</span><strong>{item.en.split(" ").slice(0, 4).join(" · ")}</strong></div><MicrophoneToggle label="朗读麦克风" onActivate={submitRead} /><h3>{score === null ? "轮到你说" : score >= 80 ? "朗读通过" : "再试一次"}</h3>{score === null && <p>尽量完整、连贯地说出整句话。</p>}<button type="button" className="read-replay" onClick={playReadDemo}><SpeakerHigh weight="fill" />{heardReadDemos.includes(readIndex) ? "再听一次标准示范" : "听标准示范"}</button>{score >= 80 && <div className="stage-footer read-stage-footer"><span /><ExpandingCta onClick={nextRead}>{readIndex === learningItems.length - 1 ? "进入模拟" : "下一句"}</ExpandingCta></div>}</article></section>}
       </>}
-      {(step === "speak" || result) && generatedMode && <CustomSceneConversation sceneId={sceneId} teacher={teacher} speed={speed} ended={Boolean(result)} onSessionStarted={(startedSessionId) => onStageChange?.("session", startedSessionId)} onComplete={onComplete} onAchievementSync={onAchievementSync} />}
-      {(step === "speak" || result) && !generatedMode && <CustomSceneConversation sceneId={sceneId} teacher={teacher} speed={speed} ended={Boolean(result)} onSessionStarted={(startedSessionId) => onStageChange?.("session", startedSessionId)} onComplete={onComplete} onAchievementSync={onAchievementSync} />}
+      {(step === "speak" || result) && generatedMode && <CustomSceneConversation sceneId={sceneId} teacher={teacher} speed={speed} ended={Boolean(result)} onSessionStarted={(startedSessionId) => onStageChange?.("session", startedSessionId)} onComplete={onComplete} />}
+      {(step === "speak" || result) && !generatedMode && <CustomSceneConversation sceneId={sceneId} teacher={teacher} speed={speed} ended={Boolean(result)} onSessionStarted={(startedSessionId) => onStageChange?.("session", startedSessionId)} onComplete={onComplete} />}
       {result && <ResultModal completed={result.completed} evaluation={result.evaluation} onBack={onBack} onAssets={onAssets} />}
       {!result && readFeedback && <ReadScoreModal feedback={readFeedback} item={readItems[readFeedback.index]} onClose={() => setReadFeedback(null)} />}
     </main>
@@ -2742,7 +2738,7 @@ export function App() {
     if (evaluation) {
       void getProfileOverview().then(setProfileOverview).catch(() => undefined);
     }
-    void synchronizeAchievements();
+    void synchronizeAchievements({ revealNotifications: true });
   };
   const setMainPage = (next) => navigate(hrefForPage(next), { page: next, authMode, training: null, result: null });
   const navigateIelts = (path) => navigate(path, { authMode });
@@ -2760,9 +2756,9 @@ export function App() {
   if (flow === "level") return <LevelSetup selected={level} onSelect={setLevel} onNext={saveLevelAndContinue} />;
   if (flow === "teacher") return <TeacherSetup selectedId={teacher.id} onSelect={(id) => setTeacher(teachers.find((item) => item.id === id))} onFinish={saveTeacherAndEnter} />;
   let content;
-  if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={showResult} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} onAchievementSync={synchronizeAchievements} />;
-  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={() => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); void synchronizeAchievements(); }} />;
-  else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={() => setMainPage("ielts")} onInterview={() => setMainPage("interview")} onAchievementSync={synchronizeAchievements} />;
+  if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={showResult} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
+  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={() => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); void synchronizeAchievements({ revealNotifications: true }); }} />;
+  else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={() => setMainPage("ielts")} onInterview={() => setMainPage("interview")} />;
   else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => setMainPage("ielts-assets")} onInterview={() => setMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(scene) => startTraining(scene, "learn", { returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
   else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBackToAssets={() => setMainPage("assets")} onInterviewAssets={() => setMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
