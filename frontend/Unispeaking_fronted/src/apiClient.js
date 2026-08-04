@@ -71,6 +71,10 @@ export function getProfileOverview(month) {
   return request(`/api/profile/overview${query}`);
 }
 
+export function getAchievementOverview() {
+  return request("/api/achievements");
+}
+
 export function syncAchievementUnlocks() {
   return request("/api/achievement-unlocks", {
     method: "POST",
