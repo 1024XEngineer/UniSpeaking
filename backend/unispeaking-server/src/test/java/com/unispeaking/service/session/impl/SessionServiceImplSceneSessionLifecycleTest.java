@@ -24,6 +24,7 @@ import com.unispeaking.domain.po.session.AbstractSceneSession;
 import com.unispeaking.domain.po.session.CustomSceneSession;
 import com.unispeaking.domain.po.session.FreeChatSceneSession;
 import com.unispeaking.domain.po.session.PracticeSessionRecord;
+import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
@@ -53,6 +54,7 @@ class SessionServiceImplSceneSessionLifecycleTest {
 	private AuthService authService;
 	private ActiveSessionRegistry sessions;
 	private PracticeSessionRepository practiceSessions;
+	private SessionMessageRepository sessionMessages;
 	private RealtimeSdpExchange realtimeSdpExchange;
 	private AiProviderRegistry providerRegistry;
 	private SessionServiceImpl service;
@@ -62,6 +64,7 @@ class SessionServiceImplSceneSessionLifecycleTest {
 		authService = mock(AuthService.class);
 		sessions = new ActiveSessionRegistry();
 		practiceSessions = mock(PracticeSessionRepository.class);
+		sessionMessages = mock(SessionMessageRepository.class);
 		realtimeSdpExchange = mock(RealtimeSdpExchange.class);
 		providerRegistry = mock(AiProviderRegistry.class);
 		service = new SessionServiceImpl(
@@ -70,7 +73,7 @@ class SessionServiceImplSceneSessionLifecycleTest {
 				mock(SceneFlowService.class),
 				mock(SceneRepository.class),
 				sessions,
-				mock(SessionMessageRepository.class),
+				sessionMessages,
 				practiceSessions,
 				realtimeSdpExchange,
 				mock(EvaluationService.class),
@@ -362,6 +365,65 @@ class SessionServiceImplSceneSessionLifecycleTest {
 				() -> assertEquals(freeRuntime.getCreatedAt().toString(), freeChat.startTime()),
 				() -> assertEquals(customRuntime.getCreatedAt().toString(), custom.startTime()));
 		verifyNoInteractions(realtimeSdpExchange, providerRegistry);
+	}
+
+	@Test
+	void interviewMessagesPersistBeforeEnteringRuntimeHistory() {
+		CustomSceneSession session = registeredSession("interview_session_1");
+		Message message = new Message(1, "  I led the launch.  ", new byte[] {1});
+
+		service.addMessage(USER_ID, session.getId(), message);
+
+		verify(sessionMessages).append(
+				SCENE_ID,
+				session.getId(),
+				1,
+				message);
+		assertEquals(1, session.getMessages().size());
+		assertEquals("I led the launch.",
+				session.getMessages().getFirst().text());
+		assertSame(session, sessions.findById(session.getId()).orElseThrow());
+	}
+
+	@Test
+	void endingInterviewPersistsCompletionAndRetainsRuntimeForFinalization() {
+		CustomSceneSession session = registeredSession("interview_session_1");
+
+		service.endSession(USER_ID, session.getId(), "client-time-is-ignored");
+
+		ArgumentCaptor<Instant> endedAt = ArgumentCaptor.forClass(Instant.class);
+		verify(practiceSessions).complete(
+				org.mockito.ArgumentMatchers.eq(session.getId()),
+				org.mockito.ArgumentMatchers.eq(UUID.fromString(USER_ID)),
+				endedAt.capture());
+		assertEquals(SessionStatus.COMPLETED, session.getStatus());
+		assertEquals(endedAt.getValue(), session.getEndedAt());
+		assertSame(session, sessions.findById(session.getId()).orElseThrow());
+
+		service.endSession(USER_ID, session.getId(), "retry");
+		verify(practiceSessions, times(1)).complete(
+				org.mockito.ArgumentMatchers.any(),
+				org.mockito.ArgumentMatchers.any(),
+				org.mockito.ArgumentMatchers.any());
+	}
+
+	@Test
+	void freeChatMessagesRemainEphemeralAndEndingRemovesRuntime() {
+		FreeChatSceneSession session = new FreeChatSceneSession(
+				"freechat_session_1",
+				USER_ID);
+		session.setSceneId("freechat_scene_1");
+		session.setSceneType(SceneType.FREE_CHAT);
+		assertTrue(sessions.registerIfAbsent(session));
+
+		service.addMessage(
+				USER_ID,
+				session.getId(),
+				new Message(1, "ephemeral", null));
+		service.endSession(USER_ID, session.getId(), null);
+
+		verifyNoInteractions(sessionMessages);
+		assertTrue(sessions.findById(session.getId()).isEmpty());
 	}
 
 	private CustomSceneSession interviewSession(String sessionId, String userId) {

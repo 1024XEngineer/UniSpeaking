@@ -245,6 +245,39 @@ class EvaluationJsonbCodecTest {
 						() -> codec.encodePronunciationDetails(null)));
 	}
 
+	@Test
+	void rejectsInvalidProminenceSpanIndexTextAndScores() {
+		String valid = codec.encodeReadingDetails(readingDetails());
+
+		assertAll(
+				() -> assertPersistenceFailure(
+						valid.replace(
+								"\"is_prominent\":null",
+								"\"is_prominent\":\"yes\""),
+						true),
+				() -> assertPersistenceFailure(
+						valid.replace(
+								"\"end_position\":1",
+								"\"end_position\":0"),
+						true),
+				() -> assertPersistenceFailure(
+						valid.replaceFirst("\"index\":0", "\"index\":-1"),
+						true),
+				() -> assertPersistenceFailure(
+						valid.replace("\"text\":\"good\"", "\"text\":\" \""),
+						true),
+				() -> assertPersistenceFailure(
+						valid.replace(
+								"\"overall_score\":90",
+								"\"overall_score\":\"90\""),
+						true),
+				() -> assertPersistenceFailure(
+						valid.replace(
+								"\"overall_score\":90",
+								"\"overall_score\":-1"),
+						true));
+	}
+
 	private void assertPersistenceFailure(
 			String json,
 			boolean reading) {

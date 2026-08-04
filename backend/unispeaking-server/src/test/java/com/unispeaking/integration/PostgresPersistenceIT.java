@@ -2,6 +2,7 @@ package com.unispeaking.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -21,6 +22,14 @@ import com.unispeaking.domain.po.auth.UserStatus;
 import com.unispeaking.domain.po.feedback.UserFeedback;
 import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
+import com.unispeaking.domain.po.scene.InterviewQuestionRecord;
+import com.unispeaking.domain.po.scene.InterviewRecord;
+import com.unispeaking.domain.po.scene.InterviewReportRecord;
+import com.unispeaking.domain.vo.scene.InterviewDifficulty;
+import com.unispeaking.domain.vo.scene.InterviewQuestionType;
+import com.unispeaking.domain.vo.scene.InterviewReportDimension;
+import com.unispeaking.domain.vo.scene.InterviewReportType;
+import com.unispeaking.domain.vo.scene.TargetRoleSummary;
 import com.unispeaking.domain.vo.feedback.FeedbackStatus;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.CustomTurnEvaluation;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.PronunciationWordDetail;
@@ -29,11 +38,16 @@ import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionE
 import com.unispeaking.infrastructure.persistence.repository.evaluation.TurnEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.feedback.FeedbackRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.MybatisSceneRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.InterviewQuestionRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.InterviewReportRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.InterviewRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.MybatisUserAccountRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.MybatisUserProfileRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -90,6 +104,15 @@ class PostgresPersistenceIT {
 
 	@Autowired
 	private MybatisSceneRepository sceneRepository;
+
+	@Autowired
+	private InterviewRepository interviewRepository;
+
+	@Autowired
+	private InterviewQuestionRepository interviewQuestionRepository;
+
+	@Autowired
+	private InterviewReportRepository interviewReportRepository;
 
 	@Autowired
 	private SessionMessageRepository sessionMessageRepository;
@@ -369,6 +392,125 @@ class PostgresPersistenceIT {
 						SET overall_score = -0.1
 						WHERE interview_id = 'report_valid'
 						"""));
+	}
+
+	@Test
+	void persistsAndPhysicallyDeletesCompleteInterviewAssets() {
+		UUID ownerId = UUID.fromString(
+				"11111111-1111-4111-8111-111111111111");
+		UUID otherUserId = UUID.fromString(
+				"22222222-2222-4222-8222-222222222222");
+		OffsetDateTime createdAt = OffsetDateTime.of(
+				2026, 8, 4, 8, 0, 0, 0, ZoneOffset.UTC);
+		TargetRoleSummary roleSummary = new TargetRoleSummary(
+				"负责企业级 SaaS 产品规划与交付。",
+				List.of("分析用户需求", "协调跨团队交付"),
+				List.of("产品规划", "数据分析"),
+				List.of("英语业务沟通"));
+		InterviewRecord interview = new InterviewRecord(
+				"interview_repository_it",
+				ownerId,
+				"interview_session_it",
+				"Product Manager",
+				InterviewDifficulty.CHALLENGE,
+				roleSummary,
+				null,
+				null,
+				null,
+				createdAt,
+				createdAt);
+
+		interviewRepository.create(interview);
+
+		InterviewRecord pending = interviewRepository
+				.findByIdAndUserId(interview.id(), ownerId)
+				.orElseThrow();
+		assertEquals(roleSummary, pending.roleSummary());
+		assertEquals(List.of(
+				"overview",
+				"qualification_requirements",
+				"required_skills",
+				"responsibilities"),
+				jdbcTemplate.queryForList(
+						"SELECT jsonb_object_keys(role_summary) "
+								+ "FROM interview WHERE id = ? ORDER BY 1",
+						String.class,
+						interview.id()));
+		assertTrue(interviewRepository
+				.findByIdAndUserId(interview.id(), otherUserId)
+				.isEmpty());
+		assertNull(pending.recordingObjectKey());
+		assertNull(pending.recordingDurationSeconds());
+		assertNull(pending.completedAt());
+
+		interviewQuestionRepository.saveAll(List.of(
+				question(interview.id(), 3, InterviewQuestionType.MAIN, createdAt),
+				question(interview.id(), 1, InterviewQuestionType.MAIN, createdAt),
+				question(
+						interview.id(),
+						2,
+						InterviewQuestionType.FOLLOW_UP,
+						createdAt)));
+
+		assertEquals(
+				List.of(1, 2, 3),
+				interviewQuestionRepository.findByInterviewId(interview.id())
+						.stream()
+						.map(InterviewQuestionRecord::questionNo)
+						.toList());
+		assertEquals(
+				InterviewQuestionType.FOLLOW_UP,
+				interviewQuestionRepository.findByKey(interview.id(), 2)
+						.orElseThrow()
+						.questionType());
+		assertEquals(1, interviewQuestionRepository.deleteByKey(
+				interview.id(),
+				2));
+		assertTrue(interviewQuestionRepository
+				.findByKey(interview.id(), 2)
+				.isEmpty());
+		assertEquals(
+				List.of(1, 3),
+				interviewQuestionRepository.findByInterviewId(interview.id())
+						.stream()
+						.map(InterviewQuestionRecord::questionNo)
+						.toList());
+
+		InterviewReportRecord report = interviewReport(
+				interview.id(),
+				createdAt.plusMinutes(5));
+		interviewReportRepository.save(report);
+		assertEquals(
+				report,
+				interviewReportRepository.findByInterviewId(interview.id())
+						.orElseThrow());
+
+		OffsetDateTime completedAt = createdAt.plusMinutes(6);
+		interviewRepository.completeAssetMetadata(
+				interview.id(),
+				"interviews/recordings/repository-it.mp3",
+				366,
+				completedAt);
+		InterviewRecord completed = interviewRepository.findById(interview.id())
+				.orElseThrow();
+		assertEquals("interviews/recordings/repository-it.mp3",
+				completed.recordingObjectKey());
+		assertEquals(366, completed.recordingDurationSeconds());
+		assertEquals(completedAt, completed.completedAt());
+		assertEquals(completedAt, completed.updatedAt());
+
+		assertEquals(1,
+				interviewReportRepository.deleteByInterviewId(interview.id()));
+		assertTrue(interviewReportRepository
+				.findByInterviewId(interview.id())
+				.isEmpty());
+		assertEquals(2,
+				interviewQuestionRepository.deleteByInterviewId(interview.id()));
+		assertTrue(interviewQuestionRepository
+				.findByInterviewId(interview.id())
+				.isEmpty());
+		assertEquals(1, interviewRepository.deleteById(interview.id()));
+		assertTrue(interviewRepository.findById(interview.id()).isEmpty());
 	}
 
 	@Test
@@ -661,7 +803,7 @@ class PostgresPersistenceIT {
 				jdbcTemplate.queryForObject(
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
-	assertEquals(
+		assertEquals(
 				List.of("0", "1", "2", "3", "4", "5", "6"),
 				jdbcTemplate.queryForList(
 						"""
@@ -728,6 +870,46 @@ class PostgresPersistenceIT {
 				sessionId,
 				difficulty,
 				recordingDurationSeconds);
+	}
+
+	private InterviewQuestionRecord question(
+			String interviewId,
+			int questionNo,
+			InterviewQuestionType questionType,
+			OffsetDateTime createdAt) {
+		return new InterviewQuestionRecord(
+				interviewId,
+				questionNo,
+				questionType,
+				"Question " + questionNo,
+				createdAt,
+				createdAt);
+	}
+
+	private InterviewReportRecord interviewReport(
+			String interviewId,
+			OffsetDateTime createdAt) {
+		return new InterviewReportRecord(
+				interviewId,
+				InterviewReportType.FULL,
+				new BigDecimal("88.5"),
+				"整体表达清晰，岗位语境适切。",
+				interviewDimension("81.1", "流利度"),
+				interviewDimension("82.2", "逻辑与连贯性"),
+				interviewDimension("83.3", "语法控制"),
+				interviewDimension("84.4", "发音可理解度"),
+				interviewDimension("85.5", "词汇与面试表达"),
+				createdAt,
+				createdAt);
+	}
+
+	private InterviewReportDimension interviewDimension(
+			String score,
+			String name) {
+		return new InterviewReportDimension(
+				new BigDecimal(score),
+				name + "评价",
+				name + "行动建议");
 	}
 
 	private void insertReport(String interviewId, String reportType) {
