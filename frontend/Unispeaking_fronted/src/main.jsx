@@ -1,5 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { AchievementNotificationProvider } from "./AchievementNotifications.jsx";
 import { App } from "./App.jsx";
 import "./styles.css";
 
@@ -32,7 +33,9 @@ class AppErrorBoundary extends React.Component {
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <AppErrorBoundary>
-      <App />
+      <AchievementNotificationProvider>
+        <App />
+      </AchievementNotificationProvider>
     </AppErrorBoundary>
   </React.StrictMode>,
 );
