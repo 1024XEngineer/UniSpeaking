@@ -38,6 +38,15 @@ object-storage:
     interview-recording-prefix: ${QINIU_INTERVIEW_RECORDING_PREFIX:interviews/recordings}
     signed-url-ttl: ${QINIU_SIGNED_URL_TTL:1h}
 
+ocr:
+  paddle:
+    enabled: ${OCR_ENABLED:true}
+    python-executable: ${OCR_PYTHON_EXECUTABLE:/opt/ocr-venv/bin/python}
+    runner-path: ${OCR_RUNNER_PATH:/app/ocr/paddle_ocr_runner.py}
+    model-directory: ${OCR_MODEL_DIRECTORY:/app/ocr/models}
+    temp-directory: ${OCR_TEMP_DIRECTORY:}
+    timeout: ${OCR_TIMEOUT:120s}
+
 prompt:
   templates:
     directory: ${PROMPT_TEMPLATE_DIR:}
