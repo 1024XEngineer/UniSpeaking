@@ -1,5 +1,6 @@
 package com.unispeaking.infrastructure.ai.iflytek;
 
+import com.unispeaking.common.audio.PcmMp3Encoder;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.ScoringProvider;
@@ -61,7 +62,7 @@ public class IflytekScoringProvider extends ScoringProvider {
 
 	private final ObjectMapper objectMapper;
 	private final WebSocketConnector connector;
-	private final IflytekPcmMp3Encoder mp3Encoder;
+	private final PcmMp3Encoder mp3Encoder;
 	private final String appId;
 	private final String apiKey;
 	private final String apiSecret;
@@ -125,7 +126,7 @@ public class IflytekScoringProvider extends ScoringProvider {
 		this.connector = Objects.requireNonNull(
 				connector,
 				"iFlytek Suntone WebSocket connector is required");
-		this.mp3Encoder = new IflytekPcmMp3Encoder();
+		this.mp3Encoder = new PcmMp3Encoder();
 		this.appId = trim(appId);
 		this.apiKey = trim(apiKey);
 		this.apiSecret = trim(apiSecret);
