@@ -1,4 +1,4 @@
-package com.unispeaking.service.scene;
+package com.unispeaking.component.statemachine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,7 +13,7 @@ import com.unispeaking.domain.po.scene.ScenarioDialogueState;
 import com.unispeaking.domain.po.scene.ScenarioSuccessFactor;
 import com.unispeaking.domain.vo.scene.ScenarioDialogueEventType;
 import com.unispeaking.provider.AiProviderRegistry;
-import com.unispeaking.service.scene.impl.ScenarioDialogueEventExtractor;
+import com.unispeaking.component.statemachine.ScenarioDialogueEventExtractor;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;

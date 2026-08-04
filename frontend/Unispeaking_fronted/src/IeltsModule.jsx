@@ -18,55 +18,21 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { NewtonsCradle } from "./NewtonsCradle.jsx";
+import { getIeltsTopics, getIeltsTraining } from "./apiClient.js";
 import { paths } from "./router.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
 
-const topicGroups = {
-  p1: [
-    { id: "home", category: "必考题", title: "Home & Accommodation", count: 5, state: "建议复练", last: "3 天前", performance: "回答展开不足" },
-    { id: "study", category: "必考题", title: "Work or Studies", count: 5, state: "已练习", last: "昨天", performance: "表达较稳定" },
-    { id: "food", category: "事物", title: "Food", count: 4, state: "未练习", last: "—", performance: "尚无记录" },
-    { id: "friends", category: "人物", title: "Friends", count: 5, state: "已练习", last: "1 周前", performance: "词汇重复" },
-    { id: "walking", category: "事件", title: "Walking", count: 5, state: "未练习", last: "—", performance: "尚无记录" },
-    { id: "museum", category: "地点", title: "Museum", count: 4, state: "已练习", last: "2 周前", performance: "语法需巩固" },
-  ],
-  p2: [
-    { id: "famous", category: "人物", title: "想见的名人", count: 1, state: "建议复练", last: "4 天前", performance: "内容组织不足" },
-    { id: "planner", category: "人物", title: "擅长做计划的人", count: 1, state: "已练习", last: "昨天", performance: "流利度较好" },
-    { id: "movie", category: "事物", title: "让你失望的电影", count: 1, state: "未练习", last: "—", performance: "尚无记录" },
-    { id: "story", category: "事物", title: "最近读过的故事", count: 1, state: "未练习", last: "—", performance: "尚无记录" },
-    { id: "trip", category: "事件", title: "一次难忘的旅行", count: 1, state: "已练习", last: "1 周前", performance: "时态需巩固" },
-    { id: "quiet", category: "地点", title: "一个安静的地方", count: 1, state: "已练习", last: "2 周前", performance: "细节丰富" },
-  ],
-  p3: [
-    { id: "fame", category: "关联话题", title: "名人与社会影响", count: 6, state: "建议复练", last: "4 天前", performance: "观点展开不足" },
-    { id: "planning", category: "关联话题", title: "计划与未来选择", count: 6, state: "已练习", last: "昨天", performance: "逻辑较清楚" },
-    { id: "education", category: "独立分类", title: "教育", count: 6, state: "未练习", last: "—", performance: "尚无记录" },
-    { id: "technology", category: "独立分类", title: "科技", count: 5, state: "已练习", last: "5 天前", performance: "词汇范围有限" },
-    { id: "society", category: "独立分类", title: "社会", count: 6, state: "未练习", last: "—", performance: "尚无记录" },
-    { id: "environment", category: "独立分类", title: "环境", count: 5, state: "已练习", last: "1 周前", performance: "语法较稳定" },
-  ],
-};
+const mockQuestions = [
+  "Let's talk about your studies. What subject are you studying?",
+  "What do you enjoy most about your studies?",
+  "Do you think your subject will be useful in the future?",
+];
 
-const questions = {
-  p1: [
-    "What kind of home would you like to live in in the future?",
-    "What part of your home do you like the most?",
-    "Do you think it is important to live in a comfortable environment?",
-    "How long have you lived in your current home?",
-    "Is there anything you would like to change about your home?",
-  ],
-  p3: [
-    "Why do some people become famous very quickly today?",
-    "Do famous people have a responsibility to influence young people positively?",
-    "How has social media changed the meaning of fame?",
-  ],
-  mock: [
-    "Let's talk about your studies. What subject are you studying?",
-    "What do you enjoy most about your studies?",
-    "Do you think your subject will be useful in the future?",
-  ],
+const apiPart = {
+  p1: "PART_1",
+  p2: "PART_2",
+  p3: "PART_3",
 };
 
 const partMeta = {
@@ -137,9 +103,9 @@ export function IeltsHeader({ title, subtitle, onBack, action, leadAction }) {
   );
 }
 
-function IeltsIntake({ onComplete }) {
+function IeltsIntake({ onComplete, initialProfile }) {
   const [stepIndex, setStepIndex] = useState(0);
-  const [answers, setAnswers] = useState({});
+  const [answers, setAnswers] = useState(() => initialProfile || {});
   const step = ieltsIntakeSteps[stepIndex];
   const selected = answers[step.id];
   const isLastStep = stepIndex === ieltsIntakeSteps.length - 1;
@@ -214,15 +180,56 @@ function IeltsHome({ onChoose, onAssets, onBack, profile }) {
 }
 
 function TopicBrowser({ part, onBack, onStart }) {
-  const [category, setCategory] = useState("全部");
+  const pageSize = 10;
+  const [category, setCategory] = useState("ALL");
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [topics, setTopics] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const filterRef = useRef(null);
   const filterButtons = useRef({});
   const [filterIndicator, setFilterIndicator] = useState({ x: 0, width: 0, ready: false });
-  const topics = topicGroups[part] || [];
-  const categories = ["全部", ...new Set(topics.map((item) => item.category))];
-  const filtered = topics.filter((item) => (category === "全部" || item.category === category) && item.title.toLowerCase().includes(query.toLowerCase()));
-  const categoryKey = categories.join("|");
+  const filters = [{ code: "ALL", label: "全部" }, ...categories];
+  const categoryKey = filters.map((item) => item.code).join("|");
+  const pageNumbers = Array.from({ length: totalPages }, (_, index) => index + 1);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const result = await getIeltsTopics({
+          part: apiPart[part],
+          category,
+          keyword: query,
+          page,
+          pageSize,
+        });
+        if (cancelled) return;
+        setCategories(Array.isArray(result?.categories) ? result.categories : []);
+        setTopics(Array.isArray(result?.topics) ? result.topics : []);
+        setTotal(Number(result?.total) || 0);
+        setTotalPages(Number(result?.totalPages) || 0);
+      } catch (requestError) {
+        if (cancelled) return;
+        setTopics([]);
+        setTotal(0);
+        setTotalPages(0);
+        setError(requestError?.message || "雅思题库加载失败");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [part, category, query, page]);
 
   useEffect(() => {
     const updateIndicator = () => {
@@ -241,18 +248,44 @@ function TopicBrowser({ part, onBack, onStart }) {
       <section className="ielts-topic-tools">
         <div className="ielts-topic-filters" ref={filterRef}>
           <span className={cx("ielts-topic-filter-indicator", filterIndicator.ready && "is-ready")} style={{ width: filterIndicator.width, transform: `translateX(${filterIndicator.x}px)` }} />
-          {categories.map((item) => <button ref={(node) => { filterButtons.current[item] = node; }} key={item} className={category === item ? "is-active" : ""} onClick={() => setCategory(item)}>{item}</button>)}
+          {filters.map((item) => <button ref={(node) => { filterButtons.current[item.code] = node; }} key={item.code} className={category === item.code ? "is-active" : ""} onClick={() => { setCategory(item.code); setPage(1); }}>{item.label}</button>)}
         </div>
         <label className="ielts-topic-search">
           <MagnifyingGlass aria-hidden="true" />
-          <input className="ielts-topic-search__input" aria-label="搜索话题" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索话题" />
-          <button type="button" className="ielts-topic-search__reset" aria-label="清空搜索" onClick={() => setQuery("")}><X /></button>
+          <input className="ielts-topic-search__input" aria-label="搜索话题" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="搜索话题" />
+          <button type="button" className="ielts-topic-search__reset" aria-label="清空搜索" onClick={() => { setQuery(""); setPage(1); }}><X /></button>
         </label>
       </section>
       <section className="ielts-topic-list">
         <header><span>话题</span><span>练习记录</span><span>最近表现</span><span /></header>
-        {filtered.map((topic) => <button key={topic.id} onClick={() => onStart(topic, false)}><span><small>{topic.category}</small><strong>{topic.title}</strong><em>{topic.count} 道问题</em></span><span><strong>{topic.state}</strong><em>{topic.last}</em></span><span>{topic.performance}</span><CaretRight /></button>)}
+        {loading && <p className="ielts-topic-state">正在读取题库…</p>}
+        {!loading && error && <p className="ielts-topic-state is-error">{error}</p>}
+        {!loading && !error && topics.length === 0 && <p className="ielts-topic-state">没有找到相关话题</p>}
+        {!loading && !error && topics.map((topic) => <button key={topic.id} onClick={() => onStart(topic, false)}><span><small>{topic.categoryLabel}</small><strong>{topic.title}</strong><em>{topic.questionCount} 道问题</em></span><span><strong>题库已同步</strong><em>{topic.source || "雅思口语题库"}</em></span><span>暂无训练记录</span><CaretRight /></button>)}
       </section>
+      {!loading && !error && totalPages > 0 && (
+        <nav className="ielts-topic-pagination" aria-label="题库分页">
+          <span>共 {total} 个话题</span>
+          <div className="ielts-topic-pagination__controls">
+            <button type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}><ArrowLeft />上一页</button>
+            <div className="ielts-topic-pagination__pages" aria-label={`共 ${totalPages} 页`}>
+              {pageNumbers.map((pageNumber) => (
+                <button
+                  type="button"
+                  key={pageNumber}
+                  className={pageNumber === page ? "is-active" : ""}
+                  aria-current={pageNumber === page ? "page" : undefined}
+                  aria-label={`第 ${pageNumber} 页`}
+                  onClick={() => setPage(pageNumber)}
+                >
+                  {pageNumber}
+                </button>
+              ))}
+            </div>
+            <button type="button" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页<ArrowRight /></button>
+          </div>
+        </nav>
+      )}
     </main>
   );
 }
@@ -376,14 +409,17 @@ function formatTime(seconds) {
   return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`;
 }
 
-function PracticeSession({ part, examiner, onExit, onComplete }) {
+function PracticeSession({ part, examiner, training, onExit, onComplete }) {
   const [subtitles, setSubtitles] = useState(false);
   const [questionIndex, setQuestionIndex] = useState(0);
   const [stage, setStage] = useState(part === "p2" ? "prepare" : "answer");
   const [remaining, setRemaining] = useState(part === "p2" ? 60 : part === "mock" ? 0 : part === "p1" ? 240 : 300);
   const [notes, setNotes] = useState("");
   const [exitOpen, setExitOpen] = useState(false);
-  const activeQuestions = questions[part] || questions.p1;
+  const activeQuestions = part === "mock"
+    ? mockQuestions.map((questionText, index) => ({ id: `mock-${index}`, questionText, cuePoints: [] }))
+    : training?.questions || [];
+  const currentQuestion = activeQuestions[questionIndex] || activeQuestions[0];
 
   useEffect(() => {
     if (part === "mock" || remaining <= 0) return undefined;
@@ -416,7 +452,7 @@ function PracticeSession({ part, examiner, onExit, onComplete }) {
     ? stage === "prepare"
       ? "You have one minute to think about and make notes for this question."
       : "You can start answering now."
-    : activeQuestions[questionIndex];
+    : currentQuestion?.questionText || "";
 
   return (
     <main className={cx("conversation", "call", "ielts-call", showTranscript && "call--subtitles", isPartTwo && "ielts-call--part-two")}>
@@ -440,9 +476,9 @@ function PracticeSession({ part, examiner, onExit, onComplete }) {
           <section className="ielts-part-two-compact-material" aria-label="Part 2 题卡与笔记">
             <article className="ielts-part-two-compact-cue">
               <span>PART 2 · LONG TURN</span>
-              <h1>Describe a famous person you would like to meet</h1>
+              <h1>{currentQuestion?.questionText}</h1>
               <p>You should say:</p>
-              <ul><li>Who he or she is</li><li>How you knew about this person</li><li>How or where you would like to meet</li><li>And explain why you would like to meet this person</li></ul>
+              <ul>{currentQuestion?.cuePoints?.map((point) => <li key={point}>{point}</li>)}</ul>
             </article>
             <section className="ielts-part-two-compact-notes">
               <header><span><NotePencil />自由笔记</span><small>{stage === "prepare" ? "准备结束后将自动锁定" : "已锁定"}</small></header>
@@ -495,13 +531,34 @@ function PracticeReport({ part, onHome, onRetry, onAssets }) {
   );
 }
 
+function IeltsTrainingDataState({ error, onBack, onRetry }) {
+  return (
+    <main className="ielts-page ielts-pending">
+      <section>
+        {!error && <NewtonsCradle label="正在读取雅思题库" />}
+        <h1>{error ? "题目加载失败" : "正在准备本次训练"}</h1>
+        <p>{error || "正在从题库读取所选话题的真实题目。"}</p>
+        <div className="ielts-pending-actions">
+          <button className="ielts-pending-home" onClick={onBack}>返回题库</button>
+          {error && <button className="ielts-pending-report" onClick={onRetry}>重新加载</button>}
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export function IeltsTrainingCenter({ route, onNavigate, onExit, onAssets }) {
   const screen = route?.screen || "home";
   const part = route?.part || "p2";
   const random = route?.selection === "random" || part === "mock";
-  const topic = part !== "mock" && !random ? topicGroups[part]?.find((item) => item.id === route?.selection) || null : null;
   const [examiner, setExaminer] = useState(ieltsExaminers[0]);
-  const [intakeProfile, setIntakeProfile] = useState(loadIeltsIntakeProfile);
+  const [savedIntakeProfile] = useState(loadIeltsIntakeProfile);
+  const [intakeProfile, setIntakeProfile] = useState(null);
+  const [training, setTraining] = useState(null);
+  const [trainingLoading, setTrainingLoading] = useState(false);
+  const [trainingError, setTrainingError] = useState("");
+  const [trainingReload, setTrainingReload] = useState(0);
+  const trainingKey = `${part}:${route?.selection || ""}`;
 
   const partSegment = (nextPart) => nextPart === "mock" ? "mock" : `part${nextPart.slice(1)}`;
   const partPath = (nextPart) => paths.ielts.part(partSegment(nextPart));
@@ -509,7 +566,7 @@ export function IeltsTrainingCenter({ route, onNavigate, onExit, onAssets }) {
 
   const choosePart = (nextPart, mode) => {
     if (nextPart === "mock") { onNavigate(paths.ielts.step("mock", "random", "setup")); return; }
-    if (mode === "recommended") { onNavigate(stepPath("p2", topicGroups.p2[0].id, "setup")); return; }
+    if (mode === "recommended") { onNavigate(stepPath("p2", "random", "setup")); return; }
     onNavigate(partPath(nextPart));
   };
   const openSetup = (nextTopic, isRandom) => onNavigate(stepPath(part, isRandom ? "random" : nextTopic.id, "setup"));
@@ -519,10 +576,35 @@ export function IeltsTrainingCenter({ route, onNavigate, onExit, onAssets }) {
     try { window.localStorage.setItem(IELTS_INTAKE_STORAGE_KEY, JSON.stringify(profile)); } catch { /* Local-only preference may be unavailable. */ }
   };
 
-  if (screen === "home" && !intakeProfile) return <IeltsIntake onComplete={completeIntake} />;
+  useEffect(() => {
+    if (part === "mock" || !["setup", "session"].includes(screen)) return undefined;
+    let cancelled = false;
+    setTrainingLoading(true);
+    setTrainingError("");
+    getIeltsTraining(apiPart[part], random ? null : route?.selection)
+      .then((result) => {
+        if (!cancelled) setTraining(result);
+      })
+      .catch((requestError) => {
+        if (cancelled) return;
+        setTraining(null);
+        setTrainingError(requestError?.message || "训练题目加载失败");
+      })
+      .finally(() => {
+        if (!cancelled) setTrainingLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [trainingKey, trainingReload]);
+
+  if (screen === "home" && !intakeProfile) {
+    return <IeltsIntake initialProfile={savedIntakeProfile} onComplete={completeIntake} />;
+  }
   if (screen === "topics") return <TopicBrowser part={part} onBack={() => onNavigate(paths.ielts.root)} onStart={openSetup} />;
-  if (screen === "setup") return <DeviceSetup part={part} topic={topic} random={random} onBack={() => onNavigate(part === "mock" ? paths.ielts.root : partPath(part))} onStart={start} />;
-  if (screen === "session") return <PracticeSession part={part} examiner={examiner} onExit={() => onNavigate(paths.ielts.root)} onComplete={() => onNavigate(stepPath(part, route?.selection || "random", "analysis"))} />;
+  if (part !== "mock" && ["setup", "session"].includes(screen) && (trainingLoading || trainingError || !training)) {
+    return <IeltsTrainingDataState error={trainingError} onBack={() => onNavigate(partPath(part))} onRetry={() => setTrainingReload((value) => value + 1)} />;
+  }
+  if (screen === "setup") return <DeviceSetup part={part} topic={training} random={random} onBack={() => onNavigate(part === "mock" ? paths.ielts.root : partPath(part))} onStart={start} />;
+  if (screen === "session") return <PracticeSession part={part} examiner={examiner} training={training} onExit={() => onNavigate(paths.ielts.root)} onComplete={() => onNavigate(stepPath(part, route?.selection || "random", "analysis"))} />;
   if (screen === "analysis") return <AnalysisPending onHome={() => onNavigate(paths.ielts.root)} onReport={() => onNavigate(stepPath(part, route?.selection || "random", "report"))} />;
   if (screen === "report") return <PracticeReport part={part} onHome={() => onNavigate(paths.ielts.root)} onRetry={() => onNavigate(stepPath(part, route?.selection || "random", "setup"))} onAssets={onAssets} />;
   return <IeltsHome onChoose={choosePart} onAssets={onAssets} onBack={onExit} profile={intakeProfile} />;

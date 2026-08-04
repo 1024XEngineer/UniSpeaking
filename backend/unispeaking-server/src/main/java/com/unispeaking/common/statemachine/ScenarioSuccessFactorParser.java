@@ -1,6 +1,5 @@
-package com.unispeaking.service.scene.impl;
+package com.unispeaking.common.statemachine;
 
-import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.po.scene.ScenarioSuccessFactor;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,13 +18,15 @@ public class ScenarioSuccessFactorParser {
 		this.objectMapper = objectMapper;
 	}
 
-	public ScenarioSuccessFactor parse(CustomSceneDefinition scene) {
+	public ScenarioSuccessFactor parse(
+			String successFactorJson,
+			String fallbackGoal) {
 		try {
-			JsonNode root = objectMapper.readTree(scene.successFactorJson());
+			JsonNode root = objectMapper.readTree(successFactorJson);
 			Map<String, String> outcomes = parseOutcomes(
 					root.path("required_outcomes"));
 			if (outcomes.isEmpty()) {
-				outcomes.put("outcome_1", scene.learningGoal());
+				outcomes.put("outcome_1", normalizedGoal(fallbackGoal));
 			}
 			return new ScenarioSuccessFactor(
 					positiveOrDefault(
@@ -39,7 +40,7 @@ public class ScenarioSuccessFactorParser {
 					root.path("closing_instruction").asText(""));
 		}
 		catch (RuntimeException exception) {
-			return fallback(scene);
+			return fallback(fallbackGoal);
 		}
 	}
 
@@ -58,13 +59,19 @@ public class ScenarioSuccessFactorParser {
 		return outcomes;
 	}
 
-	private ScenarioSuccessFactor fallback(CustomSceneDefinition scene) {
+	private ScenarioSuccessFactor fallback(String fallbackGoal) {
 		return new ScenarioSuccessFactor(
 				DEFAULT_MINIMUM_USER_TURNS,
 				ScenarioSuccessFactor.HARD_MAXIMUM_USER_TURNS,
-				Map.of("outcome_1", scene.learningGoal()),
+				Map.of("outcome_1", normalizedGoal(fallbackGoal)),
 				"用户完成场景学习目标",
 				"简短总结并自然结束对话");
+	}
+
+	private String normalizedGoal(String fallbackGoal) {
+		return fallbackGoal == null || fallbackGoal.isBlank()
+				? "完成当前对话目标"
+				: fallbackGoal.trim();
 	}
 
 	private int positiveOrDefault(int value, int fallback) {

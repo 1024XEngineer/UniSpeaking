@@ -90,6 +90,7 @@ import { hrefForPage, paths, resolveRoute } from "./router.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
 const pronunciationAudioCache = new Map();
+const maxPronunciationAudioCacheEntries = 128;
 const chineseCharacterPattern = /[\u3400-\u9fff]/;
 const sceneCachePrefix = "unispeaking.scene.";
 
@@ -154,6 +155,9 @@ async function buildSceneDisplaySummary(scene) {
 function cachedPronunciationAudio(sceneId, text) {
   const key = `${sceneId}:${text}`;
   if (!pronunciationAudioCache.has(key)) {
+    if (pronunciationAudioCache.size >= maxPronunciationAudioCacheEntries) {
+      pronunciationAudioCache.delete(pronunciationAudioCache.keys().next().value);
+    }
     pronunciationAudioCache.set(
       key,
       synthesizeSpeech(sceneId, text).catch((error) => {
@@ -163,6 +167,17 @@ function cachedPronunciationAudio(sceneId, text) {
     );
   }
   return pronunciationAudioCache.get(key);
+}
+
+function prefetchPronunciationAudio(sceneId, items, limit = 2) {
+  if (!sceneId || !Array.isArray(items) || limit <= 0) return;
+  items
+    .map((item) => String(item?.englishText || item?.en || "").trim())
+    .filter(Boolean)
+    .slice(0, limit)
+    .forEach((text) => {
+      void cachedPronunciationAudio(sceneId, text).catch(() => undefined);
+    });
 }
 
 function Brand({ compact = false }) {
@@ -1128,6 +1143,7 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
       previewSceneIdRef.current = scene.sceneId;
       setPreview(scene);
       setPreviewDisplay(null);
+      prefetchPronunciationAudio(scene.sceneId, scene.wordList, 2);
       void buildSceneDisplaySummary(scene).then((display) => {
         if (previewSceneIdRef.current === scene.sceneId) setPreviewDisplay(display);
       });
@@ -1766,6 +1782,28 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   useEffect(() => {
     setReadError("");
   }, [readIndex]);
+  useEffect(() => {
+    if (!generatedMode || !sceneId || displayedStep === "speak") return;
+    if (displayedStep === "read") {
+      prefetchPronunciationAudio(sceneId, readItems.slice(readIndex), 3);
+      return;
+    }
+    const upcoming = lessonItems.slice(learnIndex);
+    if (learningGroup === "words" && upcoming.length < 3) {
+      upcoming.push(...generatedPhraseItems.slice(0, 3 - upcoming.length));
+    }
+    prefetchPronunciationAudio(sceneId, upcoming, 3);
+  }, [
+    displayedStep,
+    generatedMode,
+    generatedPhraseItems,
+    learnIndex,
+    learningGroup,
+    lessonItems,
+    readIndex,
+    readItems,
+    sceneId,
+  ]);
   const submitRead = () => {
     const nextScore = readIndex === 1 && score === null ? 68 : 86;
     setReadScores((current) => ({ ...current, [readIndex]: nextScore }));
@@ -1889,11 +1927,14 @@ function AnimatedDeleteButton({ onClick }) {
 }
 
 function AssetFeedback({ feedback }) {
+  const suggestedExpression = String(feedback.suggestedExpression || "").trim();
+  const unavailable = !suggestedExpression
+    && feedback.feedbackSummary === "本轮评分暂不可用，已保留对话内容";
   return (
-    <section className="asset-feedback" aria-label="AI 表达评价">
-      <header><CheckCircle weight="fill" /><strong>AI 表达评价</strong></header>
-      <div className="asset-feedback__correction"><span>推荐表达</span><strong>{feedback.suggestedExpression}</strong></div>
-      <p><span>本轮总结</span>{feedback.feedbackSummary}</p>
+    <section className={cx("asset-feedback", unavailable && "is-unavailable")} aria-label={unavailable ? "本轮评分未完成" : "AI 表达评价"}>
+      <header>{unavailable ? <Clock weight="fill" /> : <CheckCircle weight="fill" />}<strong>{unavailable ? "本轮评分未完成" : "AI 表达评价"}</strong></header>
+      {suggestedExpression && <div className="asset-feedback__correction"><span>推荐表达</span><strong>{suggestedExpression}</strong></div>}
+      <p><span>{unavailable ? "说明" : "本轮总结"}</span>{feedback.feedbackSummary}</p>
     </section>
   );
 }

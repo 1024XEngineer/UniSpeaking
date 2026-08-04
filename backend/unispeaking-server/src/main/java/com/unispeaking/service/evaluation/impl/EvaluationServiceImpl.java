@@ -179,6 +179,13 @@ public class EvaluationServiceImpl implements EvaluationService {
 					runtimeSession.getId(),
 					command.turnNo(),
 					exception.errorCode().code());
+			RealtimeFlowLog.info(
+					"evaluation.turn.unavailable sceneId={} sessionId={} "
+							+ "turnNo={} errorCode={}",
+					runtimeSession.getSceneId(),
+					runtimeSession.getId(),
+					command.turnNo(),
+					exception.errorCode().code());
 			return evaluation;
 		}
 	}

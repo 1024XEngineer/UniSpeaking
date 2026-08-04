@@ -119,6 +119,19 @@ class PostgresPersistenceIT {
 		Integer migrationCount = jdbcTemplate.queryForObject(
 				"SELECT COUNT(*) FROM flyway_schema_history WHERE success",
 				Integer.class);
+		Integer topicCount = jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM ielts_topic",
+				Integer.class);
+		Integer questionCount = jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM ielts_question",
+				Integer.class);
+		Integer questionLikeTitleCount = jdbcTemplate.queryForObject(
+				"""
+				SELECT COUNT(*)
+				FROM ielts_topic
+				WHERE title ~* '^(describe|what|why|how|do |did |are |is |have |would |talk about|tell me)'
+				""",
+				Integer.class);
 		String successFactorType = jdbcTemplate.queryForObject(
 				"""
 				SELECT data_type
@@ -129,7 +142,10 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(2, migrationCount);
+		assertEquals(3, migrationCount);
+		assertEquals(303, topicCount);
+		assertEquals(1771, questionCount);
+		assertEquals(0, questionLikeTitleCount);
 		assertEquals("jsonb", successFactorType);
 	}
 
@@ -388,7 +404,7 @@ class PostgresPersistenceIT {
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
 		assertEquals(
-				List.of("0", "1", "2"),
+				List.of("0", "1", "2", "3"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version

@@ -184,6 +184,37 @@ export function buildRealtimeSessionConfig({
   };
 }
 
+export function createTurnAudioCaptureController(recorder) {
+  let active = false;
+  let finalized = false;
+  let audioPromise = Promise.resolve(null);
+
+  const stop = () => {
+    if (!recorder || !active) return false;
+    audioPromise = recorder.stopSegment();
+    active = false;
+    finalized = true;
+    return true;
+  };
+
+  return {
+    start() {
+      if (!recorder || active || finalized) return false;
+      recorder.startSegment();
+      active = true;
+      return true;
+    },
+    stop,
+    async take() {
+      if (active) stop();
+      const audio = await audioPromise;
+      audioPromise = Promise.resolve(null);
+      finalized = false;
+      return audio;
+    },
+  };
+}
+
 export function createRealtimeClient({
   apiBase = import.meta.env?.VITE_BACKEND_URL || DEFAULT_API_BASE,
   sceneId: customSceneId = null,
@@ -210,8 +241,6 @@ export function createRealtimeClient({
   let initialResponseFallbackTimer = null;
   let stopPromise = null;
   let segmentRecorder = null;
-  let segmentActive = false;
-  let currentTurnAudio = Promise.resolve(null);
   let learnerTurnNo = 0;
   let pendingOperations = new Set();
   let baseSessionInstructions = "";
@@ -222,12 +251,15 @@ export function createRealtimeClient({
   let responsePending = false;
   let closingResponseRequested = false;
   let statePipeline = Promise.resolve();
+  let turnAudioCapture = null;
 
   const emit = (event) => onEvent(event);
 
   function setTrackEnabled() {
     const track = localStream?.getAudioTracks?.()[0];
-    if (track) track.enabled = started && inputReady && !muted && !paused;
+    const enabled = started && inputReady && !muted && !paused;
+    if (track) track.enabled = enabled;
+    if (enabled && customSceneId) turnAudioCapture?.start();
   }
 
   function rejectPendingAcks(error) {
@@ -450,10 +482,7 @@ export function createRealtimeClient({
     scenarioCompletionPending = true;
     inputReady = false;
     setTrackEnabled();
-    if (segmentActive) {
-      currentTurnAudio = segmentRecorder?.stopSegment() || Promise.resolve(null);
-      segmentActive = false;
-    }
+    turnAudioCapture?.stop();
     if (!responsePending) {
       requestTurnResponse({ closing: true });
     }
@@ -540,16 +569,12 @@ export function createRealtimeClient({
 
     if (event.type === "input_audio_buffer.speech_started") {
       if (scenarioCompletionPending) return;
-      segmentRecorder?.startSegment();
-      segmentActive = Boolean(segmentRecorder);
+      turnAudioCapture?.start();
       return;
     }
 
     if (event.type === "input_audio_buffer.speech_stopped") {
-      if (segmentActive) {
-        currentTurnAudio = segmentRecorder?.stopSegment() || Promise.resolve(null);
-        segmentActive = false;
-      }
+      turnAudioCapture?.stop();
       return;
     }
 
@@ -573,10 +598,7 @@ export function createRealtimeClient({
         inputReady = false;
         setTrackEnabled();
       }
-      if (segmentActive) {
-        currentTurnAudio = segmentRecorder?.stopSegment() || Promise.resolve(null);
-        segmentActive = false;
-      }
+      turnAudioCapture?.stop();
       const persistenceOperation = addSessionMessage(
         1,
         transcript,
@@ -588,8 +610,7 @@ export function createRealtimeClient({
       const persisted = await persistenceOperation;
       if (customSceneId && persisted) {
         const turnNo = ++learnerTurnNo;
-        const wavAudio = await currentTurnAudio;
-        currentTurnAudio = Promise.resolve(null);
+        const wavAudio = await turnAudioCapture?.take();
         const stateOperation = statePipeline.then(() => advanceCustomDialogueState(
           customSceneId,
           sessionId,
@@ -688,6 +709,7 @@ export function createRealtimeClient({
       });
       if (customSceneId) {
         segmentRecorder = await createPcmWavSegmentRecorder(localStream);
+        turnAudioCapture = createTurnAudioCaptureController(segmentRecorder);
       }
       const audioTrack = localStream.getAudioTracks()[0];
       audioTrack.enabled = false;
@@ -862,8 +884,7 @@ export function createRealtimeClient({
       sessionId = null;
       sessionConfig = null;
       segmentRecorder = null;
-      segmentActive = false;
-      currentTurnAudio = Promise.resolve(null);
+      turnAudioCapture = null;
       learnerTurnNo = 0;
       pendingOperations = new Set();
       baseSessionInstructions = "";

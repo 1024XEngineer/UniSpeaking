@@ -17,8 +17,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Flow;
+import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -32,6 +35,8 @@ public class QwenTtsProvider extends TtsProvider {
 	private static final int MAX_TEXT_LENGTH = 5_000;
 	private static final int DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
 	private static final int DEFAULT_MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+	private static final int MAX_CACHE_ENTRIES = 256;
+	private static final long CACHE_TTL_NANOS = TimeUnit.MINUTES.toNanos(30);
 	private static final String DEFAULT_ENDPOINT =
 			"https://dashscope.aliyuncs.com/api/v1/services/aigc/"
 					+ "multimodal-generation/generation";
@@ -46,6 +51,9 @@ public class QwenTtsProvider extends TtsProvider {
 	private final Duration readTimeout;
 	private final int maxResponseBytes;
 	private final int maxAudioBytes;
+	private final Map<String, CachedAudio> audioCache = new ConcurrentHashMap<>();
+	private final Map<String, CompletableFuture<byte[]>> inFlightAudio =
+			new ConcurrentHashMap<>();
 
 	@Autowired
 	public QwenTtsProvider(
@@ -132,7 +140,59 @@ public class QwenTtsProvider extends TtsProvider {
 					"QWEN_TTS_CREDENTIAL_MISSING",
 					"Set DASHSCOPE_API_KEY before calling Qwen TTS");
 		}
-		return boxAudio(synthesize(text, apiKey));
+		String normalizedText = trim(text);
+		return boxAudio(cachedSynthesize(normalizedText, apiKey));
+	}
+
+	private byte[] cachedSynthesize(String text, String credential) {
+		long now = System.nanoTime();
+		CachedAudio cached = audioCache.get(text);
+		if (cached != null && now - cached.createdAtNanos() < CACHE_TTL_NANOS) {
+			return cached.audio();
+		}
+		if (cached != null) {
+			audioCache.remove(text, cached);
+		}
+
+		CompletableFuture<byte[]> pending = new CompletableFuture<>();
+		CompletableFuture<byte[]> existing = inFlightAudio.putIfAbsent(text, pending);
+		if (existing != null) {
+			try {
+				return existing.join();
+			}
+			catch (CompletionException exception) {
+				if (exception.getCause() instanceof RuntimeException runtimeException) {
+					throw runtimeException;
+				}
+				throw exception;
+			}
+		}
+
+		try {
+			byte[] audio = synthesize(text, credential);
+			cacheAudio(text, audio, System.nanoTime());
+			pending.complete(audio);
+			return audio;
+		}
+		catch (RuntimeException exception) {
+			pending.completeExceptionally(exception);
+			throw exception;
+		}
+		finally {
+			inFlightAudio.remove(text, pending);
+		}
+	}
+
+	private void cacheAudio(String text, byte[] audio, long createdAtNanos) {
+		if (audioCache.size() >= MAX_CACHE_ENTRIES) {
+			long now = System.nanoTime();
+			audioCache.entrySet().removeIf(
+					entry -> now - entry.getValue().createdAtNanos() >= CACHE_TTL_NANOS);
+		}
+		if (audioCache.size() >= MAX_CACHE_ENTRIES) {
+			audioCache.keySet().stream().findFirst().ifPresent(audioCache::remove);
+		}
+		audioCache.put(text, new CachedAudio(audio, createdAtNanos));
 	}
 
 	private byte[] synthesize(String textValue, String credential) {
@@ -433,5 +493,8 @@ public class QwenTtsProvider extends TtsProvider {
 		public void onComplete() {
 			body.complete(bytes.toByteArray());
 		}
+	}
+
+	private record CachedAudio(byte[] audio, long createdAtNanos) {
 	}
 }

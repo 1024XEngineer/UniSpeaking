@@ -1,4 +1,4 @@
-package com.unispeaking.service.scene.impl;
+package com.unispeaking.component.statemachine;
 
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.po.scene.ScenarioDialogueEvent;

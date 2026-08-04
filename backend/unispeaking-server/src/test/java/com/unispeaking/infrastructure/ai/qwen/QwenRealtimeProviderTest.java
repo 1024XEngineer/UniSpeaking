@@ -333,8 +333,13 @@ class QwenRealtimeProviderTest {
 		Byte[] response = provider.generateSpeechAudio(
 				"Practice makes progress.",
 				"must-not-be-used");
+		Byte[] cachedResponse = provider.generateSpeechAudio(
+				"Practice makes progress.",
+				"must-not-be-used");
 
 		assertEquals(List.of(box(wav)), List.of(response));
+		assertEquals(List.of(box(wav)), List.of(cachedResponse));
+		assertEquals(2, httpClient.requests.size());
 		HttpRequest request = httpClient.requests.getFirst();
 		assertEquals(
 				"Bearer dashscope-key",
