@@ -14,5 +14,11 @@ public interface AuthService {
 	default ChangePasswordResponse changePassword(ChangePasswordRequest request) {
 		throw new UnsupportedOperationException("Password change is not supported");
 	}
+	default String currentUserIdOrNull() {
+		return null;
+	}
 	String requireUserId(String requestedUserId);
+	default String requireAdminUserId() {
+		throw new UnsupportedOperationException("Admin access is not supported");
+	}
 }

@@ -17,13 +17,16 @@ import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.po.auth.UserAccount;
 import com.unispeaking.domain.po.auth.UserRole;
 import com.unispeaking.domain.po.auth.UserStatus;
+import com.unispeaking.domain.po.feedback.UserFeedback;
 import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
+import com.unispeaking.domain.vo.feedback.FeedbackStatus;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.CustomTurnEvaluation;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.PronunciationWordDetail;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SceneSentenceReadingRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.TurnEvaluationRepository;
+import com.unispeaking.infrastructure.persistence.repository.feedback.FeedbackRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.MybatisSceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.MybatisUserAccountRepository;
@@ -97,10 +100,14 @@ class PostgresPersistenceIT {
 	@Autowired
 	private SceneSentenceReadingRepository sentenceReadingRepository;
 
+	@Autowired
+	private FeedbackRepository feedbackRepository;
+
 	@BeforeEach
 	void clearBusinessTables() {
 		jdbcTemplate.execute("""
 				TRUNCATE TABLE
+				    user_feedback,
 				    sentence_evaluation,
 				    session_evaluation,
 				    turn_evaluation,
@@ -132,14 +139,15 @@ class PostgresPersistenceIT {
 				WHERE title ~* '^(describe|what|why|how|do |did |are |is |have |would |talk about|tell me)'
 				""",
 				Integer.class);
-		Integer achievementTableCount = jdbcTemplate.queryForObject(
+		Integer helpTableCount = jdbcTemplate.queryForObject(
 				"""
 				SELECT COUNT(*)
 				FROM information_schema.tables
 				WHERE table_schema = 'public'
 				  AND table_name IN (
 				      'user_achievement_unlock',
-				      'user_achievement_state'
+				      'user_achievement_state',
+				      'user_feedback'
 				  )
 				""",
 				Integer.class);
@@ -153,11 +161,11 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(4, migrationCount);
+		assertEquals(5, migrationCount);
 		assertEquals(303, topicCount);
 		assertEquals(1771, questionCount);
 		assertEquals(0, questionLikeTitleCount);
-		assertEquals(2, achievementTableCount);
+		assertEquals(3, helpTableCount);
 		assertEquals("jsonb", successFactorType);
 	}
 
@@ -210,6 +218,42 @@ class PostgresPersistenceIT {
 		assertEquals("James", saved.voiceId());
 		assertEquals("C", saved.level());
 		assertEquals("喜欢旅行和咖啡", saved.memoryText());
+	}
+
+	@Test
+	void persistsAnonymousFeedbackAndTracksResolution() {
+		Instant createdAt = Instant.parse("2026-08-04T08:00:00Z");
+		UserFeedback submitted = new UserFeedback(
+				UUID.fromString("22222222-2222-4222-8222-222222222222"),
+				"FB-20260804-ABCDEF123456",
+				null,
+				"a".repeat(64),
+				"audio",
+				"麦克风无法使用",
+				"允许权限后仍没有声音",
+				"Chrome 138",
+				FeedbackStatus.SUBMITTED,
+				null,
+				null,
+				createdAt,
+				createdAt);
+
+		feedbackRepository.create(submitted);
+		UserFeedback stored = feedbackRepository
+				.findByFeedbackNo(submitted.feedbackNo())
+				.orElseThrow();
+		UserFeedback resolved = stored.withResolution(
+				FeedbackStatus.RESOLVED,
+				"请重新选择系统输入设备后再试",
+				createdAt.plusSeconds(60));
+		feedbackRepository.update(stored, resolved);
+
+		UserFeedback result = feedbackRepository
+				.findByFeedbackNo(submitted.feedbackNo())
+				.orElseThrow();
+		assertEquals(FeedbackStatus.RESOLVED, result.status());
+		assertEquals("请重新选择系统输入设备后再试", result.reply());
+		assertEquals(createdAt.plusSeconds(60), result.repliedAt());
 	}
 
 	@Test
@@ -416,7 +460,7 @@ class PostgresPersistenceIT {
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
 		assertEquals(
-				List.of("0", "1", "2", "3", "4"),
+				List.of("0", "1", "2", "3", "4", "5"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version
