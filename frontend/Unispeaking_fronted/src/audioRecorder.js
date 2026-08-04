@@ -1,4 +1,7 @@
 const TARGET_SAMPLE_RATE = 16_000;
+const SILENCE_FRAME_MS = 20;
+const SILENCE_PADDING_MS = 200;
+const SILENCE_RMS_THRESHOLD = 0.006;
 
 function mergeSamples(chunks) {
   const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
@@ -24,6 +27,31 @@ function resample(samples, sourceRate) {
     output[index] = samples[left] * (1 - fraction) + samples[right] * fraction;
   }
   return output;
+}
+
+function trimSilence(samples) {
+  const frameSize = Math.round(TARGET_SAMPLE_RATE * SILENCE_FRAME_MS / 1000);
+  const paddingSize = Math.round(TARGET_SAMPLE_RATE * SILENCE_PADDING_MS / 1000);
+  let firstActiveFrame = -1;
+  let lastActiveFrame = -1;
+
+  for (let offset = 0; offset < samples.length; offset += frameSize) {
+    const end = Math.min(offset + frameSize, samples.length);
+    let squareSum = 0;
+    for (let index = offset; index < end; index += 1) {
+      squareSum += samples[index] * samples[index];
+    }
+    const rms = Math.sqrt(squareSum / (end - offset));
+    if (rms >= SILENCE_RMS_THRESHOLD) {
+      if (firstActiveFrame < 0) firstActiveFrame = offset;
+      lastActiveFrame = end;
+    }
+  }
+
+  if (firstActiveFrame < 0) return samples;
+  const start = Math.max(0, firstActiveFrame - paddingSize);
+  const end = Math.min(samples.length, lastActiveFrame + paddingSize);
+  return samples.slice(start, end);
 }
 
 function writeAscii(view, offset, text) {
@@ -157,7 +185,7 @@ export async function createPcmWavSegmentRecorder(stream) {
       const samples = mergeSamples(chunks);
       chunks = [];
       if (!samples.length) return null;
-      return encodePcmWav(resample(samples, sourceRate));
+      return encodePcmWav(trimSilence(resample(samples, sourceRate)));
     },
     async close() {
       if (closed) return;

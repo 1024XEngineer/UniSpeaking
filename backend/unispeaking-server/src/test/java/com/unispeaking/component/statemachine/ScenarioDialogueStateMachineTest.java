@@ -1,4 +1,4 @@
-package com.unispeaking.service.scene;
+package com.unispeaking.component.statemachine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -13,17 +13,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.common.statemachine.ScenarioSuccessFactorParser;
 import com.unispeaking.domain.dto.session.Message;
-import com.unispeaking.domain.po.scene.CustomSceneDefinition;
+import com.unispeaking.domain.dto.session.ScenarioDialogueStateResponse;
 import com.unispeaking.domain.po.scene.ScenarioDialogueEvent;
 import com.unispeaking.domain.po.scene.ScenarioSuccessFactor;
 import com.unispeaking.domain.vo.scene.ScenarioDialogueCompletionReason;
 import com.unispeaking.domain.vo.scene.ScenarioDialogueEventType;
 import com.unispeaking.domain.vo.scene.ScenarioDialogueStage;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
-import com.unispeaking.service.scene.impl.ScenarioDialogueEventExtractor;
-import com.unispeaking.service.scene.impl.ScenarioDialogueStateMachine;
-import com.unispeaking.service.scene.impl.ScenarioSuccessFactorParser;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +39,7 @@ class ScenarioDialogueStateMachineTest {
 				mock(ScenarioSuccessFactorParser.class);
 		eventExtractor = mock(ScenarioDialogueEventExtractor.class);
 		messageRepository = mock(SessionMessageRepository.class);
-		when(successFactorParser.parse(any()))
+		when(successFactorParser.parse(anyString(), anyString()))
 				.thenReturn(new ScenarioSuccessFactor(
 						1,
 						4,
@@ -60,7 +58,7 @@ class ScenarioDialogueStateMachineTest {
 
 	@Test
 	void advancesFromGreetingThroughConfirmationAndClosing() {
-		var started = stateMachine.start("session_1", scene());
+		var started = start("session_1");
 		assertEquals(ScenarioDialogueStage.GREETING, started.stage());
 		assertTrue(started.controlInstruction().contains("choose a drink"));
 		assertFalse(started.completed());
@@ -104,7 +102,7 @@ class ScenarioDialogueStateMachineTest {
 
 	@Test
 	void recordsExtractorFailureAndValidatesInput() {
-		stateMachine.start("session_2", scene());
+		start("session_2");
 		when(eventExtractor.extract(any(), anyString(), anyList()))
 				.thenThrow(new IllegalStateException("provider unavailable"));
 
@@ -120,7 +118,7 @@ class ScenarioDialogueStateMachineTest {
 
 	@Test
 	void removesStateAndRejectsUnknownSession() {
-		stateMachine.start("session_3", scene());
+		start("session_3");
 		assertTrue(stateMachine.findState("session_3").isPresent());
 
 		stateMachine.remove("session_3");
@@ -132,20 +130,13 @@ class ScenarioDialogueStateMachineTest {
 		assertEquals("SCENARIO_STATE_NOT_FOUND", exception.code());
 	}
 
-	private CustomSceneDefinition scene() {
-		return new CustomSceneDefinition(
+	private ScenarioDialogueStateResponse start(
+			String sessionId) {
+		return stateMachine.start(
+				sessionId,
 				"custom_1",
-				"11111111-1111-4111-8111-111111111111",
-				"Coffee",
-				"Cafe",
-				"Barista",
-				"Customer",
-				"Order coffee",
-				"",
 				"{}",
-				List.of(),
-				List.of(),
-				List.of());
+				"Order coffee");
 	}
 
 	private ScenarioDialogueEvent outcome(String key, String value) {

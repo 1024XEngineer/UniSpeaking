@@ -795,6 +795,8 @@ svg { display: block; }
 .asset-feedback p { display: flex; gap: 16px; margin: 12px 2px 0; color: #696965; font-size: 12px; line-height: 1.65; }
 .asset-feedback p + p { padding-top: 11px; border-top: 1px dashed #d7d7d1; }
 .asset-feedback p em { color: #343432; font-style: normal; font-weight: 650; }
+.asset-feedback.is-unavailable { border-style: dashed; }
+.asset-feedback.is-unavailable header svg { color: #8a6b2d; }
 
 .asset-module-placeholder > section { min-height: 520px; display: grid; place-items: center; align-content: center; padding: 60px; border: 1px solid var(--line); border-radius: 20px; text-align: center; background: linear-gradient(145deg, #fff 0%, #f7f7f3 100%); }
 .asset-module-placeholder > section > div { width: 64px; height: 64px; display: grid; place-items: center; margin-bottom: 20px; border-radius: 50%; background: #ebebe6; }
@@ -1079,9 +1081,9 @@ svg { display: block; }
 .ielts-topic-search__reset { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; color: #8b8b87; background: transparent; opacity: 0; visibility: hidden; transition: opacity .2s ease; }
 .ielts-topic-search__input:not(:placeholder-shown) ~ .ielts-topic-search__reset { opacity: 1; visibility: visible; }
 .ielts-topic-search__reset svg { width: 15px; height: 15px; }
-.ielts-topic-list { border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.ielts-topic-list { max-height: min(650px, calc(100vh - 310px)); border: 1px solid var(--line); border-radius: 16px; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
 .ielts-topic-list > header, .ielts-topic-list > button { display: grid; grid-template-columns: 1.5fr .7fr 1fr 24px; align-items: center; gap: 22px; }
-.ielts-topic-list > header { min-height: 44px; padding: 0 24px; color: #92928d; background: #fafaf8; font-size: 10px; letter-spacing: .08em; }
+.ielts-topic-list > header { position: sticky; top: 0; z-index: 2; min-height: 44px; padding: 0 24px; color: #92928d; background: #fafaf8; font-size: 10px; letter-spacing: .08em; }
 .ielts-topic-list > button { width: 100%; min-height: 94px; padding: 15px 24px; border: 0; border-top: 1px solid var(--line); background: #fff; text-align: left; transition: background .2s; }
 .ielts-topic-list > button:hover { background: #fafaf8; }
 .ielts-topic-list > button > span:first-child { display: grid; grid-template-columns: 88px 1fr; align-items: center; gap: 3px 16px; }
@@ -1091,6 +1093,16 @@ svg { display: block; }
 .ielts-topic-list > button > span:nth-child(2) { display: grid; gap: 6px; }
 .ielts-topic-list > button > span:nth-child(3) { color: #676763; font-size: 12px; }
 .ielts-topic-list > button > svg { width: 18px; height: 18px; }
+.ielts-topic-state { min-height: 110px; margin: 0; display: grid; place-items: center; border-top: 1px solid var(--line); color: #777772; font-size: 14px; }
+.ielts-topic-state.is-error { color: #a53a30; }
+.ielts-topic-pagination { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 20px; color: #777772; font-size: 12px; }
+.ielts-topic-pagination__controls { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.ielts-topic-pagination__pages { max-width: min(520px, 52vw); display: flex; align-items: center; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
+.ielts-topic-pagination button { min-height: 36px; padding: 0 13px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #d9d9d4; border-radius: 999px; color: var(--ink); background: #fff; font: inherit; }
+.ielts-topic-pagination__pages button { min-width: 36px; padding: 0 10px; justify-content: center; flex: 0 0 auto; }
+.ielts-topic-pagination__pages button.is-active { color: #fff; border-color: var(--ink); background: var(--ink); }
+.ielts-topic-pagination button:disabled { color: #aaa; background: #f4f4f1; cursor: not-allowed; }
+.ielts-topic-pagination button svg { width: 14px; height: 14px; }
 
 .ielts-examiner-select { min-height: 560px; margin-top: 28px; padding: 26px 32px 30px; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
 .ielts-examiner-select > header { display: flex; align-items: baseline; justify-content: space-between; gap: 28px; }

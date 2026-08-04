@@ -29,7 +29,7 @@ import com.unispeaking.service.evaluation.EvaluationService;
 import com.unispeaking.service.profile.ProfileService;
 import com.unispeaking.service.scene.SceneFlowService;
 import com.unispeaking.service.scene.SceneService;
-import com.unispeaking.service.scene.impl.ScenarioDialogueStateMachine;
+import com.unispeaking.component.statemachine.ScenarioDialogueStateMachine;
 import com.unispeaking.service.session.impl.SessionServiceImpl;
 import java.time.Instant;
 import java.util.List;
@@ -126,6 +126,10 @@ class SessionServiceImplRepracticeTest {
 		verify(sceneFlowService, never()).getByCurrentStage(
 				any(),
 				any());
-		verify(stateMachine).start(any(), any());
+		verify(stateMachine).start(
+				any(),
+				eq(sceneId),
+				eq("{}"),
+				eq("Complete the order"));
 	}
 }

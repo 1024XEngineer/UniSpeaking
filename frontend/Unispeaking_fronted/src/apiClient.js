@@ -94,6 +94,25 @@ export function changePassword({ currentPassword, newPassword }) {
   });
 }
 
+export function getIeltsTopics({
+  part,
+  category = null,
+  keyword = null,
+  page = 1,
+  pageSize = 10,
+}) {
+  const params = new URLSearchParams({ part, page: String(page), pageSize: String(pageSize) });
+  if (category && category !== "ALL") params.set("category", category);
+  if (keyword?.trim()) params.set("keyword", keyword.trim());
+  return request(`/api/ielts/topics?${params.toString()}`);
+}
+
+export function getIeltsTraining(part, topicId = null) {
+  const params = new URLSearchParams({ part });
+  if (topicId) params.set("topicId", topicId);
+  return request(`/api/ielts/training?${params.toString()}`);
+}
+
 export function getUserPreference() {
   return request("/api/user-preferences");
 }

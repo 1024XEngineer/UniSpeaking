@@ -1,9 +1,9 @@
-package com.unispeaking.service.scene.impl;
+package com.unispeaking.component.statemachine;
 
+import com.unispeaking.common.statemachine.ScenarioSuccessFactorParser;
 import com.unispeaking.domain.dto.session.ScenarioDialogueStateResponse;
 import com.unispeaking.domain.dto.session.ScenarioOutcomeState;
 import com.unispeaking.domain.dto.session.Message;
-import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.po.scene.ScenarioDialogueEvent;
 import com.unispeaking.domain.po.scene.ScenarioDialogueState;
 import com.unispeaking.domain.vo.scene.ScenarioDialogueCompletionReason;
@@ -41,11 +41,15 @@ public class ScenarioDialogueStateMachine {
 
 	public ScenarioDialogueStateResponse start(
 			String sessionId,
-			CustomSceneDefinition scene) {
+			String businessId,
+			String successFactorJson,
+			String fallbackGoal) {
 		ScenarioDialogueState state = new ScenarioDialogueState(
 				sessionId,
-				scene.sceneId(),
-				successFactorParser.parse(scene));
+				businessId,
+				successFactorParser.parse(
+						successFactorJson,
+						fallbackGoal));
 		states.put(sessionId, state);
 		return toResponse(state);
 	}
