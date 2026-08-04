@@ -35,10 +35,8 @@ IELTS、英文面试、个人主页统计和会员页面目前主要完成了前
 
 ### 前端
 
-- React 19
-- Vite 6
-- JavaScript + JSX
-- WebRTC / WebSocket
+- Web：React 19、Vite 6、JavaScript + JSX、WebRTC / WebSocket
+- Mobile：React Native、Expo SDK 57、TypeScript、Expo Router
 
 ### AI Provider
 
@@ -56,7 +54,8 @@ IELTS、英文面试、个人主页统计和会员页面目前主要完成了前
 ├── backend
 │   └── unispeaking-server       Spring Boot 后端
 ├── frontend
-│   └── Unispeaking_fronted      React + Vite 前端
+│   ├── web                      React + Vite Web 前端
+│   └── mobile                   React Native + Expo 移动端
 ├── deploy
 │   ├── docker-compose.yml
 │   ├── env
@@ -208,12 +207,12 @@ http://localhost:8080
 UNISPEAKING_ENV_FILE=/absolute/path/to/runtime.env ./mvnw spring-boot:run
 ```
 
-### 5. 启动前端
+### 5. 启动 Web 前端
 
 打开另一个终端：
 
 ```bash
-cd frontend/Unispeaking_fronted
+cd frontend/web
 npm install
 VITE_BACKEND_URL=http://localhost:8080 npm run dev
 ```
@@ -228,6 +227,26 @@ http://localhost:5173
 REST 和 WebSocket 都无法正常联调。
 
 浏览器麦克风只能在 `localhost` 或 HTTPS 安全上下文中使用，并需要用户授权。
+
+### 6. 启动移动端
+
+浏览器预览：
+
+```bash
+cd frontend/mobile
+npm install
+npm run web
+```
+
+Android 开发客户端：
+
+```bash
+npx expo prebuild --platform android
+npm run android
+```
+
+移动端目前是独立的高保真前端实现，尚未完整接入仓库中的后端接口。具体边界和开发
+方式见 [`frontend/mobile/HANDOFF.md`](frontend/mobile/HANDOFF.md)。
 
 ## Docker Compose
 
@@ -343,13 +362,21 @@ cd backend/unispeaking-server
 当前测试基线：186 项单元测试、7 项 PostgreSQL/Redis 容器集成测试通过，合并后的
 JaCoCo 全局行覆盖率为 73.80%。
 
-前端：
+Web 前端：
 
 ```bash
-cd frontend/Unispeaking_fronted
+cd frontend/web
 npm run build
 npm run check:routes
 npm run check:realtime-events
+```
+
+移动端：
+
+```bash
+cd frontend/mobile
+npx tsc --noEmit
+EXPO_OFFLINE=1 npx expo export --platform web
 ```
 
 ## 文档

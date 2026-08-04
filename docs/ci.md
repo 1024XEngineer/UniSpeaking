@@ -22,7 +22,8 @@ Redis 引入生产运行时。
 工作流文件本身发生变化时会强制运行全部检查。其他变更按路径执行：
 
 - 后端：编译、186 项单元测试、打包、PostgreSQL/Redis 集成测试、70% 行覆盖率和镜像构建；
-- 前端：Node.js 22、`npm ci`、路由与 Realtime 事件检查、生产构建和镜像构建；
+- Web 前端：Node.js 22、`npm ci`、路由与 Realtime 事件检查、生产构建和镜像构建；
+- 移动端：Node.js 22、`npm ci`、TypeScript 检查和 Expo Web 静态导出；
 - Compose、环境模板或 Nginx：配置解析或 `nginx -t`；
 - Maven/npm 依赖文件：Dependency Review，High 和 Critical 阻止合并。
 
@@ -54,14 +55,23 @@ PostgreSQL 与 Redis 集成测试：
 
 集成测试使用 Testcontainers，需要本机 Docker 可用；测试结束后容器会自动清理。
 
-前端：
+Web 前端：
 
 ```bash
-cd frontend/Unispeaking_fronted
+cd frontend/web
 npm ci
 npm run check:routes
 npm run check:realtime-events
 npm run build
+```
+
+移动端：
+
+```bash
+cd frontend/mobile
+npm ci
+npx tsc --noEmit
+EXPO_OFFLINE=1 npx expo export --platform web
 ```
 
 ## 报告
