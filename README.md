@@ -245,8 +245,10 @@ npx expo prebuild --platform android
 npm run android
 ```
 
-移动端目前是独立的高保真前端实现，尚未完整接入仓库中的后端接口。具体边界和开发
-方式见 [`frontend/mobile/HANDOFF.md`](frontend/mobile/HANDOFF.md)。
+移动端当前只有自由对话、场景广场和学习资产三个模块完成前端定稿。IELTS、英文面试
+和个人主页仍需继续开发与定稿；已有页面仅代表阶段性原型，不能视为最终版本。移动端
+尚未完整接入仓库中的后端接口，具体边界和开发方式见
+[`frontend/mobile/HANDOFF.md`](frontend/mobile/HANDOFF.md)。
 
 ## Docker Compose
 
@@ -395,3 +397,4 @@ EXPO_OFFLINE=1 npx expo export --platform web
 - 自由聊天内容不进入长期存储。
 - 自定义场景、学习内容、逐轮评分和会话报告写入 PostgreSQL。
 - IELTS、面试、个人统计和会员功能尚需继续开发后端接口。
+- 移动端仅自由对话、场景广场和学习资产已定稿；IELTS、英文面试和个人主页仍在开发。
