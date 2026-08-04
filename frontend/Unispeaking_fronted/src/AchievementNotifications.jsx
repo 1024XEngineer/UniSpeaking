@@ -80,6 +80,7 @@ export function AchievementNotificationProvider({ children }) {
   const pendingAcknowledgementsRef = useRef(new Set());
   const inFlightRef = useRef(null);
   const rerunRequestedRef = useRef(false);
+  const revealRequestedRef = useRef(false);
   const generationRef = useRef(0);
 
   const retryPendingAcknowledgements = useCallback(async (generation) => {
@@ -96,7 +97,8 @@ export function AchievementNotificationProvider({ children }) {
     }));
   }, []);
 
-  const synchronizeAchievements = useCallback(() => {
+  const synchronizeAchievements = useCallback(({ revealNotifications = false } = {}) => {
+    if (revealNotifications) revealRequestedRef.current = true;
     if (inFlightRef.current) {
       rerunRequestedRef.current = true;
       return inFlightRef.current;
@@ -106,33 +108,38 @@ export function AchievementNotificationProvider({ children }) {
     const synchronize = async () => {
       let latestResponse = null;
       do {
+        const shouldRevealNotifications = revealRequestedRef.current;
+        revealRequestedRef.current = false;
         rerunRequestedRef.current = false;
         try {
           latestResponse = await syncAchievementUnlocks();
           if (generation !== generationRef.current) return null;
-          const pending = Array.isArray(latestResponse?.pendingNotifications)
-            ? latestResponse.pendingNotifications
-            : [];
-          setQueue((current) => {
-            const queuedIds = new Set(current.map((item) => item.achievementId));
-            const additions = pending.filter((item) => {
-              const achievementId = String(item?.achievementId || "").trim();
-              if (!achievementId
-                || queuedIds.has(achievementId)
-                || seenIdsRef.current.has(achievementId)) {
-                return false;
-              }
-              queuedIds.add(achievementId);
-              seenIdsRef.current.add(achievementId);
-              return true;
+          if (shouldRevealNotifications) {
+            const pending = Array.isArray(latestResponse?.pendingNotifications)
+              ? latestResponse.pendingNotifications
+              : [];
+            setQueue((current) => {
+              const queuedIds = new Set(current.map((item) => item.achievementId));
+              const additions = pending.filter((item) => {
+                const achievementId = String(item?.achievementId || "").trim();
+                if (!achievementId
+                  || queuedIds.has(achievementId)
+                  || seenIdsRef.current.has(achievementId)) {
+                  return false;
+                }
+                queuedIds.add(achievementId);
+                seenIdsRef.current.add(achievementId);
+                return true;
+              });
+              return additions.length ? [...current, ...additions] : current;
             });
-            return additions.length ? [...current, ...additions] : current;
-          });
+          }
           await retryPendingAcknowledgements(generation);
         } catch {
           // Achievement synchronization must never interrupt the completed workflow.
         }
-      } while (rerunRequestedRef.current && generation === generationRef.current);
+      } while ((rerunRequestedRef.current || revealRequestedRef.current)
+        && generation === generationRef.current);
       return latestResponse;
     };
 
@@ -166,6 +173,7 @@ export function AchievementNotificationProvider({ children }) {
   const clearAchievementNotifications = useCallback(() => {
     generationRef.current += 1;
     rerunRequestedRef.current = false;
+    revealRequestedRef.current = false;
     inFlightRef.current = null;
     seenIdsRef.current.clear();
     pendingAcknowledgementsRef.current.clear();
