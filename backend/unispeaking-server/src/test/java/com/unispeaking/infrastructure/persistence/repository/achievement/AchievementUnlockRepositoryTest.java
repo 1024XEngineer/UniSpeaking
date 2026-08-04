@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.domain.po.achievement.AchievementUnlockCreation;
 import com.unispeaking.domain.po.achievement.UserAchievementState;
 import com.unispeaking.domain.po.achievement.UserAchievementUnlock;
 import com.unispeaking.infrastructure.persistence.entity.achievement.UserAchievementStateEntity;
@@ -73,13 +74,17 @@ class AchievementUnlockRepositoryTest {
 		UserAchievementUnlock unlock = pendingUnlock();
 		when(unlockMapper.insert(any(UserAchievementUnlockEntity.class))).thenReturn(1);
 
-		assertEquals(unlock, repository.create(unlock));
+		AchievementUnlockCreation created = repository.create(unlock);
+		assertEquals(unlock, created.unlock());
+		assertTrue(created.created());
 
 		when(unlockMapper.insert(any(UserAchievementUnlockEntity.class)))
 				.thenThrow(new DuplicateKeyException("duplicate"));
 		when(unlockMapper.selectOne(any())).thenReturn(unlockEntity(null));
 
-		assertEquals(unlock, repository.create(unlock));
+		AchievementUnlockCreation concurrent = repository.create(unlock);
+		assertEquals(unlock, concurrent.unlock());
+		assertFalse(concurrent.created());
 	}
 
 	@Test

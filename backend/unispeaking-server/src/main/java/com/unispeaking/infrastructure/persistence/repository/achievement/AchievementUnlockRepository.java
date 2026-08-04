@@ -3,6 +3,7 @@ package com.unispeaking.infrastructure.persistence.repository.achievement;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.domain.po.achievement.AchievementUnlockCreation;
 import com.unispeaking.domain.po.achievement.UserAchievementState;
 import com.unispeaking.domain.po.achievement.UserAchievementUnlock;
 import com.unispeaking.infrastructure.persistence.entity.achievement.UserAchievementStateEntity;
@@ -66,20 +67,22 @@ public class AchievementUnlockRepository {
 		}
 	}
 
-	public UserAchievementUnlock create(UserAchievementUnlock unlock) {
+	public AchievementUnlockCreation create(UserAchievementUnlock unlock) {
 		UserAchievementUnlockEntity entity = toEntity(unlock);
 		OffsetDateTime now = atUtc(Instant.now());
 		entity.setCreatedAt(now);
 		entity.setUpdatedAt(now);
 		try {
 			if (unlockMapper.insert(entity) == 1) {
-				return unlock;
+				return new AchievementUnlockCreation(unlock, true);
 			}
 			throw persistenceFailure();
 		}
 		catch (DuplicateKeyException exception) {
-			return find(unlock.userId(), unlock.achievementId()).orElseThrow(
-					this::persistenceFailure);
+			return new AchievementUnlockCreation(
+					find(unlock.userId(), unlock.achievementId()).orElseThrow(
+							this::persistenceFailure),
+					false);
 		}
 		catch (BusinessException exception) {
 			throw exception;
