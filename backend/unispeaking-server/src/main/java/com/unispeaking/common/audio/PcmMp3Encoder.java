@@ -1,19 +1,19 @@
-package com.unispeaking.infrastructure.ai.iflytek;
+package com.unispeaking.common.audio;
 
 import de.sciss.jump3r.lowlevel.LameEncoder;
 import java.io.ByteArrayOutputStream;
 import javax.sound.sampled.AudioFormat;
 
 /**
- * 将评分模块约定的 16 kHz、16-bit、单声道 PCM 转为 Suntone 支持的 MP3。
+ * 将 16 kHz、16-bit、单声道 little-endian PCM 编码为 64 kbps MP3。
  */
-final class IflytekPcmMp3Encoder {
+public final class PcmMp3Encoder {
 
 	private static final AudioFormat SOURCE_FORMAT =
 			new AudioFormat(16_000, 16, 1, true, false);
 	private static final int BIT_RATE_KBPS = 64;
 
-	byte[] encode(byte[] pcm) {
+	public byte[] encode(byte[] pcm) {
 		if (pcm == null || pcm.length == 0 || (pcm.length & 1) != 0) {
 			throw new IllegalArgumentException(
 					"PCM audio must contain complete 16-bit samples");
