@@ -47,6 +47,9 @@ assert.equal(route(paths.scenes.sentence("custom_1")).training.initialStep, "rea
 assert.equal(route(paths.scenes.session("custom_1", "session/1")).sessionId, "session/1");
 assert.equal(route(paths.scenes.assets("custom_1")).assetSceneId, "custom_1");
 assert.equal(route(paths.help.root).helpRoute.screen, "home");
+assert.equal(route(paths.help.root).publicAccess, true);
+assert.equal(route(paths.help.feedback).publicAccess, true);
+assert.equal(route(paths.app.profile).publicAccess, false);
 assert.equal(route(paths.help.category("麦克风 音频")).helpRoute.categoryId, "麦克风 音频");
 assert.equal(route(paths.help.article("修改 密码")).helpRoute.articleId, "修改 密码");
 assert.equal(route(paths.help.feedback).helpRoute.screen, "feedback");
