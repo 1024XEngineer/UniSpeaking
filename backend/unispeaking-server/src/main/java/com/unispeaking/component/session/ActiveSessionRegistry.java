@@ -20,11 +20,21 @@ public class ActiveSessionRegistry {
 		sessions.put(session.getId(), session);
 	}
 
+	public boolean registerIfAbsent(AbstractSceneSession session) {
+		return sessions.putIfAbsent(session.getId(), session) == null;
+	}
+
 	public Optional<AbstractSceneSession> findById(String sessionId) {
 		return Optional.ofNullable(sessions.get(sessionId));
 	}
 
 	public void remove(String sessionId) {
 		sessions.remove(sessionId);
+	}
+
+	public boolean remove(
+			String sessionId,
+			AbstractSceneSession session) {
+		return sessions.remove(sessionId, session);
 	}
 }
