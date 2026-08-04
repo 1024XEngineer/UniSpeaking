@@ -7,6 +7,7 @@ const baseRoute = {
   conversationSessionId: null,
   assetSceneId: null,
   helpRoute: null,
+  publicAccess: false,
 };
 
 const appRoute = (page, extra = {}) => ({
@@ -258,23 +259,26 @@ export function parseHelpRoute(pathname) {
   const segments = path.split("/").filter(Boolean);
   if (segments[0] !== "help") return null;
   if (segments.length === 1) {
-    return appRoute("help", { helpRoute: { screen: "home" } });
+    return appRoute("help", { helpRoute: { screen: "home" }, publicAccess: true });
   }
   if (segments.length === 2 && segments[1] === "feedback") {
-    return appRoute("help", { helpRoute: { screen: "feedback" } });
+    return appRoute("help", { helpRoute: { screen: "feedback" }, publicAccess: true });
   }
   if (segments.length === 3 && segments[1] === "category") {
     return appRoute("help", {
       helpRoute: { screen: "category", categoryId: safeDecode(segments[2]) },
+      publicAccess: true,
     });
   }
   if (segments.length === 3 && segments[1] === "article") {
     return appRoute("help", {
       helpRoute: { screen: "article", articleId: safeDecode(segments[2]) },
+      publicAccess: true,
     });
   }
   return appRoute("help", {
     helpRoute: { screen: "home" },
+    publicAccess: true,
     canonicalPath: paths.help.root,
   });
 }

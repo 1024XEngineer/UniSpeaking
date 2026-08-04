@@ -85,6 +85,7 @@ import { createRealtimeClient } from "./realtimeClient.js";
 import { IeltsAssets, IeltsTrainingCenter } from "./IeltsModule.jsx";
 import { InterviewAssets, InterviewTrainingCenter } from "./InterviewModule.jsx";
 import { HelpCenter } from "./help/HelpCenter.jsx";
+import { HelpLayout } from "./help/HelpLayout.jsx";
 import { NewtonsCradle } from "./NewtonsCradle.jsx";
 import { hrefForPage, paths, resolveRoute } from "./router.js";
 
@@ -2568,7 +2569,7 @@ export function App() {
     let cancelled = false;
     const bootstrapAuth = async () => {
       if (!hasAuthSession()) {
-        if (!["splash", "auth"].includes(initialRoute.flow)) {
+        if (!["splash", "auth"].includes(initialRoute.flow) && !initialRoute.publicAccess) {
           navigate(paths.auth.login, { authMode: "login" }, true);
         }
         if (!cancelled) setAuthReady(true);
@@ -2593,7 +2594,7 @@ export function App() {
         }
       } catch {
         clearAuthSession();
-        if (!cancelled && !["splash", "auth"].includes(initialRoute.flow)) {
+        if (!cancelled && !["splash", "auth"].includes(initialRoute.flow) && !initialRoute.publicAccess) {
           navigate(paths.auth.login, { authMode: "login" }, true);
         }
       } finally {
@@ -2829,6 +2830,13 @@ export function App() {
   if (flow === "auth") return <Auth mode={authMode} onBack={goSplash} onSuccess={completeAuthentication} />;
   if (flow === "level") return <LevelSetup selected={level} onSelect={setLevel} onNext={saveLevelAndContinue} />;
   if (flow === "teacher") return <TeacherSetup selectedId={teacher.id} onSelect={(id) => setTeacher(teachers.find((item) => item.id === id))} onFinish={saveTeacherAndEnter} />;
+  if (page === "help" && !user) {
+    return (
+      <HelpLayout onNavigate={navigate}>
+        <HelpCenter route={helpRoute} onNavigate={navigateHelp} />
+      </HelpLayout>
+    );
+  }
   let content;
   if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={showResult} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
   else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={() => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); void synchronizeAchievements({ revealNotifications: true }); }} />;
