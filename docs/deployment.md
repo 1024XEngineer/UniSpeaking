@@ -63,6 +63,76 @@ WHERE table_name = 'practice_session'
 ORDER BY ordinal_position;
 ```
 
+## Achievement database migration
+
+The dynamic achievement system uses the existing practice, evaluation, and
+scene tables as progress sources. It adds only the server-owned unlock and
+notification state required to make the center-screen achievement notification
+idempotent across refreshes and devices.
+
+Spring Boot applies
+`backend/unispeaking-server/src/main/resources/db/migration/V4__achievement_unlock.sql`
+automatically. V4 creates:
+
+- `user_achievement_unlock`, keyed by `user_id + achievement_id`, containing
+  the first unlock time and optional notification acknowledgement time;
+- `user_achievement_state`, keyed by `user_id`, containing the first
+  achievement initialization time.
+
+V4 does not rewrite practice sessions, evaluation reports, scenes, or user
+accounts. It does not add Redis, a message queue, an achievement definition
+table, or a client-controlled progress field.
+
+Before deploying V4 to an existing environment:
+
+1. Back up PostgreSQL using the environment's normal backup procedure.
+2. Deploy the backend and allow Flyway to finish before deploying the frontend.
+3. Verify that Flyway reports V4 as successful and that both tables and the
+   pending-notification index exist.
+4. Deploy the frontend only after `GET /api/achievements` and
+   `POST /api/achievement-unlocks` are available.
+
+Example verification queries:
+
+```sql
+SELECT version, description, success
+FROM flyway_schema_history
+WHERE version = '4';
+
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+  AND table_name IN (
+      'user_achievement_unlock',
+      'user_achievement_state'
+  )
+ORDER BY table_name;
+
+SELECT indexname
+FROM pg_indexes
+WHERE schemaname = 'public'
+  AND tablename = 'user_achievement_unlock'
+ORDER BY indexname;
+```
+
+Historical achievement initialization is application-driven rather than a
+bulk DDL backfill. On a user's first authenticated unlock synchronization, the
+backend calculates already-satisfied milestones, stores them with both
+`unlocked_at` and `acknowledged_at`, and creates the user's initialization
+state. Those historical milestones do not generate a notification burst.
+Achievements reached after initialization are stored with a null
+`acknowledged_at` until the browser confirms that the notification was shown.
+
+Newly registered users must complete one unlock synchronization before they can
+begin a learning flow. That initial synchronization creates an initialization
+state even when the user has not unlocked a milestone.
+
+The V4 schema is backward compatible with the pre-achievement application: an
+older backend ignores the new tables. If an application rollback is necessary,
+roll back the frontend and backend binaries but retain the V4 tables so unlock
+and acknowledgement history is not lost. Drop the tables only through a later,
+explicit Flyway migration after the feature has been permanently retired.
+
 ## Available settings
 
 The Spring Boot defaults live in
