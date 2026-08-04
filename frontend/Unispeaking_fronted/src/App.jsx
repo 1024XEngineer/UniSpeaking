@@ -627,6 +627,10 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
           <Button className="auth-submit" type="submit" disabled={submitting}>{submitting ? "请稍候" : mode === "signup" ? "注册" : "登录"}</Button>
         </form>
         <p className="auth-switch">{mode === "signup" ? "已经有账号？" : "还没有账号？"}<button onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setError(""); }}>{mode === "signup" ? "直接登录" : "创建账号"}</button></p>
+        <div className="auth-help">
+          <span>登录或注册遇到问题？</span>
+          <a href={paths.help.root}><Lifebuoy weight="bold" />访问帮助中心</a>
+        </div>
       </section>
     </main>
   );

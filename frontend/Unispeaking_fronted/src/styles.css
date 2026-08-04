@@ -190,6 +190,11 @@ svg { display: block; }
 .auth-submit { width: 100%; margin-top: 10px; }
 .auth-switch { color: var(--muted); text-align: center; margin-top: 24px; font-size: 14px; }
 .auth-switch button { margin-left: 6px; border: 0; background: none; font-weight: 650; cursor: pointer; }
+.auth-help { margin-top: 30px; padding-top: 22px; display: flex; align-items: center; justify-content: center; gap: 9px; border-top: 1px solid var(--line); color: #8a8a85; font-size: 12px; }
+.auth-help a { display: inline-flex; align-items: center; gap: 6px; color: #555551; font-weight: 680; text-decoration: none; }
+.auth-help a:hover { color: var(--ink); }
+.auth-help a:focus-visible { border-radius: 4px; outline: 2px solid #252525; outline-offset: 3px; }
+.auth-help a svg { width: 16px; height: 16px; }
 .verify-panel { text-align: center; }
 .verify-panel > .eyebrow { color: #8d8d88; }
 .verify-panel strong { color: var(--ink); }
