@@ -1,7 +1,23 @@
-import { useRef, useState } from "react";
-import { ArrowLeft, CheckCircle, ClipboardText, Info, ShieldCheck } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowClockwise,
+  ArrowLeft,
+  CheckCircle,
+  ClipboardText,
+  Info,
+  MagnifyingGlass,
+  PaperPlaneTilt,
+  ShieldCheck,
+} from "@phosphor-icons/react";
 import { paths } from "../router.js";
 import { helpCategories } from "./helpData.js";
+import {
+  getSavedFeedbackReceipts,
+  isFeedbackUserSignedIn,
+  loadMyHelpFeedbacks,
+  queryHelpFeedback,
+  submitHelpFeedback,
+} from "./helpApi.js";
 import { handleHelpLinkClick } from "./helpUtils.js";
 
 const initialForm = {
@@ -11,41 +27,154 @@ const initialForm = {
   environment: "",
 };
 
+const statusMeta = {
+  SUBMITTED: { label: "已提交", description: "反馈已进入处理队列。" },
+  IN_PROGRESS: { label: "处理中", description: "我们正在核对你提供的信息。" },
+  RESOLVED: { label: "已解决", description: "反馈已经处理并给出答复。" },
+  CLOSED: { label: "已关闭", description: "本次反馈处理已结束。" },
+};
+
+function categoryTitle(categoryId) {
+  return helpCategories.find((item) => item.id === categoryId)?.title || "其他问题";
+}
+
+function formatDate(value) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function FeedbackCard({ feedback, lookupCode, busy, onRefresh }) {
+  const status = statusMeta[feedback.status] || statusMeta.SUBMITTED;
+  return (
+    <article className="help-feedback-card">
+      <header>
+        <div>
+          <small>{categoryTitle(feedback.categoryId)} · {feedback.feedbackNo}</small>
+          <h3>{feedback.title}</h3>
+        </div>
+        <span className={`help-feedback-status is-${feedback.status?.toLowerCase()}`}>{status.label}</span>
+      </header>
+      <p>{status.description}</p>
+      {feedback.reply && (
+        <blockquote>
+          <strong>处理答复</strong>
+          <p>{feedback.reply}</p>
+          <time dateTime={feedback.repliedAt}>{formatDate(feedback.repliedAt)}</time>
+        </blockquote>
+      )}
+      <footer>
+        <time dateTime={feedback.updatedAt}>最近更新：{formatDate(feedback.updatedAt)}</time>
+        {lookupCode && onRefresh && (
+          <button type="button" disabled={busy} onClick={() => onRefresh(feedback.feedbackNo, lookupCode)}>
+            <ArrowClockwise weight="bold" />{busy ? "查询中" : "刷新进度"}
+          </button>
+        )}
+      </footer>
+    </article>
+  );
+}
+
 export function HelpFeedback({ onNavigate }) {
   const [form, setForm] = useState(initialForm);
-  const [summary, setSummary] = useState("");
+  const [receipt, setReceipt] = useState(null);
+  const [savedReceipts, setSavedReceipts] = useState(() => getSavedFeedbackReceipts());
+  const [mine, setMine] = useState([]);
+  const [lookup, setLookup] = useState({ feedbackNo: "", lookupCode: "" });
+  const [lookupResult, setLookupResult] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [lookupBusy, setLookupBusy] = useState("");
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [lookupError, setLookupError] = useState("");
+  const [historyError, setHistoryError] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
-  const summaryRef = useRef(null);
+  const [signedIn, setSignedIn] = useState(() => isFeedbackUserSignedIn());
+  const receiptRef = useRef(null);
+
+  const loadMine = async () => {
+    if (!isFeedbackUserSignedIn()) {
+      setSignedIn(false);
+      return;
+    }
+    setHistoryBusy(true);
+    setHistoryError("");
+    try {
+      setMine(await loadMyHelpFeedbacks());
+    } catch (error) {
+      if (!isFeedbackUserSignedIn()) setSignedIn(false);
+      setHistoryError(error.message || "暂时无法加载反馈记录，请稍后重试。");
+    } finally {
+      setHistoryBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (signedIn) void loadMine();
+  }, []);
+
+  useEffect(() => {
+    if (receipt) receiptRef.current?.focus();
+  }, [receipt]);
 
   const updateField = (field) => (event) => {
     setForm((current) => ({ ...current, [field]: event.target.value }));
-    setSummary("");
-    setCopyStatus("");
+    setFormError("");
   };
 
-  const buildSummary = (event) => {
+  const submit = async (event) => {
     event.preventDefault();
-    const category = helpCategories.find((item) => item.id === form.categoryId);
-    setSummary([
-      `问题分类：${category?.title || "其他"}`,
-      `问题标题：${form.title.trim()}`,
-      "问题描述与复现步骤：",
-      form.description.trim(),
-      `设备与浏览器：${form.environment.trim() || "未填写"}`,
-      `发生时间：${new Date().toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}`,
-    ].join("\n"));
-    setCopyStatus("反馈摘要已生成，确认内容后可以复制保存。");
+    setSubmitting(true);
+    setFormError("");
+    setCopyStatus("");
+    try {
+      const nextReceipt = await submitHelpFeedback(form);
+      setReceipt(nextReceipt);
+      setSavedReceipts(getSavedFeedbackReceipts());
+      setForm(initialForm);
+      if (signedIn) void loadMine();
+    } catch (error) {
+      setFormError(error.message || "反馈提交失败，请检查网络后重试。");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const copySummary = async () => {
+  const copyReceipt = async () => {
+    if (!receipt) return;
+    const text = `UniSpeaking 反馈编号：${receipt.feedback.feedbackNo}\n查询码：${receipt.lookupCode}`;
     try {
-      await navigator.clipboard.writeText(summary);
-      setCopyStatus("反馈摘要已复制。当前阶段不会自动上传，请保存到安全位置。");
+      await navigator.clipboard.writeText(text);
+      setCopyStatus("反馈编号和查询码已复制，请妥善保存。");
     } catch {
-      summaryRef.current?.focus();
-      summaryRef.current?.select();
-      setCopyStatus("无法自动复制，已选中摘要，请使用系统复制快捷键。");
+      setCopyStatus(`请手动保存查询码：${receipt.lookupCode}`);
     }
+  };
+
+  const runLookup = async (feedbackNo, lookupCode) => {
+    const normalizedNo = feedbackNo.trim().toUpperCase();
+    if (!normalizedNo || !lookupCode.trim()) {
+      setLookupError("请输入完整的反馈编号和查询码。");
+      return;
+    }
+    setLookupBusy(normalizedNo);
+    setLookupError("");
+    try {
+      const feedback = await queryHelpFeedback(normalizedNo, lookupCode);
+      setLookupResult(feedback);
+      setSavedReceipts(getSavedFeedbackReceipts());
+    } catch (error) {
+      setLookupError(error.message || "没有找到对应反馈，请核对编号和查询码。");
+    } finally {
+      setLookupBusy("");
+    }
+  };
+
+  const submitLookup = (event) => {
+    event.preventDefault();
+    void runLookup(lookup.feedbackNo, lookup.lookupCode);
   };
 
   return (
@@ -61,19 +190,19 @@ export function HelpFeedback({ onNavigate }) {
       <header className="help-section-header">
         <p className="eyebrow">FEEDBACK</p>
         <h1>问题反馈</h1>
-        <p>描述发生了什么，我们会帮助你把问题整理得更清楚。</p>
+        <p>提交使用中遇到的问题，并通过反馈编号持续查看处理进度和答复。</p>
       </header>
 
       <aside className="help-feedback-notice" role="note">
         <Info weight="fill" />
-        <p><strong>第一阶段不会自动提交或上传反馈。</strong><span>填写内容只保留在当前页面，用于生成可复制摘要；正式支持渠道接入后会另行说明。</span></p>
+        <p><strong>无需登录也可以提交和查询反馈。</strong><span>提交后请自行保存反馈编号和查询码；页面也会尝试将它们保存在当前浏览器中。</span></p>
       </aside>
 
       <div className="help-feedback-layout">
-        <form className="help-feedback-form" onSubmit={buildSummary}>
+        <form className="help-feedback-form" onSubmit={submit} aria-describedby="feedback-form-error">
           <label>
             问题分类
-            <select value={form.categoryId} onChange={updateField("categoryId")}>
+            <select value={form.categoryId} disabled={submitting} onChange={updateField("categoryId")}>
               {helpCategories.map((category) => <option key={category.id} value={category.id}>{category.title}</option>)}
             </select>
           </label>
@@ -85,6 +214,7 @@ export function HelpFeedback({ onNavigate }) {
               onChange={updateField("title")}
               maxLength={80}
               placeholder="用一句话概括问题"
+              disabled={submitting}
               required
             />
           </label>
@@ -96,6 +226,7 @@ export function HelpFeedback({ onNavigate }) {
               maxLength={2000}
               rows={8}
               placeholder="例如：进入自由对话 → 允许麦克风 → 点击开始后看到什么提示；你原本期望发生什么。"
+              disabled={submitting}
               required
             />
             <small>{form.description.length} / 2000</small>
@@ -108,9 +239,13 @@ export function HelpFeedback({ onNavigate }) {
               onChange={updateField("environment")}
               maxLength={120}
               placeholder="例如：macOS 15，Chrome"
+              disabled={submitting}
             />
           </label>
-          <button type="submit"><ClipboardText weight="bold" />生成反馈摘要</button>
+          {formError && <p id="feedback-form-error" className="help-feedback-error" role="alert">{formError}</p>}
+          <button type="submit" disabled={submitting}>
+            <PaperPlaneTilt weight="bold" />{submitting ? "正在提交" : "提交反馈"}
+          </button>
         </form>
 
         <aside className="help-feedback-guide">
@@ -125,14 +260,56 @@ export function HelpFeedback({ onNavigate }) {
         </aside>
       </div>
 
-      {summary && (
-        <section className="help-feedback-summary" aria-labelledby="feedback-summary-title">
-          <div><h2 id="feedback-summary-title">反馈摘要</h2><span><CheckCircle weight="fill" />仅保存在当前页面</span></div>
-          <textarea ref={summaryRef} readOnly value={summary} aria-label="生成的反馈摘要" />
-          <button type="button" onClick={copySummary}><ClipboardText weight="bold" />复制摘要</button>
+      {receipt && (
+        <section ref={receiptRef} className="help-feedback-receipt" tabIndex="-1" aria-labelledby="feedback-receipt-title">
+          <CheckCircle weight="fill" />
+          <div>
+            <h2 id="feedback-receipt-title">反馈提交成功</h2>
+            <p>请保存下面两项信息。未登录时需要同时提供它们才能查询进度。</p>
+            <dl>
+              <div><dt>反馈编号</dt><dd>{receipt.feedback.feedbackNo}</dd></div>
+              <div><dt>查询码</dt><dd>{receipt.lookupCode}</dd></div>
+            </dl>
+            <button type="button" onClick={copyReceipt}><ClipboardText weight="bold" />复制编号和查询码</button>
+            <span aria-live="polite">{copyStatus}</span>
+          </div>
         </section>
       )}
-      <p className="help-copy-status" aria-live="polite">{copyStatus}</p>
+
+      <section className="help-feedback-tracker" aria-labelledby="feedback-tracker-title">
+        <div className="help-list-heading">
+          <div><p className="eyebrow">TRACKING</p><h2 id="feedback-tracker-title">查询反馈进度</h2></div>
+        </div>
+        <form className="help-feedback-lookup" onSubmit={submitLookup}>
+          <label>反馈编号<input value={lookup.feedbackNo} onChange={(event) => setLookup((current) => ({ ...current, feedbackNo: event.target.value }))} placeholder="FB-20260804-XXXXXXXXXXXX" autoComplete="off" required /></label>
+          <label>查询码<input type="password" value={lookup.lookupCode} onChange={(event) => setLookup((current) => ({ ...current, lookupCode: event.target.value }))} placeholder="提交成功时获得的查询码" autoComplete="off" required /></label>
+          <button type="submit" disabled={Boolean(lookupBusy)}><MagnifyingGlass weight="bold" />{lookupBusy ? "查询中" : "查询进度"}</button>
+        </form>
+        {lookupError && <p className="help-feedback-error" role="alert">{lookupError}</p>}
+        {lookupResult && <FeedbackCard feedback={lookupResult} />}
+      </section>
+
+      {signedIn ? (
+        <section className="help-feedback-history" aria-labelledby="my-feedback-title">
+          <div className="help-list-heading">
+            <div><p className="eyebrow">MY FEEDBACK</p><h2 id="my-feedback-title">我的反馈</h2></div>
+            <button type="button" disabled={historyBusy} onClick={loadMine}><ArrowClockwise weight="bold" />{historyBusy ? "加载中" : "刷新"}</button>
+          </div>
+          {historyError && <p className="help-feedback-error" role="alert">{historyError}</p>}
+          {!historyBusy && !historyError && mine.length === 0 && <p className="help-feedback-empty">当前账号还没有提交过反馈。</p>}
+          <div className="help-feedback-cards">{mine.map((feedback) => <FeedbackCard key={feedback.feedbackNo} feedback={feedback} />)}</div>
+        </section>
+      ) : savedReceipts.length > 0 && (
+        <section className="help-feedback-history" aria-labelledby="saved-feedback-title">
+          <div className="help-list-heading"><div><p className="eyebrow">SAVED</p><h2 id="saved-feedback-title">本机保存的反馈</h2></div></div>
+          <p className="help-feedback-history__lead">这些查询凭据仅保存在当前浏览器。你可以随时刷新单条反馈的处理进度。</p>
+          <div className="help-feedback-cards">
+            {savedReceipts.map(({ feedback, lookupCode }) => (
+              <FeedbackCard key={feedback.feedbackNo} feedback={feedback} lookupCode={lookupCode} busy={lookupBusy === feedback.feedbackNo} onRefresh={runLookup} />
+            ))}
+          </div>
+        </section>
+      )}
     </main>
   );
 }
