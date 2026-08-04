@@ -3,6 +3,7 @@ package com.unispeaking.infrastructure.persistence.repository.evaluation;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.unispeaking.domain.dto.asset.SessionEvaluationRecord;
 import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
+import com.unispeaking.domain.po.achievement.AchievementEvaluationFact;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.SessionEvaluationEntity;
 import com.unispeaking.infrastructure.persistence.mapper.evaluation.SessionEvaluationMapper;
 import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
@@ -111,6 +112,63 @@ public class SessionEvaluationRepository {
 						.orderByAsc(SessionEvaluationEntity::getCreatedAt))
 				.stream()
 				.map(SessionEvaluationEntity::getCreatedAt)
+				.toList();
+	}
+
+	public List<AchievementEvaluationFact> findAchievementFacts(
+			List<String> sessionIds,
+			List<String> sceneIds) {
+		List<String> ownedSessionIds = normalizedIds(sessionIds);
+		List<String> ownedSceneIds = normalizedIds(sceneIds);
+		if (ownedSessionIds.isEmpty() && ownedSceneIds.isEmpty()) {
+			return List.of();
+		}
+		try {
+			LambdaQueryWrapper<SessionEvaluationEntity> query =
+					new LambdaQueryWrapper<SessionEvaluationEntity>()
+							.select(
+									SessionEvaluationEntity::getSessionId,
+									SessionEvaluationEntity::getCreatedAt,
+									SessionEvaluationEntity::getFinalScore)
+							.and(scope -> appendOwnershipScope(
+									scope,
+									ownedSessionIds,
+									ownedSceneIds))
+							.orderByAsc(SessionEvaluationEntity::getCreatedAt);
+			return mapper.selectList(query).stream()
+					.map(entity -> new AchievementEvaluationFact(
+							entity.getSessionId(),
+							entity.getCreatedAt(),
+							entity.getFinalScore()))
+					.toList();
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
+	private void appendOwnershipScope(
+			LambdaQueryWrapper<SessionEvaluationEntity> scope,
+			List<String> sessionIds,
+			List<String> sceneIds) {
+		if (!sessionIds.isEmpty()) {
+			scope.in(SessionEvaluationEntity::getSessionId, sessionIds);
+		}
+		if (!sceneIds.isEmpty()) {
+			if (!sessionIds.isEmpty()) {
+				scope.or();
+			}
+			scope.in(SessionEvaluationEntity::getSceneId, sceneIds);
+		}
+	}
+
+	private List<String> normalizedIds(List<String> ids) {
+		if (ids == null) {
+			return List.of();
+		}
+		return ids.stream()
+				.filter(id -> id != null && !id.isBlank())
+				.distinct()
 				.toList();
 	}
 

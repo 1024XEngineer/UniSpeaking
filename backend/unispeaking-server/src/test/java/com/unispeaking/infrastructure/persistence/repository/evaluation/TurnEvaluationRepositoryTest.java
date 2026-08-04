@@ -1,13 +1,16 @@
 package com.unispeaking.infrastructure.persistence.repository.evaluation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.unispeaking.infrastructure.persistence.codec.evaluation.EvaluationJsonbCodec;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.CustomTurnEvaluation;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.TurnEvaluationEntity;
@@ -15,11 +18,20 @@ import com.unispeaking.infrastructure.persistence.mapper.evaluation.TurnEvaluati
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
 
 class TurnEvaluationRepositoryTest {
+
+	@BeforeAll
+	static void initializeMybatisMetadata() {
+		TableInfoHelper.initTableInfo(
+				new MapperBuilderAssistant(new MybatisConfiguration(), "test"),
+				TurnEvaluationEntity.class);
+	}
 
 	@Test
 	void insertsBySessionIdAndTurnNoWithoutSyntheticId() {
@@ -56,6 +68,25 @@ class TurnEvaluationRepositoryTest {
 				any(TurnEvaluationEntity.class),
 				any(Wrapper.class));
 		verify(mapper, never()).updateById(any(TurnEvaluationEntity.class));
+	}
+
+	@Test
+	void findsBestScoreAcrossOwnedSessionsAndLegacyScenes() {
+		TurnEvaluationMapper mapper = mock(TurnEvaluationMapper.class);
+		TurnEvaluationEntity first = new TurnEvaluationEntity();
+		first.setOverallScore(new BigDecimal("84.5"));
+		TurnEvaluationEntity best = new TurnEvaluationEntity();
+		best.setOverallScore(new BigDecimal("96.2"));
+		when(mapper.selectList(any(Wrapper.class))).thenReturn(List.of(first, best));
+		TurnEvaluationRepository repository = repository(mapper);
+
+		assertEquals(
+				new BigDecimal("96.2"),
+				repository.findBestOverallScore(
+						List.of("session-1", "session-1"),
+						List.of("scene-1"))
+						.orElseThrow());
+		assertTrue(repository.findBestOverallScore(null, List.of()).isEmpty());
 	}
 
 	private TurnEvaluationRepository repository(
