@@ -99,7 +99,8 @@ src/main/java/com/unispeaking
 
 - `auth`：注册、登录、JWT 和当前用户身份。
 - `profile`：用户资料与偏好。
-- `scene`：场景生成、场景流程和学习阶段推进。
+- `scene`：场景生成、场景流程和学习阶段推进；IELTS、Interview 是该模块内的
+  Scene 特化，不建立同级顶层 Service 模块。
 - `session`：会话建立、消息追加、结束和会话授权。
 - `evaluation`：句子、单轮和整场对话评分编排。
 - `asset`：学习资产查询、复练资产与历史结果。
@@ -143,8 +144,9 @@ Service 不可以：
 Domain 可以包含业务数据约束和无副作用的领域行为，但不得依赖 Spring Controller、
 MyBatis、数据库 Entity、厂商 SDK 或网络 Client。
 
-DTO 按模块分包。已经不存在的 Request、Response、Command、Result 必须删除，不保留
-占位类。
+DTO 按模块分包。Scene 特化的 DTO 继续归入 `domain/dto/scene`，不得为 IELTS 或
+Interview 另建顶层 DTO 包。已经不存在的 Request、Response、Command、Result 必须
+删除，不保留占位类。
 
 ### 3.4 `provider`
 
@@ -282,10 +284,14 @@ infrastructure/persistence
 - Wrapper 的 `.last()`、`.apply()`、`.inSql()`、`.notInSql()`、`.setSql()`。
 - Service 调用 Mapper 或 `selectById/updateById` 处理复合主键。
 
-唯一允许的 SQL 是建表、索引和迁移 DDL，位置为：
+运行时表结构演进统一由 Flyway 管理。建表、修改表和索引等版本化 DDL 只能位于：
 
-- `src/main/resources/db/schema.sql`
-- `deploy/postgres/*.sql`
+- `src/main/resources/db/migration/V{version}__{description}.sql`
+
+`spring.sql.init.mode` 保持为 `never`，不得再以 `src/main/resources/db/schema.sql` 维护
+第二份运行时表结构。`deploy/postgres/*.sql` 只允许保存人工运维或兼容脚本；其中若包含
+DDL，必须明确对应的 Flyway 版本和使用条件，不得替代、先于或重复执行同一版本迁移。
+已由 Flyway 管理的环境默认只运行 `db/migration`，禁止同时手工执行等价 DDL。
 
 ### 6.3 主键与关联
 
@@ -435,45 +441,45 @@ controller/ProfileController.java
 个人主页聚合展示可以查询多个 Repository，但写操作必须回到对应业务模块，不能由一个
 “万能 ProfileService”修改所有表。
 
-### 11.2 雅思
+### 11.2 IELTS 与 Interview Scene 特化
 
-模块位置：
-
-```text
-service/ielts
-domain/dto/ielts
-controller/IeltsController.java
-```
-
-建议路由：
-
-- `POST /api/ielts/scenes`
-- `POST /api/ielts/scenes/{sceneId}/sessions`
-- `GET /api/ielts/sessions/{sessionId}/evaluation`
-- `GET /api/ielts/history`
-
-雅思评分由 `EvaluationService`/Provider 提供能力，IELTS Service 负责任务、流程和
-评分标准编排，不复制厂商评分实现。
-
-### 11.3 面试
-
-模块位置：
+IELTS 与 Interview 都是现有 Scene 业务的特化，目录边界为：
 
 ```text
-service/interview
-domain/dto/interview
-controller/InterviewController.java
+service/scene/{IELTSSceneService,InterviewSceneService}.java
+service/scene/impl/{IELTSSceneServiceImpl,InterviewSceneServiceImpl}.java
+domain/dto/scene
+domain/vo/scene
+controller/{IELTSSceneController,InterviewSceneController}.java
 ```
 
-建议路由：
+不得新增 `service/ielts`、`service/interview`、`domain/dto/ielts` 或
+`domain/dto/interview`。Controller 的路由前缀可以体现 IELTS/Interview 业务语言，
+但路由差异不构成新的顶层后端模块。
 
-- `POST /api/interviews`
-- `POST /api/interviews/{interviewId}/sessions`
-- `GET /api/interview-sessions/{sessionId}`
-- `GET /api/interview-sessions/{sessionId}/evaluation`
+职责边界：
 
-岗位、面试轮次和问题属于 Interview 模块；Realtime、TTS、LLM、评分继续复用
-Provider，不创建 `InterviewTtsService` 或 `InterviewLlmService`。
+- `IELTSSceneService`：查询 IELTS 题库、准备题组和编排 IELTS 特有规则；不管理公共
+  会话生命周期，不实现评分供应商能力。
+- `InterviewSceneService`：校验面试材料与时长，准备 `INTERVIEW_SCENE` 的岗位快照、
+  问题计划和场景 Prompt；不建立会话、不推进公共流程、不保存逐轮消息，也不生成
+  评分结果。
+- `SceneFlowService`：为任意 Scene 创建、读取、幂等推进和完成流程状态；只接受
+  Scene 特化提供的流程定义或下一步决策，不解析简历、不生成面试问题、不管理实时
+  连接、不执行评分。
+- 公共 `SessionService`：绑定已就绪的 Scene 与当前用户，负责所有 Scene 类型的会话
+  建立、归属校验、状态迁移、完整消息追加和结束；可以在会话用例中协调
+  `SceneFlowService` 并在结束事实落库后把报告任务交给 `EvaluationService`，但不拥有
+  面试下一题决策或评分算法。不得新增 `InterviewSessionService`，也不得把面试提问
+  策略或评分规则写入公共 Session。
+- 公共 `EvaluationService`：接收已授权会话的文本/音频与场景评分上下文，负责单轮
+  评分、整场报告生成和结果查询；不推进 Scene Flow，不改变 Session 业务状态，
+  Interview 结果只评价英语口语表现，不输出岗位匹配或录用判断。
+
+Realtime、TTS、LLM 和语音评分继续复用 Provider；不得创建
+`InterviewTtsService`、`InterviewLlmService` 或同类厂商能力包装 Service。详细契约、
+ADR、失败补偿和场景伪代码见
+[`docs/interview-foundation-architecture.md`](docs/interview-foundation-architecture.md)。
 
 ## 12. 配置与密钥
 
