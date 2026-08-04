@@ -2247,6 +2247,7 @@ function LearningCalendar({ calendar, onMonthChange }) {
 
 function AchievementSystem() {
   const [filter, setFilter] = useState("全部");
+  const [expandedSeriesId, setExpandedSeriesId] = useState(null);
   const [series, setSeries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -2294,7 +2295,7 @@ function AchievementSystem() {
       </header>
       {!loading && !error && series.length > 0 && (
         <nav className="achievement-filters" aria-label="成就分类">
-          {categories.map((item) => <button key={item} type="button" aria-pressed={filter === item} className={filter === item ? "is-active" : ""} onClick={() => setFilter(item)}>{item}<small>{categoryCount(item)}</small></button>)}
+          {categories.map((item) => <button key={item} type="button" aria-pressed={filter === item} className={filter === item ? "is-active" : ""} onClick={() => { setFilter(item); setExpandedSeriesId(null); }}>{item}<small>{categoryCount(item)}</small></button>)}
         </nav>
       )}
       {loading && (
@@ -2319,33 +2320,77 @@ function AchievementSystem() {
             const Icon = achievementSeriesIcons[item.seriesId] || Target;
             const itemMilestones = Array.isArray(item.milestones) ? item.milestones : [];
             const lastMilestone = itemMilestones[itemMilestones.length - 1];
+            const currentMilestone = itemMilestones.find((milestone) => milestone.level === item.currentLevel) || null;
             const progressMaximum = Number(item.nextThreshold ?? lastMilestone?.threshold ?? 1);
             const progressValue = Number(item.currentValue ?? 0);
+            const expanded = expandedSeriesId === item.seriesId;
+            const detailId = `achievement-series-${item.seriesId}-levels`;
+            const levelClass = `achievement-level-${Math.min(5, Math.max(0, Number(item.currentLevel) || 0))}`;
             return (
-              <article key={item.seriesId} className={cx("achievement-series-card", item.completed && "is-completed")}>
-                <header>
-                  <div className="achievement-series-card__icon"><Icon strokeWidth={1.8} /></div>
-                  <div><span>{item.category}</span><h3>{item.title}</h3></div>
-                  <em>{item.completed ? "全部达成" : `Lv.${item.currentLevel || 0}`}</em>
-                </header>
-                <div className="achievement-series-progress">
-                  <div>
-                    <span><small>当前进度</small><strong>{formatAchievementValue(item.currentValue)} <i>{item.unit}</i></strong></span>
-                    <span><small>{item.completed ? "最高称号" : "下一阶段"}</small><strong>{item.completed ? item.currentTitle : item.nextTitle || "待解锁"}</strong></span>
+              <div key={item.seriesId} className="achievement-series-entry">
+                <article className={cx("achievement-series-card", levelClass, item.completed && "is-completed", expanded && "is-expanded")}>
+                  <button
+                    type="button"
+                    className="achievement-series-card__trigger"
+                    aria-label={`${expanded ? "收起" : "查看"}${item.title}全部等级`}
+                    aria-expanded={expanded}
+                    aria-controls={detailId}
+                    onClick={() => setExpandedSeriesId((current) => current === item.seriesId ? null : item.seriesId)}
+                  />
+                  <header>
+                    <div className="achievement-series-card__icon"><Icon strokeWidth={1.8} /></div>
+                    <div><span>{item.category}</span><h3>{item.title}</h3></div>
+                    <em>{item.completed ? "全部达成" : `Lv.${item.currentLevel || 0}`}</em>
+                  </header>
+                  <div className="achievement-series-current">
+                    <span>{currentMilestone ? "当前最高等级" : "当前等级"}</span>
+                    <strong>{currentMilestone?.title || "尚未解锁"}</strong>
+                    <p>{currentMilestone?.description || `完成“${item.nextTitle || "第一阶段"}”后即可点亮该系列`}</p>
                   </div>
-                  <progress aria-label={`${item.title}当前进度`} value={Math.min(progressValue, progressMaximum)} max={Math.max(1, progressMaximum)} />
-                  <small>{item.completed ? "该系列所有成就已解锁" : `距离 ${item.nextTitle} · ${formatAchievementValue(item.nextThreshold)} ${item.unit}`}</small>
-                </div>
-                <ol className="achievement-milestones">
-                  {itemMilestones.map((milestone) => (
-                    <li key={milestone.achievementId} className={milestone.unlocked ? "is-unlocked" : ""}>
-                      <span>Lv.{milestone.level}</span>
-                      <div><strong>{milestone.title}</strong><small>{milestone.description}</small></div>
-                      <em>{milestone.unlocked ? <><Check weight="bold" />已获得</> : `${formatAchievementValue(milestone.threshold)} ${item.unit}`}</em>
-                    </li>
-                  ))}
-                </ol>
-              </article>
+                  <div className="achievement-series-progress">
+                    <div>
+                      <span><small>当前进度</small><strong>{formatAchievementValue(item.currentValue)} <i>{item.unit}</i></strong></span>
+                      <span><small>{item.completed ? "完成状态" : "下一阶段"}</small><strong>{item.completed ? "已完成全部等级" : item.nextTitle || "待解锁"}</strong></span>
+                    </div>
+                    <progress aria-label={`${item.title}当前进度`} value={Math.min(progressValue, progressMaximum)} max={Math.max(1, progressMaximum)} />
+                    <small>{item.completed ? "该系列所有成就已解锁" : `距离 ${item.nextTitle} · ${formatAchievementValue(item.nextThreshold)} ${item.unit}`}</small>
+                  </div>
+                  <footer><span>查看全部 {itemMilestones.length} 个等级</span><CaretDown weight="bold" /></footer>
+                </article>
+                {expanded && (
+                  <section id={detailId} className="achievement-level-panel" aria-label={`${item.title}全部等级`}>
+                    <header>
+                      <div><span>{item.category} · {item.title}</span><h3>等级进阶路径</h3><p>按等级顺序查看全部成就节点。</p></div>
+                      <button type="button" aria-label={`收起${item.title}等级`} onClick={() => setExpandedSeriesId(null)}><X weight="bold" /></button>
+                    </header>
+                    <div className="achievement-level-track">
+                      <ol>
+                        {itemMilestones.map((milestone) => {
+                          const current = milestone.level === item.currentLevel;
+                          const next = !milestone.unlocked && milestone.level === item.nextLevel;
+                          const status = current ? "当前等级" : milestone.unlocked ? "已获得" : next ? "下一目标" : "待解锁";
+                          return (
+                            <li
+                              key={milestone.achievementId}
+                              className={cx(
+                                `achievement-level-${Math.min(5, Math.max(1, Number(milestone.level) || 1))}`,
+                                milestone.unlocked && "is-unlocked",
+                                current && "is-current",
+                                next && "is-next",
+                                !milestone.unlocked && !next && "is-locked",
+                              )}
+                              aria-current={current ? "step" : undefined}
+                            >
+                              <div className="achievement-level-marker"><span>Lv.{milestone.level}</span>{milestone.unlocked ? <Check weight="bold" /> : null}</div>
+                              <div className="achievement-level-copy"><em>{status}</em><strong>{milestone.title}</strong><p>{milestone.description}</p><small>{formatAchievementValue(milestone.threshold)} {item.unit}</small></div>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    </div>
+                  </section>
+                )}
+              </div>
             );
           })}
         </div>
