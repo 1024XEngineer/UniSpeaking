@@ -1,6 +1,7 @@
 package com.unispeaking.component.session;
 
 import com.unispeaking.domain.po.session.AbstractSceneSession;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,6 +27,16 @@ public class ActiveSessionRegistry {
 
 	public Optional<AbstractSceneSession> findById(String sessionId) {
 		return Optional.ofNullable(sessions.get(sessionId));
+	}
+
+	public <T extends AbstractSceneSession> Optional<T> findById(
+			String sessionId,
+			Class<T> sessionType) {
+		return findById(sessionId).filter(sessionType::isInstance).map(sessionType::cast);
+	}
+
+	public List<AbstractSceneSession> snapshot() {
+		return List.copyOf(sessions.values());
 	}
 
 	public void remove(String sessionId) {
