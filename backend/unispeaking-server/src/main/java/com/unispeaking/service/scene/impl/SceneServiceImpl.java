@@ -1,23 +1,39 @@
 package com.unispeaking.service.scene.impl;
 
 import com.unispeaking.common.util.SceneIdGenerator;
+import com.unispeaking.common.logging.RealtimeFlowLog;
+import com.unispeaking.component.session.RealtimeSessionCoordinator;
+import com.unispeaking.component.statemachine.ScenarioDialogueStateMachine;
+import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
 import com.unispeaking.domain.dto.scene.CustomSceneRequest;
 import com.unispeaking.domain.dto.scene.CustomSceneGenerationResponse;
 import com.unispeaking.domain.dto.scene.SceneGenerationRequest;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.dto.scene.TranslateTextResponse;
+import com.unispeaking.domain.dto.session.CompleteCustomSceneDialogueResponse;
+import com.unispeaking.domain.dto.session.ScenarioDialogueStateResponse;
+import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
+import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
+import com.unispeaking.domain.dto.session.StartSessionResponse;
+import com.unispeaking.domain.po.session.AbstractSceneSession;
 import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.vo.scene.SceneConfig;
 import com.unispeaking.domain.vo.scene.SceneType;
+import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.exception.SceneNotFoundException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
+import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.service.auth.AuthService;
+import com.unispeaking.service.asset.impl.ObsoleteDialogueCleanup;
+import com.unispeaking.service.evaluation.EvaluationService;
 import com.unispeaking.service.profile.ProfileService;
 import com.unispeaking.common.prompt.FiveLayerPromptBuilder;
-import com.unispeaking.service.scene.SceneService;
+import com.unispeaking.service.scene.CustomSceneService;
+import com.unispeaking.service.scene.SceneFlowService;
+import com.unispeaking.service.session.SessionService;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,7 +42,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
-public class SceneServiceImpl implements SceneService {
+public class SceneServiceImpl implements CustomSceneService {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(SceneServiceImpl.class);
 
@@ -37,6 +53,13 @@ public class SceneServiceImpl implements SceneService {
 	private final CustomSceneGenerator customSceneGenerator;
 	private final AiProviderRegistry providerRegistry;
 	private final ObjectMapper objectMapper;
+	private final SessionService sessionService;
+	private final SceneFlowService sceneFlowService;
+	private final RealtimeSessionCoordinator sessionCoordinator;
+	private final EvaluationService evaluationService;
+	private final ScenarioDialogueStateMachine stateMachine;
+	private final SessionMessageRepository sessionMessageRepository;
+	private final ObsoleteDialogueCleanup dialogueCleanup;
 
 	public SceneServiceImpl(
 			AuthService authService,
@@ -45,7 +68,14 @@ public class SceneServiceImpl implements SceneService {
 			FiveLayerPromptBuilder promptService,
 			CustomSceneGenerator customSceneGenerator,
 			AiProviderRegistry providerRegistry,
-			ObjectMapper objectMapper) {
+			ObjectMapper objectMapper,
+			SessionService sessionService,
+			SceneFlowService sceneFlowService,
+			RealtimeSessionCoordinator sessionCoordinator,
+			EvaluationService evaluationService,
+			ScenarioDialogueStateMachine stateMachine,
+			SessionMessageRepository sessionMessageRepository,
+			ObsoleteDialogueCleanup dialogueCleanup) {
 		this.authService = authService;
 		this.profileService = profileService;
 		this.sceneRepository = sceneRepository;
@@ -53,6 +83,13 @@ public class SceneServiceImpl implements SceneService {
 		this.customSceneGenerator = customSceneGenerator;
 		this.providerRegistry = providerRegistry;
 		this.objectMapper = objectMapper;
+		this.sessionService = sessionService;
+		this.sceneFlowService = sceneFlowService;
+		this.sessionCoordinator = sessionCoordinator;
+		this.evaluationService = evaluationService;
+		this.stateMachine = stateMachine;
+		this.sessionMessageRepository = sessionMessageRepository;
+		this.dialogueCleanup = dialogueCleanup;
 	}
 
 	@Override
@@ -97,7 +134,7 @@ public class SceneServiceImpl implements SceneService {
 	}
 
 	@Override
-	public CustomSceneGenerationResponse generateCustomScene(CustomSceneRequest request) {
+	public CustomSceneGenerationResponse generate(CustomSceneRequest request) {
 		SceneGenerationResponse generated = generateScene(new SceneGenerationRequest(
 				request.userId(),
 				request.userPreference(),
@@ -167,6 +204,114 @@ public class SceneServiceImpl implements SceneService {
 		return new TranslateTextResponse(source, translated.strip(), "zh-CN");
 	}
 
+	@Override
+	public StartSceneSessionResponse startSession(
+			String sceneId,
+			StartCustomSceneDialogueRequest request) {
+		String userId = authService.requireUserId(null);
+		CustomSceneDefinition definition = requireOwnedCustomScene(sceneId);
+		SceneGenerationResponse scene = sceneRepository.findGeneratedById(sceneId)
+				.orElseThrow(() -> new BusinessException(
+						"CUSTOM_SCENE_NOT_FOUND",
+						"自定义场景不存在"));
+		String prompt = resolvePrompt(scene, definition, userId);
+		StartSessionResponse started = sessionService.startSession(
+				SceneType.CUSTOM_SCENE,
+				sceneId,
+				prompt);
+		stateMachine.start(
+				started.sessionId(),
+				definition.sceneId(),
+				definition.successFactorJson(),
+				definition.learningGoal());
+		try {
+			return sessionCoordinator.connect(
+					scene,
+					definition.title(),
+					SceneFlowStage.DIALOGUE,
+					true,
+					started,
+					SceneType.CUSTOM_SCENE,
+					sceneId,
+					prompt,
+					request.offerSdp(),
+					request.provider(),
+					request.model(),
+					request.voice(),
+					request.translationEnabled());
+		}
+		catch (RuntimeException exception) {
+			stateMachine.remove(started.sessionId());
+			throw exception;
+		}
+	}
+
+	@Override
+	public CompleteCustomSceneDialogueResponse completeSession(
+			String sceneId,
+			String sessionId,
+			String stopTime) {
+		String userId = authService.requireUserId(null);
+		requireOwnedCustomScene(sceneId);
+		AbstractSceneSession session = sessionCoordinator.requireOwnedSession(
+				userId,
+				sessionId);
+		requireCustomSceneBinding(session, sceneId);
+		ScenarioDialogueStateResponse state = stateMachine.findState(sessionId)
+				.map(ignored -> stateMachine.beginClosing(sessionId))
+				.orElse(null);
+		sessionService.endSession(userId, sessionId, stopTime);
+		String endedAt = session.getEndedAt().toString();
+		RealtimeFlowLog.info(
+				"evaluation.report.start sceneId={} sessionId={}",
+				sceneId,
+				sessionId);
+		DialogueReportResult report;
+		try {
+			report = evaluationService.generateDialogueReport(
+					sessionId,
+					sessionMessageRepository.findMessages(sessionId));
+		}
+		finally {
+			sceneFlowService.completeFlow(sceneId, true);
+			stateMachine.remove(sessionId);
+			sessionCoordinator.remove(sessionId);
+		}
+		dialogueCleanup.retainLatestDialogue(sceneId, sessionId);
+		return new CompleteCustomSceneDialogueResponse(
+				sceneId,
+				sessionId,
+				endedAt,
+				report,
+				state);
+	}
+
+	@Override
+	public ScenarioDialogueStateResponse advanceSessionState(
+			String sceneId,
+			String sessionId,
+			int turnNo,
+			String transcript) {
+		String userId = authService.requireUserId(null);
+		requireOwnedCustomScene(sceneId);
+		requireCustomSceneBinding(
+				sessionCoordinator.requireOwnedSession(userId, sessionId),
+				sceneId);
+		return stateMachine.advance(sessionId, turnNo, transcript);
+	}
+
+	@Override
+	public ScenarioDialogueStateResponse getSessionState(
+			String sceneId,
+			String sessionId) {
+		String userId = authService.requireUserId(null);
+		requireOwnedCustomScene(sceneId);
+		requireCustomSceneBinding(
+				sessionCoordinator.requireOwnedSession(userId, sessionId),
+				sceneId);
+		return stateMachine.getState(sessionId);
+	}
+
 	private SceneGenerationResponse generateCustomScene(
 			String sceneId,
 			String userId,
@@ -230,6 +375,36 @@ public class SceneServiceImpl implements SceneService {
 					"当前用户无权访问该场景");
 		}
 		return definition;
+	}
+
+	private String resolvePrompt(
+			SceneGenerationResponse scene,
+			CustomSceneDefinition definition,
+			String userId) {
+		if (scene.scenePrompt() != null && !scene.scenePrompt().isBlank()) {
+			return scene.scenePrompt();
+		}
+		return String.join("\n\n", promptService.compose(
+				profileService.getProfile(userId),
+				sceneRepository.findByType(SceneType.CUSTOM_SCENE).orElse(null),
+				SceneType.CUSTOM_SCENE,
+				definition.title(),
+				"",
+				scene.wordList(),
+				scene.phraseList(),
+				scene.sentenceList(),
+				definition));
+	}
+
+	private void requireCustomSceneBinding(
+			AbstractSceneSession session,
+			String sceneId) {
+		if (session.getSceneType() != SceneType.CUSTOM_SCENE
+				|| !sceneId.equals(session.getSceneId())) {
+			throw new BusinessException(
+					"SESSION_ACCESS_DENIED",
+					"当前会话不属于该场景");
+		}
 	}
 
 	private String requireTranslationText(String text) {

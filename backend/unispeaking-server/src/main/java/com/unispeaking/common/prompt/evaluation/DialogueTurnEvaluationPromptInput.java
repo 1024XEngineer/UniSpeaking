@@ -2,6 +2,7 @@ package com.unispeaking.common.prompt.evaluation;
 
 import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
+import com.unispeaking.domain.vo.scene.RecommendedExpression;
 import java.util.List;
 
 /**
@@ -27,7 +28,29 @@ public record DialogueTurnEvaluationPromptInput(
 		String learningGoal,
 		List<DialogueTurnEvaluationHistory> previousTurns,
 		String aiText,
-		String currentTranscript) {
+		String currentTranscript,
+		List<RecommendedExpression> recommendedExpressions) {
+
+	public DialogueTurnEvaluationPromptInput(
+			String practiceMode,
+			String background,
+			String aiRole,
+			String userRole,
+			String learningGoal,
+			List<DialogueTurnEvaluationHistory> previousTurns,
+			String aiText,
+			String currentTranscript) {
+		this(
+				practiceMode,
+				background,
+				aiRole,
+				userRole,
+				learningGoal,
+				previousTurns,
+				aiText,
+				currentTranscript,
+				List.of());
+	}
 
 	/**
 	 * 规范可选上下文并保存历史列表的不可变快照。
@@ -44,6 +67,10 @@ public record DialogueTurnEvaluationPromptInput(
 				turn -> turn == null)) {
 			throw new EvaluationException(EvaluationErrorCode.INVALID_REQUEST);
 		}
+		if (recommendedExpressions == null
+				|| recommendedExpressions.stream().anyMatch(item -> item == null)) {
+			throw new EvaluationException(EvaluationErrorCode.INVALID_REQUEST);
+		}
 
 		practiceMode = practiceMode.trim();
 		background = normalizeOptionalText(background);
@@ -52,6 +79,7 @@ public record DialogueTurnEvaluationPromptInput(
 		learningGoal = normalizeOptionalText(learningGoal);
 		previousTurns = List.copyOf(previousTurns);
 		aiText = normalizeOptionalText(aiText);
+		recommendedExpressions = List.copyOf(recommendedExpressions);
 	}
 
 	private static String normalizeOptionalText(String text) {

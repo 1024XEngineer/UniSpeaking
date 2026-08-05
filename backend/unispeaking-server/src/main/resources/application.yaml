@@ -28,6 +28,9 @@ server:
 profile:
   time-zone: ${PROFILE_TIME_ZONE:Asia/Shanghai}
 
+ielts:
+  daily-reset-cron: ${IELTS_DAILY_RESET_CRON:0 0 0 * * *}
+
 object-storage:
   qiniu:
     access-key: ${QINIU_ACCESS_KEY:}

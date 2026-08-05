@@ -3,6 +3,7 @@ package com.unispeaking.domain.po.session;
 import com.unispeaking.domain.po.session.ConversationMessage;
 import com.unispeaking.domain.vo.session.SessionPrompt;
 import com.unispeaking.domain.vo.provider.ProviderType;
+import com.unispeaking.domain.vo.scene.IeltsPart;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
 import java.time.Instant;
@@ -17,6 +18,7 @@ public abstract class AbstractSceneSession {
 	private final List<ConversationMessage> messages = new CopyOnWriteArrayList<>();
 	private String sceneId;
 	private SceneType sceneType;
+	private IeltsPart ieltsPart;
 	private String providerSessionId;
 	private SessionStatus status = SessionStatus.CREATED;
 	private Instant endedAt;
@@ -99,6 +101,8 @@ public abstract class AbstractSceneSession {
 	public void setSceneId(String sceneId) { this.sceneId = sceneId; }
 	public SceneType getSceneType() { return sceneType; }
 	public void setSceneType(SceneType sceneType) { this.sceneType = sceneType; }
+	public IeltsPart getIeltsPart() { return ieltsPart; }
+	public void setIeltsPart(IeltsPart ieltsPart) { this.ieltsPart = ieltsPart; }
 	public String getProviderSessionId() { return providerSessionId; }
 	public SessionStatus getStatus() { return status; }
 	public Instant getEndedAt() { return endedAt; }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  buildResponseCreateEvent,
   buildRealtimeSessionConfig,
   createTurnAudioCaptureController,
   extractCompletedAssistantMessage,
@@ -7,6 +8,21 @@ import {
   normalizeBaseUrl,
   websocketUrl,
 } from "../src/realtimeClient.js";
+
+assert.deepEqual(
+  buildResponseCreateEvent({
+    id: "turn-2",
+    instructions: "Ask exactly: Where do you live?",
+  }),
+  {
+    event_id: "turn-2",
+    type: "response.create",
+    response: {
+      instructions: "Ask exactly: Where do you live?",
+      modalities: ["text", "audio"],
+    },
+  },
+);
 
 assert.equal(normalizeBaseUrl("/backend"), "/backend");
 assert.equal(normalizeBaseUrl("https://api.example.com/backend/"), "https://api.example.com/backend");
@@ -84,6 +100,20 @@ const fasterHarvey = buildRealtimeSessionConfig({
   model: "qwen3.5-omni-flash-realtime",
   speechSpeed: "FASTER",
 });
+const deterministicIeltsPart = buildRealtimeSessionConfig({
+  systemPrompt: "Ask only the prepared IELTS question.",
+  model: "qwen3.5-omni-flash-realtime",
+  automaticTurnResponses: false,
+  silenceDurationMs: 3_000,
+  turnDetectionType: "server_vad",
+});
+const partTwoSession = buildRealtimeSessionConfig({
+  systemPrompt: "Conduct IELTS Part 2.",
+  model: "qwen3.5-omni-flash-realtime",
+  automaticTurnResponses: false,
+  silenceDurationMs: 3_000,
+  interruptResponse: false,
+});
 
 assert.equal(slowerKaterina.voice, "Katerina");
 assert.match(slowerKaterina.instructions, /70 English words per minute/);
@@ -92,6 +122,11 @@ assert.match(fasterHarvey.instructions, /210 English words per minute/);
 assert.equal(fasterHarvey.input_audio_transcription.model, "qwen3-asr-flash-realtime");
 assert.equal(fasterHarvey.turn_detection.type, "semantic_vad");
 assert.equal(fasterHarvey.turn_detection.silence_duration_ms, 600);
+assert.equal(deterministicIeltsPart.turn_detection.type, "server_vad");
+assert.equal(deterministicIeltsPart.turn_detection.silence_duration_ms, 3_000);
+assert.equal(deterministicIeltsPart.turn_detection.create_response, false);
+assert.equal(partTwoSession.turn_detection.create_response, false);
+assert.equal(partTwoSession.turn_detection.interrupt_response, false);
 
 let segmentStartCount = 0;
 let segmentStopCount = 0;

@@ -1,8 +1,11 @@
 import { getAccessToken } from "./apiClient.js";
 import {
   advanceCustomDialogueState,
+  advanceIeltsDialogueState,
+  advanceIeltsPart2State,
   completeCustomDialogue,
   evaluateCustomDialogueTurn,
+  evaluateIeltsDialogueTurn,
   getCustomDialogueEvaluation,
 } from "./apiClient.js";
 import { createPcmWavSegmentRecorder } from "./audioRecorder.js";
@@ -14,6 +17,9 @@ const DATA_CHANNEL_LABEL = "oai-events";
 const DEFAULT_SPEECH_SPEED = "NATURAL";
 const SCENARIO_CLOSING_TIMEOUT_MS = 20_000;
 const SCENARIO_AUDIO_DRAIN_MS = 1_200;
+const SESSION_UPDATE_TIMEOUT_MS = 5_000;
+const IELTS_STATE_TIMEOUT_MS = 5_000;
+const IELTS_INPUT_RECOVERY_MS = 2_500;
 const SPEECH_SPEED_INSTRUCTIONS = {
   SLOWER: "Voice delivery rule: speak distinctly and very slowly, around 70 English words per minute, with clear pauses between short phrases.",
   MODERATE: "Voice delivery rule: speak at a calm moderate pace, around 120 English words per minute, with clear pauses between ideas.",
@@ -22,6 +28,22 @@ const SPEECH_SPEED_INSTRUCTIONS = {
 };
 
 const eventId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+export function buildResponseCreateEvent({ id, instructions = "" } = {}) {
+  const turnInstructions = String(instructions || "").trim();
+  return {
+    event_id: id || eventId("response"),
+    type: "response.create",
+    ...(turnInstructions
+      ? {
+        response: {
+          instructions: turnInstructions,
+          modalities: ["text", "audio"],
+        },
+      }
+      : {}),
+  };
+}
 
 export function normalizeBaseUrl(baseUrl) {
   if (!baseUrl) return "";
@@ -160,6 +182,9 @@ export function buildRealtimeSessionConfig({
   model = DEFAULT_MODEL,
   speechSpeed = DEFAULT_SPEECH_SPEED,
   automaticTurnResponses = true,
+  silenceDurationMs = 600,
+  turnDetectionType = null,
+  interruptResponse = true,
 } = {}) {
   const selectedSpeechSpeed = normalizedSpeechSpeed(speechSpeed);
   return {
@@ -174,12 +199,13 @@ export function buildRealtimeSessionConfig({
     input_audio_transcription: { model: "qwen3-asr-flash-realtime" },
     smooth_output: false,
     turn_detection: {
-      type: String(model || DEFAULT_MODEL).startsWith("qwen3.5-omni-") ? "semantic_vad" : "server_vad",
+      type: turnDetectionType
+        || (String(model || DEFAULT_MODEL).startsWith("qwen3.5-omni-") ? "semantic_vad" : "server_vad"),
       threshold: 0.5,
       prefix_padding_ms: 500,
-      silence_duration_ms: 600,
+      silence_duration_ms: Math.max(600, Number(silenceDurationMs) || 600),
       create_response: Boolean(automaticTurnResponses),
-      interrupt_response: true,
+      interrupt_response: Boolean(interruptResponse),
     },
   };
 }
@@ -217,11 +243,15 @@ export function createTurnAudioCaptureController(recorder) {
 
 export function createRealtimeClient({
   apiBase = import.meta.env?.VITE_BACKEND_URL || DEFAULT_API_BASE,
-  sceneId: customSceneId = null,
+  sceneId = null,
+  sceneType = "free-chat",
   onEvent = () => {},
   onRemoteStream = () => {},
 } = {}) {
   const base = normalizeBaseUrl(apiBase);
+  const customSceneId = sceneType === "custom" ? sceneId : null;
+  const ieltsSceneId = sceneType === "ielts" ? sceneId : null;
+  const manualTurnResponses = Boolean(customSceneId || ieltsSceneId);
   let peer = null;
   let channel = null;
   let sessionSocket = null;
@@ -243,6 +273,7 @@ export function createRealtimeClient({
   let segmentRecorder = null;
   let learnerTurnNo = 0;
   let pendingOperations = new Set();
+  let pendingEvaluationOperations = new Set();
   let baseSessionInstructions = "";
   let scenarioCompletionPending = false;
   let scenarioCompletionEmitted = false;
@@ -251,7 +282,13 @@ export function createRealtimeClient({
   let responsePending = false;
   let closingResponseRequested = false;
   let statePipeline = Promise.resolve();
+  let ieltsActivePart = null;
+  let ieltsPreparedQuestions = [];
+  let ieltsDialogueCompleted = false;
+  let ieltsInputRecoveryTimer = null;
   let turnAudioCapture = null;
+  let pendingInstructionUpdate = null;
+  let instructionUpdateQueue = Promise.resolve(true);
 
   const emit = (event) => onEvent(event);
 
@@ -259,7 +296,89 @@ export function createRealtimeClient({
     const track = localStream?.getAudioTracks?.()[0];
     const enabled = started && inputReady && !muted && !paused;
     if (track) track.enabled = enabled;
-    if (enabled && customSceneId) turnAudioCapture?.start();
+    if (enabled && (customSceneId || ieltsSceneId)) turnAudioCapture?.start();
+  }
+
+  function isDeterministicIeltsPart() {
+    return ieltsActivePart === "PART_1" || ieltsActivePart === "PART_3";
+  }
+
+  function clearIeltsInputRecovery() {
+    if (!ieltsInputRecoveryTimer) return;
+    window.clearTimeout(ieltsInputRecoveryTimer);
+    ieltsInputRecoveryTimer = null;
+  }
+
+  function releaseIeltsInput(source) {
+    clearIeltsInputRecovery();
+    if (!isDeterministicIeltsPart()
+      || ieltsDialogueCompleted
+      || !started
+      || paused
+      || muted) {
+      return;
+    }
+    responsePending = false;
+    inputReady = true;
+    setTrackEnabled();
+    emit({ type: "local.ielts_input_ready", source });
+  }
+
+  function scheduleIeltsInputRecovery() {
+    if (!isDeterministicIeltsPart() || ieltsDialogueCompleted) return;
+    clearIeltsInputRecovery();
+    ieltsInputRecoveryTimer = window.setTimeout(() => {
+      ieltsInputRecoveryTimer = null;
+      releaseIeltsInput("assistant_output_fallback");
+    }, IELTS_INPUT_RECOVERY_MS);
+  }
+
+  function withTimeout(operation, timeoutMs, message) {
+    let timer = null;
+    return Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]).finally(() => {
+      if (timer) window.clearTimeout(timer);
+    });
+  }
+
+  function exactIeltsInstruction(utterance, completed) {
+    const partLabel = ieltsActivePart?.replace("_", " ") || "PART";
+    return `# IELTS ${partLabel} — Runtime State: ${completed ? "FINISHED" : "PREPARED_QUESTIONS"}\n\n`
+      + "The question sequence is controlled by the application. Never greet, evaluate, encourage, "
+      + "explain, add a transition, ask a follow-up, or repeat an earlier question. Keep the examiner "
+      + "turn as short as possible. Your entire spoken response must be exactly this sentence, with no "
+      + `words before or after it:\n\n\"${String(utterance || "").replaceAll("\\", "\\\\").replaceAll('"', '\\"')}\"`;
+  }
+
+  function fallbackIeltsState(turnNo) {
+    const totalQuestions = ieltsPreparedQuestions.length;
+    if (!totalQuestions) return null;
+    const isPart1 = ieltsActivePart === "PART_1";
+    const answeredQuestions = Math.min(
+      totalQuestions,
+      Math.max(0, isPart1 ? turnNo - 1 : turnNo),
+    );
+    const completed = answeredQuestions >= totalQuestions;
+    const utterance = completed
+      ? ieltsActivePart === "PART_3"
+        ? "Thank you. That is the end of the speaking test."
+        : "Thank you. That is the end of Part 1."
+      : ieltsPreparedQuestions[answeredQuestions];
+    return {
+      sceneId: ieltsSceneId,
+      sessionId,
+      part: ieltsActivePart,
+      openingCompleted: !isPart1 || turnNo >= 1,
+      answeredQuestions,
+      totalQuestions,
+      completed,
+      controlInstruction: exactIeltsInstruction(utterance, completed),
+      fallback: true,
+    };
   }
 
   function rejectPendingAcks(error) {
@@ -395,12 +514,58 @@ export function createRealtimeClient({
     });
   }
 
+  function sendInstructionUpdateAndWait() {
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        if (pendingInstructionUpdate?.resolve === resolve) {
+          pendingInstructionUpdate = null;
+        }
+        reject(new Error("等待实时会话指令更新确认超时"));
+      }, SESSION_UPDATE_TIMEOUT_MS);
+      pendingInstructionUpdate = {
+        resolve,
+        reject,
+        timer,
+        expectedInstructions: sessionConfig.instructions,
+      };
+      try {
+        sendProviderEvent({
+          event_id: eventId("instructions"),
+          type: "session.update",
+          session: { instructions: sessionConfig.instructions },
+        });
+      } catch (error) {
+        window.clearTimeout(timer);
+        pendingInstructionUpdate = null;
+        reject(error);
+      }
+    });
+  }
+
+  function settleInstructionUpdate(error = null, appliedInstructions = null) {
+    if (!pendingInstructionUpdate) return false;
+    const pending = pendingInstructionUpdate;
+    pendingInstructionUpdate = null;
+    window.clearTimeout(pending.timer);
+    if (error) pending.reject(error);
+    else pending.resolve(true);
+    return true;
+  }
+
+  async function waitForInstructionUpdate() {
+    try {
+      await instructionUpdateQueue;
+    } catch (error) {
+      emit({
+        type: "local.provider_warning",
+        message: error instanceof Error ? error.message : "实时会话指令更新失败",
+      });
+    }
+  }
+
   function requestInitialResponse() {
     if (initialResponseStarted) return;
-    sendProviderEvent({
-      event_id: eventId("greeting"),
-      type: "response.create",
-    });
+    sendProviderEvent(buildResponseCreateEvent({ id: eventId("greeting") }));
     initialResponseFallbackTimer = window.setTimeout(() => {
       initialResponseFallbackTimer = null;
       inputReady = true;
@@ -445,7 +610,7 @@ export function createRealtimeClient({
     }, SCENARIO_AUDIO_DRAIN_MS);
   }
 
-  function requestTurnResponse({ closing = false } = {}) {
+  function requestTurnResponse({ closing = false, instructions = "" } = {}) {
     if (responsePending) return false;
     responsePending = true;
     if (closing) {
@@ -453,16 +618,44 @@ export function createRealtimeClient({
       armScenarioCompletionTimeout();
     }
     try {
-      sendProviderEvent({
-        event_id: eventId(closing ? "closing_response" : "turn_response"),
-        type: "response.create",
-      });
+      sendProviderEvent(buildResponseCreateEvent({
+        id: eventId(closing ? "closing_response" : "turn_response"),
+        instructions,
+      }));
     } catch (error) {
       responsePending = false;
       if (closing) closingResponseRequested = false;
       throw error;
     }
     return true;
+  }
+
+  async function transitionIeltsPart2(eventName) {
+    if (!ieltsSceneId || ieltsActivePart !== "PART_2" || !sessionId) {
+      throw new Error("当前会话不是 IELTS Part 2");
+    }
+    const completing = eventName === "ANSWER_COMPLETE"
+      || eventName === "LONG_TURN_TIME_LIMIT";
+    if (completing) {
+      inputReady = false;
+      muted = true;
+      setTrackEnabled();
+      turnAudioCapture?.stop();
+    }
+    const state = await withTimeout(
+      advanceIeltsPart2State(ieltsSceneId, sessionId, eventName),
+      IELTS_STATE_TIMEOUT_MS,
+      "IELTS Part 2 状态推进超时",
+    );
+    ieltsDialogueCompleted = Boolean(state?.completed);
+    if (eventName === "PREPARATION_COMPLETE") {
+      muted = false;
+      inputReady = false;
+      setTrackEnabled();
+    }
+    emit({ type: "local.ielts_part2_state", state, event: eventName });
+    requestTurnResponse({ instructions: state?.controlInstruction || "" });
+    return state;
   }
 
   function applyScenarioState(state) {
@@ -492,6 +685,8 @@ export function createRealtimeClient({
     const accessToken = getAccessToken();
     const path = customSceneId
       ? `/api/custom-scenes/${encodeURIComponent(customSceneId)}/sessions`
+      : ieltsSceneId
+        ? `/api/ielts/${encodeURIComponent(ieltsSceneId)}/sessions`
       : "/api/scene-sessions";
     const response = await fetch(`${base}${path}`, {
       method: "POST",
@@ -503,7 +698,9 @@ export function createRealtimeClient({
         offerSdp,
         provider: "QWEN",
         model: model || DEFAULT_MODEL,
-        voice: voice || DEFAULT_VOICE,
+        ...(ieltsSceneId
+          ? { voiceId: voice || DEFAULT_VOICE }
+          : { voice: voice || DEFAULT_VOICE }),
         translationEnabled: true,
       }),
     });
@@ -525,7 +722,7 @@ export function createRealtimeClient({
         closingResponseRequested = false;
       }
       responsePending = true;
-      inputReady = !customSceneId && !scenarioCompletionPending;
+      inputReady = !manualTurnResponses && !scenarioCompletionPending;
       if (initialResponseFallbackTimer) {
         window.clearTimeout(initialResponseFallbackTimer);
         initialResponseFallbackTimer = null;
@@ -536,6 +733,13 @@ export function createRealtimeClient({
     }
 
     emit(event);
+
+    if (event.type === "error"
+      && pendingInstructionUpdate
+      && /session(?:\s|\.)*update|instructions?/i.test(event.error?.message || event.message || "")) {
+      settleInstructionUpdate(new Error(event.error?.message || event.message));
+      return;
+    }
 
     if (event.type === "session.created") {
       started = true;
@@ -555,20 +759,23 @@ export function createRealtimeClient({
     }
 
     if (event.type === "session.updated") {
+      settleInstructionUpdate(null, event.session?.instructions);
       if (sessionUpdateAcknowledged) return;
       sessionUpdateAcknowledged = true;
       if (sessionUpdateRetryTimer) {
         window.clearTimeout(sessionUpdateRetryTimer);
         sessionUpdateRetryTimer = null;
       }
-      inputReady = !customSceneId;
+      inputReady = !manualTurnResponses;
       setTrackEnabled();
       requestInitialResponse();
       return;
     }
 
     if (event.type === "input_audio_buffer.speech_started") {
-      if (scenarioCompletionPending) return;
+      if (scenarioCompletionPending
+        || (ieltsActivePart === "PART_2" && ieltsDialogueCompleted)) return;
+      clearIeltsInputRecovery();
       turnAudioCapture?.start();
       return;
     }
@@ -579,9 +786,10 @@ export function createRealtimeClient({
     }
 
     if (event.type === "response.created") {
+      clearIeltsInputRecovery();
       initialResponseStarted = true;
       responsePending = true;
-      inputReady = !customSceneId;
+      inputReady = !manualTurnResponses;
       if (initialResponseFallbackTimer) {
         window.clearTimeout(initialResponseFallbackTimer);
         initialResponseFallbackTimer = null;
@@ -591,10 +799,14 @@ export function createRealtimeClient({
     }
 
     if (event.type === "conversation.item.input_audio_transcription.completed") {
-      if (scenarioCompletionPending) return;
+      if (scenarioCompletionPending
+        || (ieltsActivePart === "PART_2" && ieltsDialogueCompleted)) {
+        turnAudioCapture?.stop();
+        return;
+      }
       const transcript = String(event.transcript || event.text || "").trim();
       if (!transcript) return;
-      if (customSceneId) {
+      if (manualTurnResponses) {
         inputReady = false;
         setTrackEnabled();
       }
@@ -607,7 +819,98 @@ export function createRealtimeClient({
       if (customSceneId) {
         requestTurnResponse();
       }
-      const persisted = await persistenceOperation;
+      const ieltsTurnNo = ieltsSceneId ? learnerTurnNo + 1 : null;
+      const deterministicIeltsPart = ieltsActivePart === "PART_1"
+        || ieltsActivePart === "PART_3";
+      const ieltsStateOperation = deterministicIeltsPart
+        ? withTimeout(
+          advanceIeltsDialogueState(
+            ieltsSceneId,
+            sessionId,
+            ieltsTurnNo,
+          ),
+          IELTS_STATE_TIMEOUT_MS,
+          "IELTS 题目状态推进超时",
+        )
+        : null;
+      let persisted = false;
+      try {
+        persisted = await persistenceOperation;
+      } catch (persistenceError) {
+        if (!ieltsSceneId) throw persistenceError;
+      }
+      if (ieltsSceneId) {
+        let turnInstructions = "";
+        if (ieltsStateOperation) {
+          let state = null;
+          try {
+            state = await ieltsStateOperation;
+          } catch (stateError) {
+            state = fallbackIeltsState(ieltsTurnNo);
+            emit({
+              type: state ? "local.ielts_state_recovered" : "local.ielts_state_error",
+              message: stateError instanceof Error
+                ? stateError.message
+                : "IELTS 题目状态推进失败",
+            });
+          }
+          if (state) {
+            ieltsDialogueCompleted = Boolean(state.completed);
+            if (ieltsDialogueCompleted) clearIeltsInputRecovery();
+            emit({ type: "local.ielts_state", state });
+            turnInstructions = String(state.controlInstruction || "").trim();
+          }
+        } else if (ieltsActivePart === "PART_2") {
+          if (!ieltsDialogueCompleted) {
+            try {
+              await transitionIeltsPart2("ANSWER_COMPLETE");
+            } catch (stateError) {
+              emit({
+                type: "local.ielts_state_error",
+                message: stateError instanceof Error
+                  ? stateError.message
+                  : "IELTS Part 2 状态推进失败",
+              });
+            }
+          }
+        } else {
+          await waitForInstructionUpdate();
+        }
+        if (ieltsActivePart !== "PART_2") {
+          requestTurnResponse({ instructions: turnInstructions });
+        }
+      }
+      let ieltsTurnAudio = null;
+      if (ieltsSceneId) {
+        learnerTurnNo = ieltsTurnNo;
+        ieltsTurnAudio = await turnAudioCapture?.take();
+      }
+      if (ieltsSceneId && persisted) {
+        const turnNo = ieltsTurnNo;
+        const evaluationOperation = evaluateIeltsDialogueTurn(
+          ieltsSceneId,
+          sessionId,
+          turnNo,
+          transcript,
+          ieltsTurnAudio,
+        );
+        pendingEvaluationOperations.add(evaluationOperation);
+        void evaluationOperation.then((turnResult) => {
+          emit({
+            type: "local.turn_evaluation",
+            evaluation: turnResult?.evaluation || turnResult,
+            scenarioState: null,
+          });
+        }).catch((error) => {
+          emit({
+            type: "local.turn_evaluation_error",
+            turnNo,
+            message: error instanceof Error ? error.message : "IELTS 本轮评分失败",
+          });
+        }).finally(() => {
+          pendingEvaluationOperations.delete(evaluationOperation);
+        });
+      }
       if (customSceneId && persisted) {
         const turnNo = ++learnerTurnNo;
         const wavAudio = await turnAudioCapture?.take();
@@ -661,6 +964,7 @@ export function createRealtimeClient({
 
     const completedAssistantMessage = extractCompletedAssistantMessage(event);
     if (completedAssistantMessage) {
+      scheduleIeltsInputRecovery();
       await addSessionMessage(
         0,
         completedAssistantMessage.text,
@@ -669,6 +973,11 @@ export function createRealtimeClient({
     }
     if (event.type === "response.done") {
       responsePending = false;
+      if (ieltsActivePart === "PART_2" && ieltsDialogueCompleted) {
+        inputReady = false;
+        setTrackEnabled();
+        emit({ type: "local.ielts_part2_completion_ready" });
+      }
       if (scenarioCompletionPending) {
         if (closingResponseRequested) {
           if (scenarioCompletionTimer) {
@@ -679,9 +988,13 @@ export function createRealtimeClient({
         } else {
           requestTurnResponse({ closing: true });
         }
-      } else if (customSceneId) {
-        inputReady = true;
-        setTrackEnabled();
+      } else if (manualTurnResponses) {
+        if (isDeterministicIeltsPart()) {
+          releaseIeltsInput("response_done");
+        } else {
+          inputReady = true;
+          setTrackEnabled();
+        }
       }
     }
   }
@@ -707,7 +1020,7 @@ export function createRealtimeClient({
       localStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
-      if (customSceneId) {
+      if (customSceneId || ieltsSceneId) {
         segmentRecorder = await createPcmWavSegmentRecorder(localStream);
         turnAudioCapture = createTurnAudioCaptureController(segmentRecorder);
       }
@@ -733,6 +1046,15 @@ export function createRealtimeClient({
         model,
       });
       sessionId = backend.sessionId;
+      ieltsActivePart = backend.currentStage || null;
+      ieltsPreparedQuestions = Array.isArray(
+        backend.content?.[ieltsActivePart === "PART_1" ? "part1" : "part3"],
+      )
+        ? backend.content[ieltsActivePart === "PART_1" ? "part1" : "part3"]
+          .map((item) => String(item?.question || "").trim())
+          .filter(Boolean)
+        : [];
+      ieltsDialogueCompleted = false;
       const finalSystemPrompt = String(backend.systemPrompt || "").trim();
       if (!finalSystemPrompt) {
         throw new Error("后端没有返回由 SceneService 生成的五层提示词");
@@ -742,7 +1064,10 @@ export function createRealtimeClient({
         voice: backend.voiceId || DEFAULT_VOICE,
         model,
         speechSpeed,
-        automaticTurnResponses: !customSceneId,
+        automaticTurnResponses: !manualTurnResponses,
+        silenceDurationMs: ieltsSceneId ? 3_000 : 600,
+        turnDetectionType: isDeterministicIeltsPart() ? "server_vad" : null,
+        interruptResponse: ieltsActivePart !== "PART_2",
       });
       baseSessionInstructions = sessionConfig.instructions;
 
@@ -784,8 +1109,62 @@ export function createRealtimeClient({
     emit({ type: "local.interrupted" });
   }
 
+  function requestResponse() {
+    if (!channel || channel.readyState !== "open") {
+      throw new Error("实时数据通道尚未连接");
+    }
+    return requestTurnResponse();
+  }
+
+  function updateInstructions(additionalInstructions = "", { replaceBase = false } = {}) {
+    if (!sessionConfig || !channel || channel.readyState !== "open") {
+      return Promise.reject(new Error("实时数据通道尚未连接"));
+    }
+    const instruction = String(additionalInstructions || "").trim();
+    instructionUpdateQueue = instructionUpdateQueue
+      .catch(() => false)
+      .then(() => {
+        sessionConfig = {
+          ...sessionConfig,
+          instructions: replaceBase
+            ? instruction
+            : [baseSessionInstructions, instruction]
+              .filter(Boolean)
+              .join("\n\n"),
+        };
+        return sendInstructionUpdateAndWait();
+      });
+    return instructionUpdateQueue;
+  }
+
   async function waitForPendingOperations(maxWaitMs) {
-    const operations = [...pendingOperations];
+    const deadline = Date.now() + maxWaitMs;
+    while (Date.now() < deadline) {
+      const operations = [...pendingOperations];
+      if (!operations.length) {
+        // A message persistence promise can settle immediately before its
+        // continuation enqueues the corresponding turn evaluation.
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+        if (!pendingOperations.size) return;
+        continue;
+      }
+      let timeout = null;
+      const remaining = Math.max(0, deadline - Date.now());
+      try {
+        await Promise.race([
+          Promise.allSettled(operations),
+          new Promise((resolve) => {
+            timeout = window.setTimeout(resolve, remaining);
+          }),
+        ]);
+      } finally {
+        if (timeout) window.clearTimeout(timeout);
+      }
+    }
+  }
+
+  async function waitForEvaluations(maxWaitMs = 30_000) {
+    const operations = [...pendingEvaluationOperations];
     if (!operations.length) return;
     let timeout = null;
     try {
@@ -804,14 +1183,22 @@ export function createRealtimeClient({
     notifyBackend = true,
     reason = "user_stop",
     emitEnded = true,
+    awaitEvaluations = true,
   } = {}) {
     clearInitializationTimers();
+    clearIeltsInputRecovery();
+    settleInstructionUpdate(new Error("实时会话已结束"));
     started = false;
     inputReady = false;
     setTrackEnabled();
     localStream?.getTracks?.().forEach((track) => track.stop());
 
-    await waitForPendingOperations(reason === "user_stop" ? 3_000 : 15_000);
+    // IELTS 的整场评分依赖逐轮发音评分已落库；结束会话前给评分请求
+    // 足够时间完成，避免总评先于最后一轮 turn_evaluation 查询。
+    await waitForPendingOperations(reason === "user_stop" ? 15_000 : 8_000);
+    if (awaitEvaluations) {
+      await waitForEvaluations(reason === "user_stop" ? 30_000 : 15_000);
+    }
     const stopTime = new Date().toISOString();
     const endingSessionId = sessionId;
     const endRequest = notifyBackend && sessionId
@@ -887,6 +1274,7 @@ export function createRealtimeClient({
       turnAudioCapture = null;
       learnerTurnNo = 0;
       pendingOperations = new Set();
+      pendingEvaluationOperations = new Set();
       baseSessionInstructions = "";
       scenarioCompletionPending = false;
       scenarioCompletionEmitted = false;
@@ -895,6 +1283,12 @@ export function createRealtimeClient({
       responsePending = false;
       closingResponseRequested = false;
       statePipeline = Promise.resolve();
+      ieltsActivePart = null;
+      ieltsPreparedQuestions = [];
+      ieltsDialogueCompleted = false;
+      ieltsInputRecoveryTimer = null;
+      pendingInstructionUpdate = null;
+      instructionUpdateQueue = Promise.resolve(true);
       pendingAcks = [];
       persistedMessageIds = new Set();
       sessionUpdateAcknowledged = false;
@@ -902,7 +1296,7 @@ export function createRealtimeClient({
       paused = false;
       muted = false;
     }
-    if (completionError && customSceneId) throw completionError;
+    if (completionError && (customSceneId || ieltsSceneId)) throw completionError;
     if (emitEnded) emit({ type: "local.ended", reason, completion });
     return completion;
   }
@@ -922,6 +1316,10 @@ export function createRealtimeClient({
     pause,
     resume,
     interrupt,
+    requestResponse,
+    transitionIeltsPart2,
+    updateInstructions,
+    waitForEvaluations,
     stop,
     setMuted,
     isActive: () => Boolean(peer || sessionId),

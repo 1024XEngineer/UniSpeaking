@@ -21,14 +21,19 @@ import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.component.session.ActiveSessionRegistry;
 import com.unispeaking.domain.dto.evaluation.SpeechEvaluationCommand;
 import com.unispeaking.infrastructure.evaluation.client.EvaluationLlmClient;
+import com.unispeaking.infrastructure.evaluation.client.IeltsEvaluationLlmClient;
 import com.unispeaking.infrastructure.evaluation.client.PronunciationAssessmentClient;
+import com.unispeaking.infrastructure.persistence.repository.evaluation.IeltsEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SceneSentenceReadingRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.TurnEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPracticeRepository;
+import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.evaluation.impl.EvaluationServiceImpl;
+import com.unispeaking.service.scene.SceneFlowService;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -46,6 +51,11 @@ class EvaluationServiceImplSpeechTest {
 	private TurnEvaluationRepository turnEvaluationRepository;
 	private SessionEvaluationRepository sessionEvaluationRepository;
 	private SceneSentenceReadingRepository sceneSentenceReadingRepository;
+	private IeltsPracticeRepository ieltsPracticeRepository;
+	private SceneFlowService sceneFlowService;
+	private PracticeSessionRepository practiceSessionRepository;
+	private IeltsEvaluationRepository ieltsEvaluationRepository;
+	private IeltsEvaluationLlmClient ieltsLlmClient;
 	private AuthService authService;
 	private EvaluationService service;
 
@@ -60,6 +70,11 @@ class EvaluationServiceImplSpeechTest {
 		sessionEvaluationRepository = mock(SessionEvaluationRepository.class);
 		sceneSentenceReadingRepository =
 				mock(SceneSentenceReadingRepository.class);
+		ieltsPracticeRepository = mock(IeltsPracticeRepository.class);
+		sceneFlowService = mock(SceneFlowService.class);
+		practiceSessionRepository = mock(PracticeSessionRepository.class);
+		ieltsEvaluationRepository = mock(IeltsEvaluationRepository.class);
+		ieltsLlmClient = mock(IeltsEvaluationLlmClient.class);
 		authService = mock(AuthService.class);
 		service = new EvaluationServiceImpl(
 				pronunciationClient,
@@ -70,6 +85,11 @@ class EvaluationServiceImplSpeechTest {
 				turnEvaluationRepository,
 				sessionEvaluationRepository,
 				sceneSentenceReadingRepository,
+				ieltsPracticeRepository,
+				sceneFlowService,
+				practiceSessionRepository,
+				ieltsEvaluationRepository,
+				ieltsLlmClient,
 				authService);
 	}
 
@@ -83,6 +103,11 @@ class EvaluationServiceImplSpeechTest {
 				turnEvaluationRepository,
 				sessionEvaluationRepository,
 				sceneSentenceReadingRepository,
+				ieltsPracticeRepository,
+				sceneFlowService,
+				practiceSessionRepository,
+				ieltsEvaluationRepository,
+				ieltsLlmClient,
 				authService);
 	}
 

@@ -1,0 +1,74 @@
+# IELTS Speaking official text-criterion rubric
+
+Apply the public IELTS Speaking Band Descriptors and Key Assessment Criteria. This rubric covers only the three criteria that can be judged from transcript plus supplied fluency evidence. Pronunciation is excluded and must come from the audio model.
+
+## Non-negotiable scoring method
+
+1. Score Fluency and Coherence (FC), Lexical Resource (LR), and Grammatical Range and Accuracy (GRA) independently.
+2. For each criterion, select the highest whole band whose positive features are all demonstrated by the available candidate evidence. When the evidence fits between two bands, select the lower band.
+3. Do not average sub-features to create a criterion band. A conspicuous recurring lower-band limitation prevents promotion to a higher band whose positive features require consistent control.
+4. Judge recurring performance, not the best sentence. Treat an isolated success or slip as isolated. Bands 8 and 9 require broad, sustained evidence and cannot be justified by one polished phrase or one short answer.
+5. Meaning being understandable is not, by itself, evidence for band 6 or above.
+6. Do not reward answer length, rare words, idioms, or complex grammar unless they are relevant, natural, accurate, and controlled.
+7. Do not infer pauses, rate, rhythm, stress, intonation, accent, or phoneme quality from punctuation or ASR text. Use a supplied metric only for what it explicitly measures. A generic 0-100 fluency score is supporting evidence, not an IELTS band and must never be converted arithmetically to one.
+8. Treat the transcript as potentially noisy ASR. Do not penalise an apparent recognition error unless it recurs, is supported by speech evidence, or clearly disrupts meaning.
+9. If the sample is too limited to demonstrate a higher-band feature, do not assume that feature. Select the highest band actually evidenced and lower confidence. Formulaic introductions, examiner language, and meta-commands such as "next question" are not evidence of the candidate's range.
+10. Band 0 is only for no attendance/no completion. If the candidate attempted speech, use bands 1-9 according to the evidence.
+
+## What each criterion means
+
+- FC: continuity, appropriate rate and effort; logical sequencing; relevant development; clear stages in narration/discussion/argument; and appropriate cohesive devices, discourse markers, pausing and fillers. False starts, backtracking, functionless repetition, and word-search pauses matter when supported by speech evidence.
+- LR: variety, precision and appropriacy of vocabulary for referential meaning, register, collocation and attitude; plus the ability to paraphrase around a lexical gap.
+- GRA: range and appropriate use of spoken sentence forms, including sentence length, subordination, verb-phrase complexity, modification and information focus; accuracy is judged by error density and the effect of errors on intelligibility and precision.
+
+## Whole-band anchors
+
+### Band 9
+- FC: virtually effortless and fully coherent; repetition/self-correction is very occasional; hesitation prepares content rather than searches for language; development is relevant and appropriately extended.
+- LR: total flexibility and precision across contexts, with sustained accurate idiomatic use.
+- GRA: structures are consistently precise and accurate except for native-speaker-like slips.
+
+### Band 8
+- FC: fluent with only very occasional repetition/self-correction; most hesitation is content-related; development is coherent, appropriate and relevant.
+- LR: wide and flexible resource; precise meaning; skilful less-common/idiomatic and collocational use despite occasional inaccuracy; effective paraphrase.
+- GRA: wide, flexible structural range; most sentences are error-free; remaining errors are occasional and non-systematic, though a few basic errors may persist.
+
+### Band 7
+- FC: readily keeps going and can produce extended speech without noticeable effort; some mid-sentence hesitation/repetition/self-correction may show language search but does not damage coherence; cohesive features are flexible.
+- LR: flexible resource across topics; some appropriate less-common/idiomatic language and collocational/style awareness despite inaccuracies; effective paraphrase.
+- GRA: a range of structures is used flexibly; error-free sentences are frequent; simple and complex forms are effective despite some errors and a few persistent basic errors.
+
+### Band 6
+- FC: keeps going and is willing to extend; hesitation/repetition/self-correction sometimes weakens coherence; uses a range of cohesive and discourse features, not always appropriately.
+- LR: sufficient resource to discuss topics at length; inappropriate choices occur but meaning remains clear; paraphrase is generally successful.
+- GRA: a mix of short and complex forms and varied structures with limited flexibility; complex-form errors are frequent but rarely impede communication.
+
+### Band 5
+- FC: usually keeps going through slow speech, repetition and/or self-correction; language-search hesitation is common; cohesive features may be overused; complex speech is less fluent than simple speech.
+- LR: sufficient for familiar and unfamiliar topics but flexibility is limited; paraphrase is attempted with mixed success.
+- GRA: basic forms are fairly accurate; complex forms are limited, usually erroneous and may require reformulation.
+
+### Band 4
+- FC: cannot continue without noticeable pauses; speech may be slow, repetitive and frequently self-corrected; mainly links simple sentences with repetitive connectors and has coherence breakdowns.
+- LR: enough for familiar topics, but only basic meaning on unfamiliar ones; frequent inappropriate word choice; paraphrase is rare.
+- GRA: basic forms and some accurate short utterances occur; subordination is rare; turns and structures are short/repetitive and errors are frequent.
+
+### Band 3
+- FC: frequent, sometimes long word-search pauses; limited linking or movement beyond simple responses; the basic message is often not conveyed.
+- LR: simple vocabulary mainly for personal information and inadequate resource for unfamiliar topics.
+- GRA: basic forms are attempted, but errors are numerous outside apparently memorised utterances.
+
+### Band 2
+- FC: lengthy pauses before almost every word; mostly isolated recognisable words with virtually no communicative significance.
+- LR: very limited isolated or memorised language; little communication is possible without non-verbal support.
+- GRA: no evidence of basic sentence forms.
+
+### Band 1
+- FC: essentially no coherent speech.
+- LR: only a few isolated words and no communication.
+- GRA: no rateable language unless memorised.
+
+### Band 0
+- The candidate did not attend or did not complete the test.
+
+For a complete-test assessment, judge the candidate's average performance across all three Parts against these descriptors. Do not arithmetically average the three diagnostic Part scores and do not assign fixed Part weights.

@@ -28,6 +28,7 @@ import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPracticeRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.infrastructure.realtime.RealtimeSdpExchange;
@@ -69,19 +70,11 @@ class SessionServiceImplSceneSessionLifecycleTest {
 		providerRegistry = mock(AiProviderRegistry.class);
 		service = new SessionServiceImpl(
 				authService,
-				mock(SceneService.class),
-				mock(SceneFlowService.class),
-				mock(SceneRepository.class),
 				sessions,
 				sessionMessages,
 				practiceSessions,
-				realtimeSdpExchange,
-				mock(EvaluationService.class),
-				mock(ScenarioDialogueStateMachine.class),
-				mock(ProfileService.class),
-				mock(FiveLayerPromptBuilder.class),
-				providerRegistry,
-				mock(ObsoleteDialogueCleanup.class));
+				mock(IeltsPracticeRepository.class),
+				mock(SceneFlowService.class));
 	}
 
 	@Test

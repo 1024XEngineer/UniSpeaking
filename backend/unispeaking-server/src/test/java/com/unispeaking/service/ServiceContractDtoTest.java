@@ -8,6 +8,7 @@ import com.unispeaking.domain.dto.scene.SceneFlowResponse;
 import com.unispeaking.domain.dto.scene.SceneGenerationRequest;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
+import com.unispeaking.domain.dto.session.StartIeltsSessionResponse;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
 import com.unispeaking.domain.vo.scene.SceneType;
@@ -43,6 +44,26 @@ class ServiceContractDtoTest {
 	void sessionDtosExposeOnlyTheDefinedFields() {
 		assertFields(StartSessionResponse.class, "sessionId", "startTime");
 		assertFields(Message.class, "owner", "content", "audio");
+	}
+
+	@Test
+	void ieltsStartResponseUsesContentInsteadOfCustomLearningFields() {
+		assertFields(
+				StartIeltsSessionResponse.class,
+				"sceneId",
+				"sceneName",
+				"sceneType",
+				"content",
+				"currentStage",
+				"scoringEnabled",
+				"sessionId",
+				"providerSessionId",
+				"answerSdp",
+				"credentialExpiresAt",
+				"voiceId",
+				"status",
+				"startTime",
+				"systemPrompt");
 	}
 
 	@Test

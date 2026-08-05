@@ -8,6 +8,7 @@ import com.unispeaking.domain.dto.scene.TranslateTextRequest;
 import com.unispeaking.domain.dto.scene.TranslateTextResponse;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.service.auth.AuthService;
+import com.unispeaking.service.scene.FreeChatSceneService;
 import com.unispeaking.service.session.SessionService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,12 +22,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class FreeChatSessionController {
 
 	private final SessionService sessionService;
+	private final FreeChatSceneService freeChatSceneService;
 	private final AuthService authService;
 
 	public FreeChatSessionController(
 			SessionService sessionService,
+			FreeChatSceneService freeChatSceneService,
 			AuthService authService) {
 		this.sessionService = sessionService;
+		this.freeChatSceneService = freeChatSceneService;
 		this.authService = authService;
 	}
 
@@ -38,7 +42,7 @@ public class FreeChatSessionController {
 				SceneType.FREE_CHAT,
 				request.model(),
 				request.voice());
-		return ApiResponse.success(sessionService.startFreeChat(request));
+		return ApiResponse.success(freeChatSceneService.startSession(request));
 	}
 
 	@PostMapping("/{sessionId}/end")
@@ -55,6 +59,6 @@ public class FreeChatSessionController {
 			@PathVariable String sessionId,
 			@Valid @RequestBody TranslateTextRequest request) {
 		return ApiResponse.success(
-				sessionService.translate(sessionId, request.text()));
+				freeChatSceneService.translate(sessionId, request.text()));
 	}
 }
