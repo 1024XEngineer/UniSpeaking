@@ -1200,12 +1200,29 @@ svg { display: block; }
 .assistant-settings__teachers strong { font-size: 18px; }
 .assistant-settings__teachers small { margin-top: 5px; font-size: 12px; }
 .assistant-settings__teachers button > svg { width: 19px; height: 19px; }
-.account-actions { display: grid; }
-.account-actions button { height: 56px; display: grid; grid-template-columns: 28px 1fr 20px; align-items: center; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: #fff; font-size: 15px; cursor: pointer; transition: background .2s, padding-left .2s; }
-.account-actions button:hover { padding-left: 6px; background: #fafaf8; }
-.account-actions button.danger { color: var(--danger); }
-.account-actions svg { width: 19px; height: 19px; }
-.settings-list > article:last-child { padding-block: 24px; }
+.account-security-page { width: min(100%, 960px); margin: 0 auto; letter-spacing: 0; }
+.account-security-header { min-height: 220px; padding-bottom: 38px; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; border-bottom: 1px solid var(--line); }
+.account-security-header__icon { width: 54px; height: 54px; margin-bottom: 28px; display: grid; place-items: center; border-radius: 8px; color: #285f48; background: #eaf3ed; }
+.account-security-header__icon svg { width: 30px; height: 30px; }
+.account-security-header > p, .account-security-section > header p { margin: 0 0 9px; color: #767672; font-size: 10px; font-weight: 760; }
+.account-security-header h1 { margin: 0; font-size: 44px; line-height: 1.08; }
+.account-security-header > span { margin-top: 14px; color: #676762; font-size: 13px; }
+.account-security-section { margin-top: 42px; }
+.account-security-section > header h2 { margin: 0; font-size: 24px; }
+.account-security-list { margin-top: 22px; border-top: 1px solid #deded9; }
+.account-security-list article { min-height: 82px; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 17px; border-bottom: 1px solid #deded9; }
+.account-security-row__icon { width: 34px; height: 34px; display: grid; place-items: center; color: #555551; }
+.account-security-row__icon svg { width: 27px; height: 27px; }
+.account-security-list strong, .account-security-list small { display: block; }
+.account-security-list strong { font-size: 13px; }
+.account-security-list small { margin-top: 5px; color: #777772; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.account-security-state { min-height: 28px; padding: 0 10px; display: inline-flex; align-items: center; border-radius: 999px; color: #62625e; background: #efefec; font-size: 10px; font-weight: 720; }
+.account-security-state.is-active { color: #286044; background: #e7f2ea; }
+.account-security-list button { min-height: 38px; padding: 0 13px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid #cecec9; border-radius: 8px; color: #3f3f3c; background: #fff; font: inherit; font-size: 11px; font-weight: 720; cursor: pointer; }
+.account-security-list button svg { width: 14px; height: 14px; }
+.account-security-list button:hover { border-color: #85857f; background: #f8f8f5; }
+.account-security-list button:focus-visible { outline: 2px solid #252524; outline-offset: 2px; }
+.account-security-list button.is-danger { color: #9a403a; border-color: #dec8c5; }
 .password-form { display: grid; gap: 15px; margin-top: 24px; }
 .password-form label { display: grid; gap: 7px; color: #555551; font-size: 13px; font-weight: 650; }
 .password-form input { height: 46px; padding: 0 13px; border: 1px solid var(--line); border-radius: 10px; font: inherit; }
@@ -1241,6 +1258,8 @@ svg { display: block; }
 }
 
 @media (max-width: 900px) {
+  .account-security-header { min-height: 190px; }
+  .account-security-header h1 { font-size: 38px; }
   .about-product-facts { grid-template-columns: 1fr; }
   .about-product-support > div { grid-template-columns: 1fr; gap: 0; border-bottom: 1px solid #deded9; }
   .about-product-support .external-feedback-link { border-bottom: 0; }
@@ -1270,6 +1289,12 @@ svg { display: block; }
 }
 
 @media (max-width: 560px) {
+  .account-security-header { min-height: 170px; padding-bottom: 30px; }
+  .account-security-header__icon { width: 48px; height: 48px; margin-bottom: 24px; }
+  .account-security-header h1 { font-size: 32px; }
+  .account-security-section { margin-top: 34px; }
+  .account-security-list article { min-height: 90px; grid-template-columns: 34px minmax(0, 1fr); gap: 13px; padding-block: 12px; }
+  .account-security-list article > :last-child { grid-column: 2; justify-self: start; }
   .about-product-hero { min-height: 240px; }
   .about-product-hero h1 { font-size: 32px; }
   .about-product-brand { height: 48px; margin-bottom: 28px; }
