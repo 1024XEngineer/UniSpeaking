@@ -53,6 +53,7 @@ public final class DialogueTurnEvaluationPromptBuilder {
 		root.set("evaluationContext", buildEvaluationContext(input));
 		root.set("previousUtterances", buildPreviousUtterances(input));
 		root.put("currentTranscript", input.currentTranscript());
+		root.set("recommendedExpressions", buildRecommendedExpressions(input));
 
 		String inputJson;
 		try {
@@ -68,6 +69,20 @@ public final class DialogueTurnEvaluationPromptBuilder {
 		return template.replace(
 				DialogueTurnEvaluationPromptTemplateLoader.INPUT_PLACEHOLDER,
 				escapePromptBoundaryCharacters(inputJson));
+	}
+
+	private ArrayNode buildRecommendedExpressions(
+			DialogueTurnEvaluationPromptInput input) {
+		ArrayNode expressions = objectMapper.createArrayNode();
+		input.recommendedExpressions().forEach(expression -> {
+			ObjectNode item = objectMapper.createObjectNode();
+			item.put("type", expression.type());
+			item.put("expression", expression.expression());
+			item.put("translation", expression.translation());
+			item.put("usageNote", expression.usageNote());
+			expressions.add(item);
+		});
+		return expressions;
 	}
 
 	private ObjectNode buildEvaluationContext(

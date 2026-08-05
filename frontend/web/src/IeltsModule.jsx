@@ -9,25 +9,26 @@ import {
   Check,
   MagnifyingGlass,
   NotePencil,
-  Pause,
-  Play,
   Shuffle,
   SquaresFour,
   Subtitles,
-  Trash,
   X,
 } from "@phosphor-icons/react";
 import { NewtonsCradle } from "./NewtonsCradle.jsx";
-import { getIeltsTopics, getIeltsTraining } from "./apiClient.js";
+import {
+  createIeltsSceneFlow,
+  generateIeltsScene,
+  generateIeltsEvaluation,
+  getIeltsEvaluationHistory,
+  getIeltsSettings,
+  getIeltsTopics,
+  getIeltsTraining,
+  updateIeltsSettings,
+} from "./apiClient.js";
+import { createRealtimeClient } from "./realtimeClient.js";
 import { paths } from "./router.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
-
-const mockQuestions = [
-  "Let's talk about your studies. What subject are you studying?",
-  "What do you enjoy most about your studies?",
-  "Do you think your subject will be useful in the future?",
-];
 
 const apiPart = {
   p1: "PART_1",
@@ -43,10 +44,10 @@ const partMeta = {
 };
 
 const ieltsExaminers = [
-  { id: "daniel", name: "Daniel", accent: "英式口音", personality: "严谨沉稳", image: "/examiner/daniel.png", offsetX: 0, intro: "节奏稳定，追问清晰，适合提前熟悉正式考场氛围。" },
-  { id: "marcus", name: "Marcus", accent: "美式口音", personality: "清晰直接", image: "/examiner/marcus.png", offsetX: 5.2, intro: "表达清楚有力，会用自然追问帮助你快速进入回答状态。" },
-  { id: "margaret", name: "Margaret", accent: "英式口音", personality: "从容细致", image: "/examiner/margaret.png", offsetX: 2.2, intro: "语速从容、停顿自然，适合练习完整展开与细节组织。" },
-  { id: "sophia", name: "Sophia", accent: "澳式口音", personality: "自然友好", image: "/examiner/sophia.png", offsetX: 5.6, intro: "交流感自然但流程严格，适合降低紧张感并保持实战节奏。" },
+  { id: "daniel", voiceId: "Harvey", name: "Daniel", accent: "英式口音", personality: "严谨沉稳", image: "/examiner/daniel.png", offsetX: 0, intro: "节奏稳定，追问清晰，适合提前熟悉正式考场氛围。" },
+  { id: "marcus", voiceId: "Aiden", name: "Marcus", accent: "美式口音", personality: "清晰直接", image: "/examiner/marcus.png", offsetX: 5.2, intro: "表达清楚有力，会用自然追问帮助你快速进入回答状态。" },
+  { id: "margaret", voiceId: "Mione", name: "Margaret", accent: "英式口音", personality: "从容细致", image: "/examiner/margaret.png", offsetX: 2.2, intro: "语速从容、停顿自然，适合练习完整展开与细节组织。" },
+  { id: "sophia", voiceId: "Maia", name: "Sophia", accent: "澳式口音", personality: "自然友好", image: "/examiner/sophia.png", offsetX: 5.6, intro: "交流感自然但流程严格，适合降低紧张感并保持实战节奏。" },
 ];
 
 const IELTS_INTAKE_STORAGE_KEY = "unispeaking.ielts.intake.v1";
@@ -103,16 +104,28 @@ export function IeltsHeader({ title, subtitle, onBack, action, leadAction }) {
   );
 }
 
-function IeltsIntake({ onComplete, initialProfile }) {
+function IeltsIntake({ onComplete, initialProfile, onCancel = null }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [answers, setAnswers] = useState(() => initialProfile || {});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const step = ieltsIntakeSteps[stepIndex];
   const selected = answers[step.id];
   const isLastStep = stepIndex === ieltsIntakeSteps.length - 1;
   const selectOption = (value) => setAnswers((current) => ({ ...current, [step.id]: value }));
-  const continueFlow = () => {
+  const continueFlow = async () => {
     if (!selected) return;
-    if (isLastStep) onComplete(answers);
+    if (isLastStep) {
+      setSaving(true);
+      setError("");
+      try {
+        await onComplete(answers);
+      } catch (requestError) {
+        setError(requestError?.message || "目标分数保存失败");
+      } finally {
+        setSaving(false);
+      }
+    }
     else setStepIndex((value) => value + 1);
   };
 
@@ -133,23 +146,44 @@ function IeltsIntake({ onComplete, initialProfile }) {
           ))}
         </div>
         <div className="ielts-intake-actions">
-          {stepIndex > 0 && <button className="ielts-intake-back" onClick={() => setStepIndex((value) => value - 1)}><ArrowLeft />上一步</button>}
-          <TrainingCta disabled={!selected} onClick={continueFlow}>{isLastStep ? "进入训练中心" : "下一步"}</TrainingCta>
+          {stepIndex > 0
+            ? <button className="ielts-intake-back" onClick={() => setStepIndex((value) => value - 1)}><ArrowLeft />上一步</button>
+            : onCancel && <button className="ielts-intake-back" onClick={onCancel}><ArrowLeft />返回训练中心</button>}
+          <TrainingCta disabled={!selected || saving} onClick={continueFlow}>{saving ? "正在保存…" : isLastStep ? "进入训练中心" : "下一步"}</TrainingCta>
         </div>
+        {error && <p className="ielts-topic-state is-error">{error}</p>}
       </section>
     </main>
   );
 }
 
-function IeltsHome({ onChoose, onAssets, onBack, profile }) {
-  const target = profile?.target || "7.0";
+function formatBand(value) {
+  if (value == null || value === "") return "--";
+  const score = Number(value);
+  return Number.isFinite(score) ? score.toFixed(1) : "--";
+}
+
+function IeltsHome({ onChoose, onAssets, onEditGoal, onBack, settings }) {
+  const target = formatBand(settings?.targetScore);
+  const latestEstimatedScore = formatBand(settings?.latestEstimatedScore);
+  const todayCompletedCount = Number(settings?.todayCompletedCount || 0);
   return (
     <main className="ielts-page ielts-home">
-      <IeltsHeader onBack={onBack} title="IELTS 口语特训" subtitle="实战训练，持续复盘，看见进步" action={<SimpleCta className="ielts-home-assets-cta" onClick={onAssets}>查看学习资产</SimpleCta>} />
+      <IeltsHeader
+        onBack={onBack}
+        title="IELTS 口语特训"
+        subtitle="实战训练，持续复盘，看见进步"
+        action={(
+          <div className="ielts-home-actions">
+            <button className="ielts-report-assets" onClick={onEditGoal}><NotePencil />调整目标</button>
+            <SimpleCta className="ielts-home-assets-cta" onClick={onAssets}>查看学习资产</SimpleCta>
+          </div>
+        )}
+      />
       <section className="ielts-goal-row" aria-label="备考目标">
         <div><span>目标</span><strong>{target}</strong></div>
-        <div><span>连续打卡</span><strong>12 <small>天</small></strong></div>
-        <div><span>今日特训</span><strong>3 <small>/ 5</small></strong></div>
+        <div><span>最近模考预估</span><strong>{latestEstimatedScore}</strong></div>
+        <div><span>今日特训</span><strong>{todayCompletedCount} <small>/ 5</small></strong></div>
       </section>
 
       <section className="ielts-mock-feature">
@@ -379,7 +413,19 @@ function ExaminerSwipeStack({ selected, onSelect }) {
 function DeviceSetup({ part, topic, random, onBack, onStart }) {
   const [examiner, setExaminer] = useState(ieltsExaminers[0]);
   const [mockExaminer] = useState(() => ieltsExaminers[Math.floor(Math.random() * ieltsExaminers.length)]);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState("");
   const isMock = part === "mock";
+  const startPractice = async () => {
+    setStarting(true);
+    setStartError("");
+    try {
+      await onStart(isMock ? mockExaminer : examiner);
+    } catch (requestError) {
+      setStartError(requestError?.message || "训练启动失败");
+      setStarting(false);
+    }
+  };
   return (
     <main className="ielts-page ielts-setup">
       <IeltsHeader onBack={onBack} title={isMock ? "准备全真模考" : `准备 ${partMeta[part].label} 训练`} subtitle={random ? "本次题目将在正式开始后随机揭晓。" : `已选择话题：${topic?.title}`} />
@@ -399,7 +445,7 @@ function DeviceSetup({ part, topic, random, onBack, onStart }) {
       ) : (
         <section className="ielts-examiner-select"><header><span>请选择考官</span><p>参考真实考试节奏，选择一位与你完成本次训练的考官。</p></header><ExaminerSwipeStack selected={examiner} onSelect={setExaminer} /></section>
       )}
-      <footer className="ielts-setup-footer"><p><strong>{isMock ? "开始后不可暂停，中途退出本次模考将作废并消耗 1 次额度。" : "开始后不可暂停或静音，本次训练将消耗 1 次特训额度。"}</strong><small>今日剩余 2 次</small></p><TrainingCta className="ielts-confirm-cta" onClick={() => onStart(isMock ? mockExaminer : examiner)}>确认并开始</TrainingCta></footer>
+      <footer className="ielts-setup-footer"><p><strong>{isMock ? "开始后不可暂停，中途退出本次模考将作废并消耗 1 次额度。" : "开始后不可暂停或静音，本次训练将消耗 1 次特训额度。"}</strong><small>每天最多完成 5 次</small>{startError && <em>{startError}</em>}</p><TrainingCta className="ielts-confirm-cta" disabled={starting} onClick={startPractice}>{starting ? "正在准备…" : "确认并开始"}</TrainingCta></footer>
     </main>
   );
 }
@@ -409,124 +455,505 @@ function formatTime(seconds) {
   return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`;
 }
 
-function PracticeSession({ part, examiner, training, onExit, onComplete }) {
-  const [subtitles, setSubtitles] = useState(false);
-  const [questionIndex, setQuestionIndex] = useState(0);
-  const [stage, setStage] = useState(part === "p2" ? "prepare" : "answer");
-  const [remaining, setRemaining] = useState(part === "p2" ? 60 : part === "mock" ? 0 : part === "p1" ? 240 : 300);
-  const [notes, setNotes] = useState("");
+function IeltsConversationSession({ part, examiner, training, generated, onExit, onComplete, deferEvaluation = false }) {
+  const isPartTwo = part === "p2";
+  const [subtitles, setSubtitles] = useState(true);
+  const [status, setStatus] = useState("正在连接考官…");
+  const [messages, setMessages] = useState([]);
+  const [elapsed, setElapsed] = useState(0);
+  const [error, setError] = useState("");
+  const [ending, setEnding] = useState(false);
   const [exitOpen, setExitOpen] = useState(false);
-  const activeQuestions = part === "mock"
-    ? mockQuestions.map((questionText, index) => ({ id: `mock-${index}`, questionText, cuePoints: [] }))
-    : training?.questions || [];
-  const currentQuestion = activeQuestions[questionIndex] || activeQuestions[0];
+  const [partTwoPhase, setPartTwoPhase] = useState(isPartTwo ? "INTRODUCTION" : null);
+  const [partTwoRemaining, setPartTwoRemaining] = useState(isPartTwo ? 60 : null);
+  const [partTwoNotes, setPartTwoNotes] = useState("");
+  const remoteAudioRef = useRef(null);
+  const clientRef = useRef(null);
+  const finishRef = useRef(null);
+  const sessionIdRef = useRef(null);
+  const partTwoPhaseRef = useRef(isPartTwo ? "INTRODUCTION" : null);
+  const partTwoTimerRef = useRef(null);
+  const partTwoCompletionTimerRef = useRef(null);
+  const transcriptRef = useRef(null);
+  const subtitleQueueRef = useRef([]);
+  const subtitleFrameRef = useRef(null);
 
-  useEffect(() => {
-    if (part === "mock" || remaining <= 0) return undefined;
-    const timer = window.setInterval(() => setRemaining((value) => value - 1), 1000);
-    return () => window.clearInterval(timer);
-  }, [part, remaining <= 0]);
+  const partTwoQuestion = generated?.content?.part2?.[0] || training?.questions?.[0] || null;
+  const partTwoQuestionText = partTwoQuestion?.question || partTwoQuestion?.questionText || "";
+  const partTwoCuePoints = partTwoQuestion?.cue_points
+    || partTwoQuestion?.cuePoints
+    || [];
 
-  useEffect(() => {
-    if (part === "p2" && stage === "prepare" && remaining <= 0) {
-      setStage("answer");
-      setRemaining(120);
-    }
-    if (part === "p2" && stage === "answer" && remaining <= 0) onComplete();
-  }, [part, stage, remaining, onComplete]);
-
-  const nextQuestion = () => {
-    if (part === "p2") {
-      if (stage === "prepare") { setStage("answer"); setRemaining(120); }
-      else onComplete();
-      return;
-    }
-    if (questionIndex >= activeQuestions.length - 1) onComplete();
-    else setQuestionIndex((value) => value + 1);
+  const updatePartTwoPhase = (nextPhase) => {
+    partTwoPhaseRef.current = nextPhase;
+    setPartTwoPhase(nextPhase);
   };
 
-  const exitDialog = exitOpen && <div className="ielts-dialog-backdrop"><section className="ielts-dialog"><h2>{part === "mock" ? "退出并作废本次模考？" : "退出当前训练？"}</h2><p>{part === "mock" ? "已完成的内容不会保存，本次仍会消耗 1 次特训额度。" : "本次未完成训练不会生成专项报告。"}</p><div><button onClick={() => setExitOpen(false)}>继续训练</button><button onClick={onExit}>确认退出</button></div></section></div>;
-  const isPartTwo = part === "p2";
-  const showTranscript = isPartTwo || subtitles;
-  const transcriptText = isPartTwo
-    ? stage === "prepare"
-      ? "You have one minute to think about and make notes for this question."
-      : "You can start answering now."
-    : currentQuestion?.questionText || "";
+  const clearPartTwoTimer = () => {
+    if (partTwoTimerRef.current) {
+      window.clearInterval(partTwoTimerRef.current);
+      partTwoTimerRef.current = null;
+    }
+  };
+
+  const clearPartTwoCompletionTimer = () => {
+    if (!partTwoCompletionTimerRef.current) return;
+    window.clearTimeout(partTwoCompletionTimerRef.current);
+    partTwoCompletionTimerRef.current = null;
+  };
+
+  const schedulePartTwoFinish = (delayMs) => {
+    if (!isPartTwo || partTwoPhaseRef.current !== "FINISHING") return;
+    clearPartTwoCompletionTimer();
+    partTwoCompletionTimerRef.current = window.setTimeout(() => {
+      partTwoCompletionTimerRef.current = null;
+      void finishRef.current?.();
+    }, delayMs);
+  };
+
+  const runPartTwoTimer = (seconds, onElapsed) => {
+    clearPartTwoTimer();
+    let remaining = seconds;
+    setPartTwoRemaining(remaining);
+    partTwoTimerRef.current = window.setInterval(() => {
+      remaining -= 1;
+      setPartTwoRemaining(Math.max(0, remaining));
+      if (remaining > 0) return;
+      clearPartTwoTimer();
+      onElapsed();
+    }, 1000);
+  };
+
+  const beginPartTwoAnswer = (client = clientRef.current) => {
+    if (!client || partTwoPhaseRef.current !== "PREPARATION") return;
+    clearPartTwoTimer();
+    updatePartTwoPhase("STARTING");
+    setStatus("准备结束，考官即将提示开始");
+    void client.transitionIeltsPart2("PREPARATION_COMPLETE")
+      .catch((transitionError) => {
+        setError(transitionError?.message || "无法开始 Part 2 作答");
+        updatePartTwoPhase("PREPARATION");
+      });
+  };
+
+  const finishPartTwoAtLimit = (client = clientRef.current) => {
+    if (!client || partTwoPhaseRef.current !== "LONG_TURN") return;
+    clearPartTwoTimer();
+    updatePartTwoPhase("FINISHING");
+    setStatus("作答时间已到，正在结束 Part 2");
+    void client.transitionIeltsPart2("LONG_TURN_TIME_LIMIT")
+      .catch((transitionError) => {
+        setError(transitionError?.message || "无法结束 Part 2");
+      });
+  };
+
+  const updateLiveMessage = ({ id, owner, delta = "", text = "", final = false }) => {
+    const content = String(text || delta || "");
+    if (!content) return;
+    setMessages((current) => {
+      const messageId = id || `${owner}-live`;
+      const exactIndex = current.findIndex((message) => message.id === messageId);
+      const fallbackIndex = final
+        ? current.findLastIndex((message) => message.owner === owner && !message.final)
+        : -1;
+      const index = exactIndex >= 0 ? exactIndex : fallbackIndex;
+      if (index < 0) {
+        return [...current, { id: messageId, owner, text: content, final }].slice(-8);
+      }
+      const next = [...current];
+      next[index] = {
+        ...next[index],
+        id: messageId,
+        text: text || `${next[index].text}${delta}`,
+        final,
+      };
+      return next.slice(-8);
+    });
+  };
+
+  const queueLiveMessage = (message) => {
+    subtitleQueueRef.current.push(message);
+    if (subtitleFrameRef.current != null) return;
+    subtitleFrameRef.current = window.requestAnimationFrame(() => {
+      subtitleFrameRef.current = null;
+      const queued = subtitleQueueRef.current.splice(0);
+      queued.forEach(updateLiveMessage);
+    });
+  };
+
+  const flushSubtitleQueue = () => {
+    if (subtitleFrameRef.current != null) {
+      window.cancelAnimationFrame(subtitleFrameRef.current);
+      subtitleFrameRef.current = null;
+    }
+    const queued = subtitleQueueRef.current.splice(0);
+    queued.forEach(updateLiveMessage);
+  };
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      if (transcriptRef.current) {
+        transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages]);
+
+  useEffect(() => {
+    if (!generated?.ieltsId) return undefined;
+    let cancelled = false;
+    const client = createRealtimeClient({
+      sceneId: generated.ieltsId,
+      sceneType: "ielts",
+      onEvent: (event) => {
+        if (cancelled) return;
+        if (event.type === "local.connecting") setStatus("正在连接考官…");
+        else if (event.type === "local.connected") {
+          setStatus(isPartTwo ? "考官正在说明 Part 2 准备要求" : "考试进行中");
+          if (isPartTwo) client.setMuted(true);
+        }
+        else if (event.type === "input_audio_buffer.speech_started") setStatus("正在聆听你的回答");
+        else if (event.type === "response.created") setStatus(`${examiner.name} 正在提问`);
+        else if (event.type === "local.ielts_input_ready") setStatus("请开始回答");
+        else if (event.type === "response.done") {
+          if (isPartTwo && partTwoPhaseRef.current === "INTRODUCTION") {
+            updatePartTwoPhase("PREPARATION");
+            setStatus("准备时间 · 60 秒");
+            runPartTwoTimer(60, () => beginPartTwoAnswer(client));
+          } else if (isPartTwo && partTwoPhaseRef.current === "STARTING") {
+            updatePartTwoPhase("LONG_TURN");
+            setStatus("请开始回答");
+            runPartTwoTimer(120, () => finishPartTwoAtLimit(client));
+          } else if (!isPartTwo) {
+            setStatus("请开始回答");
+          }
+        }
+        else if (event.type === "local.transcript.final") {
+          flushSubtitleQueue();
+          const suppressPartTwoClosingFragment = isPartTwo
+            && partTwoPhaseRef.current === "FINISHING"
+            && event.owner === 0;
+          if (!suppressPartTwoClosingFragment) {
+            updateLiveMessage({
+              id: event.itemId,
+              owner: event.owner,
+              text: event.text,
+              final: true,
+            });
+          }
+          if (event.owner === 0
+            && /that is the end of (part 1|part 2|the speaking test)/i.test(event.text || "")) {
+            if (isPartTwo) schedulePartTwoFinish(1_800);
+            else window.setTimeout(() => { void finishRef.current?.(); }, 1_800);
+          }
+        } else if (
+          event.type === "conversation.item.input_audio_transcription.delta"
+          || event.type === "conversation.item.input_audio_transcription.text"
+        ) {
+          const preview = `${event.text || ""}${event.stash || ""}`;
+          queueLiveMessage({
+            id: event.item_id || event.item?.id || "ielts-user-live",
+            owner: 1,
+            ...(preview ? { text: preview } : { delta: event.delta || "" }),
+          });
+        } else if (event.type === "response.audio_transcript.delta" || event.type === "response.text.delta") {
+          if (!(isPartTwo && partTwoPhaseRef.current === "FINISHING")) {
+            queueLiveMessage({
+              id: event.item_id || event.response_id || "ielts-assistant-live",
+              owner: 0,
+              delta: event.delta || event.text || "",
+            });
+          }
+        } else if (event.type === "conversation.item.input_audio_transcription.completed") {
+          if (isPartTwo && partTwoPhaseRef.current === "LONG_TURN") {
+            clearPartTwoTimer();
+            updatePartTwoPhase("FINISHING");
+            setStatus("回答已完成，正在结束 Part 2");
+          }
+        } else if (event.type === "local.ielts_part2_state") {
+          if (event.state?.completed) {
+            clearPartTwoTimer();
+            updatePartTwoPhase("FINISHING");
+            setStatus("Part 2 已完成，考官正在结束本部分");
+            updateLiveMessage({
+              id: "ielts-part-two-closing",
+              owner: 0,
+              text: "Thank you. That is the end of Part 2.",
+              final: true,
+            });
+            // Provider output may be interrupted or may not include the full
+            // closing transcript. The state machine remains the source of
+            // truth and this fallback prevents FINISHING from hanging.
+            schedulePartTwoFinish(10_000);
+          }
+        } else if (event.type === "local.ielts_part2_completion_ready") {
+          schedulePartTwoFinish(1_400);
+        } else if (event.type === "local.ielts_state") {
+          const state = event.state;
+          if (state?.completed) client.setMuted(true);
+          setStatus(state?.completed
+            ? `${partMeta[part].label} 已完成，考官正在结束本部分`
+            : `已完成 ${state?.answeredQuestions || 0} / ${state?.totalQuestions || 0} 题`);
+        } else if (event.type === "local.ielts_state_error") {
+          setError(event.message || "IELTS 题目状态推进失败");
+        } else if (event.type === "local.backend_warning") {
+          setError("会话记录保存失败，请稍后重试");
+        } else if (event.type === "error" || event.type === "local.error") {
+          setError(event.message || event.error?.message || "实时会话发生错误");
+          setStatus("连接异常");
+        }
+      },
+      onRemoteStream: (stream) => {
+        if (cancelled || !remoteAudioRef.current) return;
+        remoteAudioRef.current.srcObject = stream;
+        void remoteAudioRef.current.play().catch(() => setStatus("点击页面后可播放考官声音"));
+      },
+    });
+    clientRef.current = client;
+    void client.start({ voice: generated.voiceId || examiner.voiceId })
+      .then((started) => {
+        sessionIdRef.current = started?.sessionId || null;
+      })
+      .catch((startError) => {
+        if (!cancelled) setError(startError?.message || "无法开始 IELTS 实时会话");
+      });
+    return () => {
+      cancelled = true;
+      clearPartTwoTimer();
+      clearPartTwoCompletionTimer();
+      if (subtitleFrameRef.current != null) {
+        window.cancelAnimationFrame(subtitleFrameRef.current);
+        subtitleFrameRef.current = null;
+      }
+      subtitleQueueRef.current = [];
+      clientRef.current = null;
+      void client.stop({ notifyBackend: false, reason: "component_unmount", emitEnded: false });
+    };
+  }, [generated?.ieltsId, generated?.voiceId, examiner.id]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const finish = async () => {
+    if (ending) return;
+    setEnding(true);
+    setError("");
+    clearPartTwoTimer();
+    clearPartTwoCompletionTimer();
+    try {
+      setStatus("正在结束本次练习…");
+      const client = clientRef.current;
+      const backgroundEvaluationReady = deferEvaluation
+        ? client?.waitForEvaluations()
+        : null;
+      await client?.stop({
+        reason: "user_stop",
+        awaitEvaluations: !deferEvaluation,
+      });
+      clientRef.current = null;
+      if (deferEvaluation) {
+        const completedSessionId = sessionIdRef.current;
+        void Promise.resolve(backgroundEvaluationReady)
+          .then(() => completedSessionId
+            ? generateIeltsEvaluation(generated.ieltsId, completedSessionId)
+            : null)
+          .catch((evaluationError) => {
+            console.warn("Background IELTS Part evaluation failed", evaluationError);
+          });
+        onComplete(null);
+        return;
+      }
+      let evaluation = null;
+      if (sessionIdRef.current) {
+        setStatus("正在生成 IELTS 评分…");
+        try {
+          evaluation = await generateIeltsEvaluation(
+            generated.ieltsId,
+            sessionIdRef.current,
+          );
+        } catch (evaluationError) {
+          // Ending a session is valid even when the candidate stops during
+          // preparation or has not produced enough speech to be scored.
+          console.warn("IELTS evaluation was unavailable after session end", evaluationError);
+        }
+      }
+      onComplete(evaluation);
+    } catch (stopError) {
+      console.error("Failed to end IELTS session", stopError);
+      setStatus("结束失败");
+      setError("结束练习失败，请稍后重试");
+      setEnding(false);
+    }
+  };
+  finishRef.current = finish;
+
+  const abandon = async () => {
+    const client = clientRef.current;
+    clientRef.current = null;
+    await client?.stop({ notifyBackend: false, reason: "user_exit", emitEnded: false });
+    onExit();
+  };
+
+  const latestExaminerMessage = [...messages].reverse().find((message) => message.owner === 0)?.text;
+  const visibleMessages = isPartTwo
+    ? messages.filter((message) => message.owner === 0).slice(-1)
+    : messages;
+  const partTwoNotesEditable = isPartTwo
+    && ["INTRODUCTION", "PREPARATION"].includes(partTwoPhase);
+  const partTwoPhaseLabel = partTwoPhase === "LONG_TURN"
+    ? `作答时间 ${formatTime(partTwoRemaining)}`
+    : partTwoPhase === "PREPARATION" || partTwoPhase === "INTRODUCTION"
+      ? `准备时间 ${formatTime(partTwoRemaining)}`
+      : partTwoPhase === "STARTING"
+        ? "考官正在提示开始"
+        : "正在结束 Part 2";
+  const exitDialog = exitOpen && <div className="ielts-dialog-backdrop"><section className="ielts-dialog"><h2>退出当前训练？</h2><p>本次未完成训练不会计入今日完成次数，也不会生成专项报告。</p><div><button onClick={() => setExitOpen(false)}>继续训练</button><button onClick={() => void abandon()}>确认退出</button></div></section></div>;
 
   return (
-    <main className={cx("conversation", "call", "ielts-call", showTranscript && "call--subtitles", isPartTwo && "ielts-call--part-two")}>
+    <main className={cx("conversation", "call", "ielts-call", subtitles && "call--subtitles", isPartTwo && "ielts-call--part-two")}>
+      <audio ref={remoteAudioRef} autoPlay />
       <div className="conversation__top ielts-call-top">
-        <div><strong>{part === "mock" ? "IELTS 全真模考" : `${partMeta[part].label} · ${partMeta[part].title}`}</strong><span>{part === "mock" ? "Part 1 · Introduction and interview" : isPartTwo && stage === "prepare" ? "准备阶段" : "正式作答"}</span></div>
+        <div><strong>{`${partMeta[part].label} · ${partMeta[part].title}`}</strong><span>{isPartTwo ? partTwoPhaseLabel : "考官会根据你的回答自动推进考试"}</span></div>
         <button className="round-control ielts-call-exit" onClick={() => setExitOpen(true)} aria-label="退出训练"><X /></button>
       </div>
       <section className="call__stage">
-        <div className={cx("call-presence", showTranscript && "call-presence--compact")}>
-          <div className={cx("portrait", showTranscript ? "portrait--small" : "portrait--call", "ielts-call-portrait")}><img src={examiner.image} alt={examiner.name} style={{ "--examiner-offset-x": `${examiner.offsetX}%` }} /></div>
-          <div className={cx("listening-state", showTranscript && "listening-state--compact")}>
-            <span className={cx("voice-wave", showTranscript && "voice-wave--compact", "is-fallback")} aria-hidden="true">
+        <div className={cx("call-presence", subtitles && "call-presence--compact")}>
+          <div className={cx("portrait", subtitles ? "portrait--small" : "portrait--call", "ielts-call-portrait")}><img src={examiner.image} alt={examiner.name} style={{ "--examiner-offset-x": `${examiner.offsetX}%` }} /></div>
+          <div className={cx("listening-state", subtitles && "listening-state--compact")}>
+            <span className={cx("voice-wave", subtitles && "voice-wave--compact", "is-fallback")} aria-hidden="true">
               {[.28, .52, .78, 1, .72, .48, .3].map((level, index) => <i key={index} className="voice-wave__bar" style={{ "--rest-level": level }} />)}
             </span>
-            <time className="call-presence__time">{part === "mock" ? "模拟进行中" : formatTime(remaining)}</time>
-            {!showTranscript && <span>{examiner.name} 正在提问</span>}
+            <time className="call-presence__time">{isPartTwo ? formatTime(partTwoRemaining) : formatTime(elapsed)}</time>
+            {!subtitles && <span>{status}</span>}
           </div>
         </div>
-        {showTranscript && <div className="transcript ielts-call-transcript" aria-label="考官问题字幕"><article className="transcript__line"><small>{examiner.name}</small><p>{transcriptText}</p></article></div>}
-        {isPartTwo && (
-          <section className="ielts-part-two-compact-material" aria-label="Part 2 题卡与笔记">
-            <article className="ielts-part-two-compact-cue">
-              <span>PART 2 · LONG TURN</span>
-              <h1>{currentQuestion?.questionText}</h1>
-              <p>You should say:</p>
-              <ul>{currentQuestion?.cuePoints?.map((point) => <li key={point}>{point}</li>)}</ul>
-            </article>
-            <section className="ielts-part-two-compact-notes">
-              <header><span><NotePencil />自由笔记</span><small>{stage === "prepare" ? "准备结束后将自动锁定" : "已锁定"}</small></header>
-              <textarea value={notes} onChange={(event) => setNotes(event.target.value)} readOnly={stage !== "prepare"} placeholder="在这里记录你的思路、关键词或完整句子…" />
-            </section>
+        {subtitles && <div ref={transcriptRef} className="transcript ielts-call-transcript" aria-label="实时会话字幕">
+          {visibleMessages.length ? visibleMessages.map((message) => <article key={message.id} className="transcript__line"><small>{message.owner === 0 ? examiner.name : "You"}</small><p>{message.text}</p></article>) : <article className="transcript__line"><small>{examiner.name}</small><p>{latestExaminerMessage || status}</p></article>}
+        </div>}
+        {isPartTwo && <section className="ielts-part-two-compact-material" aria-label="Part 2 题卡与笔记">
+          <article className="ielts-part-two-compact-cue">
+            <span>PART 2 · CUE CARD</span>
+            <h1>{partTwoQuestionText}</h1>
+            {partTwoCuePoints.length > 0 && <><p>You should say:</p><ul>{partTwoCuePoints.map((point) => <li key={point}>{point}</li>)}</ul></>}
+          </article>
+          <section className="ielts-part-two-compact-notes">
+            <header><span><NotePencil />答题笔记</span><small>{partTwoNotesEditable ? "准备结束后自动锁定" : "已锁定，不可修改"}</small></header>
+            <textarea
+              value={partTwoNotes}
+              onChange={(event) => setPartTwoNotes(event.target.value)}
+              readOnly={!partTwoNotesEditable}
+              placeholder="记录关键词、人物、地点、原因或例子……"
+              aria-label="Part 2 答题笔记"
+            />
           </section>
-        )}
+        </section>}
       </section>
       <footer className={cx("call-controls", "ielts-call-controls", isPartTwo && "ielts-call-controls--part-two")}>
-        <span className="ielts-recording-label"><i className="recording-dot" />正在录音</span>
+        <span className="ielts-recording-label">{partTwoPhase === "LONG_TURN" && <i className="recording-dot" />}{error || status}</span>
         <div className="ielts-call-control-buttons">
-          {!isPartTwo && <button className={cx("round-control", subtitles && "is-on")} onClick={() => setSubtitles(!subtitles)} aria-label={subtitles ? "关闭字幕" : "开启字幕"}><Subtitles /></button>}
-          <button className="round-control round-control--end" onClick={nextQuestion} aria-label={isPartTwo ? stage === "prepare" ? "提前开始陈述" : "结束陈述" : "结束本题并进入下一题"}><ArrowRight weight="bold" /></button>
+          <button className={cx("round-control", subtitles && "is-on")} onClick={() => setSubtitles(!subtitles)} aria-label={subtitles ? "关闭字幕" : "开启字幕"}><Subtitles /></button>
+          {isPartTwo
+            ? partTwoPhase === "PREPARATION" && <button className="round-control round-control--end" disabled={ending} onClick={() => beginPartTwoAnswer()} aria-label="结束准备并开始作答"><ArrowRight weight="bold" /></button>
+            : <button className="round-control round-control--end" disabled={ending} onClick={() => void finish()} aria-label="结束本次训练"><X weight="bold" /></button>}
         </div>
-        <p className="ielts-call-hint">{isPartTwo ? stage === "prepare" ? "提前准备好了可以点击开始陈述" : "完成陈述后，请点击按钮结束本题" : "回答完当前问题后，请点击按钮进入下一题"}</p>
+        <p className="ielts-call-hint">{isPartTwo
+          ? partTwoPhase === "PREPARATION"
+            ? "准备好后可点击下一步；进入作答后笔记将锁定。"
+            : partTwoPhase === "LONG_TURN"
+              ? "你有两分钟作答；时间结束后系统会立即闭麦。"
+              : "请按照考官提示完成 Part 2。"
+          : "无需手动切题；考官会按照 IELTS 节奏判断回答结束并继续。"}</p>
       </footer>
       {exitDialog}
     </main>
   );
 }
 
-function AnalysisPending({ onHome, onReport }) {
+function PracticeSession(props) {
+  if (props.part === "p1" || props.part === "p2" || props.part === "p3") {
+    return <IeltsConversationSession {...props} />;
+  }
+  if (props.part === "mock") {
+    return <IeltsMockSession {...props} />;
+  }
+  return null;
+}
+
+function IeltsMockSession({ onComplete, ...props }) {
+  const parts = ["p1", "p2", "p3"];
+  const [partIndex, setPartIndex] = useState(0);
+  const activePart = parts[partIndex];
+  const completePart = (evaluation) => {
+    if (partIndex >= parts.length - 1) onComplete(evaluation);
+    else setPartIndex((value) => value + 1);
+  };
+  return <IeltsConversationSession
+    key={activePart}
+    {...props}
+    part={activePart}
+    deferEvaluation={partIndex < parts.length - 1}
+    onComplete={completePart}
+  />;
+}
+
+function AnalysisPending({ evaluation, onHome, onReport }) {
+  const available = Boolean(evaluation);
+  const partEvaluations = evaluation?.partEvaluations || [];
+  const expressions = evaluation?.recommendedExpressions || [];
   return (
-    <main className="ielts-page ielts-pending">
-      <section><NewtonsCradle label="正在分析练习报告" /><p>ANALYSIS IN PROGRESS</p><h1>本次练习已保存</h1><p>AI 正在分析四项能力与逐句表达。你可以先离开，报告完成后会出现在学习资产中。</p><div className="ielts-pending-actions"><button className="ielts-pending-home" onClick={onHome}>返回训练中心</button><button className="ielts-pending-report" onClick={onReport}>浏览本次报告<ArrowRight weight="bold" /></button></div></section>
+    <main className="ielts-page ielts-score-result-page">
+      <section className="ielts-score-result-background"><span>IELTS SPEAKING</span><h1>本次练习已结束</h1><p>评分完成后会自动保存到学习资产。</p></section>
+      <div className="ielts-dialog-backdrop ielts-score-dialog-backdrop">
+        <section className="ielts-dialog ielts-score-dialog">
+          <p className="eyebrow">{available ? "EVALUATION COMPLETE" : "INSUFFICIENT SPEECH"}</p>
+          <h2>{available ? "本次评分已完成" : "有效回答不足，暂时无法评分"}</h2>
+          {available ? <>
+            <div className="ielts-score-dialog__overall"><span>{evaluation.assessmentType === "FINAL" ? "完整模考预估" : "本 Part 诊断"}</span><strong>{formatBand(evaluation.overallBandScore)}</strong><small>/ 9</small></div>
+            {partEvaluations.length > 0 && <div className="ielts-score-dialog__parts">{partEvaluations.map((item) => <article key={item.part}><span>{String(item.part).replace("PART_", "Part ")}</span><strong>{formatBand(item.overallBandScore)}</strong></article>)}</div>}
+            <p>{evaluation.summary}</p>
+            {expressions.length > 0 && <div className="ielts-score-dialog__expressions"><span>推荐表达</span><ul>{expressions.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul></div>}
+          </> : <p>练习已经正常保存，但需要至少完成一轮有效英文回答才能生成评分报告。</p>}
+          <div><button onClick={onHome}>返回训练中心</button>{available && <button onClick={onReport}>查看详细报告</button>}</div>
+        </section>
+      </div>
     </main>
   );
 }
 
-const scoreRows = [
-  { label: "流利度与连贯性", score: 82, note: "能够持续表达，但部分观点之间缺少自然过渡。" },
-  { label: "词汇资源", score: 68, note: "表达准确，但同一形容词重复出现。" },
-  { label: "语法多样性与准确性", score: 76, note: "基础结构准确，可以加入更多复合句。" },
-  { label: "发音", score: 86, note: "整体易于理解，个别词尾需要更完整。" },
-];
-
-function PracticeReport({ part, onHome, onRetry, onAssets }) {
+function PracticeReport({ part, evaluation, onHome, onRetry, onAssets }) {
   const isMock = part === "mock";
   const reportTitle = isMock ? "全真模考 · 完整表现报告" : `${partMeta[part].label} · 本次专项表现`;
   const reportSubtitle = isMock
     ? "预估成绩仅用于训练反馈，并非雅思官方考试成绩。"
     : `这不是完整雅思口语预估分；报告只反映本次${partMeta[part].title}表现。`;
+  if (!evaluation) {
+    return (
+      <main className={cx("ielts-page", "ielts-report", "ielts-report--single")}>
+        <IeltsHeader onBack={onHome} title={reportTitle} subtitle={reportSubtitle} />
+        <section className="ielts-report-summary"><div><span>暂无评分</span><h2>本次有效英文回答不足</h2><p>后端没有生成评分结果，因此这里不会展示示例分数或虚构报告。</p></div><div><span>下一步</span><ol><li>至少完成一轮完整英文回答</li><li>结束前等待最后一轮转写完成</li></ol><TrainingCta onClick={onRetry}>重新练习</TrainingCta></div></section>
+      </main>
+    );
+  }
+  const scoreRows = [
+    { label: "流利度与连贯性", score: evaluation.fluencyCoherenceScore, note: "结合完整回答的连贯性与已记录的语音流利度证据评估。" },
+    { label: "词汇资源", score: evaluation.lexicalResourceScore, note: "根据本次回答的词汇范围、准确性、搭配与改述能力评估。" },
+    { label: "语法多样性与准确性", score: evaluation.grammaticalRangeAccuracyScore, note: "根据本次回答的句式范围、语法控制和错误影响评估。" },
+    { label: "发音", score: evaluation.pronunciationScore, note: "来自本次原始语音的发音评分，不根据 ASR 文本推测。" },
+  ];
+  const strengths = evaluation.strengths || [];
+  const improvements = evaluation.improvements || [];
+  const partEvaluations = evaluation.partEvaluations || [];
+  const expressions = evaluation.recommendedExpressions || [];
   return (
     <main className={cx("ielts-page", "ielts-report", !isMock && "ielts-report--single")}>
       <IeltsHeader onBack={onHome} title={reportTitle} subtitle={reportSubtitle} action={<button className="ielts-report-assets" onClick={onAssets}><BookOpenText />查看学习资产</button>} />
-      {isMock && <section className="ielts-mock-score"><span>本次预估</span><strong>6.5</strong><p>合理波动范围 6.0–6.5</p></section>}
-      <section className="ielts-report-summary"><div><span>本次结论</span><h2>内容清楚，但需要更自然地组织细节</h2><p>{part === "p2" ? "你已经能够持续完成两分钟陈述。" : "你能够直接回应问题并保持表达。"}下一步优先减少重复词，并让每个细节更好地服务核心观点。</p></div><div><span>优先改进</span><ol><li>用更具体的细节替代重复形容词</li><li>使用自然连接表达推进叙述</li><li>注意过去时与现在完成时的切换</li></ol></div></section>
-      <section className="ielts-score-list"><h2>四项能力反馈</h2>{scoreRows.map((row) => <article key={row.label}><strong>{row.label}</strong><span className="ielts-score-value">{row.score}<small>/100</small></span><p>{row.note}</p></article>)}</section>
+      <section className="ielts-mock-score"><span>{isMock ? "本次预估" : "本次诊断"}</span><strong>{formatBand(evaluation.overallBandScore)}</strong><p>{evaluation.assessmentType === "FINAL" ? "完整模考综合评分" : "单 Part 阶段性诊断分"}</p></section>
+      <section className="ielts-report-summary"><div><span>本次结论</span><h2>{formatBand(evaluation.overallBandScore)} 分</h2><p>{evaluation.summary}</p>{strengths.length > 0 && <><span>表现优势</span><ul>{strengths.map((item) => <li key={item}>{item}</li>)}</ul></>}</div><div><span>优先改进</span>{improvements.length > 0 ? <ol>{improvements.map((item) => <li key={item}>{item}</li>)}</ol> : <p>本次评分没有返回额外改进项。</p>}</div></section>
+      {partEvaluations.length > 0 && <section className="ielts-part-evaluation-list"><h2>各 Part 评分</h2><div>{partEvaluations.map((item) => <article key={item.part}><span>{String(item.part).replace("PART_", "Part ")}</span><strong>{formatBand(item.overallBandScore)}</strong><p>{item.summary}</p></article>)}</div></section>}
+      {expressions.length > 0 && <section className="ielts-recommended-expression-list"><h2>本次推荐表达</h2><ol>{expressions.map((item) => <li key={item}>{item}</li>)}</ol></section>}
+      <section className="ielts-score-list"><h2>四项能力反馈</h2>{scoreRows.map((row) => <article key={row.label}><strong>{row.label}</strong><span className="ielts-score-value">{formatBand(row.score)}<small>/9</small></span><p>{row.note}</p></article>)}</section>
     </main>
   );
 }
@@ -553,8 +980,13 @@ export function IeltsTrainingCenter({ route, onNavigate, onExit, onAssets }) {
   const random = route?.selection === "random" || part === "mock";
   const [examiner, setExaminer] = useState(ieltsExaminers[0]);
   const [savedIntakeProfile] = useState(loadIeltsIntakeProfile);
-  const [intakeProfile, setIntakeProfile] = useState(null);
+  const [intakeProfile, setIntakeProfile] = useState(savedIntakeProfile);
   const [training, setTraining] = useState(null);
+  const [generated, setGenerated] = useState(null);
+  const [settings, setSettings] = useState(null);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [showIntake, setShowIntake] = useState(false);
+  const [latestEvaluation, setLatestEvaluation] = useState(null);
   const [trainingLoading, setTrainingLoading] = useState(false);
   const [trainingError, setTrainingError] = useState("");
   const [trainingReload, setTrainingReload] = useState(0);
@@ -570,11 +1002,65 @@ export function IeltsTrainingCenter({ route, onNavigate, onExit, onAssets }) {
     onNavigate(partPath(nextPart));
   };
   const openSetup = (nextTopic, isRandom) => onNavigate(stepPath(part, isRandom ? "random" : nextTopic.id, "setup"));
-  const start = (nextExaminer) => { setExaminer(nextExaminer); onNavigate(stepPath(part, route?.selection || "random", "session")); };
-  const completeIntake = (profile) => {
+  const start = async (nextExaminer) => {
+    setLatestEvaluation(null);
+    setExaminer(nextExaminer);
+    await updateIeltsSettings({ examinerId: nextExaminer.id });
+    const scene = await generateIeltsScene({
+      mode: part === "mock" ? "MOCK_TEST" : "PART_PRACTICE",
+      part: part === "mock" ? null : apiPart[part],
+      topicId: part === "mock" ? null : training?.topicId || null,
+    });
+    await createIeltsSceneFlow(scene.ieltsId);
+    setGenerated(scene);
+    onNavigate(stepPath(part, route?.selection || "random", "session"));
+  };
+  const completeIntake = async (profile) => {
+    const updatedSettings = await updateIeltsSettings({ targetScore: Number(profile.target) });
+    setSettings(updatedSettings);
     setIntakeProfile(profile);
+    setShowIntake(false);
     try { window.localStorage.setItem(IELTS_INTAKE_STORAGE_KEY, JSON.stringify(profile)); } catch { /* Local-only preference may be unavailable. */ }
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    let refreshTimer = null;
+    const refreshSettings = () => getIeltsSettings().then((nextSettings) => {
+      if (cancelled) return;
+      setSettings(nextSettings);
+      if (nextSettings?.targetScore != null) {
+        setIntakeProfile((current) => ({
+          target: String(nextSettings.targetScore),
+          current: current?.current || "starter",
+        }));
+      }
+      if (nextSettings?.examinerId) {
+        const savedExaminer = ieltsExaminers.find((item) => item.id === nextSettings.examinerId);
+        if (savedExaminer) setExaminer(savedExaminer);
+      }
+    }).catch(() => {
+      // The intake form will surface persistence errors when the user submits it.
+    }).finally(() => {
+      if (!cancelled) setSettingsLoading(false);
+    });
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshSettings();
+    };
+
+    void refreshSettings();
+    if (screen === "home") {
+      window.addEventListener("focus", refreshSettings);
+      document.addEventListener("visibilitychange", refreshWhenVisible);
+      refreshTimer = window.setInterval(() => { void refreshSettings(); }, 5_000);
+    }
+    return () => {
+      cancelled = true;
+      if (refreshTimer) window.clearInterval(refreshTimer);
+      window.removeEventListener("focus", refreshSettings);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [screen]);
 
   useEffect(() => {
     if (part === "mock" || !["setup", "session"].includes(screen)) return undefined;
@@ -596,59 +1082,79 @@ export function IeltsTrainingCenter({ route, onNavigate, onExit, onAssets }) {
     return () => { cancelled = true; };
   }, [trainingKey, trainingReload]);
 
-  if (screen === "home" && !intakeProfile) {
-    return <IeltsIntake initialProfile={savedIntakeProfile} onComplete={completeIntake} />;
+  const completeTraining = async (evaluation) => {
+    setLatestEvaluation(evaluation || null);
+    try {
+      const refreshed = await getIeltsSettings();
+      setSettings(refreshed);
+    } catch {
+      // The completed report remains available even if overview refresh fails.
+    }
+    onNavigate(stepPath(part, route?.selection || "random", "analysis"));
+  };
+
+  if (screen === "home" && settingsLoading) {
+    return <IeltsTrainingDataState error="" onBack={onExit} onRetry={() => {}} />;
+  }
+  const targetConfigured = settings?.targetScore != null;
+  if (screen === "home" && (showIntake || !targetConfigured)) {
+    const initialProfile = {
+      ...((intakeProfile?.current || savedIntakeProfile?.current)
+        ? { current: intakeProfile?.current || savedIntakeProfile.current }
+        : {}),
+      ...(targetConfigured ? { target: String(settings.targetScore) } : {}),
+    };
+    return (
+      <IeltsIntake
+        key={`${showIntake}:${settings?.targetScore ?? "unset"}`}
+        initialProfile={initialProfile}
+        onComplete={completeIntake}
+        onCancel={targetConfigured ? () => setShowIntake(false) : null}
+      />
+    );
   }
   if (screen === "topics") return <TopicBrowser part={part} onBack={() => onNavigate(paths.ielts.root)} onStart={openSetup} />;
   if (part !== "mock" && ["setup", "session"].includes(screen) && (trainingLoading || trainingError || !training)) {
     return <IeltsTrainingDataState error={trainingError} onBack={() => onNavigate(partPath(part))} onRetry={() => setTrainingReload((value) => value + 1)} />;
   }
   if (screen === "setup") return <DeviceSetup part={part} topic={training} random={random} onBack={() => onNavigate(part === "mock" ? paths.ielts.root : partPath(part))} onStart={start} />;
-  if (screen === "session") return <PracticeSession part={part} examiner={examiner} training={training} onExit={() => onNavigate(paths.ielts.root)} onComplete={() => onNavigate(stepPath(part, route?.selection || "random", "analysis"))} />;
-  if (screen === "analysis") return <AnalysisPending onHome={() => onNavigate(paths.ielts.root)} onReport={() => onNavigate(stepPath(part, route?.selection || "random", "report"))} />;
-  if (screen === "report") return <PracticeReport part={part} onHome={() => onNavigate(paths.ielts.root)} onRetry={() => onNavigate(stepPath(part, route?.selection || "random", "setup"))} onAssets={onAssets} />;
-  return <IeltsHome onChoose={choosePart} onAssets={onAssets} onBack={onExit} profile={intakeProfile} />;
+  if (screen === "session") return <PracticeSession part={part} examiner={examiner} training={training} generated={generated} onExit={() => onNavigate(paths.ielts.root)} onComplete={completeTraining} />;
+  if (screen === "analysis") return <AnalysisPending evaluation={latestEvaluation} onHome={() => onNavigate(paths.ielts.root)} onReport={() => onNavigate(stepPath(part, route?.selection || "random", "report"))} />;
+  if (screen === "report") return <PracticeReport part={part} evaluation={latestEvaluation} onHome={() => onNavigate(paths.ielts.root)} onRetry={() => onNavigate(stepPath(part, route?.selection || "random", "setup"))} onAssets={onAssets} />;
+  return <IeltsHome onChoose={choosePart} onAssets={onAssets} onEditGoal={() => setShowIntake(true)} onBack={onExit} settings={settings} />;
 }
 
-const historyItems = [
-  { id: 1, type: "模考", title: "全真模考 · 第 3 次", date: "今天 14:20", result: "预估 6.5 · 波动 6.0–6.5", status: "已完成", duration: "13:42", scores: [78, 72, 75, 84], practicePath: null, reportPath: paths.ielts.step("mock", "random", "report") },
-  { id: 2, type: "Part 2", title: "擅长做计划的人", date: "昨天 20:12", result: "内容组织较清晰", status: "已完成", duration: "03:16", scores: [82, 68, 76, 86], practicePath: paths.ielts.step("part2", "planner", "setup"), reportPath: paths.ielts.step("part2", "planner", "report") },
-  { id: 3, type: "Part 1", title: "Work or Studies", date: "7 月 20 日", result: "回答完整度需要提升", status: "已完成", duration: "03:48", scores: [71, 74, 77, 83], practicePath: paths.ielts.step("part1", "study", "setup"), reportPath: paths.ielts.step("part1", "study", "report") },
-  { id: 4, type: "Part 3", title: "科技与社会", date: "7 月 18 日", result: "观点有深度，连接仍可加强", status: "已完成", duration: "04:35", scores: [76, 70, 73, 81], practicePath: paths.ielts.step("part3", "technology", "setup"), reportPath: paths.ielts.step("part3", "technology", "report") },
-];
-
-function AssetsOverview({ onTab }) {
-  const activity = [
-    { day: "周四", minutes: 8 },
-    { day: "周五", minutes: 16 },
-    { day: "周六", minutes: 0 },
-    { day: "周日", minutes: 24 },
-    { day: "周一", minutes: 12 },
-    { day: "周二", minutes: 21 },
-    { day: "今天", minutes: 15 },
-  ];
-  return <section className="ielts-overview-dashboard"><section className="ielts-asset-hero"><div><span>最近一次完整模考</span><h2>预估 6.5</h2><p>合理波动范围 6.0–6.5 · AI 训练评估，并非官方考试成绩</p></div><div><span>目标</span><strong>7.0</strong><small>还差约 0.5 分</small></div><TrainingCta className="ielts-asset-gradient-action" onClick={() => onTab("trends")}>查看能力趋势</TrainingCta></section><section className="ielts-weekly-activity"><header><div><span>近七天训练时长</span><h2>96 <small>分钟</small></h2><p>共完成 6 次训练，较上周增加 18 分钟</p></div><div className="ielts-weekly-stats"><p><strong>4</strong><small>活跃天数</small></p><p><strong>16</strong><small>日均分钟</small></p><p><strong>3</strong><small>专项覆盖</small></p></div></header><div className="ielts-weekly-bars">{activity.map((item) => <span key={item.day}><i style={{ height: `${Math.max(6, (item.minutes / 24) * 100)}%` }} className={item.minutes === 0 ? "is-empty" : ""} /><strong>{item.minutes}</strong><small>{item.day}</small></span>)}</div></section><section className="ielts-asset-recent"><header><h2>最近训练</h2></header>{historyItems.slice(0, 3).map((item) => <article key={item.id}><span>{item.type}</span><div><strong>{item.title}</strong><small>{item.date} · {item.duration}</small></div><p>{item.result}</p></article>)}</section></section>;
+function reportType(item) {
+  return item.mode === "MOCK_TEST" ? "模考" : (item.part || "专项").replace("PART_", "Part ");
 }
 
-function RecordingToggle() {
-  const [playing, setPlaying] = useState(false);
-  return <label className="ielts-recording-toggle" title={playing ? "暂停录音" : "播放录音"}>
-    <input type="checkbox" checked={playing} onChange={(event) => setPlaying(event.target.checked)} />
-    <Play className="play" weight="fill" />
-    <Pause className="pause" weight="fill" />
-    <span>{playing ? "暂停录音" : "播放录音"}</span>
-  </label>;
+function reportTitle(item) {
+  return item.mode === "MOCK_TEST" ? "IELTS Speaking 完整模考" : `${reportType(item)} 专项训练`;
 }
 
-function AssetsHistory({ onNavigate }) {
-  const [items, setItems] = useState(historyItems);
-  const [selected, setSelected] = useState(historyItems[0]);
-  const deleteSelected = () => {
-    const remaining = items.filter((item) => item.id !== selected.id);
-    setItems(remaining);
-    setSelected(remaining[0] || null);
-  };
-  return <section className="ielts-history-layout"><aside><header><h2>训练记录</h2><span>{items.length} 条</span></header>{items.map((item) => <button key={item.id} className={selected?.id === item.id ? "is-active" : ""} onClick={() => setSelected(item)}><small>{item.date} · {item.type}</small><strong>{item.title}</strong><span>{item.duration}</span></button>)}</aside>{selected ? <article><header><div><span>{selected.type}</span><h2>{selected.title}</h2><p>{selected.date} · 用时 {selected.duration}</p></div><div className="ielts-history-media-actions"><RecordingToggle key={selected.id} /><button className="asset-delete-button" type="button" aria-label="删除当前训练记录" onClick={deleteSelected}><Trash weight="bold" /><span>删除</span></button></div></header><section className="ielts-history-summary"><span>总体报告</span><h3>{selected.result}</h3><p>本次表达整体清楚，优先改善观点之间的过渡，并在回答中保持稳定、完整的展开。</p></section><section className="ielts-history-scores"><span>四项能力评分</span><div>{scoreRows.map((row, index) => <p key={row.label}><small>{row.label}</small><strong>{selected.scores[index]}<em>/100</em></strong></p>)}</div></section><footer><small>录音与本次总体报告将保留在训练记录中</small><button className="ielts-history-report" onClick={() => onNavigate(selected.reportPath)}>查看总体报告</button>{selected.practicePath && <TrainingCta className="ielts-history-practice" onClick={() => onNavigate(selected.practicePath)}>快速复练</TrainingCta>}</footer></article> : <div className="ielts-history-empty"><BookOpenText /><h2>暂无训练记录</h2><p>完成一次专项训练后，报告和录音会保存在这里。</p></div>}</section>;
+function reportDate(value) {
+  if (!value) return "时间未知";
+  return new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
+
+function reportDuration(item) {
+  const seconds = Math.max(0, Math.round((new Date(item.endedAt) - new Date(item.startedAt)) / 1000));
+  if (!Number.isFinite(seconds)) return "--:--";
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function AssetsOverview({ settings, reports, onTab }) {
+  const latestMock = reports.find((item) => item.mode === "MOCK_TEST");
+  const target = Number(settings?.targetScore);
+  const latest = Number(latestMock?.overallBandScore);
+  const gap = Number.isFinite(target) && Number.isFinite(latest) ? Math.max(0, target - latest).toFixed(1) : null;
+  return <section className="ielts-overview-dashboard"><section className="ielts-asset-hero"><div><span>最近一次完整模考</span><h2>{latestMock ? `预估 ${formatBand(latestMock.overallBandScore)}` : "暂无完整模考"}</h2><p>AI 训练评估，并非官方考试成绩</p></div><div><span>目标</span><strong>{formatBand(settings?.targetScore)}</strong><small>{gap == null ? "完成模考后显示差距" : gap === "0.0" ? "已达到当前目标" : `还差约 ${gap} 分`}</small></div><TrainingCta className="ielts-asset-gradient-action" onClick={() => onTab("trends")}>查看能力趋势</TrainingCta></section><section className="ielts-weekly-activity"><header><div><span>今日训练</span><h2>{Number(settings?.todayCompletedCount || 0)} <small>/ 5 次</small></h2><p>次数来自 user_ielts 的今日完成记录</p></div><div className="ielts-weekly-stats"><p><strong>{reports.length}</strong><small>已生成报告</small></p><p><strong>{reports.filter((item) => item.mode === "MOCK_TEST").length}</strong><small>完整模考</small></p><p><strong>{reports.filter((item) => item.mode !== "MOCK_TEST").length}</strong><small>专项报告</small></p></div></header></section><section className="ielts-asset-recent"><header><h2>最近训练</h2></header>{reports.length ? reports.slice(0, 3).map((item) => <article key={item.sessionId}><span>{reportType(item)}</span><div><strong>{reportTitle(item)}</strong><small>{reportDate(item.endedAt)} · {reportDuration(item)}</small></div><p>{formatBand(item.overallBandScore)} 分</p></article>) : <div className="ielts-history-empty"><BookOpenText /><h2>暂无评分记录</h2><p>完成一次有效训练后，后端报告会显示在这里。</p></div>}</section></section>;
+}
+
+function AssetsHistory({ items }) {
+  const [selectedId, setSelectedId] = useState(items[0]?.sessionId || null);
+  const selected = items.find((item) => item.sessionId === selectedId) || items[0] || null;
+  return <section className="ielts-history-layout"><aside><header><h2>训练记录</h2><span>{items.length} 条</span></header>{items.map((item) => <button key={item.sessionId} className={selected?.sessionId === item.sessionId ? "is-active" : ""} onClick={() => setSelectedId(item.sessionId)}><small>{reportDate(item.endedAt)} · {reportType(item)}</small><strong>{reportTitle(item)}</strong><span>{reportDuration(item)}</span></button>)}</aside>{selected ? <article><header><div><span>{reportType(selected)}</span><h2>{reportTitle(selected)}</h2><p>{reportDate(selected.endedAt)} · 用时 {reportDuration(selected)}</p></div></header><section className="ielts-history-summary"><span>后端总体报告</span><h3>{formatBand(selected.overallBandScore)} 分</h3><p>{selected.summary}</p>{selected.strengths?.length > 0 && <><span>表现优势</span><ul>{selected.strengths.map((item) => <li key={item}>{item}</li>)}</ul></>}</section><section className="ielts-history-scores"><span>数据库已保存评分</span><div><p><small>总体 Band</small><strong>{formatBand(selected.overallBandScore)}<em>/9</em></strong></p><p><small>流利度与连贯性</small><strong>{formatBand(selected.fluencyCoherenceScore)}<em>/9</em></strong></p></div></section><section className="ielts-history-summary"><span>优先改进</span>{selected.improvements?.length > 0 ? <ol>{selected.improvements.map((item) => <li key={item}>{item}</li>)}</ol> : <p>本次报告没有保存额外改进项。</p>}</section></article> : <div className="ielts-history-empty"><BookOpenText /><h2>暂无训练记录</h2><p>完成一次专项训练后，后端报告会保存在这里。</p></div>}</section>;
 }
 
 export function TrendLineChart({ values }) {
@@ -728,10 +1234,12 @@ export function TrendLineChart({ values }) {
   return <canvas ref={canvasRef} className="ielts-trend-line-chart" aria-label={`最近五次模考成绩：${values.join("、")}`} />;
 }
 
-function AssetsTrends() {
-  const values = [5.5, 6, 6, 6.5, 6.5];
-  const averages = [78, 72, 76, 84];
-  return <section className="ielts-trends-dashboard"><section className="ielts-trend-summary"><div><span>模考趋势</span><h2>6.5</h2><p>最近 5 次模考提升 1.0 分</p></div><div className="ielts-trend-chart-wrap"><TrendLineChart values={values} /><small>第 1 次</small><small>最近一次</small></div><div><span>目标进度</span><strong>7.0</strong><p>已连续打卡 12 天</p></div></section><section className="ielts-dimension-trends"><h2>四项能力平均分</h2>{scoreRows.map((row, index) => <article key={row.label}><span>{row.label}</span><strong className="ielts-dimension-score">{averages[index]}<small>/100</small></strong><div><i style={{ width: `${averages[index]}%` }} /></div><strong>{["稳定", "优先提升", "稳定", "优势"][index]}</strong></article>)}</section><section className="ielts-part-trends"><article><span>Part 1</span><strong>回答长度更稳定</strong><p>近 4 次练习中，过短回答减少 38%。</p></article><article><span>Part 2</span><strong>内容组织正在改善</strong><p>仍需减少重复并加强细节连接。</p></article><article><span>Part 3</span><strong>观点深度不足</strong><p>建议增加原因、影响与对比结构。</p></article></section></section>;
+function AssetsTrends({ settings, reports }) {
+  const mocks = reports.filter((item) => item.mode === "MOCK_TEST").slice().reverse();
+  const values = mocks.map((item) => Number(item.overallBandScore)).filter(Number.isFinite);
+  const latest = values.at(-1);
+  const change = values.length >= 2 ? (latest - values[0]).toFixed(1) : null;
+  return <section className="ielts-trends-dashboard"><section className="ielts-trend-summary"><div><span>模考趋势</span><h2>{formatBand(latest)}</h2><p>{change == null ? "至少完成两次模考后显示趋势" : `当前记录变化 ${Number(change) >= 0 ? "+" : ""}${change} 分`}</p></div>{values.length >= 2 ? <div className="ielts-trend-chart-wrap"><TrendLineChart values={values} /><small>第 1 次</small><small>最近一次</small></div> : <div className="ielts-history-empty"><p>暂无足够的真实模考数据绘制趋势。</p></div>}<div><span>目标进度</span><strong>{formatBand(settings?.targetScore)}</strong><p>目标分来自后端用户设置</p></div></section></section>;
 }
 
 export function IeltsAssets({ route, onNavigate, onBackToAssets, onInterviewAssets, onTraining }) {
@@ -742,6 +1250,27 @@ export function IeltsAssets({ route, onNavigate, onBackToAssets, onInterviewAsse
   const tabRef = useRef(null);
   const tabButtons = useRef({});
   const [tabIndicator, setTabIndicator] = useState({ x: 0, width: 0, ready: false });
+  const [settings, setSettings] = useState(null);
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getIeltsSettings(), getIeltsEvaluationHistory()])
+      .then(([nextSettings, nextReports]) => {
+        if (cancelled) return;
+        setSettings(nextSettings);
+        setReports(Array.isArray(nextReports) ? nextReports : []);
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(error?.message || "IELTS 学习资产加载失败");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const updateIndicator = () => {
@@ -755,5 +1284,5 @@ export function IeltsAssets({ route, onNavigate, onBackToAssets, onInterviewAsse
   }, [tab]);
 
   const otherAssetsButton = <div className="asset-module-menu ielts-other-assets"><button className="asset-module-menu__trigger" type="button" aria-label="切换学习资产模块" aria-haspopup="menu"><SquaresFour weight="bold" /><span>其他资产</span><CaretDown weight="bold" /></button><div className="asset-module-menu__popover" role="menu"><button type="button" role="menuitem" onClick={onBackToAssets}><BookOpenText /><span><strong>场景训练学习资产</strong><small>对话记录、纠错与场景复练</small></span><CaretRight /></button><button type="button" role="menuitem" onClick={onInterviewAssets}><Briefcase /><span><strong>英文面试学习资产</strong><small>历史报告与口语复盘</small></span><CaretRight /></button></div></div>;
-  return <main className={cx("ielts-page", "ielts-assets", tab === "overview" && "ielts-assets--overview", tab === "trends" && "ielts-assets--trends")}><IeltsHeader title="IELTS 学习资产" subtitle="集中查看每次训练记录、总体报告与原始录音。" action={<div className="ielts-assets-actions">{otherAssetsButton}<SimpleCta className="ielts-assets-header-cta" onClick={onTraining}>返回训练中心</SimpleCta></div>} /><nav className="ielts-asset-tabs" ref={tabRef}><span className={cx("ielts-asset-tab-indicator", tabIndicator.ready && "is-ready")} style={{ width: tabIndicator.width, transform: `translateX(${tabIndicator.x}px)` }} />{tabs.map((item) => <button ref={(node) => { tabButtons.current[item.id] = node; }} key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>{tab === "overview" && <AssetsOverview onTab={setTab} />}{tab === "history" && <AssetsHistory onNavigate={onNavigate} />}{tab === "trends" && <AssetsTrends />}</main>;
+  return <main className={cx("ielts-page", "ielts-assets", tab === "overview" && "ielts-assets--overview", tab === "trends" && "ielts-assets--trends")}><IeltsHeader title="IELTS 学习资产" subtitle="集中查看数据库中已生成的训练评分与总体报告。" action={<div className="ielts-assets-actions">{otherAssetsButton}<SimpleCta className="ielts-assets-header-cta" onClick={onTraining}>返回训练中心</SimpleCta></div>} /><nav className="ielts-asset-tabs" ref={tabRef}><span className={cx("ielts-asset-tab-indicator", tabIndicator.ready && "is-ready")} style={{ width: tabIndicator.width, transform: `translateX(${tabIndicator.x}px)` }} />{tabs.map((item) => <button ref={(node) => { tabButtons.current[item.id] = node; }} key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>{loading ? <div className="ielts-history-empty"><NewtonsCradle label="正在读取后端评分记录" /></div> : loadError ? <div className="ielts-history-empty"><h2>学习资产加载失败</h2><p>{loadError}</p></div> : tab === "overview" ? <AssetsOverview settings={settings} reports={reports} onTab={setTab} /> : tab === "history" ? <AssetsHistory items={reports} /> : <AssetsTrends settings={settings} reports={reports} />}</main>;
 }

@@ -7,6 +7,7 @@ import java.util.List;
 
 public interface SceneFlowService {
 	SceneFlowResponse createFlow(String sceneId);
+	SceneFlowResponse getFlow(String sceneId);
 	SceneFlowResponse advanceStage(String sceneId, SceneFlowStage stage);
 	void completeFlow(String sceneId, Boolean completed);
 	List<LearningContentItem> getByCurrentStage(String sceneId, SceneFlowStage stage);

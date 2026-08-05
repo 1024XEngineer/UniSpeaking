@@ -1,17 +1,8 @@
 package com.unispeaking.service.session;
 
-import com.unispeaking.domain.dto.session.StartFreeChatRequest;
-import com.unispeaking.domain.dto.session.CompleteCustomSceneDialogueResponse;
-import com.unispeaking.domain.dto.session.ScenarioDialogueStateResponse;
-import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
-import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
-import com.unispeaking.domain.po.session.AbstractSceneSession;
-import com.unispeaking.domain.dto.scene.TranslateTextResponse;
 import com.unispeaking.domain.vo.scene.SceneType;
-import com.unispeaking.domain.vo.session.SessionStatus;
-import java.time.Instant;
 
 public interface SessionService {
 
@@ -19,39 +10,7 @@ public interface SessionService {
 			SceneType sceneType,
 			String sceneId,
 			String prompt);
-
-	void registerSceneSession(AbstractSceneSession session);
-
-	void terminateSceneSession(
-			String userId,
-			String sessionId,
-			SessionStatus terminalStatus,
-			Instant endedAt);
-
-	StartSceneSessionResponse startFreeChat(StartFreeChatRequest request);
-
-	StartSceneSessionResponse startCustomScene(
-			String sceneId,
-			StartCustomSceneDialogueRequest request);
-
-	void addMessage(String userId, String sessionId, Message message);
-
 	void endSession(String userId, String sessionId, String stopTime);
 
-	CompleteCustomSceneDialogueResponse completeCustomScene(
-			String sceneId,
-			String sessionId,
-			String stopTime);
-
-	ScenarioDialogueStateResponse advanceCustomSceneState(
-			String sceneId,
-			String sessionId,
-			int turnNo,
-			String transcript);
-
-	ScenarioDialogueStateResponse getCustomSceneState(
-			String sceneId,
-			String sessionId);
-
-	TranslateTextResponse translate(String sessionId, String text);
+	void addMessage(String userId, String sessionId, Message message);
 }

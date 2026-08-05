@@ -2,134 +2,112 @@ package com.unispeaking.service.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
-import com.unispeaking.common.prompt.FiveLayerPromptBuilder;
 import com.unispeaking.component.session.ActiveSessionRegistry;
-import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
-import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
-import com.unispeaking.domain.po.scene.CustomSceneDefinition;
-import com.unispeaking.domain.vo.provider.ProviderType;
+import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.scene.SceneFlowStage;
-import com.unispeaking.domain.vo.session.RealtimeConnectionResult;
-import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
-import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
+import com.unispeaking.domain.dto.scene.SceneFlowResponse;
+import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPracticeRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
-import com.unispeaking.infrastructure.realtime.RealtimeSdpExchange;
-import com.unispeaking.provider.AiProviderRegistry;
-import com.unispeaking.service.asset.impl.ObsoleteDialogueCleanup;
+import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.service.evaluation.EvaluationService;
-import com.unispeaking.service.profile.ProfileService;
 import com.unispeaking.service.scene.SceneFlowService;
-import com.unispeaking.service.scene.SceneService;
-import com.unispeaking.component.statemachine.ScenarioDialogueStateMachine;
 import com.unispeaking.service.session.impl.SessionServiceImpl;
-import java.time.Instant;
-import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import java.util.UUID;
 
 class SessionServiceImplRepracticeTest {
 
 	@Test
-	void repracticeStartsWithoutAnInMemorySceneFlow() {
+	void sessionServiceOnlyCreatesTheGenericSessionLifecycle() {
 		String userId = "f76889ee-7f7c-4dae-bcc2-61b85a63dcec";
-		String sceneId = "custom_repeat123";
-		String prompt = "layer 1\n\nlayer 2\n\nlayer 3\n\nlayer 4\n\nlayer 5";
 		AuthService authService = mock(AuthService.class);
-		SceneFlowService sceneFlowService = mock(SceneFlowService.class);
-		SceneRepository sceneRepository = mock(SceneRepository.class);
-		RealtimeSdpExchange realtimeSdpExchange = mock(RealtimeSdpExchange.class);
-		ScenarioDialogueStateMachine stateMachine =
-				mock(ScenarioDialogueStateMachine.class);
-		ActiveSessionRegistry sessions = new ActiveSessionRegistry();
-		PracticeSessionRepository practiceSessions =
-				mock(PracticeSessionRepository.class);
-		CustomSceneDefinition definition = new CustomSceneDefinition(
-				sceneId,
-				userId,
-				"Coffee shop",
-				"Order a drink",
-				"Barista",
-				"Customer",
-				"Complete the order",
-				"",
-				"{}",
-				List.of(),
-				List.of(),
-				List.of());
-		SceneGenerationResponse scene = new SceneGenerationResponse(
-				sceneId,
-				List.of(),
-				List.of(),
-				List.of(),
-				prompt);
-
 		when(authService.requireUserId(isNull())).thenReturn(userId);
-		when(sceneRepository.findCustomDefinitionById(sceneId))
-				.thenReturn(Optional.of(definition));
-		when(sceneRepository.findGeneratedById(sceneId))
-				.thenReturn(Optional.of(scene));
-		when(realtimeSdpExchange.exchangeSdp(
-				any(),
-				any(),
-				any(),
-				any()))
-				.thenReturn(new RealtimeConnectionResult(
-						null,
-						"answer-sdp",
-						Instant.parse("2026-07-31T05:00:00Z")));
+		ActiveSessionRegistry sessions = new ActiveSessionRegistry();
+		PracticeSessionRepository practices = mock(PracticeSessionRepository.class);
 		SessionServiceImpl service = new SessionServiceImpl(
 				authService,
-				mock(SceneService.class),
-				sceneFlowService,
-				sceneRepository,
 				sessions,
 				mock(SessionMessageRepository.class),
-				practiceSessions,
-				realtimeSdpExchange,
-				mock(EvaluationService.class),
-				stateMachine,
-				mock(ProfileService.class),
-				mock(FiveLayerPromptBuilder.class),
-				mock(AiProviderRegistry.class),
-				mock(ObsoleteDialogueCleanup.class));
+				practices,
+				mock(IeltsPracticeRepository.class),
+				mock(SceneFlowService.class));
 
-		var response = service.startCustomScene(
-				sceneId,
-				new StartCustomSceneDialogueRequest(
-						"offer-sdp",
-						ProviderType.QWEN,
-						"qwen3.5-omni-flash-realtime",
-						"Aiden",
+		var started = service.startSession(
+				SceneType.CUSTOM_SCENE,
+				"custom_repeat123",
+				"session prompt");
+
+		assertNotNull(started.sessionId());
+		assertEquals(SceneType.CUSTOM_SCENE,
+				sessions.findById(started.sessionId()).orElseThrow().getSceneType());
+		verify(practices).create(org.mockito.ArgumentMatchers.any());
+	}
+
+	@Test
+	void completedIeltsFlowConsumesOneDailyPractice() {
+		String userId = "f76889ee-7f7c-4dae-bcc2-61b85a63dcec";
+		AuthService authService = mock(AuthService.class);
+		when(authService.requireUserId(isNull())).thenReturn(userId);
+		ActiveSessionRegistry sessions = new ActiveSessionRegistry();
+		IeltsPracticeRepository ieltsPractices = mock(IeltsPracticeRepository.class);
+		SceneFlowService flows = mock(SceneFlowService.class);
+		when(flows.advanceStage("ielts_part_1", null)).thenReturn(
+				new SceneFlowResponse(
+						"ielts_part_1",
+						SceneFlowStage.COMPLETED,
 						true));
+		SessionServiceImpl service = new SessionServiceImpl(
+				authService,
+				sessions,
+				mock(SessionMessageRepository.class),
+				mock(PracticeSessionRepository.class),
+				ieltsPractices,
+				flows);
+		var started = service.startSession(
+				SceneType.IELTS_SCENE,
+				"ielts_part_1",
+				"IELTS prompt");
 
-		assertEquals(sceneId, response.sceneId());
-		assertEquals(SceneFlowStage.DIALOGUE, response.currentStage());
-		assertEquals("answer-sdp", response.answerSdp());
-		assertNotNull(response.sessionId());
-		service.endSession(
-				userId,
-				response.sessionId(),
-				"2000-01-01T00:00:00Z");
-		verify(practiceSessions).complete(
-				eq(response.sessionId()),
-				eq(java.util.UUID.fromString(userId)),
-				any(Instant.class));
-		verify(sceneFlowService, never()).getByCurrentStage(
-				any(),
-				any());
-		verify(stateMachine).start(
-				any(),
-				eq(sceneId),
-				eq("{}"),
-				eq("Complete the order"));
+		service.endSession(userId, started.sessionId(), null);
+
+		verify(ieltsPractices).incrementCompletedCount(UUID.fromString(userId));
+		verify(flows).completeFlow("ielts_part_1", true);
+	}
+
+	@Test
+	void intermediateMockPartDoesNotConsumeDailyPractice() {
+		String userId = "f76889ee-7f7c-4dae-bcc2-61b85a63dcec";
+		AuthService authService = mock(AuthService.class);
+		when(authService.requireUserId(isNull())).thenReturn(userId);
+		ActiveSessionRegistry sessions = new ActiveSessionRegistry();
+		IeltsPracticeRepository ieltsPractices = mock(IeltsPracticeRepository.class);
+		SceneFlowService flows = mock(SceneFlowService.class);
+		when(flows.advanceStage("ielts_mock_1", null)).thenReturn(
+				new SceneFlowResponse(
+						"ielts_mock_1",
+						SceneFlowStage.IELTS_PART_2,
+						false));
+		SessionServiceImpl service = new SessionServiceImpl(
+				authService,
+				sessions,
+				mock(SessionMessageRepository.class),
+				mock(PracticeSessionRepository.class),
+				ieltsPractices,
+				flows);
+		var started = service.startSession(
+				SceneType.IELTS_SCENE,
+				"ielts_mock_1",
+				"IELTS prompt");
+
+		service.endSession(userId, started.sessionId(), null);
+
+		verify(ieltsPractices, never()).incrementCompletedCount(UUID.fromString(userId));
+		verify(flows, never()).completeFlow("ielts_mock_1", true);
 	}
 }

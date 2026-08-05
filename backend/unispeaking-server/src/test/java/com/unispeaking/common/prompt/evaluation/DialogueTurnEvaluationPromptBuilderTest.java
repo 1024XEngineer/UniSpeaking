@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
+import com.unispeaking.domain.vo.scene.RecommendedExpression;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -118,6 +119,38 @@ class DialogueTurnEvaluationPromptBuilderTest {
 		assertEquals(
 				"Historical answer",
 				root.get("previousUtterances").get(0).get("text").asString());
+	}
+
+	@Test
+	void includesIeltsRecommendedExpressionsAsLlmCandidates()
+			throws Exception {
+		DialogueTurnEvaluationPromptInput input =
+				new DialogueTurnEvaluationPromptInput(
+						"IELTS_PART_1",
+						null,
+						"IELTS examiner",
+						"IELTS candidate",
+						null,
+						List.of(),
+						"What do you usually do at weekends?",
+						"I often stay at home and read.",
+						List.of(new RecommendedExpression(
+								"COLLOCATION",
+								"unwind with a good book",
+								"读本好书来放松",
+								"Use for relaxing by reading.")));
+
+		JsonNode expressions = inputJson(builder.build(input))
+				.get("recommendedExpressions");
+
+		assertAll(
+				() -> assertEquals(1, expressions.size()),
+				() -> assertEquals(
+						"unwind with a good book",
+						expressions.get(0).get("expression").asString()),
+				() -> assertEquals(
+						"读本好书来放松",
+						expressions.get(0).get("translation").asString()));
 	}
 
 	@Test
