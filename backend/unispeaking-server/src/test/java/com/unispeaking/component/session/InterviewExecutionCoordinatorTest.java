@@ -5,6 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.unispeaking.domain.po.session.InterviewSubmission;
+import com.unispeaking.domain.vo.scene.InterviewSubmissionStatus;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -13,8 +20,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class InterviewExecutionCoordinatorTest {
@@ -230,6 +239,230 @@ class InterviewExecutionCoordinatorTest {
 		}
 	}
 
+	@Test
+	void watchdogCapsDeadlineAndReleasesBusyStateWhileProviderIsBlocked() throws Exception {
+		MutableClock clock = new MutableClock(Instant.parse("2030-01-01T00:00:00Z"));
+		ExecutorService executor = Executors.newSingleThreadExecutor();
+		InterviewExecutionCoordinator coordinator = new InterviewExecutionCoordinator(
+				executor, clock, () -> { });
+		CountDownLatch providerStarted = new CountDownLatch(1);
+		CountDownLatch releaseProvider = new CountDownLatch(1);
+		CountDownLatch providerFinished = new CountDownLatch(1);
+		AtomicInteger timeouts = new AtomicInteger();
+		try {
+			coordinator.executeUntil(
+					"interview_1",
+					InterviewTaskType.PROCESSING,
+					clock.instant(),
+					Duration.ofHours(1),
+					lease -> {
+						try {
+							providerStarted.countDown();
+							await(releaseProvider);
+						} finally {
+							providerFinished.countDown();
+						}
+					},
+					timeouts::incrementAndGet);
+			assertTrue(providerStarted.await(5, TimeUnit.SECONDS));
+
+			clock.advance(Duration.ofMinutes(10).minusMillis(1));
+			assertEquals(0, coordinator.expireTasks(clock.instant()));
+			assertTrue(coordinator.isBusy("interview_1"));
+
+			clock.advance(Duration.ofMillis(1));
+			assertEquals(1, coordinator.expireTasks(clock.instant()));
+			assertEquals(1, timeouts.get());
+			assertFalse(coordinator.isBusy("interview_1"));
+		} finally {
+			releaseProvider.countDown();
+			assertTrue(providerFinished.await(5, TimeUnit.SECONDS));
+			executor.shutdownNow();
+		}
+	}
+
+	@Test
+	void runningSubmissionTimeoutFencesLateCommitAndDefersCleanupUntilTaskStops()
+			throws Exception {
+		MutableClock clock = new MutableClock(Instant.parse("2030-01-01T00:00:00Z"));
+		ExecutorService executor = Executors.newSingleThreadExecutor();
+		InterviewExecutionCoordinator coordinator = new InterviewExecutionCoordinator(
+				executor, clock, () -> { });
+		InterviewSubmission submission = new InterviewSubmission(
+				"submission_1", 1, "digest_1", clock.instant());
+		CountDownLatch providerStarted = new CountDownLatch(1);
+		CountDownLatch releaseProvider = new CountDownLatch(1);
+		CountDownLatch cleanupFinished = new CountDownLatch(1);
+		AtomicBoolean lateCommitAccepted = new AtomicBoolean(true);
+		AtomicInteger lateMutations = new AtomicInteger();
+		AtomicInteger temporaryCleanups = new AtomicInteger();
+		try {
+			coordinator.executeSubmission(
+					"interview_1",
+					submission,
+					lease -> {
+						providerStarted.countDown();
+						await(releaseProvider);
+						lateCommitAccepted.set(lease.commitIfActive(
+								lateMutations::incrementAndGet));
+					},
+					() -> {
+						temporaryCleanups.incrementAndGet();
+						cleanupFinished.countDown();
+					});
+			assertTrue(providerStarted.await(5, TimeUnit.SECONDS));
+
+			clock.advance(InterviewRuntimePolicy.MAXIMUM_TASK_TIMEOUT);
+			assertEquals(1, coordinator.expireTasks(clock.instant()));
+			assertEquals(InterviewSubmissionStatus.FAILED_RETRYABLE, submission.status());
+			assertFalse(coordinator.isBusy("interview_1"));
+			assertFalse(coordinator.runIfIdle("interview_1", () -> { }));
+			assertEquals(0, temporaryCleanups.get());
+
+			releaseProvider.countDown();
+			assertTrue(cleanupFinished.await(5, TimeUnit.SECONDS));
+			assertFalse(lateCommitAccepted.get());
+			assertEquals(0, lateMutations.get());
+			assertEquals(1, temporaryCleanups.get());
+			assertTrue(coordinator.runIfIdle("interview_1", () -> { }));
+		} finally {
+			releaseProvider.countDown();
+			executor.shutdownNow();
+		}
+	}
+
+	@Test
+	void timeoutCallbackFailureDoesNotBlockOtherExpiredTasks() {
+		MutableClock clock = new MutableClock(Instant.parse("2030-01-01T00:00:00Z"));
+		List<Runnable> drains = new CopyOnWriteArrayList<>();
+		InterviewExecutionCoordinator coordinator = new InterviewExecutionCoordinator(
+				drains::add, clock, () -> { });
+		AtomicInteger successfulCallbacks = new AtomicInteger();
+
+		coordinator.executeUntil(
+				"interview_1",
+				InterviewTaskType.PROCESSING,
+				clock.instant(),
+				Duration.ofMinutes(1),
+					lease -> { },
+				() -> { throw new IllegalStateException("cleanup failed"); });
+		coordinator.executeUntil(
+				"interview_2",
+				InterviewTaskType.FINALIZING,
+				clock.instant(),
+				Duration.ofMinutes(1),
+					lease -> { },
+				successfulCallbacks::incrementAndGet);
+
+		clock.advance(Duration.ofMinutes(1));
+		assertEquals(2, coordinator.expireTasks(clock.instant()));
+		assertEquals(1, successfulCallbacks.get());
+		assertFalse(coordinator.isBusy("interview_1"));
+		assertFalse(coordinator.isBusy("interview_2"));
+		drains.forEach(Runnable::run);
+	}
+
+	@Test
+	void failedTimeoutCallbackIsRetriedWithoutRestoringBusyState() {
+		MutableClock clock = new MutableClock(Instant.parse("2030-01-01T00:00:00Z"));
+		List<Runnable> drains = new CopyOnWriteArrayList<>();
+		InterviewExecutionCoordinator coordinator = new InterviewExecutionCoordinator(
+				drains::add, clock, () -> { });
+		AtomicInteger attempts = new AtomicInteger();
+		coordinator.executeUntil(
+				"interview_1",
+				InterviewTaskType.PROCESSING,
+				clock.instant(),
+				Duration.ofMinutes(1),
+					lease -> { },
+				() -> {
+					if (attempts.incrementAndGet() == 1) {
+						throw new IllegalStateException("cleanup failed");
+					}
+				});
+
+		clock.advance(Duration.ofMinutes(1));
+		assertEquals(1, coordinator.expireTasks(clock.instant()));
+		assertEquals(1, attempts.get());
+		assertFalse(coordinator.isBusy("interview_1"));
+		assertTrue(coordinator.hasPendingTimeoutCallback("interview_1"));
+
+		assertEquals(0, coordinator.expireTasks(clock.instant()));
+		assertEquals(2, attempts.get());
+		assertFalse(coordinator.hasPendingTimeoutCallback("interview_1"));
+		assertFalse(coordinator.isBusy("interview_1"));
+	}
+
+	@Test
+	void timeoutCallbackErrorIsRetriedWithoutBlockingOtherInterviews() {
+		MutableClock clock = new MutableClock(Instant.parse("2030-01-01T00:00:00Z"));
+		List<Runnable> drains = new CopyOnWriteArrayList<>();
+		InterviewExecutionCoordinator coordinator = new InterviewExecutionCoordinator(
+				drains::add, clock, () -> { });
+		AtomicInteger errorAttempts = new AtomicInteger();
+		AtomicInteger otherCallbacks = new AtomicInteger();
+		coordinator.executeUntil(
+				"interview_1",
+				InterviewTaskType.PROCESSING,
+				clock.instant(),
+				Duration.ofMinutes(1),
+					lease -> { },
+				() -> {
+					if (errorAttempts.incrementAndGet() == 1) {
+						throw new AssertionError("cleanup error");
+					}
+				});
+		coordinator.executeUntil(
+				"interview_2",
+				InterviewTaskType.FINALIZING,
+				clock.instant(),
+				Duration.ofMinutes(1),
+					lease -> { },
+				otherCallbacks::incrementAndGet);
+
+		clock.advance(Duration.ofMinutes(1));
+		assertEquals(2, coordinator.expireTasks(clock.instant()));
+		assertEquals(1, errorAttempts.get());
+		assertEquals(1, otherCallbacks.get());
+		assertTrue(coordinator.hasPendingTimeoutCallback("interview_1"));
+		assertFalse(coordinator.isBusy("interview_1"));
+		assertFalse(coordinator.isBusy("interview_2"));
+
+		assertEquals(0, coordinator.expireTasks(clock.instant()));
+		assertEquals(2, errorAttempts.get());
+		assertFalse(coordinator.hasPendingTimeoutCallback("interview_1"));
+	}
+
+	@Test
+	void idleMaintenanceFencesConcurrentTaskAcceptanceWithoutUsingProviderLock() throws Exception {
+		List<Runnable> drains = new CopyOnWriteArrayList<>();
+		InterviewExecutionCoordinator coordinator = new InterviewExecutionCoordinator(drains::add);
+		ExecutorService callers = Executors.newFixedThreadPool(2);
+		CountDownLatch maintenanceStarted = new CountDownLatch(1);
+		CountDownLatch releaseMaintenance = new CountDownLatch(1);
+		try {
+			Future<Boolean> maintenance = callers.submit(() -> coordinator.runIfIdle(
+					"interview_1",
+					() -> {
+						maintenanceStarted.countDown();
+						await(releaseMaintenance);
+					}));
+			assertTrue(maintenanceStarted.await(5, TimeUnit.SECONDS));
+			Future<?> acceptance = callers.submit(() -> coordinator.execute(
+					"interview_1", InterviewTaskType.PROCESSING, () -> { }));
+
+			assertThrows(TimeoutException.class, () -> acceptance.get(100, TimeUnit.MILLISECONDS));
+			assertTrue(drains.isEmpty());
+			releaseMaintenance.countDown();
+			assertTrue(maintenance.get(5, TimeUnit.SECONDS));
+			acceptance.get(5, TimeUnit.SECONDS);
+			assertEquals(1, drains.size());
+		} finally {
+			releaseMaintenance.countDown();
+			callers.shutdownNow();
+		}
+	}
+
 	private static void trackConcurrency(
 			AtomicInteger concurrentTasks,
 			AtomicInteger maximumConcurrency) {
@@ -246,5 +479,29 @@ class InterviewExecutionCoordinatorTest {
 			Thread.currentThread().interrupt();
 			throw new IllegalStateException("coordinator test interrupted", exception);
 		}
+	}
+
+	private static final class MutableClock extends Clock {
+
+		private final AtomicReference<Instant> now;
+
+		private MutableClock(Instant now) {
+			this.now = new AtomicReference<>(now);
+		}
+
+		private void advance(Duration duration) {
+			now.updateAndGet(current -> current.plus(duration));
+		}
+
+		@Override
+		public ZoneId getZone() { return ZoneOffset.UTC; }
+
+		@Override
+		public Clock withZone(ZoneId zone) {
+			return zone.equals(ZoneOffset.UTC) ? this : Clock.fixed(instant(), zone);
+		}
+
+		@Override
+		public Instant instant() { return now.get(); }
 	}
 }

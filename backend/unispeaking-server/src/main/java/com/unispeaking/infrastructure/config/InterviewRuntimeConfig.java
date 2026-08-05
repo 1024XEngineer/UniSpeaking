@@ -1,7 +1,10 @@
 package com.unispeaking.infrastructure.config;
 
+import com.unispeaking.component.session.InterviewRuntimePolicy;
 import java.time.Clock;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -27,5 +30,19 @@ public class InterviewRuntimeConfig {
 	@Bean(name = "interviewClock")
 	public Clock interviewClock() {
 		return Clock.systemUTC();
+	}
+
+	@Bean
+	public InterviewRuntimePolicy interviewRuntimePolicy() {
+		return InterviewRuntimePolicy.defaults();
+	}
+
+	@Bean(name = "interviewWatchdogScheduler", destroyMethod = "shutdown")
+	public ScheduledExecutorService interviewWatchdogScheduler() {
+		return Executors.newSingleThreadScheduledExecutor(runnable -> {
+			Thread thread = new Thread(runnable, "interview-watchdog-1");
+			thread.setDaemon(true);
+			return thread;
+		});
 	}
 }
