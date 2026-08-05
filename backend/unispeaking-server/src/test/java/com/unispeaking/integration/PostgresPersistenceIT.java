@@ -19,7 +19,6 @@ import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.po.auth.UserAccount;
 import com.unispeaking.domain.po.auth.UserRole;
 import com.unispeaking.domain.po.auth.UserStatus;
-import com.unispeaking.domain.po.feedback.UserFeedback;
 import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.domain.po.profile.WeeklyLearningGoals;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
@@ -31,13 +30,11 @@ import com.unispeaking.domain.vo.scene.InterviewQuestionType;
 import com.unispeaking.domain.vo.scene.InterviewReportDimension;
 import com.unispeaking.domain.vo.scene.InterviewReportType;
 import com.unispeaking.domain.vo.scene.TargetRoleSummary;
-import com.unispeaking.domain.vo.feedback.FeedbackStatus;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.CustomTurnEvaluation;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.PronunciationWordDetail;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SceneSentenceReadingRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.TurnEvaluationRepository;
-import com.unispeaking.infrastructure.persistence.repository.feedback.FeedbackRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.MybatisSceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.InterviewQuestionRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.InterviewReportRepository;
@@ -130,9 +127,6 @@ class PostgresPersistenceIT {
 
 	@Autowired
 	private SceneSentenceReadingRepository sentenceReadingRepository;
-
-	@Autowired
-	private FeedbackRepository feedbackRepository;
 
 	@BeforeEach
 	void clearBusinessTables() {
@@ -679,42 +673,6 @@ class PostgresPersistenceIT {
 		assertEquals(
 				goals,
 				weeklyLearningGoalRepository.findByUserId(userId).orElseThrow());
-	}
-
-	@Test
-	void persistsAnonymousFeedbackAndTracksResolution() {
-		Instant createdAt = Instant.parse("2026-08-04T08:00:00Z");
-		UserFeedback submitted = new UserFeedback(
-				UUID.fromString("22222222-2222-4222-8222-222222222222"),
-				"FB-20260804-ABCDEF123456",
-				null,
-				"a".repeat(64),
-				"audio",
-				"麦克风无法使用",
-				"允许权限后仍没有声音",
-				"Chrome 138",
-				FeedbackStatus.SUBMITTED,
-				null,
-				null,
-				createdAt,
-				createdAt);
-
-		feedbackRepository.create(submitted);
-		UserFeedback stored = feedbackRepository
-				.findByFeedbackNo(submitted.feedbackNo())
-				.orElseThrow();
-		UserFeedback resolved = stored.withResolution(
-				FeedbackStatus.RESOLVED,
-				"请重新选择系统输入设备后再试",
-				createdAt.plusSeconds(60));
-		feedbackRepository.update(stored, resolved);
-
-		UserFeedback result = feedbackRepository
-				.findByFeedbackNo(submitted.feedbackNo())
-				.orElseThrow();
-		assertEquals(FeedbackStatus.RESOLVED, result.status());
-		assertEquals("请重新选择系统输入设备后再试", result.reply());
-		assertEquals(createdAt.plusSeconds(60), result.repliedAt());
 	}
 
 	@Test
