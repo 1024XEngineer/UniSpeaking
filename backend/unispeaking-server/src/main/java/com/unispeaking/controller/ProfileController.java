@@ -3,16 +3,20 @@ package com.unispeaking.controller;
 import com.unispeaking.common.response.ApiResponse;
 import com.unispeaking.domain.dto.profile.AvatarResponse;
 import com.unispeaking.domain.dto.profile.ProfileOverviewResponse;
+import com.unispeaking.domain.dto.profile.ProfileInsightsResponse;
 import com.unispeaking.domain.dto.profile.UpdateProfileRequest;
 import com.unispeaking.domain.dto.profile.UpdateProfileResponse;
+import com.unispeaking.domain.dto.profile.UpdateWeeklyLearningGoalsRequest;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.profile.ProfileAccountService;
+import com.unispeaking.service.profile.ProfileInsightsService;
 import com.unispeaking.service.profile.ProfileOverviewService;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -26,14 +30,30 @@ public class ProfileController {
 	private final AuthService authService;
 	private final ProfileOverviewService overviewService;
 	private final ProfileAccountService accountService;
+	private final ProfileInsightsService insightsService;
 
 	public ProfileController(
 			AuthService authService,
 			ProfileOverviewService overviewService,
-			ProfileAccountService accountService) {
+			ProfileAccountService accountService,
+			ProfileInsightsService insightsService) {
 		this.authService = authService;
 		this.overviewService = overviewService;
 		this.accountService = accountService;
+		this.insightsService = insightsService;
+	}
+
+	@GetMapping("/insights")
+	public ApiResponse<ProfileInsightsResponse> insights() {
+		return ApiResponse.success(insightsService.getInsights(
+				authService.requireUserId(null)));
+	}
+
+	@PutMapping("/insights/goals")
+	public ApiResponse<ProfileInsightsResponse> updateGoals(
+			@Valid @RequestBody UpdateWeeklyLearningGoalsRequest request) {
+		return ApiResponse.success(insightsService.updateGoals(
+				authService.requireUserId(null), request));
 	}
 
 	@GetMapping("/overview")

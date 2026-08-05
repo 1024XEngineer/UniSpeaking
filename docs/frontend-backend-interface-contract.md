@@ -55,6 +55,61 @@ Authorization: Bearer <accessToken>
 - 有效会话跨越上海零点时，时长按每个自然日实际覆盖区间拆分。
 - 接口始终返回精确秒数；当前页面对非零有效秒数按分钟向上展示，因此 30～59 秒显示为 1 分钟。
 
+### 查询学习目标与洞察
+
+```text
+GET /api/profile/insights
+Authorization: Bearer <accessToken>
+```
+
+第一阶段返回本周学习目标与真实完成进度：
+
+```json
+{
+  "weeklyGoals": {
+    "weekStartsAt": "2026-08-03T00:00:00+08:00",
+    "weekEndsAt": "2026-08-10T00:00:00+08:00",
+    "durationTargetMinutes": 120,
+    "completedDurationSeconds": 4560,
+    "remainingDurationSeconds": 2640,
+    "durationProgress": 63.3,
+    "durationAchieved": false,
+    "trainingCountTarget": 5,
+    "completedTrainingCount": 3,
+    "remainingTrainingCount": 2,
+    "countProgress": 60.0,
+    "countAchieved": false
+  }
+}
+```
+
+统计口径：
+
+- 周期为 `Asia/Shanghai` 时区的周一 00:00 至当前时刻。
+- 仅统计 `COMPLETED` 且整场时长不少于 30 秒的会话。
+- 当前仅统计 `FREE_CHAT` 和 `CUSTOM_SCENE`；IELTS 与 Interview 完成真实会话链路后再纳入。
+- 时长按会话与本周的实际重叠区间计算；次数按会话完成时间所在周归属。
+- 进度保留一位小数并封顶 100%，超额完成仍会在实际时长或次数中体现。
+- 未设置目标时使用 120 分钟和 5 次的业务默认值。数据库字段保持可空，不设数据库默认值或数值范围约束。
+
+### 修改每周学习目标
+
+```text
+PUT /api/profile/insights/goals
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+```json
+{
+  "durationTargetMinutes": 120,
+  "trainingCountTarget": 5
+}
+```
+
+`durationTargetMinutes` 必须为 1～1260 的整数，`trainingCountTarget` 必须为
+1～70 的整数。更新成功后返回与查询接口相同的完整洞察结构。
+
 ### 修改用户名（昵称）
 
 ```text
