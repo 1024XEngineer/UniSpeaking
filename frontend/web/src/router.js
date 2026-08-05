@@ -7,6 +7,7 @@ const baseRoute = {
   conversationSessionId: null,
   assetSceneId: null,
   helpRoute: null,
+  aboutRoute: null,
   publicAccess: false,
 };
 
@@ -30,6 +31,7 @@ export const APP_PAGES = [
   "membership",
   "settings",
   "help",
+  "about",
 ];
 
 export const PAGE_PATHS = {
@@ -41,6 +43,7 @@ export const PAGE_PATHS = {
   membership: "/membership",
   settings: "/settings",
   help: "/help",
+  about: "/about",
   ielts: "/ielts",
   "ielts-assets": "/ielts/assets",
   interview: "/interview",
@@ -109,6 +112,12 @@ export const paths = {
     category: (categoryId) => `/help/category/${encodeURIComponent(categoryId)}`,
     article: (articleId) => `/help/article/${encodeURIComponent(articleId)}`,
     feedback: "/help/feedback",
+  },
+  about: {
+    root: "/about",
+    userAgreement: "/about/user-agreement",
+    privacyPolicy: "/about/privacy-policy",
+    aiService: "/about/ai-service",
   },
 };
 
@@ -285,6 +294,25 @@ export function parseHelpRoute(pathname) {
   });
 }
 
+export function parseAboutRoute(pathname) {
+  const path = normalizePath(pathname);
+  const segments = path.split("/").filter(Boolean);
+  if (segments[0] !== "about") return null;
+  if (segments.length === 1) {
+    return appRoute("about", { aboutRoute: { screen: "home" } });
+  }
+  const documentIds = ["user-agreement", "privacy-policy", "ai-service"];
+  if (segments.length === 2 && documentIds.includes(segments[1])) {
+    return appRoute("about", {
+      aboutRoute: { screen: "document", documentId: segments[1] },
+    });
+  }
+  return appRoute("about", {
+    aboutRoute: { screen: "home" },
+    canonicalPath: paths.about.root,
+  });
+}
+
 function previewRoute(preview) {
   if (!preview) return null;
   if (preview === "teacher") return { ...baseRoute, flow: "teacher", page: "conversation" };
@@ -351,6 +379,8 @@ export function resolveRoute(locationLike = window.location) {
   if (interviewRoute) return interviewRoute;
   const helpRoute = parseHelpRoute(pathname);
   if (helpRoute) return helpRoute;
+  const aboutRoute = parseAboutRoute(pathname);
+  if (aboutRoute) return aboutRoute;
 
   const page = Object.entries(PAGE_PATHS).find(([, routePath]) => routePath === pathname)?.[0];
   if (page) return appRoute(page, {

@@ -27,6 +27,10 @@ const cases = [
   [paths.help.category("quick-start"), "help"],
   [paths.help.article("start-free-conversation"), "help"],
   [paths.help.feedback, "help"],
+  [paths.about.root, "about"],
+  [paths.about.userAgreement, "about"],
+  [paths.about.privacyPolicy, "about"],
+  [paths.about.aiService, "about"],
 ];
 
 for (const [pathname, expectedPage] of cases) {
@@ -56,5 +60,11 @@ assert.equal(route(paths.help.category("麦克风 音频")).helpRoute.categoryId
 assert.equal(route(paths.help.article("修改 密码")).helpRoute.articleId, "修改 密码");
 assert.equal(route(paths.help.feedback).helpRoute.screen, "feedback");
 assert.equal(route("/help/unknown/path").canonicalPath, paths.help.root);
+assert.equal(route(paths.about.root).aboutRoute.screen, "home");
+assert.equal(route(paths.about.userAgreement).aboutRoute.documentId, "user-agreement");
+assert.equal(route(paths.about.privacyPolicy).aboutRoute.documentId, "privacy-policy");
+assert.equal(route(paths.about.aiService).aboutRoute.documentId, "ai-service");
+assert.equal(route("/about/unknown").canonicalPath, paths.about.root);
+assert.equal(route(paths.about.root).publicAccess, false);
 
-console.log(`Route contract passed: ${cases.length + 19} assertions`);
+console.log(`Route contract passed: ${cases.length + 25} assertions`);
