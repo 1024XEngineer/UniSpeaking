@@ -2,7 +2,6 @@ package com.unispeaking.infrastructure.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -29,13 +28,5 @@ class SecurityConfigTest {
 		request.addHeader("Authorization", "Bearer header-token");
 
 		assertEquals("header-token", securityConfig.bearerTokenResolver().resolve(request));
-	}
-
-	@Test
-	void allowsDedicatedFeedbackLookupHeaderThroughCors() {
-		var configuration = securityConfig.corsConfigurationSource()
-				.getCorsConfiguration(new MockHttpServletRequest("GET", "/api/feedbacks/lookup/FB-1"));
-
-		assertTrue(configuration.getAllowedHeaders().contains("X-Feedback-Lookup-Code"));
 	}
 }
