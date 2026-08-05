@@ -30,6 +30,7 @@ export const APP_PAGES = [
   "insights",
   "membership",
   "settings",
+  "security",
   "help",
   "about",
 ];
@@ -42,6 +43,7 @@ export const PAGE_PATHS = {
   insights: "/profile/insights",
   membership: "/membership",
   settings: "/settings",
+  security: "/profile/security",
   help: "/help",
   about: "/about",
   ielts: "/ielts",
