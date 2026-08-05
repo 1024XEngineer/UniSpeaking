@@ -88,6 +88,17 @@ export function getProfileOverview(month) {
   return request(`/api/profile/overview${query}`);
 }
 
+export function getProfileInsights() {
+  return request("/api/profile/insights");
+}
+
+export function updateWeeklyLearningGoals(goals) {
+  return request("/api/profile/insights/goals", {
+    method: "PUT",
+    body: JSON.stringify(goals),
+  });
+}
+
 export function getAchievementOverview() {
   return request("/api/achievements");
 }

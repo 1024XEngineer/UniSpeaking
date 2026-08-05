@@ -54,6 +54,7 @@ import {
   PackageCheck,
   Sparkles,
   Target,
+  ChartLine,
 } from "lucide-react";
 import { learningItems, levels, plans, recommendations, teachers } from "./data.js";
 import {
@@ -87,6 +88,7 @@ import { InterviewAssets, InterviewTrainingCenter } from "./InterviewModule.jsx"
 import { HelpCenter } from "./help/HelpCenter.jsx";
 import { HelpLayout } from "./help/HelpLayout.jsx";
 import { NewtonsCradle } from "./NewtonsCradle.jsx";
+import { LearningInsights } from "./profile/LearningInsights.jsx";
 import { hrefForPage, paths, resolveRoute } from "./router.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
@@ -703,7 +705,7 @@ function AppShell({ page, setPage, teacher, avatarUrl, children }) {
       <aside className={cx("sidebar", sidebarOpen && "is-open")} onMouseEnter={() => setSidebarOpen(true)} onMouseLeave={() => setSidebarOpen(false)}>
         <Brand compact={!sidebarOpen} />
         <nav>{items.map(({ id, label, icon: Icon }) => <button key={id} className={cx("sidebar__item", activePage === id && "is-active")} onClick={() => { if (activePage !== id) setPage(id); }} aria-label={label} title={label}><Icon weight={activePage === id ? "bold" : "regular"} /><span className="sidebar__label"><span>{label}</span></span></button>)}</nav>
-        <button className={cx("sidebar__avatar", ["profile", "membership", "settings", "help"].includes(page) && "is-active")} onClick={() => setPage("profile")}><img src={avatarUrl || teacher.image} alt="个人中心" /></button>
+        <button className={cx("sidebar__avatar", ["profile", "insights", "membership", "settings", "help"].includes(page) && "is-active")} onClick={() => setPage("profile")}><img src={avatarUrl || teacher.image} alt="个人中心" /></button>
       </aside>
       <div className="app-main">{children}</div>
     </div>
@@ -2188,6 +2190,7 @@ function Profile({ section, setSection, helpRoute, onHelpNavigate, user, profile
         </div>
         <nav aria-label="个人中心导航">
           <button className={section === "profile" ? "is-active" : ""} onClick={() => setSection("profile")}><User />个人概览</button>
+          <button className={section === "insights" ? "is-active" : ""} onClick={() => setSection("insights")}><ChartLine />学习目标与洞察</button>
           <button className={section === "membership" ? "is-active" : ""} onClick={() => setSection("membership")}><Crown />会员权益</button>
           <button className={section === "settings" ? "is-active" : ""} onClick={() => setSection("settings")}><SlidersHorizontal />助手设置</button>
           <button className={section === "help" ? "is-active" : ""} onClick={() => setSection("help")}><Lifebuoy />帮助与反馈</button>
@@ -2196,6 +2199,7 @@ function Profile({ section, setSection, helpRoute, onHelpNavigate, user, profile
       </aside>
       <section className={cx("profile-content", section === "help" && "profile-content--help")}>
         {section === "profile" && <Overview calendar={profile?.calendar} statistics={profile?.statistics} onMonthChange={onMonthChange} onAssets={onAssets} />}
+        {section === "insights" && <LearningInsights />}
         {section === "membership" && <Membership />}
         {section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} onPasswordChange={onPasswordChange} />}
         {section === "help" && <HelpCenter route={helpRoute} onNavigate={onHelpNavigate} />}

@@ -22,6 +22,7 @@ const cases = [
   [paths.interview.reportPartial, "interview"],
   [paths.interview.assets.trends, "interview-assets"],
   [paths.interview.assets.record("product-manager"), "interview-assets"],
+  [paths.app.insights, "insights"],
   [paths.help.root, "help"],
   [paths.help.category("quick-start"), "help"],
   [paths.help.article("start-free-conversation"), "help"],
@@ -50,6 +51,7 @@ assert.equal(route(paths.help.root).helpRoute.screen, "home");
 assert.equal(route(paths.help.root).publicAccess, true);
 assert.equal(route(paths.help.feedback).publicAccess, true);
 assert.equal(route(paths.app.profile).publicAccess, false);
+assert.equal(route(paths.app.insights).publicAccess, false);
 assert.equal(route(paths.help.category("麦克风 音频")).helpRoute.categoryId, "麦克风 音频");
 assert.equal(route(paths.help.article("修改 密码")).helpRoute.articleId, "修改 密码");
 assert.equal(route(paths.help.feedback).helpRoute.screen, "feedback");

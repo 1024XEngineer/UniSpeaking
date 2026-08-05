@@ -21,6 +21,7 @@ import com.unispeaking.domain.po.auth.UserRole;
 import com.unispeaking.domain.po.auth.UserStatus;
 import com.unispeaking.domain.po.feedback.UserFeedback;
 import com.unispeaking.domain.po.profile.UserProfile;
+import com.unispeaking.domain.po.profile.WeeklyLearningGoals;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.po.scene.InterviewQuestionRecord;
 import com.unispeaking.domain.po.scene.InterviewRecord;
@@ -44,6 +45,7 @@ import com.unispeaking.infrastructure.persistence.repository.scene.InterviewRepo
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.MybatisUserAccountRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.MybatisUserProfileRepository;
+import com.unispeaking.infrastructure.persistence.repository.user.WeeklyLearningGoalRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -101,6 +103,9 @@ class PostgresPersistenceIT {
 
 	@Autowired
 	private MybatisUserProfileRepository userProfileRepository;
+
+	@Autowired
+	private WeeklyLearningGoalRepository weeklyLearningGoalRepository;
 
 	@Autowired
 	private MybatisSceneRepository sceneRepository;
@@ -195,7 +200,7 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(List.of("1", "2", "3", "4", "5", "6"), migrationVersions);
+		assertEquals(List.of("1", "2", "3", "4", "5", "6", "7"), migrationVersions);
 		assertEquals(303, topicCount);
 		assertEquals(1771, questionCount);
 		assertEquals(0, questionLikeTitleCount);
@@ -547,6 +552,15 @@ class PostgresPersistenceIT {
 				"NATURAL",
 				"C",
 				"喜欢旅行和咖啡"));
+		assertNull(jdbcTemplate.queryForObject(
+				"SELECT weekly_duration_target_minutes FROM user_preference WHERE user_id = ?",
+				Integer.class,
+				userId));
+		assertEquals(
+				WeeklyLearningGoals.defaults(),
+				weeklyLearningGoalRepository.findByUserId(userId).orElseThrow());
+		WeeklyLearningGoals goals = new WeeklyLearningGoals(180, 6);
+		weeklyLearningGoalRepository.save(userId, goals);
 
 		assertEquals(
 				"ci@example.com",
@@ -562,6 +576,9 @@ class PostgresPersistenceIT {
 		assertEquals("James", saved.voiceId());
 		assertEquals("C", saved.level());
 		assertEquals("喜欢旅行和咖啡", saved.memoryText());
+		assertEquals(
+				goals,
+				weeklyLearningGoalRepository.findByUserId(userId).orElseThrow());
 	}
 
 	@Test
@@ -804,7 +821,7 @@ class PostgresPersistenceIT {
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
 		assertEquals(
-				List.of("0", "1", "2", "3", "4", "5", "6"),
+				List.of("0", "1", "2", "3", "4", "5", "6", "7"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version
