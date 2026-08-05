@@ -15,9 +15,9 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { paths } from "../router.js";
+import { ExternalFeedbackLink } from "./ExternalFeedbackLink.jsx";
 import { HelpArticle } from "./HelpArticle.jsx";
 import { HelpCategory } from "./HelpCategory.jsx";
-import { HelpFeedback } from "./HelpFeedback.jsx";
 import { helpCategories } from "./helpData.js";
 import {
   findHelpArticle,
@@ -174,9 +174,9 @@ function HelpHome({ onNavigate }) {
       <aside className="help-support-cta">
         <span><Lifebuoy weight="duotone" /></span>
         <div><p className="eyebrow">STILL NEED HELP?</p><h2>仍然需要帮助？</h2><p>先整理问题现象、复现步骤和设备环境，避免提交账号密码等敏感信息。</p></div>
-        <a href={paths.help.feedback} onClick={(event) => handleHelpLinkClick(event, paths.help.feedback, onNavigate)}>
-          问题反馈<ArrowRight weight="bold" />
-        </a>
+        <ExternalFeedbackLink>
+          {(configured) => <>{configured ? "问题反馈" : "反馈入口待配置"}<ArrowRight weight="bold" /></>}
+        </ExternalFeedbackLink>
       </aside>
     </main>
   );
@@ -184,7 +184,6 @@ function HelpHome({ onNavigate }) {
 
 export function HelpCenter({ route, onNavigate }) {
   const screen = route?.screen || "home";
-  if (screen === "feedback") return <HelpFeedback onNavigate={onNavigate} />;
   if (screen === "category") {
     const category = findHelpCategory(route.categoryId);
     if (!category) return <HelpNotFound onNavigate={onNavigate} />;

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, CaretRight, CheckCircle, ChatCircleDots, XCircle } from "@phosphor-icons/react";
 import { paths } from "../router.js";
+import { ExternalFeedbackLink } from "./ExternalFeedbackLink.jsx";
 import { formatHelpDate, handleHelpLinkClick } from "./helpUtils.js";
 
 export function HelpArticle({ article, category, relatedArticles, onNavigate }) {
@@ -50,13 +51,10 @@ export function HelpArticle({ article, category, relatedArticles, onNavigate }) 
           ) : (
             <div className="help-article-unresolved" role="status">
               <ChatCircleDots weight="duotone" />
-              <span><strong>我们继续帮你排查</strong><small>整理问题现象和复现步骤，前往静态反馈页生成反馈摘要。</small></span>
-              <a
-                href={paths.help.feedback}
-                onClick={(event) => handleHelpLinkClick(event, paths.help.feedback, onNavigate)}
-              >
-                仍未解决，提交反馈
-              </a>
+              <span><strong>我们继续帮你排查</strong><small>整理问题现象、复现步骤和设备环境后，通过独立问卷提交。</small></span>
+              <ExternalFeedbackLink>
+                {(configured) => configured ? "仍未解决，提交反馈" : "反馈入口待配置"}
+              </ExternalFeedbackLink>
             </div>
           )}
         </section>
