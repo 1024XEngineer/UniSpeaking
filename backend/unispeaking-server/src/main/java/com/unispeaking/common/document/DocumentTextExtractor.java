@@ -57,7 +57,7 @@ public final class DocumentTextExtractor {
 		if (normalized.isEmpty()) {
 			throw new DocumentException(DocumentErrorCode.TEXT_EMPTY);
 		}
-		if (normalized.length() > MAX_TEXT_CHARS) {
+		if (normalized.codePointCount(0, normalized.length()) > MAX_TEXT_CHARS) {
 			throw new DocumentException(DocumentErrorCode.TEXT_TOO_LARGE);
 		}
 		return normalized;
@@ -110,7 +110,7 @@ public final class DocumentTextExtractor {
 		if (text == null) {
 			return "";
 		}
-		return text.replace("\r\n", "\n").replace('\r', '\n').trim();
+		return text.replace("\r\n", "\n").replace('\r', '\n').strip();
 	}
 
 	private static boolean isBlank(String value) {

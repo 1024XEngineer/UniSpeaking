@@ -2,6 +2,7 @@ package com.unispeaking.domain.vo.scene;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.IntStream;
 
 public final class InterviewQuestionPlan {
 
@@ -31,6 +32,24 @@ public final class InterviewQuestionPlan {
 		this.mainQuestions = copied;
 	}
 
+	public static InterviewQuestionPlan fromGeneratedMainQuestions(
+			InterviewDifficulty difficulty,
+			List<String> mainQuestionTexts) {
+		Objects.requireNonNull(difficulty, "difficulty must not be null");
+		if (mainQuestionTexts == null || mainQuestionTexts.size() != MAIN_QUESTION_COUNT) {
+			throw new IllegalArgumentException("Interview must contain exactly five main questions");
+		}
+		int followUpLimit = expectedFollowUpLimit(difficulty);
+		List<InterviewPlannedQuestion> questions = IntStream
+				.range(0, MAIN_QUESTION_COUNT)
+				.mapToObj(index -> new InterviewPlannedQuestion(
+						index + 1,
+						mainQuestionTexts.get(index),
+						followUpLimit))
+				.toList();
+		return new InterviewQuestionPlan(difficulty, questions);
+	}
+
 	public InterviewDifficulty difficulty() {
 		return difficulty;
 	}
@@ -48,6 +67,15 @@ public final class InterviewQuestionPlan {
 
 	public int maxFollowUps() {
 		return expectedFollowUpLimit(difficulty);
+	}
+
+	public InterviewFollowUpFocus followUpFocus() {
+		return switch (difficulty) {
+			case BASIC -> InterviewFollowUpFocus.CLARIFICATION;
+			case STANDARD -> InterviewFollowUpFocus.REASON_ACTION_RESULT;
+			case CHALLENGE ->
+					InterviewFollowUpFocus.TRADE_OFF_REFLECTION_COMPLEX_SCENARIO;
+		};
 	}
 
 	private static int expectedFollowUpLimit(InterviewDifficulty difficulty) {

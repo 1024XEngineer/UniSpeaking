@@ -15,9 +15,44 @@ class InterviewQuestionPlanTest {
 
 		assertEquals(5, plan.mainQuestions().size());
 		assertEquals(2, plan.maxFollowUps());
+		assertEquals(
+				InterviewFollowUpFocus.TRADE_OFF_REFLECTION_COMPLEX_SCENARIO,
+				plan.followUpFocus());
 		assertThrows(
 				UnsupportedOperationException.class,
 				() -> plan.mainQuestions().clear());
+	}
+
+	@Test
+	void createsFiveQuestionPlanFromProviderIndependentTextsForEveryDifficulty() {
+		InterviewQuestionPlan basic = generated(InterviewDifficulty.BASIC);
+		InterviewQuestionPlan standard = generated(InterviewDifficulty.STANDARD);
+		InterviewQuestionPlan challenge = generated(InterviewDifficulty.CHALLENGE);
+
+		assertEquals(InterviewFollowUpFocus.CLARIFICATION, basic.followUpFocus());
+		assertEquals(1, basic.mainQuestion(5).maxFollowUps());
+		assertEquals(
+				InterviewFollowUpFocus.REASON_ACTION_RESULT,
+				standard.followUpFocus());
+		assertEquals(1, standard.mainQuestion(5).maxFollowUps());
+		assertEquals(
+				InterviewFollowUpFocus.TRADE_OFF_REFLECTION_COMPLEX_SCENARIO,
+				challenge.followUpFocus());
+		assertEquals(2, challenge.mainQuestion(5).maxFollowUps());
+	}
+
+	@Test
+	void rejectsGeneratedQuestionListsThatAreNotExactlyFiveNonBlankTexts() {
+		assertThrows(
+				IllegalArgumentException.class,
+				() -> InterviewQuestionPlan.fromGeneratedMainQuestions(
+						InterviewDifficulty.BASIC,
+						List.of("Q1")));
+		assertThrows(
+				IllegalArgumentException.class,
+				() -> InterviewQuestionPlan.fromGeneratedMainQuestions(
+						InterviewDifficulty.STANDARD,
+						List.of("Q1", "Q2", " ", "Q4", "Q5")));
 	}
 
 	@Test
@@ -45,6 +80,12 @@ class InterviewQuestionPlanTest {
 	private static InterviewQuestionPlan plan(InterviewDifficulty difficulty) {
 		return new InterviewQuestionPlan(difficulty, questions(5,
 				difficulty == InterviewDifficulty.CHALLENGE ? 2 : 1));
+	}
+
+	private static InterviewQuestionPlan generated(InterviewDifficulty difficulty) {
+		return InterviewQuestionPlan.fromGeneratedMainQuestions(
+				difficulty,
+				List.of("Q1", "Q2", "Q3", "Q4", "Q5"));
 	}
 
 	private static List<InterviewPlannedQuestion> questions(int count, int limit) {

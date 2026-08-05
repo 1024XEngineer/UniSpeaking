@@ -28,6 +28,7 @@ class DocumentTextExtractorTest {
 	private static final String PDF_MIME_TYPE = "application/pdf";
 	private static final String DOCX_MIME_TYPE =
 			"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+	private static final String SUPPLEMENTARY_CODE_POINT = "\uD83D\uDE80";
 
 	private final DocumentTextExtractor extractor = new DocumentTextExtractor();
 
@@ -120,6 +121,37 @@ class DocumentTextExtractorTest {
 						DOCX_MIME_TYPE,
 						overMaximum,
 						DocumentErrorCode.TEXT_TOO_LARGE));
+	}
+
+	@Test
+	void countsExtractedTextLimitByUnicodeCodePoint() {
+		byte[] maximum = docxWithParagraphs(
+				SUPPLEMENTARY_CODE_POINT.repeat(DocumentTextExtractor.MAX_TEXT_CHARS));
+		byte[] overMaximum = docxWithParagraphs(
+				SUPPLEMENTARY_CODE_POINT.repeat(DocumentTextExtractor.MAX_TEXT_CHARS + 1));
+
+		String extracted = extractor.extractText("resume.docx", DOCX_MIME_TYPE, maximum);
+
+		assertAll(
+				() -> assertEquals(
+						DocumentTextExtractor.MAX_TEXT_CHARS,
+						extracted.codePointCount(0, extracted.length())),
+				() -> assertError(
+						"resume.docx",
+						DOCX_MIME_TYPE,
+						overMaximum,
+						DocumentErrorCode.TEXT_TOO_LARGE));
+	}
+
+	@Test
+	void acceptsValidPdfAtExactFileSizeLimit() {
+		byte[] source = pdfWithText("exact size");
+		byte[] exactLimit = Arrays.copyOf(source, DocumentTextExtractor.MAX_FILE_BYTES);
+		Arrays.fill(exactLimit, source.length, exactLimit.length, (byte) ' ');
+
+		String extracted = extractor.extractText("resume.pdf", PDF_MIME_TYPE, exactLimit);
+
+		assertEquals("exact size", extracted);
 	}
 
 	@Test

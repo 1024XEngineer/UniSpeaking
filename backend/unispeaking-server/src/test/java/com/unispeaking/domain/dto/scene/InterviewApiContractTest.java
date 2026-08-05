@@ -9,6 +9,7 @@ import com.unispeaking.domain.vo.scene.InterviewDifficulty;
 import com.unispeaking.domain.vo.scene.InterviewQuestionType;
 import com.unispeaking.domain.vo.scene.InterviewReportType;
 import com.unispeaking.domain.vo.scene.TargetRoleSummary;
+import jakarta.validation.constraints.Size;
 import java.lang.reflect.RecordComponent;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -162,6 +163,14 @@ class InterviewApiContractTest {
 					"qualificationRequirements"
 				},
 				fields(TargetRoleSummary.class));
+	}
+
+	@Test
+	void leavesFinalJdAndResumeCodePointLimitsToMaterialBoundary() {
+		RecordComponent[] components = CreateInterviewRequest.class.getRecordComponents();
+
+		assertFalse(hasSizeConstraint(components[2]));
+		assertFalse(hasSizeConstraint(components[3]));
 	}
 
 	@Test
@@ -381,5 +390,10 @@ class InterviewApiContractTest {
 		return Arrays.stream(type.getRecordComponents())
 				.map(RecordComponent::getName)
 				.toArray(String[]::new);
+	}
+
+	private static boolean hasSizeConstraint(RecordComponent component) {
+		return component.getAccessor().isAnnotationPresent(Size.class)
+				|| component.getAnnotatedType().isAnnotationPresent(Size.class);
 	}
 }
