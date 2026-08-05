@@ -72,7 +72,17 @@ class ProfileControllerTest {
 				.andExpect(jsonPath("$.data.abilityTrends[0].scores.accuracy")
 						.value(62.5))
 				.andExpect(jsonPath("$.data.abilityTrends[0].scores.naturalness")
-						.value(63.2));
+						.value(63.2))
+				.andExpect(jsonPath("$.data.weaknessAnalysis.sampleCount")
+						.value(3))
+				.andExpect(jsonPath("$.data.weaknessAnalysis.reliable")
+						.value(true))
+				.andExpect(jsonPath("$.data.weaknesses[0].dimension")
+						.value("vocabulary"))
+				.andExpect(jsonPath("$.data.weaknesses[0].averageScore")
+						.value(50.0))
+				.andExpect(jsonPath("$.data.recommendations[0].trainingType")
+						.value("CUSTOM_SCENE"));
 
 		verify(authService).requireUserId(null);
 		verify(insightsService).getInsights(USER_ID);
@@ -150,6 +160,17 @@ class ProfileControllerTest {
 								new BigDecimal("84.8"),
 								new BigDecimal("55.0"),
 								new BigDecimal("50.0"),
-								new BigDecimal("63.2")))));
+								new BigDecimal("63.2")))),
+				new ProfileInsightsResponse.WeaknessAnalysis(3, 3, true),
+				List.of(new ProfileInsightsResponse.AbilityWeakness(
+						"vocabulary",
+						1,
+						new BigDecimal("50.0"),
+						new BigDecimal("4.0"),
+						"最近 3 次有效评分平均分最低")),
+				List.of(new ProfileInsightsResponse.TrainingRecommendation(
+						"vocabulary",
+						"CUSTOM_SCENE",
+						"通过主题词汇和情景表达训练提升词汇运用")));
 	}
 }

@@ -7,7 +7,10 @@ import java.util.List;
 public record ProfileInsightsResponse(
 		WeeklyGoals weeklyGoals,
 		List<TrainingTypeDistribution> trainingTypeDistribution,
-		List<AbilityTrendPoint> abilityTrends) {
+		List<AbilityTrendPoint> abilityTrends,
+		WeaknessAnalysis weaknessAnalysis,
+		List<AbilityWeakness> weaknesses,
+		List<TrainingRecommendation> recommendations) {
 
 	public record WeeklyGoals(
 			OffsetDateTime weekStartsAt,
@@ -43,5 +46,25 @@ public record ProfileInsightsResponse(
 			BigDecimal grammar,
 			BigDecimal vocabulary,
 			BigDecimal naturalness) {
+	}
+
+	public record WeaknessAnalysis(
+			int sampleCount,
+			int minimumSampleCount,
+			boolean reliable) {
+	}
+
+	public record AbilityWeakness(
+			String dimension,
+			int rank,
+			BigDecimal averageScore,
+			BigDecimal recentChange,
+			String basis) {
+	}
+
+	public record TrainingRecommendation(
+			String dimension,
+			String trainingType,
+			String reason) {
 	}
 }

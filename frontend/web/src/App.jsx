@@ -2179,6 +2179,12 @@ function Profile({ section, setSection, helpRoute, onHelpNavigate, user, profile
   const email = account?.email || user?.username || "";
   const avatarUrl = account?.avatarUrl || teacher.image;
   const [profileEditOpen, setProfileEditOpen] = useState(false);
+  const startRecommendedTraining = (trainingType) => {
+    const destination = trainingType === "FREE_CHAT"
+      ? "conversation"
+      : trainingType === "CUSTOM_SCENE" ? "scenes" : null;
+    if (destination) setSection(destination);
+  };
   return (
     <main className="profile-layout">
       <aside className="profile-nav">
@@ -2200,7 +2206,7 @@ function Profile({ section, setSection, helpRoute, onHelpNavigate, user, profile
       </aside>
       <section className={cx("profile-content", section === "help" && "profile-content--help")}>
         {section === "profile" && <Overview calendar={profile?.calendar} statistics={profile?.statistics} onMonthChange={onMonthChange} onAssets={onAssets} />}
-        {section === "insights" && <LearningInsights />}
+        {section === "insights" && <LearningInsights onStartTraining={startRecommendedTraining} />}
         {section === "membership" && <Membership />}
         {section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} onPasswordChange={onPasswordChange} />}
         {section === "help" && <HelpCenter route={helpRoute} onNavigate={onHelpNavigate} />}

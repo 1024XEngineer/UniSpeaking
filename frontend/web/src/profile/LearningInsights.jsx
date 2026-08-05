@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { getProfileInsights, updateWeeklyLearningGoals } from "../apiClient.js";
 import { AbilityTrendChart } from "./AbilityTrendChart.jsx";
+import { WeaknessRecommendations } from "./WeaknessRecommendations.jsx";
 
 const DURATION_MIN = 1;
 const DURATION_MAX = 1260;
@@ -216,7 +217,7 @@ function GoalEditor({ goals, onClose, onSave }) {
   );
 }
 
-export function LearningInsights() {
+export function LearningInsights({ onStartTraining }) {
   const [insights, setInsights] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -297,6 +298,12 @@ export function LearningInsights() {
           </section>
           <TrainingTypeDistribution items={insights.trainingTypeDistribution} />
           <AbilityTrendChart items={insights.abilityTrends} />
+          <WeaknessRecommendations
+            analysis={insights.weaknessAnalysis}
+            weaknesses={insights.weaknesses}
+            recommendations={insights.recommendations}
+            onStartTraining={onStartTraining}
+          />
         </>
       )}
 
