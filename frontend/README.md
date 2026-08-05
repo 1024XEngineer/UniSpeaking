@@ -22,6 +22,7 @@
 - 自定义场景对话、状态机、逐轮评分、五维报告。
 - 学习资产列表、详情和场景复练。
 - 个人主页每周学习目标、真实进度、训练类型占比、五维能力趋势、薄弱项识别与推荐训练。
+- 个人主页关于产品、用户协议、隐私政策与 AI 服务说明。
 
 仍以页面和演示数据为主的功能：
 
@@ -105,6 +106,10 @@ web
 | `/interview` | 英文面试模块 |
 | `/profile` | 个人主页 |
 | `/profile/insights` | 学习目标与洞察 |
+| `/about` | 关于产品 |
+| `/about/user-agreement` | 用户协议草案 |
+| `/about/privacy-policy` | 隐私政策草案 |
+| `/about/ai-service` | AI 服务说明草案 |
 | `/settings` | 用户设置 |
 
 路由契约由 `npm run check:routes` 校验。页面切换必须使用 `router.js` 中的路径
