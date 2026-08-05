@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.unispeaking.domain.dto.asset.SessionEvaluationRecord;
 import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
 import com.unispeaking.domain.po.achievement.AchievementEvaluationFact;
+import com.unispeaking.domain.po.evaluation.SessionScoreSnapshot;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.SessionEvaluationEntity;
 import com.unispeaking.infrastructure.persistence.mapper.evaluation.SessionEvaluationMapper;
 import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
@@ -147,6 +148,34 @@ public class SessionEvaluationRepository {
 		}
 	}
 
+	public List<SessionScoreSnapshot> findScoreSnapshotsBySessionIds(
+			List<String> sessionIds) {
+		List<String> ownedSessionIds = normalizedIds(sessionIds);
+		if (ownedSessionIds.isEmpty()) {
+			return List.of();
+		}
+		try {
+			return mapper.selectList(
+						new LambdaQueryWrapper<SessionEvaluationEntity>()
+								.select(
+										SessionEvaluationEntity::getSessionId,
+										SessionEvaluationEntity::getAccuracyScore,
+										SessionEvaluationEntity::getFluencyScore,
+										SessionEvaluationEntity::getGrammarScore,
+										SessionEvaluationEntity::getVocabularyScore,
+										SessionEvaluationEntity::getNaturalnessScore)
+								.in(
+										SessionEvaluationEntity::getSessionId,
+										ownedSessionIds))
+					.stream()
+					.map(this::toScoreSnapshot)
+					.toList();
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
 	private void appendOwnershipScope(
 			LambdaQueryWrapper<SessionEvaluationEntity> scope,
 			List<String> sessionIds,
@@ -215,6 +244,17 @@ public class SessionEvaluationRepository {
 				entity.getImprovements() == null
 						? java.util.List.of()
 						: Arrays.asList(entity.getImprovements()));
+	}
+
+	private SessionScoreSnapshot toScoreSnapshot(
+			SessionEvaluationEntity entity) {
+		return new SessionScoreSnapshot(
+				entity.getSessionId(),
+				entity.getAccuracyScore(),
+				entity.getFluencyScore(),
+				entity.getGrammarScore(),
+				entity.getVocabularyScore(),
+				entity.getNaturalnessScore());
 	}
 
 	private EvaluationException persistenceFailure() {

@@ -62,7 +62,7 @@ GET /api/profile/insights
 Authorization: Bearer <accessToken>
 ```
 
-返回本周学习目标、真实完成进度和训练类型时长占比：
+返回本周学习目标、真实完成进度、训练类型时长占比和最近五维能力趋势：
 
 ```json
 {
@@ -86,6 +86,20 @@ Authorization: Bearer <accessToken>
       "durationSeconds": 4560,
       "percentage": 100.0
     }
+  ],
+  "abilityTrends": [
+    {
+      "sessionId": "custom_session1",
+      "completedAt": "2026-08-03T15:37:00+08:00",
+      "trainingType": "CUSTOM_SCENE",
+      "scores": {
+        "accuracy": 62.5,
+        "fluency": 84.8,
+        "grammar": 55.0,
+        "vocabulary": 50.0,
+        "naturalness": 63.2
+      }
+    }
   ]
 }
 ```
@@ -101,6 +115,10 @@ Authorization: Bearer <accessToken>
 - `trainingTypeDistribution` 按相同有效会话口径聚合本周重叠时长，只返回实际产生有效时长的类型。
 - 当前占比仅纳入 `FREE_CHAT` 和 `CUSTOM_SCENE`，百分比保留一位小数；无有效训练时返回空数组。
 - 客户端预留 `IELTS_SCENE`、`INTERVIEW_SCENE` 和未知类型显示，真实训练链路接入后再调整后端纳入范围。
+- `abilityTrends` 只读取当前用户状态为 `COMPLETED` 且已经生成 `session_evaluation` 五维报告的会话。
+- 能力趋势按训练完成时间选取最近 10 次，再按时间正序返回；时间使用 `Asia/Shanghai` 时区。
+- 五维字段保持为准确度、流利度、语法、词汇和自然度，不将准确度改名为发音。
+- 无报告或报告无法关联到当前用户已完成会话时不返回数据点，数组为空。
 
 ### 修改每周学习目标
 

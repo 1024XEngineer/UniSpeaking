@@ -893,6 +893,34 @@ svg { display: block; }
 .training-distribution__empty { min-height: 210px; margin-top: 25px; display: grid; place-content: center; justify-items: center; gap: 12px; border-block: 1px solid #e6e6e1; color: #767672; }
 .training-distribution__empty svg { width: 28px; height: 28px; }
 .training-distribution__empty strong { color: #555551; font-size: 13px; }
+.ability-trends { margin-top: 44px; padding-top: 34px; border-top: 1px solid var(--line); }
+.ability-trends > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.ability-trends > header p { margin: 0 0 8px; color: #767672; font-size: 10px; font-weight: 760; letter-spacing: 0; }
+.ability-trends > header h2 { margin: 0; font-size: 25px; letter-spacing: 0; }
+.ability-trends > header > span { color: #777772; font-size: 11px; }
+.ability-trends__dimensions { margin-top: 24px; display: grid; grid-template-columns: repeat(5, minmax(104px, 1fr)); overflow-x: auto; border: 1px solid #d9d9d4; border-radius: 8px; }
+.ability-trends__dimensions button { min-width: 104px; min-height: 42px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 0; border-right: 1px solid #d9d9d4; background: #fff; color: #686864; font: inherit; font-size: 11px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.ability-trends__dimensions button:last-child { border-right: 0; }
+.ability-trends__dimensions button:hover { background: #f7f7f4; }
+.ability-trends__dimensions button.is-active { color: #252524; background: #f1f1ed; box-shadow: inset 0 -2px var(--dimension-color); }
+.ability-trends__dimensions button:focus-visible { position: relative; z-index: 1; outline: 2px solid #252524; outline-offset: -2px; }
+.ability-trends__dimensions button i { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 2px; background: var(--dimension-color); }
+.ability-trends__chart-scroll { margin-top: 22px; padding-bottom: 5px; overflow-x: auto; border-block: 1px solid #e6e6e1; }
+.ability-trends__chart { width: 100%; min-width: 720px; height: auto; display: block; color: #767672; }
+.ability-trends__grid-line line { stroke: #e7e7e2; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ability-trends__grid-line text, .ability-trends__axis-label { fill: #888883; font-size: 9px; }
+.ability-trends__line { fill: none; stroke: var(--trend-color); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.ability-trends__point-hit { fill: transparent; stroke: none; }
+.ability-trends__point > circle:not(.ability-trends__point-hit) { fill: #fff; stroke: var(--trend-color); stroke-width: 3; vector-effect: non-scaling-stroke; cursor: pointer; transition: r .15s ease; }
+.ability-trends__point > circle:not(.ability-trends__point-hit):focus-visible { outline: none; fill: var(--trend-color); stroke: #fff; }
+.ability-trends__tooltip { pointer-events: none; }
+.ability-trends__tooltip rect { fill: #272725; }
+.ability-trends__tooltip text { fill: #fff; font-size: 10px; font-weight: 700; }
+.ability-trends__tooltip text:last-child { fill: #cfcfca; font-size: 8px; font-weight: 500; }
+.ability-trends__sample-state { margin: 12px 0 0; color: #777772; font-size: 11px; text-align: center; }
+.ability-trends__empty { min-height: 210px; margin-top: 25px; display: grid; place-content: center; justify-items: center; gap: 12px; border-block: 1px solid #e6e6e1; color: #767672; }
+.ability-trends__empty svg { width: 28px; height: 28px; }
+.ability-trends__empty strong { color: #555551; font-size: 13px; }
 .learning-insights-error { min-height: 150px; margin-top: 28px; padding: 24px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border: 1px solid #ddd4c5; border-radius: 8px; background: #fffaf2; }
 .learning-insights-error strong { display: block; font-size: 15px; }
 .learning-insights-error p { margin: 7px 0 0; color: #83796b; font-size: 12px; }
@@ -1133,6 +1161,7 @@ svg { display: block; }
   .training-distribution__content { grid-template-columns: 1fr; gap: 28px; }
   .training-distribution__chart { width: 220px; }
   .training-distribution__legend { width: 100%; }
+  .ability-trends__chart { width: 720px; }
   .achievement-system__header { align-items: flex-start; flex-direction: column; }
   .achievement-overall { width: 100%; }
   .achievement-filters { overflow-x: auto; padding-bottom: 4px; }
@@ -1158,6 +1187,7 @@ svg { display: block; }
   .training-distribution > header { align-items: flex-start; flex-direction: column; gap: 8px; }
   .training-distribution__chart { width: 196px; }
   .training-distribution__chart strong { font-size: 34px; }
+  .ability-trends > header { align-items: flex-start; flex-direction: column; gap: 8px; }
   .learning-goal-dialog { padding: 14px; }
   .learning-goal-dialog > section { padding: 21px; }
   .achievement-system { padding: 21px 16px; }

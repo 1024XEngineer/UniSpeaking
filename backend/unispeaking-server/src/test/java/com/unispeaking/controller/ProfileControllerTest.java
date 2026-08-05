@@ -16,6 +16,7 @@ import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.profile.ProfileAccountService;
 import com.unispeaking.service.profile.ProfileInsightsService;
 import com.unispeaking.service.profile.ProfileOverviewService;
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,7 +66,13 @@ class ProfileControllerTest {
 				.andExpect(jsonPath("$.data.trainingTypeDistribution[0].durationSeconds")
 						.value(4560))
 				.andExpect(jsonPath("$.data.trainingTypeDistribution[0].percentage")
-						.value(100.0));
+						.value(100.0))
+				.andExpect(jsonPath("$.data.abilityTrends[0].trainingType")
+						.value("CUSTOM_SCENE"))
+				.andExpect(jsonPath("$.data.abilityTrends[0].scores.accuracy")
+						.value(62.5))
+				.andExpect(jsonPath("$.data.abilityTrends[0].scores.naturalness")
+						.value(63.2));
 
 		verify(authService).requireUserId(null);
 		verify(insightsService).getInsights(USER_ID);
@@ -133,6 +140,16 @@ class ProfileControllerTest {
 						new ProfileInsightsResponse.TrainingTypeDistribution(
 								"CUSTOM_SCENE",
 								4560,
-								100.0)));
+								100.0)),
+				List.of(new ProfileInsightsResponse.AbilityTrendPoint(
+						"custom_session1",
+						OffsetDateTime.parse("2026-08-03T15:37:00+08:00"),
+						"CUSTOM_SCENE",
+						new ProfileInsightsResponse.AbilityScores(
+								new BigDecimal("62.5"),
+								new BigDecimal("84.8"),
+								new BigDecimal("55.0"),
+								new BigDecimal("50.0"),
+								new BigDecimal("63.2")))));
 	}
 }
