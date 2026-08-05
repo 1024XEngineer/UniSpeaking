@@ -450,7 +450,7 @@ service/scene/{IELTSSceneService,InterviewSceneService}.java
 service/scene/impl/{IELTSSceneServiceImpl,InterviewSceneServiceImpl}.java
 domain/dto/scene
 domain/vo/scene
-controller/{IELTSSceneController,InterviewSceneController}.java
+controller/{IELTSSceneController,InterviewController}.java
 ```
 
 不得新增 `service/ielts`、`service/interview`、`domain/dto/ielts` 或
@@ -461,22 +461,32 @@ controller/{IELTSSceneController,InterviewSceneController}.java
 
 - `IELTSSceneService`：查询 IELTS 题库、准备题组和编排 IELTS 特有规则；不管理公共
   会话生命周期，不实现评分供应商能力。
-- `InterviewSceneService`：校验面试材料与时长，准备 `INTERVIEW_SCENE` 的岗位快照、
-  问题计划和场景 Prompt；不建立会话、不推进公共流程、不保存逐轮消息，也不生成
-  评分结果。
+- `InterviewSceneService`：拥有 Interview 完整用例编排，负责材料校验、岗位摘要、
+  五题计划、逐题回答、有限追问、恢复、结束、五维报告、完整录音和学习资产；通过公共
+  Service、Provider 和 Repository 完成工作，不复制它们的底层能力。
 - `SceneFlowService`：为任意 Scene 创建、读取、幂等推进和完成流程状态；只接受
-  Scene 特化提供的流程定义或下一步决策，不解析简历、不生成面试问题、不管理实时
-  连接、不执行评分。
-- 公共 `SessionService`：绑定已就绪的 Scene 与当前用户，负责所有 Scene 类型的会话
-  建立、归属校验、状态迁移、完整消息追加和结束；可以在会话用例中协调
-  `SceneFlowService` 并在结束事实落库后把报告任务交给 `EvaluationService`，但不拥有
-  面试下一题决策或评分算法。不得新增 `InterviewSessionService`，也不得把面试提问
-  策略或评分规则写入公共 Session。
-- 公共 `EvaluationService`：接收已授权会话的文本/音频与场景评分上下文，负责单轮
-  评分、整场报告生成和结果查询；不推进 Scene Flow，不改变 Session 业务状态，
-  Interview 结果只评价英语口语表现，不输出岗位匹配或录用判断。
+  Scene 特化提供的流程定义或下一步决策，不解析简历、不生成面试问题、不接收音频、
+  不执行转写或评分。
+- 公共 `SessionService`：注册 Scene 特化已创建的 `AbstractSceneSession`，创建
+  `practice_session`，校验会话归属并写入 `COMPLETED`/`FAILED` 终态；不得编排
+  Interview 的 ASR、LLM、TTS、追问、报告或录音，也不得在用户点击结束时提前完成
+  Interview。
+- 公共 `EvaluationService`：提供无持久化副作用的语音评分能力；不查询 Scene 或
+  Session，不推进流程，不保存 Interview 逐轮评分或转写。Interview 的五维聚合和报告
+  由 `InterviewSceneService` 编排，且只评价英语口语表现。
 
-Realtime、TTS、LLM 和语音评分继续复用 Provider；不得创建
+Interview 固定使用“材料准备 → 分段式逐题问答 → 完成与报告”三段式链路，固定五个
+主问题；BASIC/STANDARD 每题最多一次追问，CHALLENGE 每题最多两次。问题经 TTS 播放，
+回答以最长 210 秒的 16 kHz 单声道 16-bit PCM WAV 通过 HTTP 提交，再执行 ASR 和无副作用
+语音评分；需要追问时使用普通 LLM 单次调用。简历可选且只支持文本、文本型 PDF 和
+DOCX。Interview 不交换 SDP、不建立 WebRTC/DataChannel，也不使用 Realtime 模型。
+
+Interview 只有在完整五维报告和包含实际 AI 问题与用户回答的 MP3 录音都成功后才进入
+`COMPLETED`。FULL 与 PARTIAL 都必须包含同字段、同量尺的完整报告；报告或录音任一失败
+都不得形成学习资产。AI 问题短音频可在运行态 JSON 中使用 Base64 返回，用户转写、原始
+材料和分题回答音频不得作为长期资产或公开 API 字段。
+
+TTS、Transcription、LLM 和语音评分继续复用 Provider；不得创建
 `InterviewTtsService`、`InterviewLlmService` 或同类厂商能力包装 Service。详细契约、
 ADR、失败补偿和场景伪代码见
 [`docs/interview-foundation-architecture.md`](docs/interview-foundation-architecture.md)。
