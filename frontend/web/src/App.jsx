@@ -2199,7 +2199,7 @@ function Profile({ section, setSection, helpRoute, onHelpNavigate, user, profile
           <button className={section === "insights" ? "is-active" : ""} onClick={() => setSection("insights")}><ChartLine />学习目标与洞察</button>
           <button className={section === "membership" ? "is-active" : ""} onClick={() => setSection("membership")}><Crown />会员权益</button>
           <button className={section === "settings" ? "is-active" : ""} onClick={() => setSection("settings")}><SlidersHorizontal />助手设置</button>
-          <button className={section === "help" ? "is-active" : ""} onClick={() => setSection("help")}><Lifebuoy />帮助与反馈</button>
+          <button className={section === "help" ? "is-active" : ""} onClick={() => setSection("help")}><Lifebuoy />帮助中心</button>
         </nav>
         <button className="logout" onClick={onLogout}><SignOut />退出登录</button>
       </aside>
