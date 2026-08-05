@@ -2,214 +2,326 @@
 
 ## 1. 目的与范围
 
-英文模拟面试让已登录用户用简历、目标岗位说明和训练时长准备一个面试场景，完成实时
-英语问答，并获得只针对本次口语表现的报告。
+英文模拟面试是现有 Scene 业务的特化场景。用户围绕目标岗位完成固定五个主问题及有限
+追问，在面试结束后获得完整录音和五维英语口语报告。系统不评价岗位匹配度、胜任度或
+录用概率。
 
-本文是 Interview foundation 的维护入口，只记录公共能力边界、接口语义、关键决策、
-失败补偿和核心流程。Interview 与 IELTS 都是现有 Scene 的特化，不是顶层后端模块。
+本阶段实现 Issue #33 定义、Issue #38 交付的后端闭环：
 
-本阶段范围：
+- 岗位名称、可选 JD 和可选简历输入；简历支持文本、文本型 PDF 和 DOCX。
+- 本地 PaddleOCR 识别最多五张 JD 截图，创建时只接收用户确认后的最终 JD 文本。
+- BASIC、STANDARD、CHALLENGE 三档难度，所有难度固定五个主问题。
+- `ASR -> LLM -> TTS` 的分段式逐题问答，不使用 Realtime API。
+- `submissionId` 幂等、十分钟进程内恢复、FULL/PARTIAL 五维报告和完整 MP3 录音。
+- 历史、录音播放、FULL 趋势、快速复练和物理删除。
 
-- 准备 `INTERVIEW_SCENE` 的材料快照、问题计划、流程定义和 Prompt。
-- 复用公共 Scene Flow、Session、Evaluation 和 Provider 能力完成训练闭环。
-- 明确幂等、授权、失败状态、可重试边界和敏感材料最小化规则。
+本阶段不实现前端 API 接入、时长选择、自动结束、用户回答字幕、DOC/图片/扫描版简历、
+重启恢复、多实例共享、Redis、MQ、Outbox、SSE、业务 WebSocket、向量检索或第二套 Scene
+Flow。原始简历、JD 截图、用户转写和分题回答音频不长期保存。
 
-本阶段不包含招聘决策、岗位匹配、录用建议、长期保存原始简历、计费权益、消息队列或
-新的 AI/存储供应商。本文不承诺具体厂商，也不以空接口预留未确认能力。
+## 2. 模块与职责
 
-## 2. 领域原语与职责边界
-
-| 原语 | 核心职责 | 输入 | 输出 | 不负责 |
-|---|---|---|---|---|
-| Interview Scene | 把用户材料转成一次可训练的面试场景 | 当前用户、简历、岗位说明、时长 | 岗位快照、问题计划、流程定义、Prompt | 会话连接、逐轮消息、评分、招聘判断 |
-| Scene Flow | 记录并校验场景当前步骤 | Scene、期望步骤、动作标识 | 当前步骤、下一步骤、是否完成 | 材料解析、问题生成、实时传输、评分 |
-| Session | 记录一次用户训练事实及完整对话 | 当前用户、就绪 Scene、完整消息、结束原因 | Session ID、生命周期状态、对话记录 | 面试规则、问题选择、评分算法 |
-| Evaluation | 从已授权训练事实生成口语反馈 | Session、完整对话、可选音频、评分上下文 | 单轮结果、整场报告或明确的处理中/失败状态 | 推进流程、改变会话状态、岗位胜任判断 |
-
-变化方向测试：面试材料和问题策略会独立于 IELTS 题库演进，分别留在各自的 Scene
-特化；会话授权、生命周期、消息完整性和口语评分语义需要跨 Scene 一致，保留为公共
-原语。前端页面可以独立演进，但不据此拆出 `service/interview`。
-
-## 3. 代码组织约束
+代码继续位于现有模块：
 
 ```text
+controller/InterviewController.java
 service/scene/InterviewSceneService.java
 service/scene/impl/InterviewSceneServiceImpl.java
-service/scene/SceneFlowService.java
-service/session/SessionService.java
-service/evaluation/EvaluationService.java
 domain/dto/scene/...
-domain/dto/session/...
-domain/dto/evaluation/...
-infrastructure/persistence/{entity,mapper,repository}/...
-src/main/resources/db/migration/V{version}__{description}.sql
+domain/vo/scene/...
+domain/po/session/InterviewSession.java
+component/session/ActiveSessionRegistry.java
+infrastructure/persistence/{entity,mapper,repository}/scene/...
 ```
 
-Interview 的 HTTP 入口可以使用独立业务路由和 `InterviewSceneController`，但内部仍按
-上述边界编排。供应商 Adapter 继续位于 `infrastructure`，数据库访问继续通过公共
-Repository；不得出现 Interview 私有 Mapper、Session、Evaluation 或 Provider 包。
+不得新增 `service/interview`、`domain/dto/interview`、Interview 私有 Provider、第二套
+Session Service 或 `interview_session` 表。
 
-兼容基线：复用现有 `SceneType.INTERVIEW_SCENE`、`interview_` ID 前缀、公共 Session
-状态机和已有评分持久化；后续实现只为缺失的 Interview Scene 事实新增 Flyway 迁移，
-不复制公共表，也不改写已发布迁移。
+职责边界：
 
-## 4. 接口契约
+- `InterviewController` 只做 HTTP 协议适配、认证入口和 DTO 转换，只依赖
+  `InterviewSceneService`。
+- `InterviewSceneService` 拥有材料准备、创建、逐题回答、追问裁决、恢复、结束、报告、
+  完整录音和学习资产的完整用例编排。
+- `SceneFlowService` 只管理外层 `DIALOGUE -> COMPLETED` 流程。题目和追问切换不推进
+  Flow，成功或最终失败时释放 Flow。
+- `SessionService` 只注册 Scene 特化创建的 Session、创建 `practice_session`、校验归属并
+  写入 `COMPLETED`/`FAILED` 终态。不得编排 Interview 的 ASR、LLM、TTS、追问或报告。
+- `EvaluationService.evaluateSpeech` 只提供无持久化副作用的语音评分，不查询 Scene 或
+  Session，不保存转写和逐轮评分。
+- ASR、LLM、TTS、评分、OCR、对象存储继续通过现有 Provider 或通用组件调用。
 
-以下是稳定的业务语义，不固定尚未实现的 Java DTO 形状。
+## 3. 运行态与持久化边界
 
-### 4.1 `InterviewSceneService`
+`InterviewSession` 继承 `AbstractSceneSession`，由 `ActiveSessionRegistry` 管理。它只存在于
+当前后端进程，组合：
 
-| 操作 | 输入 | 输出 | 前置与后置条件 | 幂等与错误 |
-|---|---|---|---|---|
-| 准备面试场景 | 当前用户、PDF/DOC/DOCX 简历、岗位说明、10/15/20 分钟、幂等键 | `sceneId`、准备状态、材料摘要、问题数 | 用户已认证；文件不超过 10 MB；岗位说明 30–5000 字；成功后 Scene 类型为 `INTERVIEW_SCENE` 且归属当前用户 | 同一用户和幂等键返回同一结果；格式无效为 400，材料不可解析为 422，供应商暂时失败为 503 |
-| 查询准备结果 | 当前用户、`sceneId` | 准备中、已就绪或失败及安全错误码 | 只返回当前用户的 Scene；已就绪结果包含可启动 Session 所需的稳定快照 | 不存在为 404，不归属为 403；不返回原始 Prompt 或简历全文 |
+- `InterviewQuestionPlan`：五个主问题和每题追问上限。
+- `InterviewProgress`：当前主问题、追问次数、实际问题和结束原因。
+- `InterviewTurn`：AI 问题音频、用户回答临时音频、临时转写和临时语音评分。
+- 最近活动时间、当前 submission、结束请求和不足数据确认状态。
 
-该 Service 可以编排材料提取、LLM Provider 和 Scene Repository，但不得创建 Session、
-推进对话步骤或调用 Evaluation。
+不建立 `interview_session`、`interview_turn` 或任务表。数据库继续使用三张 Interview 表和
+`practice_session`：
 
-### 4.2 `SceneFlowService`
+- `interview` 保存身份、岗位摘要、难度和完成录音元数据；`completed_at IS NOT NULL` 才是
+  可见资产。
+- `interview_question` 只保存实际提出的 AI 问题。
+- `interview_report` 保存 FULL/PARTIAL 的完整五维报告。
+- `practice_session` 表达公共训练事实和最终状态，由公共 Session 能力唯一创建。
 
-| 操作 | 输入 | 输出 | 契约 |
-|---|---|---|---|
-| 创建流程 | `sceneId`、Scene 特化给出的流程定义 | 初始步骤和流程版本 | Scene 已就绪；同一 Scene/版本重复调用不产生第二条流程 |
-| 推进流程 | `sceneId`、期望当前步骤、动作标识 | 新的当前步骤、完成标志 | 比较并推进；动作标识去重；过期步骤返回 409 并附当前状态 |
-| 完成流程 | `sceneId`、结束原因 | 完成状态 | 已完成时重复调用仍成功；不能倒退到历史步骤 |
+原始材料、用户转写、分题回答音频和逐轮评分仅在进程内或受控临时存储中存在，最终化或
+失败后清理。
 
-Interview 的问题计划决定“下一题是什么”，`SceneFlowService` 只保证顺序、并发安全和
-可恢复状态，不理解简历或岗位语义。
+## 4. 材料与问题计划
 
-### 4.3 公共 `SessionService`
+输入约束：
 
-| 操作 | 输入 | 输出 | 契约 |
-|---|---|---|---|
-| 开始 Scene Session | 当前用户、已就绪 `sceneId`、模型/声音等会话选项、幂等键 | `sessionId`、`sceneType`、连接信息、状态 | 校验 Scene 归属并绑定 `INTERVIEW_SCENE`；公共状态机负责 `CREATED` 到 `ACTIVE` |
-| 追加完整消息 | 当前用户、`sessionId`、轮次/消息标识、角色、完整文本 | 确认后的消息序号 | 只保存 final 消息，不保存流式 delta；同一消息标识重复提交不重复写入 |
-| 结束 Session | 当前用户、`sessionId`、结束原因 | 最终状态和结束时间 | 先持久化结束事实，再触发可重试的报告生成；重复结束不改写首次有效结束时间 |
-| 查询 Session | 当前用户、`sessionId` | 状态、去敏对话和报告状态 | 每次读取都校验归属；不得返回临时凭证、内部 Prompt 或原始供应商错误 |
+- `jobTitle` 必填；最终 JD 文本不超过 5,000 字符。
+- `resumeText` 与 `resumeFile` 互斥且都可不提供。
+- 简历文件仅允许文本型 PDF 和 DOCX，单文件不超过 10 MB，PDF 不超过 10 页，最终提取
+  文本不超过 20,000 字符。
+- 不支持 DOC、Markdown 文件、图片简历、扫描件和扫描版 PDF。
+- JD OCR 最多接收五张图片，合计不超过 10 MB；只返回识别文字，不创建 Interview，也不
+  保存截图。
 
-公共 Session 是实时训练用例的编排者：可以协调 `SceneFlowService`，并在结束事实落库
-后把报告任务交给 `EvaluationService`；它不决定面试下一题、不解析材料、不计算评分。
-Controller 只做协议适配，不串联这三个 Service。暂停、恢复和打断的实时协议仍由客户
-端 DataChannel 处理；只有影响业务事实的状态才持久化。
+`TargetRoleSummary` 固定包含 `overview`、`responsibilities`、`requiredSkills`、
+`qualificationRequirements` 四个字段。简历只临时影响问题计划，不进入岗位摘要。
 
-### 4.4 公共 `EvaluationService`
+所有难度固定五个主问题：
 
-| 操作 | 输入 | 输出 | 契约 |
-|---|---|---|---|
-| 记录单轮评价 | 已授权 `sessionId`、轮次、完整文本、可选音频 | 单轮口语结果 | `(sessionId, turnNo, evaluatorVersion)` 幂等；不改变 Flow 或 Session 状态 |
-| 生成整场报告 | 已完成 `sessionId`、完整对话、Interview 评分上下文 | 报告或处理中状态 | 可重复执行并覆盖同版本未完成结果；缺失维度明确标记，不以 0 分代替 |
-| 查询评价 | 当前用户、`sessionId` | 完整、部分、处理中或失败 | 校验 Session 归属；报告只评价英语表达，不推断岗位匹配或录用概率 |
+- BASIC：每个主问题最多一个澄清型追问。
+- STANDARD：每个主问题最多一个原因、行动或结果型追问。
+- CHALLENGE：每个主问题最多两个权衡、反思或复杂场景型追问。
 
-评分上下文由 Interview Scene 提供，算法与供应商实现归公共 Evaluation/Provider。
+LLM 每轮只可建议 `ASK_FOLLOW_UP` 或 `MOVE_TO_NEXT_MAIN`，最终由
+`InterviewProgress` 强制执行追问上限。用户英语等级只影响措辞复杂度，不改变问题难度、
+评分量尺或数据库结构。
 
-## 5. 关键 ADR
-
-### ADR-001：Interview 与 IELTS 作为 Scene 特化
-
-- 背景：两者有不同材料和流程规则，但都需要 Scene、Session、Evaluation 和 Provider。
-- 决策：特化放在 `service/scene` 和 `domain/dto/scene`，不建立顶层 Interview/IELTS 包。
-- 原因：业务差异留在变化更快的 Scene 策略，跨场景事实只维护一份。
-- 代价：公共契约必须容纳不同流程，不能把自定义场景的固定学习阶段写死为全局规则。
-- 替代：独立 Interview 模块会复制 Session/评分并形成双向依赖，因此不采用。
-
-### ADR-002：结束事实与报告生成解耦
-
-- 背景：外部评分可能超时，不能因此丢失已经完成的训练。
-- 决策：Session 结束先持久化；报告按 Session 和评分版本幂等生成，可返回处理中、部分或
-  失败状态。
-- 原因：用户可以离开页面，重试不会重复会话或报告。
-- 代价：读取方必须展示非终态，并需要后台重试或后续补偿入口。
-- 替代：结束请求内强制同步生成报告会扩大超时和重复提交风险，因此不采用。
-
-### ADR-003：原始面试材料最小化和短期保留
-
-- 背景：简历与岗位说明包含个人和商业敏感信息。
-- 决策：原始文件仅在受控临时存储中保留到提取完成或短 TTL 到期；业务库只保存训练所需
-  的最小快照和对象 Key，不保存长期签名 URL，不在日志中记录全文。派生快照仍按敏感
-  数据处理，不跨用户复用，并受明确保留期和删除策略约束。
-- 原因：降低泄漏面，同时保留可重复训练所需的稳定业务上下文。
-- 代价：失败排查依赖脱敏摘要、错误码和关联 ID，不能依赖原文日志。
-- 替代：长期保存原始简历便于重跑但超出 foundation 的必要范围，因此不采用。
-
-### ADR-004：数据库演进只认 Flyway 版本迁移
-
-- 背景：项目已配置 `classpath:db/migration` 且关闭 Spring SQL init，多份 DDL 来源会
-  造成执行顺序和环境状态不一致。
-- 决策：版本化 DDL 只放 `src/main/resources/db/migration`；运维脚本不能替代或重复
-  Flyway 迁移。
-- 原因：所有环境共享可验证、可追踪的迁移历史。
-- 代价：已发布迁移不可直接修改，修正必须新增后续版本。
-- 替代：同时维护 `schema.sql` 或手工部署 DDL 容易漂移，因此不采用。
-
-## 6. 失败补偿与隐私
-
-| 失败点 | 已持久化事实 | 补偿与重试 | 用户可见状态 |
-|---|---|---|---|
-| 文件校验/提取失败 | 最多只有准备请求与脱敏错误码 | 删除临时对象；同一幂等键修正输入后需新请求 | 材料无效或无法解析 |
-| 问题计划/Prompt 生成失败 | Scene 保持准备中或失败，不可启动 | 按退避策略重试；达到上限后标记失败并清理临时材料 | 准备失败，可重试 |
-| 流程创建失败 | 已就绪 Scene 仍存在 | 对 Scene/流程版本幂等重放 | 暂不可开始 |
-| 实时连接失败 | Session 已创建但未激活 | 将 Session 记为 `FAILED` 或按策略重连；临时凭证自然过期 | 连接失败，可重新开始 |
-| 消息重复/乱序 | 已确认的完整消息 | 按消息标识去重；缺口保持待补，不猜测文本 | 对话同步中 |
-| 结束时评分失败 | Session 已完成、结束时间不可回退 | 按 Session/评分版本重试；保留已有单轮结果 | 报告处理中、部分或失败 |
-| 临时材料删除失败 | 仅保存对象 Key 和清理状态 | 有界重试并告警；下载链接保持短 TTL | 不暴露基础设施细节 |
-
-所有入口从认证上下文取得 `userId`，对 `sceneId`、`sessionId`、报告和对象 Key 逐次校验
-归属。日志只记录关联 ID、状态、耗时、文件类型/大小和脱敏错误码；禁止记录简历正文、
-岗位说明全文、Prompt、JWT、临时凭证、完整 SDP、音频 Base64 或供应商原始响应。材料
-摘要和问题计划也按敏感数据授权与清理，不得用于其他用户或模型训练。
-
-## 7. 核心场景伪代码
-
-### 7.1 准备面试 Scene
+## 5. 创建流程
 
 ```text
-准备面试场景(当前用户, 简历, 岗位说明, 时长, 幂等键):
-    校验用户、文件类型与大小、岗位说明长度、允许时长
-    如果存在同用户同幂等键的请求:
-        返回已有准备结果
-
-    临时对象 = 安全保存简历(短期保留)
-    尝试:
-        材料摘要 = 提取训练所需最小信息(临时对象, 岗位说明)
-        问题计划 = 生成面试问题计划(材料摘要, 时长)
-        场景 = 保存 Interview Scene(当前用户, 材料摘要, 问题计划)
-        创建流程(场景, 问题计划的流程定义)
-        标记场景已就绪
-        安排删除临时对象
-        返回场景标识和已就绪状态
-    失败:
-        标记准备失败并保存安全错误码
-        安排删除临时对象
-        返回可重试或需修正材料的状态
+分配 interviewId 和 sessionId
+-> 构造 InterviewSession
+-> 校验并解析材料
+-> 生成 role_summary
+-> 生成五题计划
+-> 生成第一题 TTS
+-> 创建 interview
+-> SceneFlowService.createFlow(interviewId)，初始阶段为 DIALOGUE
+-> SessionService.registerSceneSession(session)
+-> 返回第一题文本和 Base64 音频
 ```
 
-### 7.2 公共 Session 完成面试并交付报告
+`registerSceneSession` 是 `practice_session` 的唯一创建入口，并以一个可补偿的注册命令
+完成 registry 注册和数据库创建：任一步骤失败都必须移除已注册运行态并删除已创建的
+`practice_session`。创建失败时再按逆序释放 Flow、删除未完成 Interview 和清理临时材料。
+创建流程不拆分 prepare/start，不创建 Realtime 连接。
+
+## 6. 回答协议与幂等
 
 ```text
-公共 Session 完成面试(当前用户, 场景标识, 会话标识, 结束原因):
-    校验场景和会话都归属当前用户且相互绑定
-    幂等完成 Scene Flow
-    幂等结束公共 Session 并固定结束时间
+POST /api/interviews/{interviewId}/answers
+Content-Type: multipart/form-data
 
-    尝试:
-        完整对话 = 读取已确认的 final 消息
-        评分上下文 = 读取 Interview Scene 的评分快照
-        报告 = 幂等生成口语报告(会话标识, 完整对话, 评分上下文)
-        返回已完成报告
-    暂时失败:
-        保留已完成 Session 和已有单轮结果
-        安排按会话和评分版本重试
-        返回报告处理中或部分结果
-    永久失败:
-        保存安全错误码，不覆盖已有结果
-        返回报告失败并允许用户查看完整对话
+questionNo
+submissionId
+audio
 ```
 
-## 8. 实现验收约束
+音频必须为 16 kHz、单声道、16-bit PCM WAV，单轮最长 210 秒。210 秒是适配默认 Qwen
+ASR 7 MiB 输入上限的技术安全边界，不是面试结束原因，也不提供面试总时长选择。公共
+`PcmWavValidator` 的默认五分钟能力保持兼容，Interview 通过参数化上限使用 210 秒。
 
-- 任何 Interview 生产代码都落在现有 Scene、Session、Evaluation、Provider 或
-  Infrastructure 边界内，没有顶层 `service/interview`、`domain/dto/interview`。
-- 并发创建、推进、消息追加、结束和报告生成都有业务幂等键及冲突测试。
-- 认证、资源归属、文件限制、短 TTL、日志脱敏和删除补偿有自动化测试。
-- 新 DDL 只通过新的 Flyway 版本迁移交付；不修改已发布迁移，不提交 `schema.sql` 副本。
-- 单元、容器集成和覆盖率门禁遵循 `CLAUDE.md`；本文档本身不替代实现测试。
+回答接口在复制临时 WAV、原子预占 submission 并成功提交 executor 后返回
+`202 Accepted`。状态机为：
+
+```text
+ACCEPTED -> PROCESSING -> COMPLETED
+                         -> FAILED_RETRYABLE
+                         -> FAILED_TERMINAL
+```
+
+幂等规则：
+
+- 相同 `submissionId`、题号和音频摘要在 PROCESSING/COMPLETED 时返回已有状态，不重复
+  推进问题。
+- FAILED_RETRYABLE 可使用同一 ID 和摘要重试；优先复用原临时文件。
+- FAILED_TERMINAL 返回原错误；当前题仍可继续时允许使用新的 submission ID 重新录制。
+- 同一 ID 对应不同内容、当前题使用其他未完成 ID、旧题迟到提交均返回 409。
+- 所有预占失败和 executor 拒绝都删除本次新临时文件并回滚未生效的 reservation。
+
+处理顺序固定为：
+
+```text
+WAV 校验 -> ASR -> 有效英文词统计 -> (有效词 >= 4 时 evaluateSpeech，否则记录不可评分)
+-> LLM 决定追问或下一主问题 -> InterviewProgress 裁决 -> 下一题 TTS
+```
+
+只有全部步骤成功才推进问题。API 和日志不得返回或记录用户转写、逐轮评分或 Provider 原始
+响应。AI 问题文本和短音频可通过运行态 JSON 返回，音频字段使用 Base64 和明确 MIME。
+
+## 7. 中断恢复
+
+状态查询、心跳和业务请求都更新 `lastSeen`。非处理态会话失联后进入 `INTERRUPTED`；后端
+每分钟扫描一次，十分钟内恢复时返回 ACTIVE，不重建 Flow，也不改变问题进度。
+
+正在处理回答、等待已接收回答结束或最终化的 Session 不参与基于 lastSeen 的空闲清理，
+但每个 submission 和 finalizer 都必须带有硬截止时间（从接收/开始最终化起不超过十分钟）。
+超过截止时间时，watchdog 将卡死任务标记为 FAILED_RETRYABLE 或 FAILED_TERMINAL，删除其
+临时数据并解除占用；随后由普通十分钟清理处理已无活动的 Session。这样 Provider 阻塞、
+executor 丢失回调和 finalizer 停滞都不会永久占用运行态。
+
+超过会话恢复窗口后：
+
+- 运行态和 `practice_session` 标记 FAILED。
+- 调用 `completeFlow(interviewId, false)`。
+- 删除未完成 Interview 和临时数据。
+- 移除运行态，不进入历史、训练时长或趋势。
+
+不支持后端进程重启后的未完成面试恢复。
+
+## 8. 结束与最低数据
+
+单个回答至少四个有效英文词才参与评分；所有可评分回答合计至少二十个有效英文词才允许
+形成资产。有效词统计复用 `EnglishWordCounter`。二十词资产门槛与公共三十秒训练时长
+门槛互不替代。
+
+```text
+POST /api/interviews/{interviewId}/end
+{ "confirmInsufficientData": false }
+```
+
+结束请求不调用会过早完成 `practice_session` 的通用 `endSession`。它只阻止新的回答预占，
+并等待已经 ACCEPTED/PROCESSING 的回答结束；锁内只观察和切换状态，不阻塞 processor。
+
+- 有 pending submission 时返回 `202 WAITING_FOR_SUBMISSIONS`。
+- pending 完成后若不足二十词，运行态设置 `confirmationRequired=true`，恢复 ACTIVE 和新
+  回答接收；`state` 返回实际词数和最低词数。
+- 数据已确定不足且 `confirmInsufficientData=false` 时返回
+  `409 INTERVIEW_DATA_CONFIRMATION_REQUIRED`，保持 ACTIVE 并更新 `lastSeen`。
+- 确认结束后，运行态和 `practice_session` 标记 FAILED，释放 Flow，删除未完成 Interview
+  和临时数据，不生成报告或录音。
+- 数据足够的用户提前结束生成 PARTIAL；五题计划自然完成生成 FULL。
+
+## 9. 五维报告
+
+FULL 和 PARTIAL 都是字段完整、同量尺的报告。五个维度为：
+
+- 流利度。
+- 逻辑与连贯性。
+- 语法控制。
+- 发音可理解度。
+- 词汇与面试表达。
+
+流利度和发音复用无副作用语音评分结果，逻辑、语法和词汇由一次结构化 LLM 调用生成。
+五维均为 0-100 分且等权，总分保留一位小数。不得复用包含其他维度或不等权规则的
+`ConversationScoreCalculator`。
+
+报告使用中文，包含每个维度的评价和行动建议；不逐字引用用户回答，不输出姓名、公司、
+项目等身份实体，不评价岗位匹配、胜任度或录用概率。LLM 结构非法时只修复一次，再次
+失败则最终化失败。
+
+## 10. 完整录音与完成闸门
+
+完整录音按实际问答顺序包含：
+
+```text
+AI 问题音频 -> 用户回答 -> 下一 AI 问题音频 -> 下一用户回答 -> ...
+```
+
+所有分段统一为 16 kHz 单声道 PCM，拼接后编码为 64 kbps MP3，通过现有
+`ObjectStorageProvider` 上传确定性对象 Key。数据库不保存公开或长期签名 URL。
+
+Interview 只有在完整报告和完整录音都成功后才算完成。成功顺序：
+
+```text
+确定 FULL/PARTIAL
+-> 生成完整报告
+-> 拼接并编码完整录音
+-> 上传录音对象
+-> 单个数据库事务：保存实际问题、报告、录音元数据、completed_at、practice_session COMPLETED
+-> 事务提交后更新运行态
+-> SceneFlowService.advanceStage(interviewId, DIALOGUE)
+-> SceneFlowService.completeFlow(interviewId, true)
+-> 清理临时数据和运行态
+```
+
+最终化按 `interviewId` 幂等。已提交资产不会因后续 Flow 清理失败降级：
+
+- `advanceStage` 和 `completeFlow(true)` 都必须幂等。
+- 提交后 Flow 操作失败时保留运行态中的 `flowCleanupPending`，以有界退避重试；重试任务
+  只做 Flow 收敛，不修改已提交资产和 `practice_session`。
+- 重试耗尽只记录脱敏告警，资产仍保持可见，后续状态查询不得把它降级为 FAILED。
+
+报告、录音、对象上传或最终数据库事务任一最终化步骤失败时统一执行：
+
+- 运行态和 `practice_session` 标记 FAILED。
+- 不向 Interview 表写不存在的 FAILED 状态。
+- 删除未完成 Interview、问题和报告。
+- 回滚或删除已写入但未提交的数据库事实。
+- 对已上传对象执行补偿删除；对象不存在视为幂等成功。
+- `completeFlow(interviewId, false)` 并清理临时数据。
+- 不产生可见学习资产。
+
+## 11. 学习资产、趋势与删除
+
+FULL 和 PARTIAL 都进入历史并可查看岗位摘要、实际 AI 问题、完整五维报告和完整录音。
+只有 FULL 进入最近成绩和能力趋势，趋势按难度分组并动态计算。录音播放接口每次校验用户
+归属并生成短期签名 URL。
+
+快速复练创建新的 Interview，带入岗位名称、难度和岗位摘要；只读取用户指定来源的上一场
+相同岗位 Interview 的实际问题作为避免重复提示。不查询全历史，不做向量或语义相似度
+检索，不持久化 `sourceInterviewId`，也不承诺绝对不重复。
+
+删除顺序：
+
+```text
+删除录音对象
+-> 数据库事务删除 interview_report
+-> 删除 interview_question
+-> 删除 interview
+```
+
+对象不存在视为幂等成功。对象已删但数据库事务失败时，数据库 Interview 记录就是重试
+依据；第二次请求继续数据库删除。删除不得删除或回写 `practice_session`，已产生的训练
+时长不回退。
+
+## 12. HTTP 与隐私约束
+
+公开路由：
+
+```text
+POST   /api/interviews/job-description/ocr
+POST   /api/interviews
+POST   /api/interviews/{id}/answers
+GET    /api/interviews/{id}/state
+POST   /api/interviews/{id}/heartbeat
+POST   /api/interviews/{id}/end
+GET    /api/interviews
+GET    /api/interviews/{id}
+GET    /api/interviews/{id}/recording
+GET    /api/interviews/trends?difficulty=...
+POST   /api/interviews/{sourceId}/repractice
+DELETE /api/interviews/{id}
+```
+
+主要状态映射：202 表示已接收异步工作；404 表示资源不存在或不归属；409 表示题号、提交
+或确认冲突；422 表示可识别但无效的材料、音频或业务状态；502 表示同步外部依赖失败；
+503 表示 executor 或服务暂不可用。异步失败通过 `state` 返回稳定业务错误码、可重试标志，
+不改变已经结束的 HTTP 响应。
+
+日志只记录关联 ID、题号、状态、耗时、文件类型和大小、脱敏错误码。禁止记录 JWT、简历
+正文、JD 全文、Prompt、转写、音频 Base64、长期签名 URL、供应商请求或原始错误体。
+
+## 13. 验收约束
+
+- Controller 只依赖 `InterviewSceneService`。
+- 五题计划、追问上限、submission 幂等和题号推进均有单元与并发测试。
+- 210 秒音频边界测试不改变公共 300 秒行为。
+- 状态查询、恢复、结束确认和十分钟清理使用 fake clock/executor/latch 测试。
+- FULL/PARTIAL 五维完整性、等权总分和趋势口径有自动化测试。
+- 报告或录音任一失败都不能形成可见资产。
+- 对象删除成功但数据库失败后的第二次重试可以完成删除。
+- 原始材料、用户转写和分题音频不入库、不进入公开 API 和日志。
+- 所有 Java 测试放在 `backend/unispeaking-server/src/test/java` 对应包目录。
