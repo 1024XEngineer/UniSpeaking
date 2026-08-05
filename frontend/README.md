@@ -1,7 +1,13 @@
-# UniSpeaking Frontend
+# UniSpeaking Frontends
 
-前端项目位于 [`Unispeaking_fronted`](Unispeaking_fronted)，使用 React 19 和
-Vite 6。
+仓库包含两个相互独立的前端项目：
+
+- [`web`](web)：React 19 + Vite 6 Web 应用，已经接入主要后端业务链路。
+- [`mobile`](mobile)：React Native + Expo Router 移动端，当前以高保真交互原型为主。
+
+两端共享产品流程和视觉语言，但不共享组件源码。
+
+## Web 前端
 
 ## 当前联调状态
 
@@ -28,7 +34,7 @@ Vite 6。
 要求 Node.js 20 或更高版本。
 
 ```bash
-cd frontend/Unispeaking_fronted
+cd frontend/web
 npm install
 VITE_BACKEND_URL=http://localhost:8080 npm run dev
 ```
@@ -55,7 +61,7 @@ npm run check:realtime-events
 ## 目录
 
 ```text
-Unispeaking_fronted
+web
 ├── public
 │   ├── brand
 │   ├── examiner
@@ -119,3 +125,26 @@ Secret。
 完整接口以
 [`docs/frontend-backend-interface-contract.md`](../docs/frontend-backend-interface-contract.md)
 为准。
+
+## 移动端
+
+要求 Node.js 20 或更高版本。浏览器预览：
+
+```bash
+cd frontend/mobile
+npm install
+npm run web
+```
+
+Android 开发客户端：
+
+```bash
+npx expo prebuild --platform android
+npm run android
+```
+
+移动端使用 TypeScript、Expo SDK 57 和 Expo Router，应用包名为
+`com.unispeaking.mobile`。当前只有自由对话、场景广场和学习资产完成前端定稿；
+IELTS、英文面试和个人主页仍需继续开发与定稿，仓库中的相关页面只是阶段性原型。
+移动端后端数据接入范围也与 Web 端不同，继续开发前请先阅读
+[`mobile/HANDOFF.md`](mobile/HANDOFF.md)。

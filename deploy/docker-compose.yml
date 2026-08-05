@@ -9,7 +9,7 @@ services:
 
   frontend:
     build:
-      context: ../frontend/Unispeaking_fronted
+      context: ../frontend/web
       args:
         VITE_BACKEND_URL: ${VITE_BACKEND_URL:-/backend}
     ports:

@@ -1,6 +1,7 @@
 package com.unispeaking.service.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
@@ -98,6 +99,47 @@ class AuthServiceImplTest {
 		assertEquals(user.id().toString(), service.requireUserId("spoofed-user-id"));
 	}
 
+	@Test
+	void resolvesOptionalUserOnlyWhenAuthenticationExists() {
+		AuthServiceImpl service = service();
+		assertNull(service.currentUserIdOrNull());
+
+		UserAccount user = user();
+		when(userAccountRepository.findById(user.id())).thenReturn(Optional.of(user));
+		setAuthentication(user);
+
+		assertEquals(user.id().toString(), service.currentUserIdOrNull());
+	}
+
+	@Test
+	void restrictsFeedbackAdministrationToAdminRole() {
+		AuthServiceImpl service = service();
+		UserAccount user = user();
+		when(userAccountRepository.findById(user.id())).thenReturn(Optional.of(user));
+		setAuthentication(user);
+
+		BusinessException denied = assertThrows(
+				BusinessException.class,
+				service::requireAdminUserId);
+		assertEquals("ADMIN_ACCESS_DENIED", denied.code());
+
+		UserAccount admin = userWithRole(UserRole.ADMIN);
+		when(userAccountRepository.findById(admin.id())).thenReturn(Optional.of(admin));
+		setAuthentication(admin);
+		assertEquals(admin.id().toString(), service.requireAdminUserId());
+	}
+
+	private void setAuthentication(UserAccount user) {
+		Jwt jwt = new Jwt(
+				"token",
+				Instant.parse("2026-07-28T00:00:00Z"),
+				Instant.parse("2026-07-29T00:00:00Z"),
+				Map.of("alg", "HS256"),
+				Map.of("sub", user.id().toString(), "auth_version", user.authVersion()));
+		SecurityContextHolder.getContext()
+				.setAuthentication(new JwtAuthenticationToken(jwt, java.util.List.of()));
+	}
+
 	private AuthServiceImpl service() {
 		return new AuthServiceImpl(
 				userAccountRepository,
@@ -107,13 +149,17 @@ class AuthServiceImplTest {
 	}
 
 	private UserAccount user() {
+		return userWithRole(UserRole.USER);
+	}
+
+	private UserAccount userWithRole(UserRole role) {
 		Instant now = Instant.parse("2026-07-28T00:00:00Z");
 		return new UserAccount(
 				UUID.fromString("22222222-2222-4222-8222-222222222222"),
 				"learner@example.com",
 				"bcrypt-hash",
 				null,
-				UserRole.USER,
+				role,
 				UserStatus.ACTIVE,
 				0,
 				null,

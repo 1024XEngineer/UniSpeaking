@@ -98,6 +98,158 @@ Content-Type: application/json
 
 新密码长度为 6～72，且不能与当前密码相同。成功响应中的 `reauthenticationRequired` 为 `true`；服务端同时递增 `auth_version`，使该用户所有现有 JWT（包括当前请求所用 JWT）失效，前端必须清除 Token 并跳转登录页。
 
+## 成就系统接口
+
+以下接口均从 JWT 获取当前用户，不接收客户端传入的 `userId`。客户端只能请求服务端根据业务事实重新计算成就，不能上传当前进度、修改阈值或声明某个成就已经解锁。
+
+### 查询成就概览
+
+```text
+GET /api/achievements
+Authorization: Bearer <accessToken>
+```
+
+该接口只读取成就进度和已有解锁记录，不创建解锁记录，也不修改弹窗展示状态。
+
+```json
+{
+  "series": [
+    {
+      "seriesId": "conversation",
+      "category": "开口",
+      "title": "对话历程",
+      "unit": "次",
+      "currentValue": 20,
+      "currentLevel": 3,
+      "currentTitle": "对话常客",
+      "nextLevel": 4,
+      "nextTitle": "对话达人",
+      "nextThreshold": 50,
+      "completed": false,
+      "milestones": [
+        {
+          "achievementId": "conversation-1",
+          "level": 1,
+          "title": "初次开口",
+          "description": "累计完成 1 次有效对话",
+          "threshold": 1,
+          "unlocked": true,
+          "unlockedAt": "2026-08-04T02:00:00Z"
+        },
+        {
+          "achievementId": "conversation-4",
+          "level": 4,
+          "title": "对话达人",
+          "description": "累计完成 50 次有效对话",
+          "threshold": 50,
+          "unlocked": false,
+          "unlockedAt": null
+        }
+      ]
+    }
+  ]
+}
+```
+
+字段说明：
+
+- `series`：固定按服务端成就目录顺序返回 10 个系列。
+- `currentValue`：该系列当前真实统计值；分数可以包含小数，次数、天数和时长使用整数。
+- `currentLevel`：已经解锁的最高等级；尚未解锁第 1 级时为 `0`。
+- `currentTitle`：当前最高等级称号；等级为 `0` 时为 `null`。
+- `nextLevel`、`nextTitle`、`nextThreshold`：下一晋升节点；完成最高等级后均为 `null`。
+- `completed`：是否已经完成该系列最高等级。
+- `milestones`：按等级升序返回该系列全部节点。
+- `unlockedAt`：服务端首次记录的解锁时间；未解锁时为 `null`。
+
+### 同步成就解锁
+
+```text
+POST /api/achievement-unlocks
+Authorization: Bearer <accessToken>
+```
+
+请求体为空。服务端读取练习、评分、打卡和学习资产事实，重新计算全部成就节点，并为已经满足但尚未记录的节点创建解锁记录。重复调用必须幂等。
+
+```json
+{
+  "initialized": true,
+  "overview": {
+    "series": []
+  },
+  "newlyUnlocked": [
+    {
+      "achievementId": "conversation-4",
+      "seriesId": "conversation",
+      "category": "开口",
+      "seriesTitle": "对话历程",
+      "level": 4,
+      "title": "对话达人",
+      "description": "累计完成 50 次有效对话",
+      "unlockedAt": "2026-08-04T02:30:00Z",
+      "acknowledgedAt": null
+    }
+  ],
+  "pendingNotifications": [
+    {
+      "achievementId": "conversation-4",
+      "seriesId": "conversation",
+      "category": "开口",
+      "seriesTitle": "对话历程",
+      "level": 4,
+      "title": "对话达人",
+      "description": "累计完成 50 次有效对话",
+      "unlockedAt": "2026-08-04T02:30:00Z",
+      "acknowledgedAt": null
+    }
+  ]
+}
+```
+
+同步规则：
+
+- `initialized` 表示当前用户已经完成成就系统历史初始化。
+- `newlyUnlocked` 仅包含本次请求创建的非静默解锁记录。
+- `pendingNotifications` 包含本次新解锁和之前尚未确认展示的全部节点。
+- 待展示节点按 `unlockedAt` 升序排列；同一批次按成就目录顺序和等级升序排列。
+- 首次同步采用历史静默初始化：已经满足的历史节点会写入解锁记录并立即标记为已展示，因此两个通知数组均为空。
+- 新注册用户必须在进入练习前完成首次同步；即使没有解锁任何节点，也要完成初始化。
+- 同步失败不改变已经完成的练习、评分、打卡或学习资产结果。
+
+### 确认成就弹窗已经展示
+
+```text
+PATCH /api/achievement-unlocks/conversation-4
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+```json
+{
+  "acknowledged": true
+}
+```
+
+成功响应：
+
+```json
+{
+  "achievementId": "conversation-4",
+  "acknowledgedAt": "2026-08-04T02:30:05Z"
+}
+```
+
+确认操作必须幂等：同一节点重复确认时返回第一次确认产生的 `acknowledgedAt`，不能覆盖为新的时间。只能确认当前用户已经解锁的节点。
+
+成就接口错误码：
+
+| HTTP 状态 | 错误码 | 含义 |
+|---:|---|---|
+| `400` | `ACHIEVEMENT_ACKNOWLEDGEMENT_INVALID` | `acknowledged` 缺失或不是 `true` |
+| `401` | `UNAUTHORIZED` | JWT 缺失、无效或已失效 |
+| `404` | `ACHIEVEMENT_UNLOCK_NOT_FOUND` | 当前用户尚未解锁该节点或节点 ID 不存在 |
+| `500` | `ACHIEVEMENT_PERSISTENCE_FAILED` | 解锁或确认状态持久化失败 |
+
 ## 1. 基础约定
 
 ### 1.1 Base URL

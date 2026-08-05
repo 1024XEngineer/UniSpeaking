@@ -27,10 +27,12 @@ public class SceneFlowServiceImpl implements SceneFlowService {
 	@Override
 	public SceneFlowResponse createFlow(String sceneId) {
 		SceneType sceneType = parseSceneType(sceneId);
-		if (sceneType != SceneType.FREE_CHAT) {
+		boolean startsAtDialogue = sceneType == SceneType.FREE_CHAT
+				|| sceneType == SceneType.INTERVIEW_SCENE;
+		if (!startsAtDialogue) {
 			findScene(sceneId);
 		}
-		SceneFlowStage initialStage = sceneType == SceneType.FREE_CHAT
+		SceneFlowStage initialStage = startsAtDialogue
 				? SceneFlowStage.DIALOGUE
 				: SceneFlowStage.WORD_LEARNING;
 		SceneFlowResponse flow = new SceneFlowResponse(
@@ -56,8 +58,10 @@ public class SceneFlowServiceImpl implements SceneFlowService {
 
 	@Override
 	public void completeFlow(String sceneId, Boolean completed) {
-		if (!Boolean.TRUE.equals(completed)) {
-			return;
+		if (completed == null) {
+			throw new BusinessException(
+					"SCENE_FLOW_COMPLETION_STATUS_REQUIRED",
+					"scene flow completion status is required");
 		}
 		flows.remove(sceneId);
 	}

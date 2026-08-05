@@ -34,6 +34,7 @@ jobs:
     outputs:
       backend: ${{ steps.paths.outputs.backend }}
       frontend: ${{ steps.paths.outputs.frontend }}
+      mobile: ${{ steps.paths.outputs.mobile }}
       docker_backend: ${{ steps.paths.outputs.docker_backend }}
       docker_frontend: ${{ steps.paths.outputs.docker_frontend }}
       compose: ${{ steps.paths.outputs.compose }}
@@ -58,6 +59,7 @@ jobs:
 
           backend=false
           frontend=false
+          mobile=false
           docker_backend=false
           docker_frontend=false
           compose=false
@@ -74,16 +76,22 @@ jobs:
                 backend=true
                 docker_backend=true
                 ;;
-              frontend/Unispeaking_fronted/*)
+              frontend/web/*)
                 frontend=true
                 docker_frontend=true
+                ;;
+              frontend/mobile/*)
+                mobile=true
                 ;;
             esac
             case "$file" in
               backend/unispeaking-server/pom.xml|backend/unispeaking-server/.mvn/*|backend/unispeaking-server/mvnw)
                 dependencies=true
                 ;;
-              frontend/Unispeaking_fronted/package.json|frontend/Unispeaking_fronted/package-lock.json)
+              frontend/web/package.json|frontend/web/package-lock.json)
+                dependencies=true
+                ;;
+              frontend/mobile/package.json|frontend/mobile/package-lock.json)
                 dependencies=true
                 ;;
               deploy/docker-compose.yml|deploy/docker-compose.yaml|deploy/compose.yml|deploy/compose.yaml|deploy/env/.env.example)
@@ -98,6 +106,7 @@ jobs:
           if [[ "$force_all" == true ]]; then
             backend=true
             frontend=true
+            mobile=true
             docker_backend=true
             docker_frontend=true
             compose=true
@@ -108,6 +117,7 @@ jobs:
           {
             echo "backend=$backend"
             echo "frontend=$frontend"
+            echo "mobile=$mobile"
             echo "docker_backend=$docker_backend"
             echo "docker_frontend=$docker_frontend"
             echo "compose=$compose"
@@ -313,14 +323,14 @@ jobs:
           retention-days: 30
 
   frontend:
-    name: 前端依赖与生产构建
+    name: Web 前端依赖与生产构建
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: frontend/Unispeaking_fronted
+        working-directory: frontend/web
     steps:
       - name: 检出待测合并提交
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -332,7 +342,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: frontend/Unispeaking_fronted/package-lock.json
+          cache-dependency-path: frontend/web/package-lock.json
 
       - name: 安装锁定依赖
         run: npm ci
@@ -345,6 +355,39 @@ jobs:
 
       - name: 生产构建
         run: npm run build
+
+  mobile:
+    name: 移动端类型与 Expo Web 构建
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend/mobile
+    steps:
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 配置 Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/mobile/package-lock.json
+
+      - name: 安装锁定依赖
+        run: npm ci
+
+      - name: 检查 TypeScript
+        run: npx tsc --noEmit
+
+      - name: 导出 Expo Web
+        env:
+          EXPO_OFFLINE: "1"
+        run: npx expo export --platform web
 
   docker_backend:
     name: 构建后端镜像
@@ -380,9 +423,9 @@ jobs:
       - name: 验证前端镜像构建
         run: >-
           docker build
-          --file frontend/Unispeaking_fronted/Dockerfile
+          --file frontend/web/Dockerfile
           --tag unispeaking-frontend:ci
-          frontend/Unispeaking_fronted
+          frontend/web
 
   compose:
     name: 校验 Compose 配置
@@ -449,6 +492,7 @@ jobs:
       - integration
       - coverage
       - frontend
+      - mobile
       - docker_backend
       - docker_frontend
       - compose
@@ -468,6 +512,7 @@ jobs:
           INTEGRATION_RESULT: ${{ needs.integration.result }}
           COVERAGE_RESULT: ${{ needs.coverage.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
+          MOBILE_RESULT: ${{ needs.mobile.result }}
           DOCKER_BACKEND_RESULT: ${{ needs.docker_backend.result }}
           DOCKER_FRONTEND_RESULT: ${{ needs.docker_frontend.result }}
           COMPOSE_RESULT: ${{ needs.compose.result }}
@@ -475,6 +520,7 @@ jobs:
           DEPENDENCY_RESULT: ${{ needs.dependency_review.result }}
           BACKEND_REQUIRED: ${{ needs.changes.outputs.backend }}
           FRONTEND_REQUIRED: ${{ needs.changes.outputs.frontend }}
+          MOBILE_REQUIRED: ${{ needs.changes.outputs.mobile }}
           DOCKER_BACKEND_REQUIRED: ${{ needs.changes.outputs.docker_backend }}
           DOCKER_FRONTEND_REQUIRED: ${{ needs.changes.outputs.docker_frontend }}
           COMPOSE_REQUIRED: ${{ needs.changes.outputs.compose }}
@@ -507,6 +553,7 @@ jobs:
           require_job integration "$INTEGRATION_RESULT" "$BACKEND_REQUIRED"
           require_job coverage "$COVERAGE_RESULT" "$BACKEND_REQUIRED"
           require_job frontend "$FRONTEND_RESULT" "$FRONTEND_REQUIRED"
+          require_job mobile "$MOBILE_RESULT" "$MOBILE_REQUIRED"
           require_job docker_backend "$DOCKER_BACKEND_RESULT" "$DOCKER_BACKEND_REQUIRED"
           require_job docker_frontend "$DOCKER_FRONTEND_RESULT" "$DOCKER_FRONTEND_REQUIRED"
           require_job compose "$COMPOSE_RESULT" "$COMPOSE_REQUIRED"

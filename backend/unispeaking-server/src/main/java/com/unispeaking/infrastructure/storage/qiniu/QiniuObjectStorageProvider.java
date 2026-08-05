@@ -119,7 +119,7 @@ public class QiniuObjectStorageProvider implements ObjectStorageProvider {
 
 	private BusinessException storageFailure() {
 		return new BusinessException(
-				"AVATAR_STORAGE_FAILED",
-				"头像存储服务暂时不可用");
+				"OBJECT_STORAGE_FAILED",
+				"对象存储服务暂时不可用");
 	}
 }

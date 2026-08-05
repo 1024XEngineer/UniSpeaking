@@ -6,6 +6,8 @@ import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationCommand;
 import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationResult;
 import com.unispeaking.domain.dto.evaluation.PhonemeScore;
 import com.unispeaking.domain.dto.evaluation.SentenceEvaluationResponse;
+import com.unispeaking.domain.dto.evaluation.SpeechEvaluationCommand;
+import com.unispeaking.domain.dto.evaluation.SpeechEvaluationResult;
 import com.unispeaking.domain.dto.evaluation.WordPronunciationScore;
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.dto.session.Message;
@@ -114,6 +116,27 @@ public class EvaluationServiceImpl implements EvaluationService {
 		this.authService = Objects.requireNonNull(
 				authService,
 				"authService must not be null");
+	}
+
+	@Override
+	public SpeechEvaluationResult evaluateSpeech(
+			SpeechEvaluationCommand command) {
+		if (command == null
+				|| command.referenceText() == null
+				|| command.referenceText().isBlank()) {
+			throw new EvaluationException(EvaluationErrorCode.INVALID_REQUEST);
+		}
+		String referenceText = command.referenceText().trim();
+		byte[] audio = command.audio();
+		PcmWavValidator.validate(audio);
+		PronunciationAssessmentResult assessment =
+				pronunciationClient.evaluate(referenceText, audio);
+		var calculation = TurnSpeechScoreCalculator.calculate(assessment);
+		return new SpeechEvaluationResult(
+				calculation.accuracyScore(),
+				calculation.fluencyScore(),
+				calculation.effectiveDurationUnits(),
+				calculation.validPhonemeCount());
 	}
 
 	@Override

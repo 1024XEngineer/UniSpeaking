@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -12,6 +13,8 @@ import static org.mockito.Mockito.when;
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
+import com.unispeaking.domain.vo.provider.ProviderType;
+import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.infrastructure.persistence.entity.scene.SceneEntity;
 import com.unispeaking.infrastructure.persistence.entity.scene.ScenePhraseEntity;
 import com.unispeaking.infrastructure.persistence.entity.scene.SceneSentenceEntity;
@@ -20,11 +23,25 @@ import com.unispeaking.infrastructure.persistence.mapper.scene.SceneMapper;
 import com.unispeaking.infrastructure.persistence.mapper.scene.ScenePhraseMapper;
 import com.unispeaking.infrastructure.persistence.mapper.scene.SceneSentenceMapper;
 import com.unispeaking.infrastructure.persistence.mapper.scene.SceneWordMapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import java.util.List;
+import java.time.OffsetDateTime;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 class MybatisSceneRepositoryTest {
+
+	@BeforeAll
+	static void initializeMybatisMetadata() {
+		TableInfoHelper.initTableInfo(
+				new MapperBuilderAssistant(
+						new MybatisConfiguration(),
+						"mybatis-scene-repository-test"),
+				SceneEntity.class);
+	}
 
 	@Test
 	void persistsCustomSceneSynchronouslyWithoutAnInMemoryCache() {
@@ -105,6 +122,68 @@ class MybatisSceneRepositoryTest {
 
 		assertEquals(3, count);
 		verify(sceneMapper).selectCount(any());
+	}
+
+	@Test
+	void exposesDefaultSceneProviderAndRejectsDeletedDefinitions() {
+		SceneMapper sceneMapper = mock(SceneMapper.class);
+		MybatisSceneRepository repository = repository(sceneMapper);
+		SceneEntity deleted = new SceneEntity();
+		deleted.setDeletedAt(OffsetDateTime.now());
+		when(sceneMapper.selectById("deleted")).thenReturn(deleted);
+
+		var config = repository.findByType(SceneType.INTERVIEW_SCENE)
+				.orElseThrow();
+
+		assertEquals(SceneType.INTERVIEW_SCENE, config.type());
+		assertEquals(ProviderType.QWEN, config.providerType());
+		assertTrue(repository.findCustomDefinitionById("deleted").isEmpty());
+	}
+
+	@Test
+	void userIdQueriesReturnEmptyForInvalidUuidAndListOwnedIds() {
+		SceneMapper sceneMapper = mock(SceneMapper.class);
+		SceneEntity first = new SceneEntity();
+		first.setId("custom_1");
+		SceneEntity second = new SceneEntity();
+		second.setId("custom_2");
+		when(sceneMapper.selectList(any())).thenReturn(List.of(first, second));
+		MybatisSceneRepository repository = repository(sceneMapper);
+
+		assertEquals(0, repository.countActiveByUserId("not-a-uuid"));
+		assertTrue(repository.findAllIdsByUserId("not-a-uuid").isEmpty());
+		assertEquals(
+				List.of("custom_1", "custom_2"),
+				repository.findAllIdsByUserId(
+						"11111111-1111-4111-8111-111111111111"));
+		verify(sceneMapper, never()).selectCount(any());
+		verify(sceneMapper).selectList(any());
+	}
+
+	private MybatisSceneRepository repository(SceneMapper sceneMapper) {
+		return new MybatisSceneRepository(
+				sceneMapper,
+				mock(SceneWordMapper.class),
+				mock(ScenePhraseMapper.class),
+				mock(SceneSentenceMapper.class),
+				mock(CustomScenePersistence.class));
+	}
+
+	@Test
+	void countsHistoricalAssetsIncludingSoftDeletedScenes() {
+		SceneMapper sceneMapper = mock(SceneMapper.class);
+		when(sceneMapper.selectCount(any())).thenReturn(7L);
+		var repository = new MybatisSceneRepository(
+				sceneMapper,
+				mock(SceneWordMapper.class),
+				mock(ScenePhraseMapper.class),
+				mock(SceneSentenceMapper.class),
+				mock(CustomScenePersistence.class));
+		assertEquals(
+				7,
+				repository.countAllByUserId(
+						"11111111-1111-4111-8111-111111111111"));
+		assertEquals(0, repository.countAllByUserId("invalid-user-id"));
 	}
 
 	private Fixture fixture() {

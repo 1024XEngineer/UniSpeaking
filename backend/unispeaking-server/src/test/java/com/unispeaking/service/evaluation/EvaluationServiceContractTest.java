@@ -10,19 +10,20 @@ import org.junit.jupiter.api.Test;
 class EvaluationServiceContractTest {
 
 	@Test
-	void exposesOnlyTheFourEvaluationOperations() {
+	void exposesOnlyTheFiveEvaluationOperations() {
 		Set<String> methods = Arrays.stream(
 						EvaluationService.class.getDeclaredMethods())
 				.map(method -> method.getName())
 				.collect(Collectors.toSet());
 
 		assertEquals(Set.of(
+				"evaluateSpeech",
 				"evaluateSentenceReading",
 				"evaluateDialogueTurn",
 				"generateDialogueReport",
 				"getDialogueEvaluation"), methods);
 		assertEquals(
-				4,
+				5,
 				EvaluationService.class.getDeclaredMethods().length);
 	}
 }

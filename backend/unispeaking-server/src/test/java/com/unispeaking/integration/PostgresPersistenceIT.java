@@ -2,6 +2,8 @@ package com.unispeaking.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,26 +19,44 @@ import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.po.auth.UserAccount;
 import com.unispeaking.domain.po.auth.UserRole;
 import com.unispeaking.domain.po.auth.UserStatus;
+import com.unispeaking.domain.po.feedback.UserFeedback;
 import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
+import com.unispeaking.domain.po.scene.InterviewQuestionRecord;
+import com.unispeaking.domain.po.scene.InterviewRecord;
+import com.unispeaking.domain.po.scene.InterviewReportRecord;
+import com.unispeaking.domain.vo.scene.InterviewDifficulty;
+import com.unispeaking.domain.vo.scene.InterviewQuestionType;
+import com.unispeaking.domain.vo.scene.InterviewReportDimension;
+import com.unispeaking.domain.vo.scene.InterviewReportType;
+import com.unispeaking.domain.vo.scene.TargetRoleSummary;
+import com.unispeaking.domain.vo.feedback.FeedbackStatus;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.CustomTurnEvaluation;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.PronunciationWordDetail;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SceneSentenceReadingRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.TurnEvaluationRepository;
+import com.unispeaking.infrastructure.persistence.repository.feedback.FeedbackRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.MybatisSceneRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.InterviewQuestionRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.InterviewReportRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.InterviewRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.MybatisUserAccountRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.MybatisUserProfileRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -86,6 +106,15 @@ class PostgresPersistenceIT {
 	private MybatisSceneRepository sceneRepository;
 
 	@Autowired
+	private InterviewRepository interviewRepository;
+
+	@Autowired
+	private InterviewQuestionRepository interviewQuestionRepository;
+
+	@Autowired
+	private InterviewReportRepository interviewReportRepository;
+
+	@Autowired
 	private SessionMessageRepository sessionMessageRepository;
 
 	@Autowired
@@ -97,14 +126,21 @@ class PostgresPersistenceIT {
 	@Autowired
 	private SceneSentenceReadingRepository sentenceReadingRepository;
 
+	@Autowired
+	private FeedbackRepository feedbackRepository;
+
 	@BeforeEach
 	void clearBusinessTables() {
 		jdbcTemplate.execute("""
 				TRUNCATE TABLE
+				    user_feedback,
 				    sentence_evaluation,
 				    session_evaluation,
 				    turn_evaluation,
 				    session_message,
+				    interview_report,
+				    interview_question,
+				    interview,
 				    sentence,
 				    phrase,
 				    "word",
@@ -116,9 +152,14 @@ class PostgresPersistenceIT {
 
 	@Test
 	void migratesEmptyDatabaseAndRegistersFlywayHistory() {
-		Integer migrationCount = jdbcTemplate.queryForObject(
-				"SELECT COUNT(*) FROM flyway_schema_history WHERE success",
-				Integer.class);
+		List<String> migrationVersions = jdbcTemplate.queryForList(
+				"""
+				SELECT version
+				FROM flyway_schema_history
+				WHERE success
+				ORDER BY installed_rank
+				""",
+				String.class);
 		Integer topicCount = jdbcTemplate.queryForObject(
 				"SELECT COUNT(*) FROM ielts_topic",
 				Integer.class);
@@ -132,6 +173,18 @@ class PostgresPersistenceIT {
 				WHERE title ~* '^(describe|what|why|how|do |did |are |is |have |would |talk about|tell me)'
 				""",
 				Integer.class);
+		Integer helpTableCount = jdbcTemplate.queryForObject(
+				"""
+				SELECT COUNT(*)
+				FROM information_schema.tables
+				WHERE table_schema = 'public'
+				  AND table_name IN (
+				      'user_achievement_unlock',
+				      'user_achievement_state',
+				      'user_feedback'
+				  )
+				""",
+				Integer.class);
 		String successFactorType = jdbcTemplate.queryForObject(
 				"""
 				SELECT data_type
@@ -142,11 +195,322 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(3, migrationCount);
+		assertEquals(List.of("1", "2", "3", "4", "5", "6"), migrationVersions);
 		assertEquals(303, topicCount);
 		assertEquals(1771, questionCount);
 		assertEquals(0, questionLikeTitleCount);
+		assertEquals(3, helpTableCount);
 		assertEquals("jsonb", successFactorType);
+	}
+
+	@Test
+	void createsInterviewTablesWithExactColumnsAndRelationships() {
+		assertEquals(
+				List.of(
+						"id|character varying|64|||NO",
+						"user_id|uuid||||NO",
+						"session_id|character varying|64|||NO",
+						"job_title|character varying|255|||NO",
+						"difficulty|character varying|16|||NO",
+						"role_summary|jsonb||||NO",
+						"recording_object_key|character varying|512|||YES",
+						"recording_duration_seconds|integer||32|0|YES",
+						"completed_at|timestamp with time zone||||YES",
+						"created_at|timestamp with time zone||||NO",
+						"updated_at|timestamp with time zone||||NO"),
+				columnDefinitions("interview"));
+		assertEquals(
+				List.of(
+						"interview_id|character varying|64|||NO",
+						"question_no|integer||32|0|NO",
+						"question_type|character varying|16|||NO",
+						"question_text|text||||NO",
+						"created_at|timestamp with time zone||||NO",
+						"updated_at|timestamp with time zone||||NO"),
+				columnDefinitions("interview_question"));
+		assertEquals(
+				List.of(
+						"interview_id|character varying|64|||NO",
+						"report_type|character varying|16|||NO",
+						"overall_score|numeric||4|1|NO",
+						"overall_summary|text||||NO",
+						"fluency_score|numeric||4|1|NO",
+						"fluency_evaluation|text||||NO",
+						"fluency_action_suggestion|text||||NO",
+						"logic_coherence_score|numeric||4|1|NO",
+						"logic_coherence_evaluation|text||||NO",
+						"logic_coherence_action_suggestion|text||||NO",
+						"grammar_control_score|numeric||4|1|NO",
+						"grammar_control_evaluation|text||||NO",
+						"grammar_control_action_suggestion|text||||NO",
+						"pronunciation_intelligibility_score|numeric||4|1|NO",
+						"pronunciation_intelligibility_evaluation|text||||NO",
+						"pronunciation_intelligibility_action_suggestion|text||||NO",
+						"vocabulary_expression_score|numeric||4|1|NO",
+						"vocabulary_expression_evaluation|text||||NO",
+						"vocabulary_expression_action_suggestion|text||||NO",
+						"created_at|timestamp with time zone||||NO",
+						"updated_at|timestamp with time zone||||NO"),
+				columnDefinitions("interview_report"));
+
+		assertEquals(
+				Map.of(
+						"interview", "id",
+						"interview_question", "interview_id,question_no",
+						"interview_report", "interview_id"),
+				jdbcTemplate.query(
+						"""
+						SELECT tc.table_name,
+						       STRING_AGG(kcu.column_name, ',' ORDER BY kcu.ordinal_position)
+						FROM information_schema.table_constraints tc
+						JOIN information_schema.key_column_usage kcu
+						  ON kcu.constraint_schema = tc.constraint_schema
+						 AND kcu.constraint_name = tc.constraint_name
+						WHERE tc.table_schema = 'public'
+						  AND tc.table_name IN ('interview', 'interview_question', 'interview_report')
+						  AND tc.constraint_type = 'PRIMARY KEY'
+						GROUP BY tc.table_name
+						""",
+						resultSet -> {
+							Map<String, String> keys = new java.util.HashMap<>();
+							while (resultSet.next()) {
+								keys.put(resultSet.getString(1), resultSet.getString(2));
+							}
+							return keys;
+						}));
+		assertEquals(
+				List.of("session_id"),
+				jdbcTemplate.queryForList(
+						"""
+						SELECT kcu.column_name
+						FROM information_schema.table_constraints tc
+						JOIN information_schema.key_column_usage kcu
+						  ON kcu.constraint_schema = tc.constraint_schema
+						 AND kcu.constraint_name = tc.constraint_name
+						WHERE tc.table_schema = 'public'
+						  AND tc.table_name = 'interview'
+						  AND tc.constraint_type = 'UNIQUE'
+						""",
+						String.class));
+		String completedAssetIndex = jdbcTemplate.queryForObject(
+				"""
+				SELECT indexdef
+				FROM pg_indexes
+				WHERE schemaname = 'public'
+				  AND tablename = 'interview'
+				  AND indexname = 'idx_interview_user_completed_at'
+				""",
+				String.class);
+		assertTrue(completedAssetIndex.contains("(user_id, completed_at DESC)"));
+		assertTrue(completedAssetIndex.contains("WHERE (completed_at IS NOT NULL)"));
+		assertEquals(
+				0,
+				jdbcTemplate.queryForObject(
+						"""
+						SELECT COUNT(*)
+						FROM information_schema.table_constraints
+						WHERE table_schema = 'public'
+						  AND table_name IN ('interview', 'interview_question', 'interview_report')
+						  AND constraint_type = 'FOREIGN KEY'
+						""",
+						Integer.class));
+	}
+
+	@Test
+	void enforcesInterviewSchemaChecksAndSessionUniqueness() {
+		insertInterview("interview_valid", "session_valid", "STANDARD", 0);
+
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> insertInterview(
+						"interview_bad_difficulty",
+						"session_bad_difficulty",
+						"EXPERT",
+						0));
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> insertInterview(
+						"interview_bad_duration",
+						"session_bad_duration",
+						"BASIC",
+						-1));
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> insertInterview(
+						"interview_duplicate_session",
+						"session_valid",
+						"CHALLENGE",
+						1));
+
+		jdbcTemplate.update(
+				"""
+				INSERT INTO interview_question
+				    (interview_id, question_no, question_type, question_text)
+				VALUES ('interview_valid', 1, 'MAIN', 'Tell me about yourself.')
+				""");
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> jdbcTemplate.update("""
+						INSERT INTO interview_question
+						    (interview_id, question_no, question_type, question_text)
+						VALUES ('interview_bad_no', 0, 'MAIN', 'Invalid number')
+						"""));
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> jdbcTemplate.update("""
+						INSERT INTO interview_question
+						    (interview_id, question_no, question_type, question_text)
+						VALUES ('interview_bad_type', 1, 'OPTIONAL', 'Invalid type')
+						"""));
+
+		insertReport("report_valid", "FULL");
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> insertReport("report_bad_type", "DRAFT"));
+		List<String> scoreColumns = List.of(
+				"overall_score",
+				"fluency_score",
+				"logic_coherence_score",
+				"grammar_control_score",
+				"pronunciation_intelligibility_score",
+				"vocabulary_expression_score");
+		for (int index = 0; index < scoreColumns.size(); index++) {
+			String interviewId = "report_bad_score_" + index;
+			String scoreColumn = scoreColumns.get(index);
+			insertReport(interviewId, "PARTIAL");
+			assertThrows(
+					DataIntegrityViolationException.class,
+					() -> jdbcTemplate.update(
+							"UPDATE interview_report SET " + scoreColumn
+									+ " = 100.1 WHERE interview_id = ?",
+							interviewId));
+		}
+		assertThrows(
+				DataIntegrityViolationException.class,
+				() -> jdbcTemplate.update("""
+						UPDATE interview_report
+						SET overall_score = -0.1
+						WHERE interview_id = 'report_valid'
+						"""));
+	}
+
+	@Test
+	void persistsAndPhysicallyDeletesCompleteInterviewAssets() {
+		UUID ownerId = UUID.fromString(
+				"11111111-1111-4111-8111-111111111111");
+		UUID otherUserId = UUID.fromString(
+				"22222222-2222-4222-8222-222222222222");
+		OffsetDateTime createdAt = OffsetDateTime.of(
+				2026, 8, 4, 8, 0, 0, 0, ZoneOffset.UTC);
+		TargetRoleSummary roleSummary = new TargetRoleSummary(
+				"负责企业级 SaaS 产品规划与交付。",
+				List.of("分析用户需求", "协调跨团队交付"),
+				List.of("产品规划", "数据分析"),
+				List.of("英语业务沟通"));
+		InterviewRecord interview = new InterviewRecord(
+				"interview_repository_it",
+				ownerId,
+				"interview_session_it",
+				"Product Manager",
+				InterviewDifficulty.CHALLENGE,
+				roleSummary,
+				null,
+				null,
+				null,
+				createdAt,
+				createdAt);
+
+		interviewRepository.create(interview);
+
+		InterviewRecord pending = interviewRepository
+				.findByIdAndUserId(interview.id(), ownerId)
+				.orElseThrow();
+		assertEquals(roleSummary, pending.roleSummary());
+		assertEquals(List.of(
+				"overview",
+				"qualification_requirements",
+				"required_skills",
+				"responsibilities"),
+				jdbcTemplate.queryForList(
+						"SELECT jsonb_object_keys(role_summary) "
+								+ "FROM interview WHERE id = ? ORDER BY 1",
+						String.class,
+						interview.id()));
+		assertTrue(interviewRepository
+				.findByIdAndUserId(interview.id(), otherUserId)
+				.isEmpty());
+		assertNull(pending.recordingObjectKey());
+		assertNull(pending.recordingDurationSeconds());
+		assertNull(pending.completedAt());
+
+		interviewQuestionRepository.saveAll(List.of(
+				question(interview.id(), 3, InterviewQuestionType.MAIN, createdAt),
+				question(interview.id(), 1, InterviewQuestionType.MAIN, createdAt),
+				question(
+						interview.id(),
+						2,
+						InterviewQuestionType.FOLLOW_UP,
+						createdAt)));
+
+		assertEquals(
+				List.of(1, 2, 3),
+				interviewQuestionRepository.findByInterviewId(interview.id())
+						.stream()
+						.map(InterviewQuestionRecord::questionNo)
+						.toList());
+		assertEquals(
+				InterviewQuestionType.FOLLOW_UP,
+				interviewQuestionRepository.findByKey(interview.id(), 2)
+						.orElseThrow()
+						.questionType());
+		assertEquals(1, interviewQuestionRepository.deleteByKey(
+				interview.id(),
+				2));
+		assertTrue(interviewQuestionRepository
+				.findByKey(interview.id(), 2)
+				.isEmpty());
+		assertEquals(
+				List.of(1, 3),
+				interviewQuestionRepository.findByInterviewId(interview.id())
+						.stream()
+						.map(InterviewQuestionRecord::questionNo)
+						.toList());
+
+		InterviewReportRecord report = interviewReport(
+				interview.id(),
+				createdAt.plusMinutes(5));
+		interviewReportRepository.save(report);
+		assertEquals(
+				report,
+				interviewReportRepository.findByInterviewId(interview.id())
+						.orElseThrow());
+
+		OffsetDateTime completedAt = createdAt.plusMinutes(6);
+		interviewRepository.completeAssetMetadata(
+				interview.id(),
+				"interviews/recordings/repository-it.mp3",
+				366,
+				completedAt);
+		InterviewRecord completed = interviewRepository.findById(interview.id())
+				.orElseThrow();
+		assertEquals("interviews/recordings/repository-it.mp3",
+				completed.recordingObjectKey());
+		assertEquals(366, completed.recordingDurationSeconds());
+		assertEquals(completedAt, completed.completedAt());
+		assertEquals(completedAt, completed.updatedAt());
+
+		assertEquals(1,
+				interviewReportRepository.deleteByInterviewId(interview.id()));
+		assertTrue(interviewReportRepository
+				.findByInterviewId(interview.id())
+				.isEmpty());
+		assertEquals(2,
+				interviewQuestionRepository.deleteByInterviewId(interview.id()));
+		assertTrue(interviewQuestionRepository
+				.findByInterviewId(interview.id())
+				.isEmpty());
+		assertEquals(1, interviewRepository.deleteById(interview.id()));
+		assertTrue(interviewRepository.findById(interview.id()).isEmpty());
 	}
 
 	@Test
@@ -198,6 +562,42 @@ class PostgresPersistenceIT {
 		assertEquals("James", saved.voiceId());
 		assertEquals("C", saved.level());
 		assertEquals("喜欢旅行和咖啡", saved.memoryText());
+	}
+
+	@Test
+	void persistsAnonymousFeedbackAndTracksResolution() {
+		Instant createdAt = Instant.parse("2026-08-04T08:00:00Z");
+		UserFeedback submitted = new UserFeedback(
+				UUID.fromString("22222222-2222-4222-8222-222222222222"),
+				"FB-20260804-ABCDEF123456",
+				null,
+				"a".repeat(64),
+				"audio",
+				"麦克风无法使用",
+				"允许权限后仍没有声音",
+				"Chrome 138",
+				FeedbackStatus.SUBMITTED,
+				null,
+				null,
+				createdAt,
+				createdAt);
+
+		feedbackRepository.create(submitted);
+		UserFeedback stored = feedbackRepository
+				.findByFeedbackNo(submitted.feedbackNo())
+				.orElseThrow();
+		UserFeedback resolved = stored.withResolution(
+				FeedbackStatus.RESOLVED,
+				"请重新选择系统输入设备后再试",
+				createdAt.plusSeconds(60));
+		feedbackRepository.update(stored, resolved);
+
+		UserFeedback result = feedbackRepository
+				.findByFeedbackNo(submitted.feedbackNo())
+				.orElseThrow();
+		assertEquals(FeedbackStatus.RESOLVED, result.status());
+		assertEquals("请重新选择系统输入设备后再试", result.reply());
+		assertEquals(createdAt.plusSeconds(60), result.repliedAt());
 	}
 
 	@Test
@@ -404,7 +804,7 @@ class PostgresPersistenceIT {
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
 		assertEquals(
-				List.of("0", "1", "2", "3"),
+				List.of("0", "1", "2", "3", "4", "5", "6"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version
@@ -421,8 +821,122 @@ class PostgresPersistenceIT {
 				  AND table_name = 'scene'
 				""",
 				String.class).isEmpty());
+		assertFalse(jdbcTemplate.queryForList(
+				"""
+				SELECT table_name
+				FROM information_schema.tables
+				WHERE table_schema = 'legacy_ci'
+				  AND table_name = 'interview_report'
+				""",
+				String.class).isEmpty());
 
 		jdbcTemplate.execute("DROP SCHEMA " + schema + " CASCADE");
+	}
+
+	private List<String> columnDefinitions(String tableName) {
+		return jdbcTemplate.queryForList(
+				"""
+				SELECT CONCAT_WS(
+				           '|',
+				           column_name,
+				           data_type,
+				           COALESCE(character_maximum_length::TEXT, ''),
+				           COALESCE(numeric_precision::TEXT, ''),
+				           COALESCE(numeric_scale::TEXT, ''),
+				           is_nullable)
+				FROM information_schema.columns
+				WHERE table_schema = 'public'
+				  AND table_name = ?
+				ORDER BY ordinal_position
+				""",
+				String.class,
+				tableName);
+	}
+
+	private void insertInterview(
+			String interviewId,
+			String sessionId,
+			String difficulty,
+			Integer recordingDurationSeconds) {
+		jdbcTemplate.update(
+				"""
+				INSERT INTO interview
+				    (id, user_id, session_id, job_title, difficulty, role_summary,
+				     recording_duration_seconds)
+				VALUES (?, '11111111-1111-4111-8111-111111111111', ?,
+				        'Product Manager', ?, '{}'::JSONB, ?)
+				""",
+				interviewId,
+				sessionId,
+				difficulty,
+				recordingDurationSeconds);
+	}
+
+	private InterviewQuestionRecord question(
+			String interviewId,
+			int questionNo,
+			InterviewQuestionType questionType,
+			OffsetDateTime createdAt) {
+		return new InterviewQuestionRecord(
+				interviewId,
+				questionNo,
+				questionType,
+				"Question " + questionNo,
+				createdAt,
+				createdAt);
+	}
+
+	private InterviewReportRecord interviewReport(
+			String interviewId,
+			OffsetDateTime createdAt) {
+		return new InterviewReportRecord(
+				interviewId,
+				InterviewReportType.FULL,
+				new BigDecimal("88.5"),
+				"整体表达清晰，岗位语境适切。",
+				interviewDimension("81.1", "流利度"),
+				interviewDimension("82.2", "逻辑与连贯性"),
+				interviewDimension("83.3", "语法控制"),
+				interviewDimension("84.4", "发音可理解度"),
+				interviewDimension("85.5", "词汇与面试表达"),
+				createdAt,
+				createdAt);
+	}
+
+	private InterviewReportDimension interviewDimension(
+			String score,
+			String name) {
+		return new InterviewReportDimension(
+				new BigDecimal(score),
+				name + "评价",
+				name + "行动建议");
+	}
+
+	private void insertReport(String interviewId, String reportType) {
+		jdbcTemplate.update(
+				"""
+				INSERT INTO interview_report (
+				    interview_id, report_type, overall_score, overall_summary,
+				    fluency_score, fluency_evaluation, fluency_action_suggestion,
+				    logic_coherence_score, logic_coherence_evaluation,
+				    logic_coherence_action_suggestion,
+				    grammar_control_score, grammar_control_evaluation,
+				    grammar_control_action_suggestion,
+				    pronunciation_intelligibility_score,
+				    pronunciation_intelligibility_evaluation,
+				    pronunciation_intelligibility_action_suggestion,
+				    vocabulary_expression_score, vocabulary_expression_evaluation,
+				    vocabulary_expression_action_suggestion)
+				VALUES (
+				    ?, ?, 80.0, 'summary',
+				    80.0, 'evaluation', 'action',
+				    80.0, 'evaluation', 'action',
+				    80.0, 'evaluation', 'action',
+				    80.0, 'evaluation', 'action',
+				    80.0, 'evaluation', 'action')
+				""",
+				interviewId,
+				reportType);
 	}
 
 	private CustomSceneDefinition sceneDefinition() {

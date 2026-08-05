@@ -1,10 +1,13 @@
 package com.unispeaking.service.scene;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.domain.dto.scene.LearningContentItem;
@@ -20,9 +23,20 @@ import org.junit.jupiter.api.Test;
 class SceneFlowServiceImplTest {
 
 	@Test
-	void freeChatStartsDirectlyAtDialogue() {
-		SceneRepository repository = repositoryWith(
-				scene("freechat_abc123", false));
+	void interviewStartsDirectlyAtDialogueWithoutLoadingScene() {
+		SceneRepository repository = mock(SceneRepository.class);
+		var service = new SceneFlowServiceImpl(repository);
+
+		var flow = service.createFlow("interview_abc123");
+
+		assertEquals(SceneFlowStage.DIALOGUE, flow.stage());
+		assertFalse(flow.completed());
+		verifyNoInteractions(repository);
+	}
+
+	@Test
+	void freeChatStillStartsDirectlyAtDialogueWithoutLoadingScene() {
+		SceneRepository repository = mock(SceneRepository.class);
 		var service = new SceneFlowServiceImpl(repository);
 
 		var flow = service.createFlow("freechat_abc123");
@@ -32,6 +46,7 @@ class SceneFlowServiceImplTest {
 		assertTrue(service.getByCurrentStage(
 				"freechat_abc123",
 				SceneFlowStage.DIALOGUE).isEmpty());
+		verifyNoInteractions(repository);
 	}
 
 	@Test
@@ -70,6 +85,18 @@ class SceneFlowServiceImplTest {
 	}
 
 	@Test
+	void ieltsSceneStillLoadsSceneAndStartsAtWordLearning() {
+		SceneGenerationResponse generatedScene = scene("ielts_abc123", true);
+		SceneRepository repository = repositoryWith(generatedScene);
+		var service = new SceneFlowServiceImpl(repository);
+
+		var flow = service.createFlow("ielts_abc123");
+
+		assertEquals(SceneFlowStage.WORD_LEARNING, flow.stage());
+		verify(repository).findGeneratedById("ielts_abc123");
+	}
+
+	@Test
 	void rejectsSceneIdsWithoutARegisteredScenePrefix() {
 		SceneRepository repository = repositoryWith(
 				scene("scene_legacy", true));
@@ -83,12 +110,77 @@ class SceneFlowServiceImplTest {
 	}
 
 	@Test
-	void completingAnAlreadyRemovedFlowIsIdempotent() {
+	void completingWithTrueReleasesExistingFlow() {
+		SceneRepository repository = mock(SceneRepository.class);
+		var service = new SceneFlowServiceImpl(repository);
+		service.createFlow("interview_true123");
+
+		service.completeFlow("interview_true123", true);
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> service.advanceStage(
+						"interview_true123",
+						SceneFlowStage.DIALOGUE));
+		assertEquals("SCENE_FLOW_NOT_FOUND", exception.code());
+	}
+
+	@Test
+	void completingWithFalseReleasesExistingFlow() {
+		SceneRepository repository = mock(SceneRepository.class);
+		var service = new SceneFlowServiceImpl(repository);
+		service.createFlow("interview_false123");
+
+		service.completeFlow("interview_false123", false);
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> service.advanceStage(
+						"interview_false123",
+						SceneFlowStage.DIALOGUE));
+		assertEquals("SCENE_FLOW_NOT_FOUND", exception.code());
+	}
+
+	@Test
+	void repeatedlyCompletingMissingFlowIsIdempotentForBothStatuses() {
+		SceneRepository repository = mock(SceneRepository.class);
+		var service = new SceneFlowServiceImpl(repository);
+
+		assertDoesNotThrow(() -> {
+			service.completeFlow("interview_missing123", true);
+			service.completeFlow("interview_missing123", true);
+			service.completeFlow("interview_missing123", false);
+			service.completeFlow("interview_missing123", false);
+		});
+		verifyNoInteractions(repository);
+	}
+
+	@Test
+	void nullCompletionStatusIsRejectedAndKeepsExistingFlow() {
+		SceneRepository repository = mock(SceneRepository.class);
+		var service = new SceneFlowServiceImpl(repository);
+		service.createFlow("interview_null123");
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> service.completeFlow("interview_null123", null));
+
+		assertEquals("SCENE_FLOW_COMPLETION_STATUS_REQUIRED", exception.code());
+		var retainedFlow = service.advanceStage(
+				"interview_null123",
+				SceneFlowStage.DIALOGUE);
+		assertEquals(SceneFlowStage.COMPLETED, retainedFlow.stage());
+		assertTrue(retainedFlow.completed());
+		verifyNoInteractions(repository);
+	}
+
+	@Test
+	void completingAnAlreadyRemovedFlowDoesNotPreventRecreation() {
 		SceneRepository repository = repositoryWith(
 				scene("custom_repeat123", true));
 		var service = new SceneFlowServiceImpl(repository);
 
-		service.completeFlow("custom_repeat123", true);
+		service.completeFlow("custom_repeat123", false);
 
 		var flow = service.createFlow("custom_repeat123");
 		assertEquals(SceneFlowStage.WORD_LEARNING, flow.stage());

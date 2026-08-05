@@ -119,7 +119,7 @@ class ProfileAccountServiceImplTest {
 				BusinessException.class,
 				() -> service.replaceAvatar(UUID.randomUUID().toString(), new byte[] {1}));
 
-		assertEquals("AVATAR_STORAGE_UNAVAILABLE", exception.code());
+		assertEquals("OBJECT_STORAGE_UNAVAILABLE", exception.code());
 		verify(accounts, never()).findById(any());
 	}
 

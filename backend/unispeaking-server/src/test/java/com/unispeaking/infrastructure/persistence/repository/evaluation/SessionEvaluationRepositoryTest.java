@@ -14,6 +14,7 @@ import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.domain.dto.asset.SessionEvaluationRecord;
 import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
+import com.unispeaking.domain.po.achievement.AchievementEvaluationFact;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.SessionEvaluationEntity;
 import com.unispeaking.infrastructure.persistence.mapper.evaluation.SessionEvaluationMapper;
 import java.math.BigDecimal;
@@ -143,6 +144,85 @@ class SessionEvaluationRepositoryTest {
 				List.of(), first.getCreatedAt(), second.getCreatedAt()).isEmpty());
 		assertTrue(repository.findCreatedAtBySceneIdsBetween(
 				null, first.getCreatedAt(), second.getCreatedAt()).isEmpty());
+	}
+
+	@Test
+	void translatesUpdateAndListFailures() {
+		SessionEvaluationMapper updateMapper = mock(
+				SessionEvaluationMapper.class);
+		when(updateMapper.selectById("session-1"))
+				.thenReturn(entity("scene-1", "session-1"));
+		when(updateMapper.updateById(any(SessionEvaluationEntity.class)))
+				.thenReturn(0);
+		SessionEvaluationRepository updateRepository =
+				new SessionEvaluationRepository(updateMapper);
+		assertEquals(
+				EvaluationErrorCode.PERSISTENCE_FAILED,
+				assertThrows(
+						EvaluationException.class,
+						() -> updateRepository.save(
+								"scene-1", "session-1", report()))
+						.errorCode());
+
+		SessionEvaluationMapper listMapper = mock(
+				SessionEvaluationMapper.class);
+		when(listMapper.selectList(any()))
+				.thenThrow(new IllegalStateException("database"));
+		SessionEvaluationRepository listRepository =
+				new SessionEvaluationRepository(listMapper);
+		assertEquals(
+				EvaluationErrorCode.PERSISTENCE_FAILED,
+				assertThrows(
+						EvaluationException.class,
+						() -> listRepository.findBySceneId("scene-1"))
+						.errorCode());
+	}
+
+	@Test
+	void translatesSaveAndRecordLookupRuntimeFailures() {
+		SessionEvaluationMapper saveMapper = mock(
+				SessionEvaluationMapper.class);
+		when(saveMapper.selectById("session-1"))
+				.thenThrow(new IllegalStateException("database"));
+		SessionEvaluationRepository saveRepository =
+				new SessionEvaluationRepository(saveMapper);
+		assertEquals(
+				EvaluationErrorCode.PERSISTENCE_FAILED,
+				assertThrows(
+						EvaluationException.class,
+						() -> saveRepository.save(
+								"scene-1", "session-1", report()))
+						.errorCode());
+
+		SessionEvaluationMapper recordMapper = mock(
+				SessionEvaluationMapper.class);
+		when(recordMapper.selectById("session-1"))
+				.thenThrow(new IllegalStateException("database"));
+		SessionEvaluationRepository recordRepository =
+				new SessionEvaluationRepository(recordMapper);
+		assertEquals(
+				EvaluationErrorCode.PERSISTENCE_FAILED,
+				assertThrows(
+						EvaluationException.class,
+						() -> recordRepository.findRecord("session-1"))
+						.errorCode());
+	}
+
+	@Test
+	void listsAchievementFactsByOwnedSessionsOrScenes() {
+		SessionEvaluationMapper mapper = mock(SessionEvaluationMapper.class);
+		SessionEvaluationEntity first = entity("scene-1", "session-1");
+		when(mapper.selectList(any())).thenReturn(List.of(first));
+		SessionEvaluationRepository repository = new SessionEvaluationRepository(mapper);
+
+		List<AchievementEvaluationFact> facts = repository.findAchievementFacts(
+				List.of("session-1", "session-1", " "),
+				List.of("scene-1"));
+
+		assertEquals(1, facts.size());
+		assertEquals("session-1", facts.getFirst().sessionId());
+		assertEquals(new BigDecimal("91"), facts.getFirst().finalScore());
+		assertTrue(repository.findAchievementFacts(List.of(), null).isEmpty());
 	}
 
 	private DialogueReportResult report() {
