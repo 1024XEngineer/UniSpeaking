@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  ChartPie,
   Check,
   Clock3,
   Pencil,
@@ -13,6 +14,13 @@ const DURATION_MIN = 1;
 const DURATION_MAX = 1260;
 const COUNT_MIN = 1;
 const COUNT_MAX = 70;
+const TRAINING_TYPE_META = {
+  FREE_CHAT: { label: "自由对话", color: "#287057" },
+  CUSTOM_SCENE: { label: "情景口语", color: "#c65d43" },
+  IELTS_SCENE: { label: "雅思口语", color: "#3468a0" },
+  INTERVIEW_SCENE: { label: "AI 面试", color: "#a67a24" },
+};
+const UNKNOWN_TYPE_META = { label: "其他训练", color: "#74746f" };
 
 function minutesFromSeconds(seconds) {
   const value = Number(seconds) || 0;
@@ -28,6 +36,13 @@ function formatWeekRange(startsAt, endsAt) {
   });
   const inclusiveEnd = new Date(new Date(endsAt).getTime() - 1);
   return `${formatter.format(new Date(startsAt))} 至 ${formatter.format(inclusiveEnd)}`;
+}
+
+function formatDuration(seconds) {
+  const minutes = Math.max(0, Number(seconds) || 0) / 60;
+  if (minutes > 0 && minutes < 1) return "< 1 分钟";
+  if (Number.isInteger(minutes)) return `${minutes} 分钟`;
+  return `${minutes.toFixed(1)} 分钟`;
 }
 
 function GoalCard({
@@ -55,6 +70,79 @@ function GoalCard({
       <progress value={normalizedProgress} max="100" aria-label={`${title}完成进度 ${normalizedProgress}%`} />
       <footer>{achieved ? `本周目标已完成` : `还差 ${remaining} ${unit}`}</footer>
     </article>
+  );
+}
+
+function TrainingTypeDistribution({ items }) {
+  const validItems = (Array.isArray(items) ? items : [])
+    .filter((item) => Number(item?.durationSeconds) > 0);
+  const totalSeconds = validItems.reduce(
+    (total, item) => total + Number(item.durationSeconds),
+    0,
+  );
+  let offset = 0;
+  const segments = validItems.map((item) => {
+    const chartPercentage = totalSeconds > 0
+      ? Number(item.durationSeconds) * 100 / totalSeconds
+      : 0;
+    const segment = {
+      ...item,
+      chartPercentage,
+      offset,
+      meta: TRAINING_TYPE_META[item.type] || UNKNOWN_TYPE_META,
+    };
+    offset += chartPercentage;
+    return segment;
+  });
+
+  return (
+    <section className="training-distribution" aria-labelledby="training-distribution-title">
+      <header>
+        <div>
+          <p>TRAINING MIX</p>
+          <h2 id="training-distribution-title">本周训练类型占比</h2>
+        </div>
+        <span>按有效训练时长统计</span>
+      </header>
+
+      {segments.length === 0 ? (
+        <div className="training-distribution__empty">
+          <ChartPie aria-hidden="true" />
+          <strong>本周暂无有效训练记录</strong>
+        </div>
+      ) : (
+        <div className="training-distribution__content">
+          <div className="training-distribution__chart">
+            <svg viewBox="0 0 120 120" role="img" aria-label="本周训练类型时长占比">
+              <circle className="training-distribution__track" cx="60" cy="60" r="48" pathLength="100" />
+              {segments.map((segment) => (
+                <circle
+                  key={segment.type}
+                  className="training-distribution__segment"
+                  cx="60"
+                  cy="60"
+                  r="48"
+                  pathLength="100"
+                  stroke={segment.meta.color}
+                  strokeDasharray={`${segment.chartPercentage} ${100 - segment.chartPercentage}`}
+                  strokeDashoffset={-segment.offset}
+                />
+              ))}
+            </svg>
+            <div><strong>{minutesFromSeconds(totalSeconds)}</strong><span>有效分钟</span></div>
+          </div>
+          <ul className="training-distribution__legend">
+            {segments.map((segment) => (
+              <li key={segment.type}>
+                <i style={{ backgroundColor: segment.meta.color }} aria-hidden="true" />
+                <div><strong>{segment.meta.label}</strong><span>{formatDuration(segment.durationSeconds)}</span></div>
+                <em>{Math.round((Number(segment.percentage) || 0) * 10) / 10}%</em>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -181,30 +269,33 @@ export function LearningInsights() {
       )}
 
       {!loading && !error && goals && (
-        <section className="learning-goals-grid" aria-label="本周学习目标">
-          <GoalCard
-            icon={Clock3}
-            title="口语时长"
-            completed={completedMinutes}
-            target={goals.durationTargetMinutes}
-            unit="分钟"
-            progress={goals.durationProgress}
-            remaining={remainingMinutes}
-            achieved={goals.durationAchieved}
-            tone="duration"
-          />
-          <GoalCard
-            icon={Repeat2}
-            title="训练次数"
-            completed={goals.completedTrainingCount}
-            target={goals.trainingCountTarget}
-            unit="次"
-            progress={goals.countProgress}
-            remaining={goals.remainingTrainingCount}
-            achieved={goals.countAchieved}
-            tone="count"
-          />
-        </section>
+        <>
+          <section className="learning-goals-grid" aria-label="本周学习目标">
+            <GoalCard
+              icon={Clock3}
+              title="口语时长"
+              completed={completedMinutes}
+              target={goals.durationTargetMinutes}
+              unit="分钟"
+              progress={goals.durationProgress}
+              remaining={remainingMinutes}
+              achieved={goals.durationAchieved}
+              tone="duration"
+            />
+            <GoalCard
+              icon={Repeat2}
+              title="训练次数"
+              completed={goals.completedTrainingCount}
+              target={goals.trainingCountTarget}
+              unit="次"
+              progress={goals.countProgress}
+              remaining={goals.remainingTrainingCount}
+              achieved={goals.countAchieved}
+              tone="count"
+            />
+          </section>
+          <TrainingTypeDistribution items={insights.trainingTypeDistribution} />
+        </>
       )}
 
       {editorOpen && goals && <GoalEditor goals={goals} onClose={() => setEditorOpen(false)} onSave={saveGoals} />}
