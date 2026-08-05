@@ -3,7 +3,9 @@ FROM node:22-alpine AS build
 WORKDIR /app
 
 ARG VITE_BACKEND_URL=/backend
+ARG VITE_FEEDBACK_URL=
 ENV VITE_BACKEND_URL=${VITE_BACKEND_URL}
+ENV VITE_FEEDBACK_URL=${VITE_FEEDBACK_URL}
 
 COPY package.json package-lock.json ./
 RUN npm ci

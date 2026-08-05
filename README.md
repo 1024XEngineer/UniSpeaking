@@ -214,7 +214,7 @@ UNISPEAKING_ENV_FILE=/absolute/path/to/runtime.env ./mvnw spring-boot:run
 ```bash
 cd frontend/web
 npm install
-VITE_BACKEND_URL=http://localhost:8080 npm run dev
+VITE_BACKEND_URL=http://localhost:8080 VITE_FEEDBACK_URL= npm run dev
 ```
 
 默认访问：
@@ -225,6 +225,9 @@ http://localhost:5173
 
 本地开发必须让 `VITE_BACKEND_URL` 指向后端；如果留空，请求会发送给 Vite 自己，
 REST 和 WebSocket 都无法正常联调。
+
+`VITE_FEEDBACK_URL` 是公开的外部腾讯问卷地址。留空时反馈入口不可点击；配置后由
+问卷页面独立完成收集和存储，UniSpeaking 后端不接收或查询产品反馈。
 
 浏览器麦克风只能在 `localhost` 或 HTTPS 安全上下文中使用，并需要用户授权。
 

@@ -9,6 +9,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { paths } from "../router.js";
+import { ExternalFeedbackLink } from "../help/ExternalFeedbackLink.jsx";
 import { PRODUCT_INFORMATION } from "./productDocuments.js";
 
 const legalLinks = [
@@ -104,9 +105,9 @@ export function AboutProduct({ onNavigate, onHelpNavigate }) {
           <a href={paths.help.root} onClick={(event) => followInternalLink(event, paths.help.root, onHelpNavigate)}>
             <Lifebuoy weight="duotone" aria-hidden="true" /><span><strong>帮助中心</strong><small>查找常见问题与使用说明</small></span><ArrowRight weight="bold" />
           </a>
-          <a href={paths.help.feedback} onClick={(event) => followInternalLink(event, paths.help.feedback, onHelpNavigate)}>
-            <ChatCircleDots weight="duotone" aria-hidden="true" /><span><strong>问题反馈</strong><small>提交问题、建议或内容反馈</small></span><ArrowRight weight="bold" />
-          </a>
+          <ExternalFeedbackLink>
+            {(configured) => <><ChatCircleDots weight="duotone" aria-hidden="true" /><span><strong>{configured ? "问题反馈" : "反馈入口待配置"}</strong><small>通过独立问卷提交问题、建议或内容反馈</small></span><ArrowRight weight="bold" /></>}
+          </ExternalFeedbackLink>
         </div>
       </section>
     </main>

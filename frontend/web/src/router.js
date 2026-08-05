@@ -111,7 +111,6 @@ export const paths = {
     root: "/help",
     category: (categoryId) => `/help/category/${encodeURIComponent(categoryId)}`,
     article: (articleId) => `/help/article/${encodeURIComponent(articleId)}`,
-    feedback: "/help/feedback",
   },
   about: {
     root: "/about",
@@ -271,9 +270,6 @@ export function parseHelpRoute(pathname) {
   if (segments[0] !== "help") return null;
   if (segments.length === 1) {
     return appRoute("help", { helpRoute: { screen: "home" }, publicAccess: true });
-  }
-  if (segments.length === 2 && segments[1] === "feedback") {
-    return appRoute("help", { helpRoute: { screen: "feedback" }, publicAccess: true });
   }
   if (segments.length === 3 && segments[1] === "category") {
     return appRoute("help", {
