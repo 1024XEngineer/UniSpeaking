@@ -62,7 +62,7 @@ GET /api/profile/insights
 Authorization: Bearer <accessToken>
 ```
 
-第一阶段返回本周学习目标与真实完成进度：
+返回本周学习目标、真实完成进度和训练类型时长占比：
 
 ```json
 {
@@ -79,7 +79,14 @@ Authorization: Bearer <accessToken>
     "remainingTrainingCount": 2,
     "countProgress": 60.0,
     "countAchieved": false
-  }
+  },
+  "trainingTypeDistribution": [
+    {
+      "type": "CUSTOM_SCENE",
+      "durationSeconds": 4560,
+      "percentage": 100.0
+    }
+  ]
 }
 ```
 
@@ -91,6 +98,9 @@ Authorization: Bearer <accessToken>
 - 时长按会话与本周的实际重叠区间计算；次数按会话完成时间所在周归属。
 - 进度保留一位小数并封顶 100%，超额完成仍会在实际时长或次数中体现。
 - 未设置目标时使用 120 分钟和 5 次的业务默认值。数据库字段保持可空，不设数据库默认值或数值范围约束。
+- `trainingTypeDistribution` 按相同有效会话口径聚合本周重叠时长，只返回实际产生有效时长的类型。
+- 当前占比仅纳入 `FREE_CHAT` 和 `CUSTOM_SCENE`，百分比保留一位小数；无有效训练时返回空数组。
+- 客户端预留 `IELTS_SCENE`、`INTERVIEW_SCENE` 和未知类型显示，真实训练链路接入后再调整后端纳入范围。
 
 ### 修改每周学习目标
 

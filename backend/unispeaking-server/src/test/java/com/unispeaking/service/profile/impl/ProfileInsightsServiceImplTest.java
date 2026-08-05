@@ -38,13 +38,19 @@ class ProfileInsightsServiceImplTest {
 				.thenReturn(List.of(record(userId, 300)));
 		ProfileInsightsServiceImpl service = service(goals, sessions);
 
-		var response = service.getInsights(userId.toString()).weeklyGoals();
+		var insights = service.getInsights(userId.toString());
+		var response = insights.weeklyGoals();
 
 		assertEquals(120, response.durationTargetMinutes());
 		assertEquals(300, response.completedDurationSeconds());
 		assertEquals(5, response.trainingCountTarget());
 		assertEquals(1, response.completedTrainingCount());
 		assertEquals("2026-08-03T00:00+08:00", response.weekStartsAt().toString());
+		var distribution = insights.trainingTypeDistribution();
+		assertEquals(1, distribution.size());
+		assertEquals("FREE_CHAT", distribution.getFirst().type());
+		assertEquals(300, distribution.getFirst().durationSeconds());
+		assertEquals(100.0, distribution.getFirst().percentage());
 	}
 
 	@Test
@@ -69,6 +75,7 @@ class ProfileInsightsServiceImplTest {
 				response.weeklyGoals().durationTargetMinutes());
 		assertEquals(6,
 				response.weeklyGoals().trainingCountTarget());
+		assertEquals(List.of(), response.trainingTypeDistribution());
 	}
 
 	private ProfileInsightsServiceImpl service(

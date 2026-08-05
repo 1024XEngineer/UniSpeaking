@@ -12,6 +12,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -65,7 +66,7 @@ public class ProfileInsightsServiceImpl implements ProfileInsightsService {
 				targets,
 				now,
 				zoneId);
-		return new ProfileInsightsResponse(new ProfileInsightsResponse.WeeklyGoals(
+		var weeklyGoals = new ProfileInsightsResponse.WeeklyGoals(
 				progress.weekStartsAt().atZone(zoneId).toOffsetDateTime(),
 				progress.weekEndsAt().atZone(zoneId).toOffsetDateTime(),
 				targets.durationTargetMinutes(),
@@ -77,7 +78,15 @@ public class ProfileInsightsServiceImpl implements ProfileInsightsService {
 				progress.completedTrainingCount(),
 				progress.remainingTrainingCount(),
 				progress.countProgress(),
-				progress.countAchieved()));
+				progress.countAchieved());
+		List<ProfileInsightsResponse.TrainingTypeDistribution> distribution =
+				progress.trainingTypeDurations().stream()
+						.map(item -> new ProfileInsightsResponse.TrainingTypeDistribution(
+								item.type().name(),
+								item.durationSeconds(),
+								item.percentage()))
+						.toList();
+		return new ProfileInsightsResponse(weeklyGoals, distribution);
 	}
 
 	@Override

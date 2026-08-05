@@ -17,6 +17,7 @@ import com.unispeaking.service.profile.ProfileAccountService;
 import com.unispeaking.service.profile.ProfileInsightsService;
 import com.unispeaking.service.profile.ProfileOverviewService;
 import java.time.OffsetDateTime;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -58,7 +59,13 @@ class ProfileControllerTest {
 				.andExpect(jsonPath("$.data.weeklyGoals.completedDurationSeconds")
 						.value(4560))
 				.andExpect(jsonPath("$.data.weeklyGoals.completedTrainingCount")
-						.value(3));
+						.value(3))
+				.andExpect(jsonPath("$.data.trainingTypeDistribution[0].type")
+						.value("CUSTOM_SCENE"))
+				.andExpect(jsonPath("$.data.trainingTypeDistribution[0].durationSeconds")
+						.value(4560))
+				.andExpect(jsonPath("$.data.trainingTypeDistribution[0].percentage")
+						.value(100.0));
 
 		verify(authService).requireUserId(null);
 		verify(insightsService).getInsights(USER_ID);
@@ -121,6 +128,11 @@ class ProfileControllerTest {
 				3,
 				2,
 				60.0,
-				false));
+				false),
+				List.of(
+						new ProfileInsightsResponse.TrainingTypeDistribution(
+								"CUSTOM_SCENE",
+								4560,
+								100.0)));
 	}
 }

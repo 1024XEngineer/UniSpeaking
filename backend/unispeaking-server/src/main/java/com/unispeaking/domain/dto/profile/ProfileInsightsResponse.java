@@ -1,8 +1,11 @@
 package com.unispeaking.domain.dto.profile;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 
-public record ProfileInsightsResponse(WeeklyGoals weeklyGoals) {
+public record ProfileInsightsResponse(
+		WeeklyGoals weeklyGoals,
+		List<TrainingTypeDistribution> trainingTypeDistribution) {
 
 	public record WeeklyGoals(
 			OffsetDateTime weekStartsAt,
@@ -17,5 +20,11 @@ public record ProfileInsightsResponse(WeeklyGoals weeklyGoals) {
 			long remainingTrainingCount,
 			double countProgress,
 			boolean countAchieved) {
+	}
+
+	public record TrainingTypeDistribution(
+			String type,
+			long durationSeconds,
+			double percentage) {
 	}
 }
