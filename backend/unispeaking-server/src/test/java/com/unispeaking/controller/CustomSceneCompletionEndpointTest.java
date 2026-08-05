@@ -13,7 +13,7 @@ import com.unispeaking.domain.dto.session.CompleteCustomSceneDialogueResponse;
 import com.unispeaking.service.evaluation.EvaluationService;
 import com.unispeaking.service.asset.LearningAssetService;
 import com.unispeaking.service.scene.SceneFlowService;
-import com.unispeaking.service.scene.SceneService;
+import com.unispeaking.service.scene.CustomSceneService;
 import com.unispeaking.service.session.SessionService;
 import java.math.BigDecimal;
 import java.util.List;
@@ -26,7 +26,7 @@ class CustomSceneCompletionEndpointTest {
 
 	@Test
 	void activeHangupReturnsPersistedFiveDimensionReport() throws Exception {
-		SessionService sessionService = mock(SessionService.class);
+		CustomSceneService customSceneService = mock(CustomSceneService.class);
 		DialogueReportResult report = new DialogueReportResult(
 				new BigDecimal("84.0"),
 				new BigDecimal("81.0"),
@@ -37,7 +37,7 @@ class CustomSceneCompletionEndpointTest {
 				"本次场景练习已完成。",
 				List.of("表达清楚"),
 				List.of("增加词汇变化"));
-		when(sessionService.completeCustomScene(
+		when(customSceneService.completeSession(
 				eq("custom_2001"),
 				eq("scene_5001"),
 				eq("2026-07-30T10:42:00Z")))
@@ -48,9 +48,8 @@ class CustomSceneCompletionEndpointTest {
 						report,
 						null));
 		CustomSceneController controller = new CustomSceneController(
-				mock(SceneService.class),
+				customSceneService,
 				mock(SceneFlowService.class),
-				sessionService,
 				mock(EvaluationService.class),
 				mock(LearningAssetService.class));
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
@@ -71,7 +70,7 @@ class CustomSceneCompletionEndpointTest {
 				.andExpect(jsonPath("$.data.evaluation.naturalnessScore").value(83.0))
 				.andExpect(jsonPath("$.data.evaluation.finalScore").value(83.0));
 
-		verify(sessionService).completeCustomScene(
+		verify(customSceneService).completeSession(
 				"custom_2001",
 				"scene_5001",
 				"2026-07-30T10:42:00Z");

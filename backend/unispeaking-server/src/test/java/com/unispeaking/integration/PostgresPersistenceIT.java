@@ -133,6 +133,10 @@ class PostgresPersistenceIT {
 		jdbcTemplate.execute("""
 				TRUNCATE TABLE
 				    user_feedback,
+				    ielts_evaluation,
+				    ielts,
+				    user_ielts,
+				    practice_session,
 				    sentence_evaluation,
 				    session_evaluation,
 				    turn_evaluation,
@@ -510,6 +514,102 @@ class PostgresPersistenceIT {
 				.isEmpty());
 		assertEquals(1, interviewRepository.deleteById(interview.id()));
 		assertTrue(interviewRepository.findById(interview.id()).isEmpty());
+	}
+
+	@Test
+	void persistsIeltsUserContentAndBandEvaluation() {
+		UUID userId = UUID.fromString("33333333-3333-4333-8333-333333333333");
+		jdbcTemplate.update(
+				"""
+				INSERT INTO user_ielts
+				    (user_id, target_score, today_completed_count, preferred_voice)
+				VALUES (?::uuid, 7.5, 4, 'Clara')
+				""",
+				userId.toString());
+		jdbcTemplate.update(
+				"""
+				INSERT INTO practice_session
+				    (session_id, user_id, scene_type, status, started_at)
+				VALUES ('session_ielts_it1', ?::uuid, 'IELTS_SCENE', 'ACTIVE',
+				        CURRENT_TIMESTAMP)
+				""",
+				userId.toString());
+		jdbcTemplate.update(
+				"""
+				INSERT INTO ielts
+				    (ielts_id, user_id, mode, selected_part, selected_topic_id,
+				     content)
+				VALUES ('session_ielts_it1', ?::uuid, 'PART_PRACTICE', 'PART_1',
+				        'ielts_group_it1',
+				        '{
+				          "part1": [{
+				            "question": "What do you enjoy doing on weekends?",
+				            "recommended_expressions": ["I usually...", "I tend to..."]
+				          }],
+				          "part2": [],
+				          "part3": []
+				        }'::jsonb)
+				""",
+				userId.toString());
+		jdbcTemplate.update("""
+				INSERT INTO ielts_evaluation
+				    (session_id, ielts_id, part, assessment_type,
+				     overall_band_score, fluency_coherence_score,
+				     lexical_resource_score,
+				     grammatical_range_accuracy_score,
+				     pronunciation_score, summary, strengths, improvements)
+				VALUES ('session_ielts_it1', 'session_ielts_it1', 'PART_1',
+				        'DIAGNOSTIC', 7.0, 7.5, 7.0, 6.5, 7.0,
+				        '表达清晰，细节可以更充分。', ARRAY['词汇自然'],
+				        ARRAY['补充例子'])
+				""");
+		jdbcTemplate.update(
+				"""
+				UPDATE user_ielts
+				SET today_completed_count = today_completed_count + 1
+				WHERE user_id = ?::uuid
+				  AND today_completed_count < 5
+				""",
+				userId.toString());
+
+		assertEquals(
+				new BigDecimal("7.0"),
+				jdbcTemplate.queryForObject(
+						"""
+						SELECT overall_band_score
+						FROM ielts_evaluation
+						WHERE session_id = 'session_ielts_it1'
+						""",
+						BigDecimal.class));
+		assertEquals(
+				"session_ielts_it1",
+				jdbcTemplate.queryForObject(
+						"""
+						SELECT ielts_id
+						FROM ielts_evaluation
+						WHERE session_id = 'session_ielts_it1'
+						""",
+						String.class));
+		assertEquals(
+				"array",
+				jdbcTemplate.queryForObject(
+						"""
+						SELECT jsonb_typeof(
+						    content -> 'part1' -> 0 -> 'recommended_expressions')
+						FROM ielts
+						WHERE ielts_id = 'session_ielts_it1'
+						""",
+						String.class));
+		assertEquals(
+				5,
+				jdbcTemplate.queryForObject(
+						"""
+						SELECT today_completed_count
+						FROM user_ielts
+						WHERE user_id = ?::uuid
+						""",
+						Integer.class,
+						userId.toString()));
 	}
 
 	@Test

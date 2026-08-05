@@ -13,13 +13,18 @@ import com.unispeaking.infrastructure.persistence.entity.evaluation.CustomTurnEv
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SceneSentenceReadingRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.TurnEvaluationRepository;
+import com.unispeaking.infrastructure.persistence.repository.evaluation.IeltsEvaluationRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPracticeRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
+import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.evaluation.impl.EvaluationServiceImpl;
+import com.unispeaking.service.scene.SceneFlowService;
 import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.infrastructure.evaluation.client.EvaluationLlmClient;
+import com.unispeaking.infrastructure.evaluation.client.IeltsEvaluationLlmClient;
 import com.unispeaking.infrastructure.evaluation.client.PronunciationAssessmentClient;
 import com.unispeaking.component.session.ActiveSessionRegistry;
 import java.math.BigDecimal;
@@ -79,6 +84,11 @@ class EvaluationServiceImplReportTest {
 				turnRepository,
 				reportRepository,
 				mock(SceneSentenceReadingRepository.class),
+				mock(IeltsPracticeRepository.class),
+				mock(SceneFlowService.class),
+				mock(PracticeSessionRepository.class),
+				mock(IeltsEvaluationRepository.class),
+				mock(IeltsEvaluationLlmClient.class),
 				mock(AuthService.class));
 
 		var report = service.generateDialogueReport(sessionId, dialogue);

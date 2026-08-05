@@ -1363,6 +1363,8 @@ svg { display: block; }
 .ielts-part-card p { min-height: 38px; margin: 0 0 16px; color: #8a8a85; font-size: 16px; line-height: 1.55; }
 .ielts-part-card .ielts-cta { min-height: 44px; padding-inline: 18px; font-size: 16px; }
 .ielts-part-card .ielts-training-cta { min-height: 48px; padding-block: 11px; }
+.ielts-home-actions { display: flex; align-items: center; gap: 10px; }
+.ielts-home-actions .ielts-report-assets { min-height: 48px; cursor: pointer; }
 
 .ielts-intake { min-height: 100%; background: #fff; }
 .ielts-intake .setup-card { margin-top: clamp(48px, 8vh, 82px); }
@@ -1505,6 +1507,33 @@ svg { display: block; }
 .ielts-dialog > div { margin-top: 26px; display: flex; justify-content: flex-end; gap: 10px; }
 .ielts-dialog button { min-height: 43px; padding: 0 17px; border: 1px solid #d9d9d4; border-radius: 999px; background: #fff; }
 .ielts-dialog button:last-child { color: #fff; background: #20201f; }
+.ielts-score-result-page { display: grid; place-items: center; background: #f7f7f4; }
+.ielts-score-result-background { text-align: center; opacity: .34; }
+.ielts-score-result-background span { color: #777773; font-size: 11px; letter-spacing: .16em; }
+.ielts-score-result-background h1 { margin: 14px 0 8px; font-size: 46px; }
+.ielts-score-result-background p { color: #777773; }
+.ielts-score-dialog-backdrop { background: rgba(247,247,244,.68); }
+.ielts-score-dialog { width: min(720px, 88vw); max-height: 84vh; overflow: auto; }
+.ielts-score-dialog__overall { margin: 22px 0; display: flex; align-items: baseline; gap: 8px; }
+.ielts-score-dialog__overall span { margin-right: auto; color: #777773; font-size: 13px; }
+.ielts-score-dialog__overall strong { font-size: 64px; letter-spacing: -.07em; }
+.ielts-score-dialog__overall small { color: #777773; }
+.ielts-score-dialog__parts { display: grid !important; grid-template-columns: repeat(3, 1fr); gap: 10px !important; margin: 0 0 22px !important; }
+.ielts-score-dialog__parts article { padding: 16px; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-radius: 12px; }
+.ielts-score-dialog__parts article span { color: #777773; font-size: 12px; }
+.ielts-score-dialog__parts article strong { font-size: 26px; }
+.ielts-score-dialog__expressions { margin-top: 20px !important; display: block !important; }
+.ielts-score-dialog__expressions > span { color: #777773; font-size: 12px; font-weight: 700; }
+.ielts-score-dialog__expressions ul { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 7px; color: #555552; }
+.ielts-part-evaluation-list, .ielts-recommended-expression-list { margin-top: 24px; }
+.ielts-part-evaluation-list > h2, .ielts-recommended-expression-list > h2 { font-size: 17px; }
+.ielts-part-evaluation-list > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.ielts-part-evaluation-list article { padding: 20px; border: 1px solid var(--line); border-radius: 14px; }
+.ielts-part-evaluation-list article span { color: #777773; font-size: 12px; }
+.ielts-part-evaluation-list article strong { display: block; margin: 9px 0; font-size: 34px; }
+.ielts-part-evaluation-list article p { margin: 0; color: #70706c; font-size: 13px; line-height: 1.6; }
+.ielts-recommended-expression-list { padding: 24px 28px; border: 1px solid var(--line); border-radius: 14px; }
+.ielts-recommended-expression-list ol { margin: 14px 0 0; padding-left: 22px; display: grid; gap: 10px; color: #555552; }
 
 .ielts-pending { display: grid; place-items: center; }
 .ielts-pending > section { width: min(660px, 70vw); text-align: center; }

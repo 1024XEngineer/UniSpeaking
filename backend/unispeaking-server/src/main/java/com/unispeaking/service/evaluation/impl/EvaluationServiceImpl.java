@@ -4,6 +4,9 @@ import com.unispeaking.domain.dto.evaluation.DialogueEvaluationResult;
 import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
 import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationCommand;
 import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationResult;
+import com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult;
+import com.unispeaking.domain.dto.evaluation.IeltsPartEvaluation;
+import com.unispeaking.domain.dto.evaluation.IeltsEvaluationHistoryItem;
 import com.unispeaking.domain.dto.evaluation.PhonemeScore;
 import com.unispeaking.domain.dto.evaluation.SentenceEvaluationResponse;
 import com.unispeaking.domain.dto.evaluation.SpeechEvaluationCommand;
@@ -12,25 +15,38 @@ import com.unispeaking.domain.dto.evaluation.WordPronunciationScore;
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
+import com.unispeaking.domain.po.scene.IeltsPracticeRecord;
 import com.unispeaking.domain.po.session.AbstractSceneSession;
+import com.unispeaking.domain.po.session.PracticeSessionRecord;
 import com.unispeaking.domain.vo.scene.SceneType;
+import com.unispeaking.domain.vo.scene.IeltsPart;
+import com.unispeaking.domain.vo.scene.IeltsMode;
+import com.unispeaking.domain.vo.scene.RecommendedExpression;
+import com.unispeaking.domain.vo.scene.SceneFlowStage;
+import com.unispeaking.domain.vo.session.SessionStatus;
 import com.unispeaking.common.logging.RealtimeFlowLog;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.CustomTurnEvaluation;
+import com.unispeaking.infrastructure.persistence.entity.evaluation.IeltsEvaluationEntity;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.PronunciationWordDetail;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
+import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SceneSentenceReadingRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.TurnEvaluationRepository;
+import com.unispeaking.infrastructure.persistence.repository.evaluation.IeltsEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPracticeRepository;
 import com.unispeaking.component.session.ActiveSessionRegistry;
 import com.unispeaking.service.evaluation.EvaluationService;
 import com.unispeaking.service.auth.AuthService;
+import com.unispeaking.service.scene.SceneFlowService;
 import com.unispeaking.common.evaluation.validation.PcmWavValidator;
 import com.unispeaking.common.evaluation.calculation.ConversationScoreCalculation;
 import com.unispeaking.common.evaluation.calculation.ConversationScoreCalculator;
 import com.unispeaking.common.evaluation.calculation.TurnScoreContribution;
 import com.unispeaking.common.evaluation.calculation.TurnSpeechScoreCalculator;
 import com.unispeaking.infrastructure.evaluation.client.EvaluationLlmClient;
+import com.unispeaking.infrastructure.evaluation.client.IeltsEvaluationLlmClient;
 import com.unispeaking.infrastructure.evaluation.client.PronunciationAssessmentClient;
 import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
@@ -40,6 +56,7 @@ import com.unispeaking.common.evaluation.model.PronunciationAssessmentResult;
 import com.unispeaking.common.evaluation.model.PronunciationPhonemeResult;
 import com.unispeaking.common.evaluation.model.PronunciationWordResult;
 import com.unispeaking.common.evaluation.model.TurnLanguageFeedback;
+import com.unispeaking.common.evaluation.model.IeltsTextAssessment;
 import com.unispeaking.common.evaluation.model.WordReadStatus;
 import com.unispeaking.common.evaluation.policy.TooShortEvaluationPolicy;
 import com.unispeaking.common.evaluation.validation.EnglishWordCounter;
@@ -51,9 +68,11 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,6 +98,11 @@ public class EvaluationServiceImpl implements EvaluationService {
 	private final TurnEvaluationRepository turnEvaluationRepository;
 	private final SessionEvaluationRepository sessionEvaluationRepository;
 	private final SceneSentenceReadingRepository sceneSentenceReadingRepository;
+	private final IeltsPracticeRepository ieltsPracticeRepository;
+	private final SceneFlowService sceneFlowService;
+	private final PracticeSessionRepository practiceSessionRepository;
+	private final IeltsEvaluationRepository ieltsEvaluationRepository;
+	private final IeltsEvaluationLlmClient ieltsLlmClient;
 	private final AuthService authService;
 
 	public EvaluationServiceImpl(
@@ -90,6 +114,11 @@ public class EvaluationServiceImpl implements EvaluationService {
 			TurnEvaluationRepository turnEvaluationRepository,
 			SessionEvaluationRepository sessionEvaluationRepository,
 			SceneSentenceReadingRepository sceneSentenceReadingRepository,
+			IeltsPracticeRepository ieltsPracticeRepository,
+			SceneFlowService sceneFlowService,
+			PracticeSessionRepository practiceSessionRepository,
+			IeltsEvaluationRepository ieltsEvaluationRepository,
+			IeltsEvaluationLlmClient ieltsLlmClient,
 			AuthService authService) {
 		this.pronunciationClient = Objects.requireNonNull(
 				pronunciationClient,
@@ -113,6 +142,21 @@ public class EvaluationServiceImpl implements EvaluationService {
 		this.sceneSentenceReadingRepository = Objects.requireNonNull(
 				sceneSentenceReadingRepository,
 				"sceneSentenceReadingRepository must not be null");
+		this.ieltsPracticeRepository = Objects.requireNonNull(
+				ieltsPracticeRepository,
+				"ieltsPracticeRepository must not be null");
+		this.sceneFlowService = Objects.requireNonNull(
+				sceneFlowService,
+				"sceneFlowService must not be null");
+		this.practiceSessionRepository = Objects.requireNonNull(
+				practiceSessionRepository,
+				"practiceSessionRepository must not be null");
+		this.ieltsEvaluationRepository = Objects.requireNonNull(
+				ieltsEvaluationRepository,
+				"ieltsEvaluationRepository must not be null");
+		this.ieltsLlmClient = Objects.requireNonNull(
+				ieltsLlmClient,
+				"ieltsLlmClient must not be null");
 		this.authService = Objects.requireNonNull(
 				authService,
 				"authService must not be null");
@@ -137,6 +181,403 @@ public class EvaluationServiceImpl implements EvaluationService {
 				calculation.fluencyScore(),
 				calculation.effectiveDurationUnits(),
 				calculation.validPhonemeCount());
+	}
+
+	@Override
+	public IeltsEvaluationResult generateIeltsEvaluation(
+			String ieltsId,
+			String sessionId) {
+		IeltsPracticeRecord practice = requireOwnedIeltsPractice(ieltsId);
+		List<PracticeSessionRecord> sessions =
+				practiceSessionRepository.findBySceneId(ieltsId).stream()
+						.filter(item -> item.sceneType() == SceneType.IELTS_SCENE)
+						.filter(item -> item.status() == SessionStatus.COMPLETED)
+						.toList();
+		int sessionIndex = -1;
+		for (int index = 0; index < sessions.size(); index++) {
+			if (sessions.get(index).sessionId().equals(sessionId)) {
+				sessionIndex = index;
+				break;
+			}
+		}
+		if (sessionIndex < 0) {
+			throw new EvaluationException(EvaluationErrorCode.SESSION_NOT_FOUND);
+		}
+		boolean finalMockEvaluation = practice.mode() == IeltsMode.MOCK_TEST
+				&& sessionIndex >= 2;
+		IeltsEvaluationResult result = finalMockEvaluation
+				? evaluateCompleteIeltsTest(practice, sessions)
+				: evaluateIeltsPart(
+						practice,
+						sessionId,
+						practice.selectedPart() != null
+								? practice.selectedPart()
+								: partByIndex(sessionIndex));
+		ieltsEvaluationRepository.save(ieltsId, sessionId, result);
+		return result;
+	}
+
+	@Override
+	public BigDecimal getLatestIeltsEstimatedScore() {
+		return getIeltsEvaluationHistory().stream()
+				.filter(item -> item.mode() == IeltsMode.MOCK_TEST)
+				.filter(item -> "FINAL".equals(item.assessmentType()))
+				.findFirst()
+				.map(IeltsEvaluationHistoryItem::overallBandScore)
+				.orElse(null);
+	}
+
+	@Override
+	public List<IeltsEvaluationHistoryItem> getIeltsEvaluationHistory() {
+		String userId = authService.requireUserId(null);
+		Map<String, List<PracticeSessionRecord>> sessionsByPractice =
+				practiceSessionRepository.findCompletedByUserAndSceneType(
+						UUID.fromString(userId),
+						SceneType.IELTS_SCENE)
+						.stream()
+						.collect(java.util.stream.Collectors.groupingBy(
+								PracticeSessionRecord::sceneId,
+								LinkedHashMap::new,
+								java.util.stream.Collectors.toList()));
+		List<IeltsEvaluationHistoryItem> history = new ArrayList<>();
+		for (Map.Entry<String, List<PracticeSessionRecord>> entry
+				: sessionsByPractice.entrySet()) {
+			IeltsPracticeRecord practice = ieltsPracticeRepository
+					.findPractice(entry.getKey())
+					.orElse(null);
+			if (practice == null) continue;
+			List<PracticeSessionRecord> sessions = entry.getValue();
+			PracticeSessionRecord resultSession;
+			String assessmentType;
+			IeltsPart part;
+			if (practice.mode() == IeltsMode.MOCK_TEST) {
+				if (sessions.size() < 3) continue;
+				resultSession = sessions.get(2);
+				assessmentType = "FINAL";
+				part = null;
+			}
+			else {
+				resultSession = sessions.getLast();
+				assessmentType = "DIAGNOSTIC";
+				part = practice.selectedPart();
+			}
+			IeltsEvaluationEntity evaluation = ieltsEvaluationRepository
+					.find(resultSession.sessionId())
+					.orElse(null);
+			if (evaluation == null) continue;
+			history.add(new IeltsEvaluationHistoryItem(
+					resultSession.sessionId(),
+					practice.ieltsId(),
+					practice.mode(),
+					part,
+					assessmentType,
+					evaluation.getOverallBandScore(),
+					evaluation.getFluencyCoherenceScore(),
+					evaluation.getSummary(),
+					evaluation.getStrengths() == null
+							? List.of()
+							: List.of(evaluation.getStrengths()),
+					evaluation.getImprovements() == null
+							? List.of()
+							: List.of(evaluation.getImprovements()),
+					resultSession.startedAt(),
+					resultSession.endedAt()));
+		}
+		return history.stream()
+				.sorted(Comparator.comparing(
+						IeltsEvaluationHistoryItem::endedAt,
+						Comparator.nullsLast(Comparator.reverseOrder())))
+				.toList();
+	}
+
+	private IeltsEvaluationResult evaluateIeltsPart(
+			IeltsPracticeRecord practice,
+			String sessionId,
+			IeltsPart part) {
+		List<Message> messages = sessionMessageRepository.findMessages(sessionId);
+		String transcript = formatTranscript(messages, true);
+		List<CustomTurnEvaluation> turns =
+				turnEvaluationRepository.findAll(sessionId);
+		List<CustomTurnEvaluation> scorableTurns = turns.stream()
+				.filter(turn -> !isUnscorable(turn))
+				.toList();
+		String cueCard = part == IeltsPart.PART_2
+				? formatCueCard(practice)
+				: null;
+		IeltsTextAssessment text = ieltsLlmClient.assessPart(
+				part,
+				transcript,
+				cueCard,
+				formatSpeechMetrics(scorableTurns));
+		BigDecimal pronunciation = scorableTurns.isEmpty()
+				? null
+				: pronunciationBand(scorableTurns);
+		BigDecimal overall = pronunciation == null
+				? textDiagnosticBand(text)
+				: overallBand(text, pronunciation);
+		List<String> recommendedExpressions = recommendedExpressions(turns);
+		return new IeltsEvaluationResult(
+				part,
+				"DIAGNOSTIC",
+				overall,
+				text.fluencyCoherenceBand(),
+				text.lexicalResourceBand(),
+				text.grammaticalRangeAccuracyBand(),
+				pronunciation,
+				text.summary()
+						+ (pronunciation == null
+								? " 本 Part 的有效语音评分暂不可用，当前总分仅为三项文本诊断均值。"
+								: "")
+						+ " 本结果是单 Part 诊断分，不是官方独立 Part 成绩。",
+				text.strengths(),
+				text.improvements(),
+				List.of(),
+				recommendedExpressions);
+	}
+
+	private IeltsEvaluationResult evaluateCompleteIeltsTest(
+			IeltsPracticeRecord practice,
+			List<PracticeSessionRecord> sessions) {
+		StringBuilder transcript = new StringBuilder();
+		List<CustomTurnEvaluation> allTurns = new ArrayList<>();
+		List<IeltsPartEvaluation> partEvaluations = new ArrayList<>();
+		for (int index = 0; index < Math.min(3, sessions.size()); index++) {
+			var session = sessions.get(index);
+			partEvaluations.add(evaluatePartSafely(
+					practice,
+					session,
+					partByIndex(index)));
+			List<Message> messages = sessionMessageRepository.findMessages(
+					session.sessionId());
+			transcript.append('[')
+					.append(partByIndex(index).name())
+					.append("]\n")
+					.append(formatTranscript(messages, false))
+					.append("\n\n");
+			allTurns.addAll(turnEvaluationRepository.findAll(session.sessionId()));
+		}
+		List<CustomTurnEvaluation> scorableTurns = allTurns.stream()
+				.filter(turn -> !isUnscorable(turn))
+				.toList();
+		BigDecimal pronunciation = pronunciationBand(scorableTurns);
+		IeltsTextAssessment text = ieltsLlmClient.assessFullTest(
+				transcript.toString().strip(),
+				formatSpeechMetrics(scorableTurns),
+				pronunciation.toPlainString());
+		return new IeltsEvaluationResult(
+				null,
+				"FINAL",
+				overallBand(text, pronunciation),
+				text.fluencyCoherenceBand(),
+				text.lexicalResourceBand(),
+				text.grammaticalRangeAccuracyBand(),
+				pronunciation,
+				text.summary(),
+				text.strengths(),
+				text.improvements(),
+				partEvaluations,
+				recommendedExpressions(allTurns));
+	}
+
+	private IeltsPartEvaluation toPartEvaluation(
+			IeltsEvaluationResult result) {
+		return new IeltsPartEvaluation(
+				result.part(),
+				result.overallBandScore(),
+				result.fluencyCoherenceScore(),
+				result.lexicalResourceScore(),
+				result.grammaticalRangeAccuracyScore(),
+				result.pronunciationScore(),
+				result.summary(),
+				result.strengths(),
+				result.improvements(),
+				result.recommendedExpressions());
+	}
+
+	private IeltsPartEvaluation evaluatePartSafely(
+			IeltsPracticeRecord practice,
+			PracticeSessionRecord session,
+			IeltsPart part) {
+		try {
+			return toPartEvaluation(evaluateIeltsPart(
+					practice,
+					session.sessionId(),
+					part));
+		}
+		catch (RuntimeException exception) {
+			LOGGER.warn(
+					"IELTS per-Part evaluation unavailable during final aggregation "
+							+ "sessionId={} part={} error={}",
+					session.sessionId(),
+					part,
+					exception.getMessage());
+			List<CustomTurnEvaluation> turns = turnEvaluationRepository
+					.findAll(session.sessionId());
+			List<CustomTurnEvaluation> scorableTurns = turns.stream()
+					.filter(turn -> !isUnscorable(turn))
+					.toList();
+			if (!scorableTurns.isEmpty()) {
+				BigDecimal fluency = roundToHalf(average(
+						scorableTurns,
+						CustomTurnEvaluation::fluencyScore)
+						.multiply(new BigDecimal("0.09")));
+				BigDecimal pronunciation = pronunciationBand(scorableTurns);
+				BigDecimal speechDiagnostic = roundToHalf(average(
+						scorableTurns,
+						CustomTurnEvaluation::overallScore)
+						.multiply(new BigDecimal("0.09")));
+				return new IeltsPartEvaluation(
+						part,
+						speechDiagnostic,
+						fluency,
+						null,
+						null,
+						pronunciation,
+						"文本模型评分暂不可用，当前显示基于有效语音轮次的临时诊断分。",
+						List.of(),
+						List.of("评分服务恢复后重新生成完整文本诊断。"),
+						recommendedExpressions(turns));
+			}
+			return new IeltsPartEvaluation(
+					part,
+					null,
+					null,
+					null,
+					null,
+					null,
+					"该 Part 的后台评分暂不可用。",
+					List.of(),
+					List.of(),
+					recommendedExpressions(turns));
+		}
+	}
+
+	private List<String> recommendedExpressions(
+			List<CustomTurnEvaluation> turns) {
+		return turns.stream()
+				.map(CustomTurnEvaluation::suggestedExpression)
+				.filter(value -> value != null && !value.isBlank())
+				.map(String::trim)
+				.distinct()
+				.toList();
+	}
+
+	private String formatTranscript(
+			List<Message> messages,
+			boolean requireCandidateAnswer) {
+		String transcript = messages.stream()
+				.map(message -> (message.owner() == 0
+						? "EXAMINER: "
+						: "CANDIDATE: ") + message.content())
+				.collect(java.util.stream.Collectors.joining("\n"));
+		if (requireCandidateAnswer
+				&& messages.stream().noneMatch(message -> message.owner() == 1)) {
+			throw new EvaluationException(
+					EvaluationErrorCode.NO_SCORABLE_UTTERANCES);
+		}
+		return transcript;
+	}
+
+	private String formatCueCard(IeltsPracticeRecord practice) {
+		var question = practice.content().part2().stream()
+				.findFirst()
+				.orElseThrow(() -> new EvaluationException(
+						EvaluationErrorCode.RESULT_INCOMPLETE));
+		String cuePoints = question.cuePoints().isEmpty()
+				? ""
+				: "\nYou should say:\n- "
+						+ String.join("\n- ", question.cuePoints());
+		return question.question() + cuePoints;
+	}
+
+	private String formatSpeechMetrics(List<CustomTurnEvaluation> turns) {
+		if (turns.isEmpty()) return null;
+		return "scorable_turns=" + turns.size()
+				+ "; average_fluency_score_0_100="
+				+ average(turns, CustomTurnEvaluation::fluencyScore)
+				+ "; exact_pause_repetition_self_correction_counts=UNAVAILABLE";
+	}
+
+	private BigDecimal pronunciationBand(List<CustomTurnEvaluation> turns) {
+		if (turns.isEmpty()) {
+			throw new EvaluationException(
+					EvaluationErrorCode.NO_SCORABLE_UTTERANCES);
+		}
+		BigDecimal percentage = average(
+				turns,
+				CustomTurnEvaluation::pronunciationScore);
+		return roundToHalf(percentage.multiply(new BigDecimal("0.09")));
+	}
+
+	private BigDecimal overallBand(
+			IeltsTextAssessment text,
+			BigDecimal pronunciation) {
+		return roundToHalf(text.fluencyCoherenceBand()
+				.add(text.lexicalResourceBand())
+				.add(text.grammaticalRangeAccuracyBand())
+				.add(pronunciation)
+				.divide(BigDecimal.valueOf(4), 4, RoundingMode.HALF_UP));
+	}
+
+	private BigDecimal textDiagnosticBand(IeltsTextAssessment text) {
+		return roundToHalf(text.fluencyCoherenceBand()
+				.add(text.lexicalResourceBand())
+				.add(text.grammaticalRangeAccuracyBand())
+				.divide(BigDecimal.valueOf(3), 4, RoundingMode.HALF_UP));
+	}
+
+	private BigDecimal roundToHalf(BigDecimal value) {
+		return value.multiply(BigDecimal.valueOf(2))
+				.setScale(0, RoundingMode.HALF_UP)
+				.divide(BigDecimal.valueOf(2), 1, RoundingMode.UNNECESSARY)
+				.max(BigDecimal.ZERO.setScale(1))
+				.min(BigDecimal.valueOf(9).setScale(1));
+	}
+
+	private IeltsPart partByIndex(int index) {
+		return switch (index) {
+			case 0 -> IeltsPart.PART_1;
+			case 1 -> IeltsPart.PART_2;
+			case 2 -> IeltsPart.PART_3;
+			default -> throw new EvaluationException(
+					EvaluationErrorCode.INVALID_REQUEST);
+		};
+	}
+
+	@Override
+	public DialogueTurnEvaluationResult evaluateIeltsTurn(
+			String ieltsId,
+			DialogueTurnEvaluationCommand command) {
+		if (command == null || command.turnNo() < 1) {
+			throw new EvaluationException(EvaluationErrorCode.INVALID_REQUEST);
+		}
+		AbstractSceneSession session = requireOwnedIeltsSession(
+				ieltsId,
+				command.sessionId());
+		try {
+			return evaluateIeltsSceneTurn(session, command);
+		}
+		catch (EvaluationException exception) {
+			if (!isRecoverableTurnFailure(exception)) {
+				throw exception;
+			}
+			DialogueTurnEvaluationResult evaluation =
+					UnavailableTurnEvaluationPolicy.createResult(
+							command.turnNo(),
+							command.transcript());
+			turnEvaluationRepository.upsert(toCustomTurn(
+					session,
+					evaluation,
+					List.of()));
+			LOGGER.warn(
+					"IELTS turn scoring unavailable sceneId={} sessionId={} "
+							+ "turnNo={} code={}",
+					ieltsId,
+					command.sessionId(),
+					command.turnNo(),
+					exception.errorCode().code());
+			return evaluation;
+		}
 	}
 
 	@Override
@@ -371,6 +812,51 @@ public class EvaluationServiceImpl implements EvaluationService {
 		return result;
 	}
 
+	private DialogueTurnEvaluationResult evaluateIeltsSceneTurn(
+			AbstractSceneSession session,
+			DialogueTurnEvaluationCommand command) {
+		EnglishWordCounter.Analysis text =
+				EnglishWordCounter.analyze(command.transcript());
+		if (text.classification() == EnglishWordCounter.Classification.EMPTY) {
+			throw new EvaluationException(EvaluationErrorCode.TRANSCRIPT_REQUIRED);
+		}
+		if (text.classification() == EnglishWordCounter.Classification.TOO_SHORT) {
+			DialogueTurnEvaluationResult result =
+					TooShortEvaluationPolicy.createResult(
+							command.turnNo(),
+							command.transcript());
+			turnEvaluationRepository.upsert(toCustomTurn(
+					session,
+					result,
+					List.of()));
+			return result;
+		}
+
+		PcmWavValidator.validate(command.audio());
+		PronunciationAssessmentResult assessment =
+				pronunciationClient.evaluate(command.transcript(), command.audio());
+		TurnSpeechScoreCalculator.calculate(assessment);
+		TurnLanguageFeedback feedback = llmClient.assessTurn(
+				buildIeltsTurnPrompt(session, command));
+		DialogueTurnEvaluationResult result = new DialogueTurnEvaluationResult(
+				command.turnNo(),
+				command.transcript(),
+				assessment.overallScore(),
+				assessment.rhythmScore(),
+				assessment.toneScore(),
+				assessment.integrityScore(),
+				assessment.pronunciationScore(),
+				assessment.fluencyScore(),
+				feedback.feedbackSummary(),
+				feedback.suggestedExpression(),
+				mapWords(assessment.words()));
+		turnEvaluationRepository.upsert(toCustomTurn(
+				session,
+				result,
+				toPersistedWords(assessment)));
+		return result;
+	}
+
 	private DialogueTurnEvaluationPromptInput buildCustomTurnPrompt(
 			AbstractSceneSession session,
 			DialogueTurnEvaluationCommand command) {
@@ -399,6 +885,92 @@ public class EvaluationServiceImpl implements EvaluationService {
 				history,
 				findAiText(messages, command.turnNo()),
 				command.transcript());
+	}
+
+	private DialogueTurnEvaluationPromptInput buildIeltsTurnPrompt(
+			AbstractSceneSession session,
+			DialogueTurnEvaluationCommand command) {
+		IeltsPracticeRecord practice = requireOwnedIeltsPractice(
+				session.getSceneId());
+		IeltsPart part = activeIeltsPart(practice, session);
+		List<Message> messages =
+				sessionMessageRepository.findMessages(session.getId());
+		List<DialogueTurnEvaluationHistory> history =
+				turnEvaluationRepository.findBefore(
+							session.getId(),
+							command.turnNo())
+						.stream()
+						.map(turn -> new DialogueTurnEvaluationHistory(
+								turn.turnNo(),
+								findAiText(messages, turn.turnNo()),
+								turn.transcript()))
+						.toList();
+		List<RecommendedExpression> recommendedExpressions = practice.content()
+				.questionsFor(part)
+				.stream()
+				.flatMap(question -> question.recommendedExpressions().stream())
+				.toList();
+		return new DialogueTurnEvaluationPromptInput(
+				"IELTS_" + part.name(),
+				"IELTS Speaking " + part.name().replace('_', ' '),
+				"IELTS Speaking examiner",
+				"IELTS candidate",
+				"Give concise corrective feedback while preserving the "
+						+ "candidate's intended meaning.",
+				history,
+				findAiText(messages, command.turnNo()),
+				command.transcript(),
+				recommendedExpressions);
+	}
+
+	private AbstractSceneSession requireOwnedIeltsSession(
+			String ieltsId,
+			String sessionId) {
+		String userId = authService.requireUserId(null);
+		IeltsPracticeRecord practice = requireOwnedIeltsPractice(ieltsId);
+		AbstractSceneSession session = activeSessionRegistry.findById(sessionId)
+				.filter(value -> value.getSceneType() == SceneType.IELTS_SCENE)
+				.orElseThrow(() -> new EvaluationException(
+						EvaluationErrorCode.SESSION_NOT_FOUND));
+		if (!userId.equals(practice.userId().toString())
+				|| !userId.equals(session.getUserId())
+				|| !ieltsId.equals(session.getSceneId())) {
+			throw new EvaluationException(EvaluationErrorCode.SESSION_NOT_FOUND);
+		}
+		return session;
+	}
+
+	private IeltsPracticeRecord requireOwnedIeltsPractice(String ieltsId) {
+		String userId = authService.requireUserId(null);
+		IeltsPracticeRecord practice = ieltsPracticeRepository
+				.findPractice(ieltsId)
+				.orElseThrow(() -> new EvaluationException(
+						EvaluationErrorCode.SESSION_NOT_FOUND));
+		if (!userId.equals(practice.userId().toString())) {
+			throw new EvaluationException(EvaluationErrorCode.SESSION_NOT_FOUND);
+		}
+		return practice;
+	}
+
+	private IeltsPart activeIeltsPart(
+			IeltsPracticeRecord practice,
+			AbstractSceneSession session) {
+		if (practice.selectedPart() != null) {
+			return practice.selectedPart();
+		}
+		if (session.getIeltsPart() != null) {
+			return session.getIeltsPart();
+		}
+		// Compatibility fallback for active sessions created before IELTS Part
+		// became immutable session metadata.
+		SceneFlowStage stage = sceneFlowService.getFlow(practice.ieltsId()).stage();
+		return switch (stage) {
+			case IELTS_PART_1 -> IeltsPart.PART_1;
+			case IELTS_PART_2 -> IeltsPart.PART_2;
+			case IELTS_PART_3 -> IeltsPart.PART_3;
+			default -> throw new EvaluationException(
+					EvaluationErrorCode.INVALID_REQUEST);
+		};
 	}
 
 	private TurnScoreContribution toContribution(

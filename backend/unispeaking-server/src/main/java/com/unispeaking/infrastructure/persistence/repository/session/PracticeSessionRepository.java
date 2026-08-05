@@ -106,6 +106,44 @@ public class PracticeSessionRepository {
 		}
 	}
 
+	public List<PracticeSessionRecord> findBySceneId(String sceneId) {
+		try {
+			return mapper.selectList(
+						new LambdaQueryWrapper<PracticeSessionEntity>()
+								.eq(PracticeSessionEntity::getSceneId, sceneId)
+								.orderByAsc(PracticeSessionEntity::getStartedAt))
+					.stream()
+					.map(this::toDomain)
+					.toList();
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
+	public List<PracticeSessionRecord> findCompletedByUserAndSceneType(
+			UUID userId,
+			SceneType sceneType) {
+		try {
+			return mapper.selectList(
+						new LambdaQueryWrapper<PracticeSessionEntity>()
+								.eq(PracticeSessionEntity::getUserId, userId)
+								.eq(
+										PracticeSessionEntity::getSceneType,
+										sceneType.name())
+								.eq(
+										PracticeSessionEntity::getStatus,
+										SessionStatus.COMPLETED.name())
+								.orderByAsc(
+										PracticeSessionEntity::getStartedAt))
+					.stream()
+					.map(this::toDomain)
+					.toList();
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
 	private void updateTerminalStatus(
 			String sessionId,
 			UUID userId,

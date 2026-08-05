@@ -144,6 +144,31 @@ export function getIeltsTraining(part, topicId = null) {
   return request(`/api/ielts/training?${params.toString()}`);
 }
 
+export function getIeltsSettings() {
+  return request("/api/ielts/settings", { cache: "no-store" });
+}
+
+export function updateIeltsSettings({ targetScore = null, examinerId = null }) {
+  return request("/api/ielts/settings", {
+    method: "PUT",
+    body: JSON.stringify({ targetScore, examinerId }),
+  });
+}
+
+export function generateIeltsScene({ mode, part, topicId = null }) {
+  return request("/api/ielts/generate", {
+    method: "POST",
+    body: JSON.stringify({ mode, part, topicId }),
+  });
+}
+
+export function createIeltsSceneFlow(sceneId) {
+  return request("/api/ielts/flows", {
+    method: "POST",
+    body: JSON.stringify({ sceneId }),
+  });
+}
+
 export function getUserPreference() {
   return request("/api/user-preferences");
 }
@@ -206,6 +231,61 @@ export function evaluateCustomDialogueTurn(
       body: formData,
     },
   );
+}
+
+export function evaluateIeltsDialogueTurn(
+  ieltsId,
+  sessionId,
+  turnNo,
+  transcript,
+  wavAudio,
+) {
+  const formData = new FormData();
+  formData.append("transcript", transcript);
+  if (wavAudio) formData.append("audio", wavAudio, `ielts-turn-${turnNo}.wav`);
+  return request(
+    `/api/ielts/${encodeURIComponent(ieltsId)}/sessions/${encodeURIComponent(sessionId)}/turns/${turnNo}/evaluation`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+}
+
+export function advanceIeltsDialogueState(
+  ieltsId,
+  sessionId,
+  turnNo,
+) {
+  return request(
+    `/api/ielts/${encodeURIComponent(ieltsId)}/sessions/${encodeURIComponent(sessionId)}/turns/${turnNo}/state`,
+    { method: "POST" },
+  );
+}
+
+export function advanceIeltsPart2State(
+  ieltsId,
+  sessionId,
+  event,
+) {
+  return request(
+    `/api/ielts/${encodeURIComponent(ieltsId)}/sessions/${encodeURIComponent(sessionId)}/part2/state`,
+    {
+      method: "POST",
+      body: JSON.stringify({ event }),
+    },
+  );
+}
+
+export function generateIeltsEvaluation(ieltsId, sessionId) {
+  return request(
+    `/api/ielts/${encodeURIComponent(ieltsId)}/sessions/${encodeURIComponent(sessionId)}/evaluation`,
+    { method: "POST" },
+  );
+}
+
+export function getIeltsEvaluationHistory() {
+  return request("/api/ielts/evaluations");
 }
 
 export function advanceCustomDialogueState(

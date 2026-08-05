@@ -1461,6 +1461,7 @@ function CustomSceneConversation({
     let cancelled = false;
     const client = createRealtimeClient({
       sceneId,
+      sceneType: "custom",
       onEvent: (event) => {
         if (!cancelled) handleEvent(event);
       },
