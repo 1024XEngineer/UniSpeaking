@@ -38,6 +38,9 @@
     "eslint-config-expo": "~57.0.1",
     "typescript": "~6.0.3"
   },
+  "overrides": {
+    "brace-expansion@^5.0.8": "5.0.9"
+  },
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
