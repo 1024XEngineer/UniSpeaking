@@ -1,7 +1,9 @@
 package com.unispeaking.domain.po.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.unispeaking.domain.vo.scene.InterviewSubmissionStatus;
 import java.time.Instant;
@@ -66,5 +68,28 @@ class InterviewSubmissionTest {
 				IllegalArgumentException.class,
 				() -> submission.markCompleted(NOW));
 		assertEquals(InterviewSubmissionStatus.PROCESSING, submission.status());
+	}
+
+	@Test
+	void timeoutCanFailAcceptedOrProcessingSubmissionButNotCompletedSubmission() {
+		InterviewSubmission accepted = new InterviewSubmission(
+				"submission_accepted", 1, "digest_1", NOW);
+		InterviewSubmission processing = new InterviewSubmission(
+				"submission_processing", 1, "digest_2", NOW);
+		processing.markProcessing(NOW.plusSeconds(1));
+		InterviewSubmission completed = new InterviewSubmission(
+				"submission_completed", 1, "digest_3", NOW);
+		completed.markProcessing(NOW.plusSeconds(1));
+		completed.markCompleted(NOW.plusSeconds(2));
+
+		assertTrue(accepted.markTimedOut(
+				true, "TIMEOUT", "timeout", NOW.plusSeconds(3)));
+		assertTrue(processing.markTimedOut(
+				false, "TIMEOUT", "timeout", NOW.plusSeconds(3)));
+		assertFalse(completed.markTimedOut(
+				true, "TIMEOUT", "timeout", NOW.plusSeconds(3)));
+		assertEquals(InterviewSubmissionStatus.FAILED_RETRYABLE, accepted.status());
+		assertEquals(InterviewSubmissionStatus.FAILED_TERMINAL, processing.status());
+		assertEquals(InterviewSubmissionStatus.COMPLETED, completed.status());
 	}
 }

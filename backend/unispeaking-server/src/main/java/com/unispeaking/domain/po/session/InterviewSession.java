@@ -24,11 +24,13 @@ public final class InterviewSession extends AbstractSceneSession {
 	private final Map<Integer, InterviewTurn> turns = new LinkedHashMap<>();
 	private final Map<String, InterviewSubmission> submissions = new LinkedHashMap<>();
 	private Instant lastSeen;
+	private Instant interruptedAt;
 	private boolean acceptingSubmissions = true;
 	private boolean endRequested;
 	private boolean confirmationRequired;
 	private boolean insufficientDataConfirmed;
 	private boolean flowCleanupPending;
+	private boolean expirationCleanupClaimed;
 
 	public InterviewSession(
 			String id,
@@ -156,6 +158,19 @@ public final class InterviewSession extends AbstractSceneSession {
 	public synchronized boolean flowCleanupPending() { return flowCleanupPending; }
 	public synchronized void markFlowCleanupPending() { flowCleanupPending = true; }
 	public synchronized void clearFlowCleanupPending() { flowCleanupPending = false; }
+	public synchronized boolean expirationCleanupClaimed() {
+		return expirationCleanupClaimed;
+	}
+	public synchronized boolean claimExpirationCleanup() {
+		if (expirationCleanupClaimed || getStatus() != SessionStatus.INTERRUPTED) {
+			return false;
+		}
+		expirationCleanupClaimed = true;
+		return true;
+	}
+	public synchronized void releaseExpirationCleanupClaim() {
+		expirationCleanupClaimed = false;
+	}
 	public synchronized Instant lastSeen() { return lastSeen; }
 	public InterviewQuestionPlan questionPlan() { return questionPlan; }
 	public String interviewId() { return interviewId; }
@@ -173,7 +188,10 @@ public final class InterviewSession extends AbstractSceneSession {
 	public synchronized void pause() { super.pause(); }
 
 	@Override
-	public synchronized void resume() { super.resume(); }
+	public synchronized void resume() {
+		super.resume();
+		interruptedAt = null;
+	}
 
 	@Override
 	public synchronized void bindProviderSession(String providerSessionId) {
@@ -221,7 +239,21 @@ public final class InterviewSession extends AbstractSceneSession {
 	}
 
 	@Override
-	public synchronized void recordInterrupt() { super.recordInterrupt(); }
+	public synchronized void recordInterrupt() {
+		recordInterrupt(lastSeen);
+	}
+
+	public synchronized void recordInterrupt(Instant at) {
+		Instant required = Objects.requireNonNull(at, "at");
+		super.recordInterrupt();
+		if (interruptedAt == null) {
+			interruptedAt = required;
+		}
+	}
+
+	public synchronized Optional<Instant> interruptedAt() {
+		return Optional.ofNullable(interruptedAt);
+	}
 
 	@Override
 	public synchronized void complete(Instant stopTime) { super.complete(stopTime); }

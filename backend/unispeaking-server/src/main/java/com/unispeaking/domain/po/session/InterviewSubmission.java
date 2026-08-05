@@ -72,6 +72,26 @@ public final class InterviewSubmission {
 		updatedAt = at;
 	}
 
+	public synchronized boolean markTimedOut(
+			boolean retryable,
+			String errorCode,
+			String errorMessage,
+			Instant at) {
+		if (!status.isInFlight()) {
+			return false;
+		}
+		String requiredCode = requireText(errorCode, "errorCode");
+		String requiredMessage = requireText(errorMessage, "errorMessage");
+		validateTime(at);
+		status = retryable
+				? InterviewSubmissionStatus.FAILED_RETRYABLE
+				: InterviewSubmissionStatus.FAILED_TERMINAL;
+		this.errorCode = requiredCode;
+		this.errorMessage = requiredMessage;
+		updatedAt = at;
+		return true;
+	}
+
 	public synchronized void retry(Instant at) {
 		requireStatus(InterviewSubmissionStatus.FAILED_RETRYABLE,
 				"only retryable failures can be retried");
