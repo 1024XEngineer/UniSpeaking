@@ -7,18 +7,23 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.domain.dto.profile.UpdateWeeklyLearningGoalsRequest;
+import com.unispeaking.domain.po.evaluation.SessionScoreSnapshot;
 import com.unispeaking.domain.po.profile.WeeklyLearningGoals;
 import com.unispeaking.domain.po.session.PracticeSessionRecord;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
+import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.WeeklyLearningGoalRepository;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 class ProfileInsightsServiceImplTest {
@@ -33,10 +38,13 @@ class ProfileInsightsServiceImplTest {
 				mock(WeeklyLearningGoalRepository.class);
 		PracticeSessionRepository sessions =
 				mock(PracticeSessionRepository.class);
+		SessionEvaluationRepository evaluations =
+				mock(SessionEvaluationRepository.class);
 		when(goals.findByUserId(userId)).thenReturn(Optional.empty());
 		when(sessions.findCompletedOverlapping(any(), any(), any()))
 				.thenReturn(List.of(record(userId, 300)));
-		ProfileInsightsServiceImpl service = service(goals, sessions);
+		when(sessions.findCompletedByUserId(userId)).thenReturn(List.of());
+		ProfileInsightsServiceImpl service = service(goals, sessions, evaluations);
 
 		var insights = service.getInsights(userId.toString());
 		var response = insights.weeklyGoals();
@@ -60,11 +68,14 @@ class ProfileInsightsServiceImplTest {
 				mock(WeeklyLearningGoalRepository.class);
 		PracticeSessionRepository sessions =
 				mock(PracticeSessionRepository.class);
+		SessionEvaluationRepository evaluations =
+				mock(SessionEvaluationRepository.class);
 		WeeklyLearningGoals updated = new WeeklyLearningGoals(180, 6);
 		when(goals.findByUserId(userId)).thenReturn(Optional.of(updated));
 		when(sessions.findCompletedOverlapping(any(), any(), any()))
 				.thenReturn(List.of());
-		ProfileInsightsServiceImpl service = service(goals, sessions);
+		when(sessions.findCompletedByUserId(userId)).thenReturn(List.of());
+		ProfileInsightsServiceImpl service = service(goals, sessions, evaluations);
 
 		var response = service.updateGoals(
 				userId.toString(),
@@ -76,16 +87,87 @@ class ProfileInsightsServiceImplTest {
 		assertEquals(6,
 				response.weeklyGoals().trainingCountTarget());
 		assertEquals(List.of(), response.trainingTypeDistribution());
+		assertEquals(List.of(), response.abilityTrends());
+	}
+
+	@Test
+	void returnsLatestTenOwnedReportsInCompletionOrder() {
+		UUID userId = UUID.randomUUID();
+		WeeklyLearningGoalRepository goals =
+				mock(WeeklyLearningGoalRepository.class);
+		PracticeSessionRepository sessions =
+				mock(PracticeSessionRepository.class);
+		SessionEvaluationRepository evaluations =
+				mock(SessionEvaluationRepository.class);
+		when(goals.findByUserId(userId))
+				.thenReturn(Optional.of(WeeklyLearningGoals.defaults()));
+		when(sessions.findCompletedOverlapping(any(), any(), any()))
+				.thenReturn(List.of());
+		Instant firstEnd = Instant.parse("2026-08-03T01:00:00Z");
+		List<PracticeSessionRecord> completed = new ArrayList<>();
+		IntStream.rangeClosed(1, 12).forEach(index -> completed.add(record(
+				userId,
+				"session_" + index,
+				firstEnd.plusSeconds(index * 60L),
+				index == 11 ? SceneType.CUSTOM_SCENE : SceneType.FREE_CHAT)));
+		when(sessions.findCompletedByUserId(userId)).thenReturn(completed);
+		List<SessionScoreSnapshot> snapshots = IntStream.rangeClosed(1, 11)
+				.mapToObj(index -> snapshot("session_" + index, index))
+				.toList();
+		when(evaluations.findScoreSnapshotsBySessionIds(any()))
+				.thenReturn(snapshots);
+		ProfileInsightsServiceImpl service = service(
+				goals,
+				sessions,
+				evaluations);
+
+		var trends = service.getInsights(userId.toString()).abilityTrends();
+
+		assertEquals(10, trends.size());
+		assertEquals("session_2", trends.getFirst().sessionId());
+		assertEquals(new BigDecimal("2"), trends.getFirst().scores().accuracy());
+		assertEquals("2026-08-03T09:02+08:00",
+				trends.getFirst().completedAt().toString());
+		assertEquals("session_11", trends.getLast().sessionId());
+		assertEquals("CUSTOM_SCENE", trends.getLast().trainingType());
 	}
 
 	private ProfileInsightsServiceImpl service(
 			WeeklyLearningGoalRepository goals,
-			PracticeSessionRepository sessions) {
+			PracticeSessionRepository sessions,
+			SessionEvaluationRepository evaluations) {
 		return new ProfileInsightsServiceImpl(
 				goals,
 				sessions,
+				evaluations,
 				ZONE_ID,
 				Clock.fixed(NOW, ZONE_ID));
+	}
+
+	private PracticeSessionRecord record(
+			UUID userId,
+			String sessionId,
+			Instant endedAt,
+			SceneType type) {
+		return new PracticeSessionRecord(
+				sessionId,
+				userId,
+				type.sceneIdPrefix() + "_scene",
+				type,
+				SessionStatus.COMPLETED,
+				endedAt.minusSeconds(300),
+				endedAt);
+	}
+
+	private SessionScoreSnapshot snapshot(String sessionId, int score) {
+		BigDecimal value = BigDecimal.valueOf(score);
+		return new SessionScoreSnapshot(
+				sessionId,
+				value,
+				value,
+				value,
+				value,
+				value);
 	}
 
 	private PracticeSessionRecord record(UUID userId, long durationSeconds) {

@@ -860,6 +860,12 @@ class PostgresPersistenceIT {
 				1,
 				sessionEvaluationRepository.findBySceneId(definition.sceneId()).size());
 		assertEquals(
+				new BigDecimal("88.00"),
+				sessionEvaluationRepository.findScoreSnapshotsBySessionIds(
+						List.of("session_it1"))
+						.getFirst()
+						.accuracy());
+		assertEquals(
 				definition.sceneId(),
 				sentenceReadingRepository
 						.findSceneIdBySentenceId("sentence_it1")

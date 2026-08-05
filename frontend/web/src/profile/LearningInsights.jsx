@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { getProfileInsights, updateWeeklyLearningGoals } from "../apiClient.js";
+import { AbilityTrendChart } from "./AbilityTrendChart.jsx";
 
 const DURATION_MIN = 1;
 const DURATION_MAX = 1260;
@@ -295,6 +296,7 @@ export function LearningInsights() {
             />
           </section>
           <TrainingTypeDistribution items={insights.trainingTypeDistribution} />
+          <AbilityTrendChart items={insights.abilityTrends} />
         </>
       )}
 
