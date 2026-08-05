@@ -31,7 +31,15 @@ class InterviewExecutionCoordinatorTest {
 	@Test
 	void serializesTasksForTheSameInterviewAndTracksQueuedWork() throws Exception {
 		ExecutorService executor = Executors.newFixedThreadPool(2);
-		InterviewExecutionCoordinator coordinator = new InterviewExecutionCoordinator(executor);
+		CountDownLatch drainFinished = new CountDownLatch(1);
+		InterviewExecutionCoordinator coordinator = new InterviewExecutionCoordinator(
+				task -> executor.submit(() -> {
+					try {
+						task.run();
+					} finally {
+						drainFinished.countDown();
+					}
+				}));
 		CountDownLatch firstStarted = new CountDownLatch(1);
 		CountDownLatch releaseFirst = new CountDownLatch(1);
 		CountDownLatch finished = new CountDownLatch(2);
@@ -61,6 +69,7 @@ class InterviewExecutionCoordinatorTest {
 			assertTrue(queued.busy());
 			releaseFirst.countDown();
 			assertTrue(finished.await(5, TimeUnit.SECONDS));
+			assertTrue(drainFinished.await(5, TimeUnit.SECONDS));
 			assertEquals(List.of(1, 2), order);
 			assertEquals(1, maximumConcurrency.get());
 			assertFalse(coordinator.isBusy("interview_1"));
@@ -133,8 +142,15 @@ class InterviewExecutionCoordinatorTest {
 	@Test
 	void taskFailureDoesNotStrandLaterWorkOrBusyState() throws Exception {
 		ExecutorService executor = Executors.newSingleThreadExecutor();
+		CountDownLatch drainFinished = new CountDownLatch(1);
 		InterviewExecutionCoordinator coordinator = new InterviewExecutionCoordinator(
-				task -> executor.submit(task));
+				task -> executor.submit(() -> {
+					try {
+						task.run();
+					} finally {
+						drainFinished.countDown();
+					}
+				}));
 		CountDownLatch firstStarted = new CountDownLatch(1);
 		CountDownLatch releaseFirst = new CountDownLatch(1);
 		CountDownLatch secondFinished = new CountDownLatch(1);
@@ -150,6 +166,7 @@ class InterviewExecutionCoordinatorTest {
 			releaseFirst.countDown();
 
 			assertTrue(secondFinished.await(5, TimeUnit.SECONDS));
+			assertTrue(drainFinished.await(5, TimeUnit.SECONDS));
 			assertFalse(coordinator.isBusy("interview_1"));
 		} finally {
 			releaseFirst.countDown();
