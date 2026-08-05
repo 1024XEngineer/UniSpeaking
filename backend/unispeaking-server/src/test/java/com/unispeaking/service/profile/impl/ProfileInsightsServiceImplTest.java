@@ -1,6 +1,8 @@
 package com.unispeaking.service.profile.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -59,6 +61,10 @@ class ProfileInsightsServiceImplTest {
 		assertEquals("FREE_CHAT", distribution.getFirst().type());
 		assertEquals(300, distribution.getFirst().durationSeconds());
 		assertEquals(100.0, distribution.getFirst().percentage());
+		assertEquals(0, insights.weaknessAnalysis().sampleCount());
+		assertFalse(insights.weaknessAnalysis().reliable());
+		assertEquals(List.of(), insights.weaknesses());
+		assertEquals(List.of(), insights.recommendations());
 	}
 
 	@Test
@@ -88,6 +94,7 @@ class ProfileInsightsServiceImplTest {
 				response.weeklyGoals().trainingCountTarget());
 		assertEquals(List.of(), response.trainingTypeDistribution());
 		assertEquals(List.of(), response.abilityTrends());
+		assertFalse(response.weaknessAnalysis().reliable());
 	}
 
 	@Test
@@ -121,7 +128,8 @@ class ProfileInsightsServiceImplTest {
 				sessions,
 				evaluations);
 
-		var trends = service.getInsights(userId.toString()).abilityTrends();
+		var insights = service.getInsights(userId.toString());
+		var trends = insights.abilityTrends();
 
 		assertEquals(10, trends.size());
 		assertEquals("session_2", trends.getFirst().sessionId());
@@ -130,6 +138,11 @@ class ProfileInsightsServiceImplTest {
 				trends.getFirst().completedAt().toString());
 		assertEquals("session_11", trends.getLast().sessionId());
 		assertEquals("CUSTOM_SCENE", trends.getLast().trainingType());
+		assertTrue(insights.weaknessAnalysis().reliable());
+		assertEquals(10, insights.weaknessAnalysis().sampleCount());
+		assertEquals("accuracy", insights.weaknesses().getFirst().dimension());
+		assertEquals("CUSTOM_SCENE",
+				insights.recommendations().getFirst().trainingType());
 	}
 
 	private ProfileInsightsServiceImpl service(

@@ -9,6 +9,7 @@ import com.unispeaking.infrastructure.config.ProfileProperties;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.WeeklyLearningGoalRepository;
+import com.unispeaking.service.profile.AbilityWeaknessCalculator;
 import com.unispeaking.service.profile.ProfileInsightsService;
 import com.unispeaking.service.profile.WeeklyGoalProgressCalculator;
 import java.time.Clock;
@@ -33,6 +34,7 @@ public class ProfileInsightsServiceImpl implements ProfileInsightsService {
 	private final ZoneId zoneId;
 	private final Clock clock;
 	private final WeeklyGoalProgressCalculator calculator;
+	private final AbilityWeaknessCalculator weaknessCalculator;
 
 	@Autowired
 	public ProfileInsightsServiceImpl(
@@ -60,6 +62,7 @@ public class ProfileInsightsServiceImpl implements ProfileInsightsService {
 		this.zoneId = zoneId;
 		this.clock = clock;
 		this.calculator = new WeeklyGoalProgressCalculator();
+		this.weaknessCalculator = new AbilityWeaknessCalculator();
 	}
 
 	@Override
@@ -98,10 +101,16 @@ public class ProfileInsightsServiceImpl implements ProfileInsightsService {
 								item.durationSeconds(),
 								item.percentage()))
 						.toList();
+		List<ProfileInsightsResponse.AbilityTrendPoint> abilityTrends =
+				abilityTrends(id);
+		var weaknessResult = weaknessCalculator.calculate(abilityTrends);
 		return new ProfileInsightsResponse(
 				weeklyGoals,
 				distribution,
-				abilityTrends(id));
+				abilityTrends,
+				weaknessResult.analysis(),
+				weaknessResult.weaknesses(),
+				weaknessResult.recommendations());
 	}
 
 	private List<ProfileInsightsResponse.AbilityTrendPoint> abilityTrends(

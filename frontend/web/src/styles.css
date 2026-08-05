@@ -921,6 +921,42 @@ svg { display: block; }
 .ability-trends__empty { min-height: 210px; margin-top: 25px; display: grid; place-content: center; justify-items: center; gap: 12px; border-block: 1px solid #e6e6e1; color: #767672; }
 .ability-trends__empty svg { width: 28px; height: 28px; }
 .ability-trends__empty strong { color: #555551; font-size: 13px; }
+.weakness-insights { margin-top: 44px; padding: 34px 0 20px; border-top: 1px solid var(--line); }
+.weakness-insights > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.weakness-insights > header p { margin: 0 0 8px; color: #767672; font-size: 10px; font-weight: 760; letter-spacing: 0; }
+.weakness-insights > header h2 { margin: 0; font-size: 25px; letter-spacing: 0; }
+.weakness-insights > header > span { color: #777772; font-size: 11px; }
+.weakness-insights__empty { min-height: 190px; margin-top: 25px; padding: 32px; display: grid; grid-template-columns: 42px minmax(0, 1fr) minmax(160px, 220px); align-items: center; gap: 18px; border-block: 1px solid #e6e6e1; }
+.weakness-insights__empty > svg { width: 30px; height: 30px; color: #767672; }
+.weakness-insights__empty strong { display: block; font-size: 15px; }
+.weakness-insights__empty p { margin: 7px 0 0; color: #777772; font-size: 12px; }
+.weakness-insights__sample-progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.weakness-insights__sample-progress progress { width: 100%; height: 7px; border: 0; border-radius: 4px; overflow: hidden; appearance: none; }
+.weakness-insights__sample-progress progress::-webkit-progress-bar { background: #e9e9e5; }
+.weakness-insights__sample-progress progress::-webkit-progress-value { border-radius: 4px; background: #565652; }
+.weakness-insights__sample-progress progress::-moz-progress-bar { border-radius: 4px; background: #565652; }
+.weakness-insights__sample-progress span { color: #676762; font-size: 11px; font-weight: 740; }
+.weakness-insights__grid { margin-top: 25px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.weakness-card { min-height: 316px; padding: 25px; display: flex; flex-direction: column; border: 1px solid #d9d9d4; border-top: 3px solid var(--weakness-color); border-radius: 8px; background: #fff; }
+.weakness-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.weakness-card > header span { display: block; color: #777772; font-size: 10px; }
+.weakness-card > header h3 { margin: 7px 0 0; font-size: 24px; letter-spacing: 0; }
+.weakness-card__score { flex: 0 0 auto; text-align: right; }
+.weakness-card__score strong { display: block; color: var(--weakness-color); font-size: 32px; line-height: 1; letter-spacing: 0; }
+.weakness-card__score span { margin-top: 6px; }
+.weakness-card__basis { margin: 26px 0 10px; color: #62625e; font-size: 12px; }
+.weakness-card__change { width: fit-content; display: inline-flex; align-items: center; gap: 6px; color: #6e6e69; font-size: 11px; }
+.weakness-card__change svg { width: 14px; height: 14px; }
+.weakness-card__change.is-positive { color: #287057; }
+.weakness-card__change.is-negative { color: #b44d39; }
+.weakness-card > footer { margin-top: auto; padding-top: 22px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 18px; border-top: 1px solid #e7e7e2; }
+.weakness-card > footer > div > span { color: var(--weakness-color); font-size: 11px; font-weight: 760; }
+.weakness-card > footer p { margin: 6px 0 0; color: #62625e; font-size: 11px; line-height: 1.55; }
+.weakness-card > footer button { min-height: 40px; padding: 0 13px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid #292928; border-radius: 8px; background: #292928; color: #fff; font: inherit; font-size: 11px; font-weight: 720; white-space: nowrap; cursor: pointer; }
+.weakness-card > footer button:hover { background: #444441; }
+.weakness-card > footer button:focus-visible { outline: 2px solid #252524; outline-offset: 2px; }
+.weakness-card > footer button:disabled { border-color: #d4d4cf; background: #e8e8e4; color: #858580; cursor: not-allowed; }
+.weakness-card > footer button svg { width: 14px; height: 14px; }
 .learning-insights-error { min-height: 150px; margin-top: 28px; padding: 24px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border: 1px solid #ddd4c5; border-radius: 8px; background: #fffaf2; }
 .learning-insights-error strong { display: block; font-size: 15px; }
 .learning-insights-error p { margin: 7px 0 0; color: #83796b; font-size: 12px; }
@@ -1162,6 +1198,7 @@ svg { display: block; }
   .training-distribution__chart { width: 220px; }
   .training-distribution__legend { width: 100%; }
   .ability-trends__chart { width: 720px; }
+  .weakness-insights__grid { grid-template-columns: 1fr; }
   .achievement-system__header { align-items: flex-start; flex-direction: column; }
   .achievement-overall { width: 100%; }
   .achievement-filters { overflow-x: auto; padding-bottom: 4px; }
@@ -1188,6 +1225,12 @@ svg { display: block; }
   .training-distribution__chart { width: 196px; }
   .training-distribution__chart strong { font-size: 34px; }
   .ability-trends > header { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .weakness-insights > header { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .weakness-insights__empty { padding: 26px 4px; grid-template-columns: 38px minmax(0, 1fr); }
+  .weakness-insights__sample-progress { grid-column: 1 / -1; width: 100%; margin-top: 8px; }
+  .weakness-card { min-height: 330px; padding: 21px; }
+  .weakness-card > footer { grid-template-columns: 1fr; align-items: start; }
+  .weakness-card > footer button { justify-self: start; }
   .learning-goal-dialog { padding: 14px; }
   .learning-goal-dialog > section { padding: 21px; }
   .achievement-system { padding: 21px 16px; }

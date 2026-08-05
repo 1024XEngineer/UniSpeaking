@@ -62,7 +62,7 @@ GET /api/profile/insights
 Authorization: Bearer <accessToken>
 ```
 
-返回本周学习目标、真实完成进度、训练类型时长占比和最近五维能力趋势：
+返回本周学习目标、真实完成进度、训练类型时长占比、最近五维能力趋势、薄弱项与推荐训练：
 
 ```json
 {
@@ -100,6 +100,27 @@ Authorization: Bearer <accessToken>
         "naturalness": 63.2
       }
     }
+  ],
+  "weaknessAnalysis": {
+    "sampleCount": 3,
+    "minimumSampleCount": 3,
+    "reliable": true
+  },
+  "weaknesses": [
+    {
+      "dimension": "vocabulary",
+      "rank": 1,
+      "averageScore": 50.0,
+      "recentChange": 4.0,
+      "basis": "最近 3 次有效评分平均分最低"
+    }
+  ],
+  "recommendations": [
+    {
+      "dimension": "vocabulary",
+      "trainingType": "CUSTOM_SCENE",
+      "reason": "通过主题词汇和情景表达训练提升词汇运用"
+    }
   ]
 }
 ```
@@ -119,6 +140,12 @@ Authorization: Bearer <accessToken>
 - 能力趋势按训练完成时间选取最近 10 次，再按时间正序返回；时间使用 `Asia/Shanghai` 时区。
 - 五维字段保持为准确度、流利度、语法、词汇和自然度，不将准确度改名为发音。
 - 无报告或报告无法关联到当前用户已完成会话时不返回数据点，数组为空。
+- 薄弱项使用与 `abilityTrends` 相同的最近 10 次有效评分，至少 3 次才生成可靠结论。
+- `weaknesses` 返回平均分最低和第二低的维度；平分时按准确度、流利度、语法、词汇、自然度的固定顺序排序。
+- `averageScore` 是该维度样本平均分，`recentChange` 是最近一次与最早一次的分差，均保留一位小数。
+- 样本不足时 `weaknessAnalysis.reliable` 为 `false`，`weaknesses` 和 `recommendations` 均为空数组。
+- 推荐映射为：准确度、语法、词汇使用 `CUSTOM_SCENE`；流利度、自然度使用 `FREE_CHAT`。
+- 推荐仅指向当前真实可用的 Web 训练入口，未知或尚未接入的训练类型不得跳转到占位页面。
 
 ### 修改每周学习目标
 
