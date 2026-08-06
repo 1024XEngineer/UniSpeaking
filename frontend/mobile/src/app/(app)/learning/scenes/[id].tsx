@@ -1,26 +1,18 @@
-import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { useAppModel } from '@/model/AppModel';
 import { routes } from '@/navigation/routes';
-import { SceneAssetDetail } from '@/screens/AssetsScreen';
+import { SceneAssetDetailLoader } from '@/screens/AssetsScreen';
 
 export default function SceneLearningDetailRoute() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { sceneRecords, removeSceneRecord } = useAppModel();
-  const record = sceneRecords.find((item) => item.id === id);
-
-  if (!record) return <Redirect href={routes.tabs.learning} />;
 
   return (
-    <SceneAssetDetail
-      record={record}
+    <SceneAssetDetailLoader
+      sceneId={id}
       onBack={() => router.back()}
-      onPractice={() => router.push(routes.scenes.training(record.id, 'speak'))}
-      onDelete={() => {
-        removeSceneRecord(record.id);
-        router.replace(routes.tabs.learning);
-      }}
+      onPractice={() => router.push(routes.scenes.training(id, 'speak'))}
+      onDelete={() => router.replace(routes.tabs.learning)}
     />
   );
 }

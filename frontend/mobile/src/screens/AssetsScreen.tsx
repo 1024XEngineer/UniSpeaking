@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ArrowLeftIcon } from 'phosphor-react-native/src/icons/ArrowLeft';
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
@@ -14,8 +14,25 @@ import { TranslateIcon } from 'phosphor-react-native/src/icons/Translate';
 
 import { AppButton, AppScreen, Card, PageHeader, Pill, SectionTitle } from '@/components/ui';
 import type { LearningExpression, SceneLearningRecord } from '@/data/learningAssets';
-import { useAppModel } from '@/model/AppModel';
+import { LearningAssetService } from '@/features/scenes/LearningAssetService';
+import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
+import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
+import { ApiClient } from '@/infrastructure/http/ApiClient';
 import { colors } from '@/theme/tokens';
+
+type LearningAssetServicePort = Pick<
+  LearningAssetService,
+  'listRecords' | 'getRecord'
+>;
+
+function createLearningAssetService(): LearningAssetService {
+  return new LearningAssetService(
+    new ApiClient({
+      baseUrl: getRuntimeConfig().backendUrl,
+      tokenStore: new SecureTokenStore(),
+    }),
+  );
+}
 
 function AssetModuleMenu({ onIelts, onInterview }: { onIelts: () => void; onInterview: () => void }) {
   const [open, setOpen] = useState(false);
@@ -75,12 +92,44 @@ export function AssetsScreen({
   onOpenRecord,
   onOpenIelts,
   onOpenInterview,
+  assetService: injectedAssetService,
 }: {
   onOpenRecord: (record: SceneLearningRecord) => void;
   onOpenIelts: () => void;
   onOpenInterview: () => void;
+  assetService?: LearningAssetServicePort;
 }) {
-  const { sceneRecords } = useAppModel();
+  const [assetService] = useState<LearningAssetServicePort>(
+    () => injectedAssetService ?? createLearningAssetService(),
+  );
+  const [sceneRecords, setSceneRecords] = useState<SceneLearningRecord[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void assetService.listRecords().then(
+      (records) => {
+        if (active) setSceneRecords(records);
+      },
+      (cause: unknown) => {
+        if (active) {
+          setError(cause instanceof Error ? cause.message : '学习资产加载失败');
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [assetService, reloadKey]);
+
+  const reload = () => {
+    setError(null);
+    setSceneRecords(null);
+    setReloadKey((current) => current + 1);
+  };
+
+  const count = sceneRecords?.length ?? 0;
   return (
     <AppScreen>
       <PageHeader
@@ -89,10 +138,23 @@ export function AssetsScreen({
         subtitle="把场景练习中真正用过的表达，留在这里继续复习。"
         action={<AssetModuleMenu onIelts={onOpenIelts} onInterview={onOpenInterview} />}
       />
-      <SectionTitle eyebrow="TRAINING HISTORY" title="场景训练记录" action={<Text style={styles.count}>{sceneRecords.length} 条</Text>} />
+      <SectionTitle eyebrow="TRAINING HISTORY" title="场景训练记录" action={<Text style={styles.count}>{count} 条</Text>} />
       <Card style={styles.recordsCard}>
-        {sceneRecords.map((record) => <SceneRecordRow key={record.id} record={record} onPress={() => onOpenRecord(record)} />)}
-        {!sceneRecords.length ? (
+        {sceneRecords?.map((record) => <SceneRecordRow key={record.id} record={record} onPress={() => onOpenRecord(record)} />)}
+        {sceneRecords === null && !error ? (
+          <View style={styles.empty}>
+            <BookOpenTextIcon color={colors.subtle} size={30} />
+            <Text style={styles.emptyTitle}>正在同步场景学习资产…</Text>
+          </View>
+        ) : null}
+        {error ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>暂时无法加载</Text>
+            <Text style={styles.emptyText}>{error}</Text>
+            <AppButton title="重新加载" variant="soft" onPress={reload} />
+          </View>
+        ) : null}
+        {sceneRecords?.length === 0 ? (
           <View style={styles.empty}>
             <BookOpenTextIcon color={colors.subtle} size={30} />
             <Text style={styles.emptyTitle}>暂无场景学习资产</Text>
@@ -182,6 +244,77 @@ export function SceneAssetDetail({ record, onBack, onPractice, onDelete }: { rec
         </View>
       </Modal>
     </>
+  );
+}
+
+export function SceneAssetDetailLoader({
+  sceneId,
+  onBack,
+  onPractice,
+  onDelete,
+  assetService: injectedAssetService,
+}: {
+  sceneId: string;
+  onBack: () => void;
+  onPractice: () => void;
+  onDelete: () => void;
+  assetService?: LearningAssetServicePort;
+}) {
+  const [assetService] = useState<LearningAssetServicePort>(
+    () => injectedAssetService ?? createLearningAssetService(),
+  );
+  const [record, setRecord] = useState<SceneLearningRecord | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void assetService.getRecord(sceneId).then(
+      (nextRecord) => {
+        if (active) setRecord(nextRecord);
+      },
+      (cause: unknown) => {
+        if (active) {
+          setError(cause instanceof Error ? cause.message : '学习资产详情加载失败');
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [assetService, reloadKey, sceneId]);
+
+  const reload = () => {
+    setError(null);
+    setRecord(null);
+    setReloadKey((current) => current + 1);
+  };
+
+  if (record) {
+    return (
+      <SceneAssetDetail
+        record={record}
+        onBack={onBack}
+        onPractice={onPractice}
+        onDelete={onDelete}
+      />
+    );
+  }
+
+  return (
+    <AppScreen>
+      <View style={styles.detailBar}>
+        <Pressable accessibilityRole="button" accessibilityLabel="返回" onPress={onBack} style={styles.roundButton}><ArrowLeftIcon color={colors.ink} size={20} weight="bold" /></Pressable>
+      </View>
+      <Card style={styles.recordsCard}>
+        <View style={styles.empty}>
+          <BookOpenTextIcon color={colors.subtle} size={30} />
+          <Text style={styles.emptyTitle}>{error ? '暂时无法加载' : '正在加载学习资产…'}</Text>
+          {error ? <Text style={styles.emptyText}>{error}</Text> : null}
+          {error ? <AppButton title="重新加载" variant="soft" onPress={reload} /> : null}
+        </View>
+      </Card>
+    </AppScreen>
   );
 }
 
