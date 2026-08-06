@@ -92,11 +92,9 @@ public class SecurityConfig {
 	}
 
 	@Bean
-	CorsConfigurationSource corsConfigurationSource() {
+	CorsConfigurationSource corsConfigurationSource(WebOriginProperties webOriginProperties) {
 		CorsConfiguration configuration = new CorsConfiguration();
-		configuration.setAllowedOriginPatterns(List.of(
-				"http://localhost:*",
-				"http://127.0.0.1:*"));
+		configuration.setAllowedOriginPatterns(webOriginProperties.getAllowedOriginPatterns());
 		configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
 		configuration.setAllowedHeaders(List.of(
 				"Authorization",

@@ -13,20 +13,21 @@ public class SessionWebSocketConfig implements WebSocketConfigurer {
 
 	private final SessionMessageWebSocketHandler sessionMessageWebSocketHandler;
 	private final SessionWebSocketAuthenticationInterceptor authenticationInterceptor;
+	private final WebOriginProperties webOriginProperties;
 
 	public SessionWebSocketConfig(
 			SessionMessageWebSocketHandler sessionMessageWebSocketHandler,
-			SessionWebSocketAuthenticationInterceptor authenticationInterceptor) {
+			SessionWebSocketAuthenticationInterceptor authenticationInterceptor,
+			WebOriginProperties webOriginProperties) {
 		this.sessionMessageWebSocketHandler = sessionMessageWebSocketHandler;
 		this.authenticationInterceptor = authenticationInterceptor;
+		this.webOriginProperties = webOriginProperties;
 	}
 
 	@Override
 	public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
 		registry.addHandler(sessionMessageWebSocketHandler, "/ws/session-messages")
 				.addInterceptors(authenticationInterceptor)
-				.setAllowedOriginPatterns(
-						"http://localhost:*",
-						"http://127.0.0.1:*");
+				.setAllowedOriginPatterns(webOriginProperties.getAllowedOriginPatterns().toArray(String[]::new));
 	}
 }
