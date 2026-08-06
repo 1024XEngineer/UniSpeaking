@@ -18,6 +18,10 @@ services:
   backend:
     build:
       context: ../backend/unispeaking-server
+      args:
+        MAVEN_REPO_URL: ${MAVEN_REPO_URL:-https://maven.aliyun.com/repository/public}
+        PYPI_INDEX_URL: ${PYPI_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        PADDLE_PDX_MODEL_SOURCE: ${PADDLE_PDX_MODEL_SOURCE:-bos}
     env_file:
       - ./env/.env
     expose:
@@ -33,6 +37,7 @@ services:
       args:
         VITE_BACKEND_URL: ${VITE_BACKEND_URL:-/backend}
         VITE_FEEDBACK_URL: ${VITE_FEEDBACK_URL:-}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     expose:
       - "80"
     restart: unless-stopped
