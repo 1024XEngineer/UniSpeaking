@@ -33,6 +33,11 @@ nano deploy/env/.env
 Replace every credential placeholder. Keep `DATABASE_URL` pointed at the
 Compose service name `postgres`, not `localhost`.
 
+The environment template also selects mainland China mirrors for Maven, PyPI,
+npm, and PaddleOCR models. These values affect image builds only. The Docker
+daemon registry mirror remains configured separately in
+`/etc/docker/daemon.json` on the server.
+
 ## Initialize a new database
 
 The consolidated baseline is for an empty database only. Start PostgreSQL by
