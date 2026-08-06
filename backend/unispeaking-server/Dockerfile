@@ -11,7 +11,11 @@ FROM eclipse-temurin:21-jre AS java-runtime
 FROM python:3.11-slim-bookworm AS ocr-base
 WORKDIR /app
 
-RUN apt-get update \
+RUN sed -i \
+        -e 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' \
+        -e 's|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=3 update \
     && apt-get install -y --no-install-recommends \
         libgomp1 \
         libgl1 \
@@ -42,7 +46,11 @@ RUN python /app/ocr/paddle_ocr_runner.py \
 FROM python:3.11-slim-bookworm
 WORKDIR /app
 
-RUN apt-get update \
+RUN sed -i \
+        -e 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' \
+        -e 's|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=3 update \
     && apt-get install -y --no-install-recommends \
         libgomp1 \
         libgl1 \
