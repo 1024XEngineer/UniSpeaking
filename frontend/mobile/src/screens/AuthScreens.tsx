@@ -184,7 +184,7 @@ export function AuthFormScreen({
   onBack: () => void;
   onSwitch: () => void;
 }) {
-  const { nickname, setNickname, signIn, signUp } = useAppModel();
+  const { authError, authStatus, nickname, setNickname, signIn, signUp } = useAppModel();
   const [draftNickname, setDraftNickname] = useState(nickname);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -194,15 +194,24 @@ export function AuthFormScreen({
   const nicknameValid = mode === 'login' || draftNickname.trim().length >= 2;
   const valid = emailValid && passwordValid && nicknameValid;
 
-  const submit = () => {
+  const submit = async () => {
     setSubmitted(true);
     if (!valid) return;
-    if (mode === 'signup') {
-      setNickname(draftNickname.trim());
-      signUp();
-      return;
+    try {
+      if (mode === 'signup') {
+        const nextNickname = draftNickname.trim();
+        setNickname(nextNickname);
+        await signUp({
+          username: email.trim(),
+          password,
+          nickname: nextNickname,
+        });
+        return;
+      }
+      await signIn({ username: email.trim(), password });
+    } catch {
+      // The controller publishes the backend-safe message through authError.
     }
-    signIn();
   };
 
   return (
@@ -260,15 +269,18 @@ export function AuthFormScreen({
             autoCapitalize="none"
             autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
             style={[styles.input, submitted && !passwordValid && styles.inputError]}
-            onSubmitEditing={submit}
+            onSubmitEditing={() => void submit()}
           />
           {submitted && !passwordValid ? <Text style={styles.errorText}>密码至少需要 8 位字符</Text> : null}
         </View>
       </View>
 
+      {authError ? <Text accessibilityRole="alert" style={styles.errorText}>{authError}</Text> : null}
+
       <AppButton
         title={mode === 'login' ? '登录' : '注册并继续'}
-        onPress={submit}
+        disabled={authStatus === 'authenticating'}
+        onPress={() => void submit()}
         style={styles.fullWidth}
       />
 
@@ -342,8 +354,7 @@ export function TeacherOnboardingScreen({ onComplete }: { onComplete: () => void
       <OnboardingFooter
         title="选择这位老师"
         onPress={() => {
-          completeOnboarding();
-          onComplete();
+          void completeOnboarding().then(onComplete);
         }}
       />
     </SafeAreaView>
