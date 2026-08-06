@@ -66,26 +66,20 @@ export function getCurrentUser() {
   return request("/api/auth/me");
 }
 
-export function createHelpFeedback(feedback) {
-  return request("/api/feedbacks", {
-    method: "POST",
-    body: JSON.stringify(feedback),
-  });
-}
-
-export function lookupHelpFeedback(feedbackNo, lookupCode) {
-  return request(`/api/feedbacks/lookup/${encodeURIComponent(feedbackNo)}`, {
-    headers: { "X-Feedback-Lookup-Code": lookupCode },
-  });
-}
-
-export function getMyHelpFeedbacks() {
-  return request("/api/feedbacks/mine");
-}
-
 export function getProfileOverview(month) {
   const query = month ? `?month=${encodeURIComponent(month)}` : "";
   return request(`/api/profile/overview${query}`);
+}
+
+export function getProfileInsights() {
+  return request("/api/profile/insights");
+}
+
+export function updateWeeklyLearningGoals(goals) {
+  return request("/api/profile/insights/goals", {
+    method: "PUT",
+    body: JSON.stringify(goals),
+  });
 }
 
 export function getAchievementOverview() {

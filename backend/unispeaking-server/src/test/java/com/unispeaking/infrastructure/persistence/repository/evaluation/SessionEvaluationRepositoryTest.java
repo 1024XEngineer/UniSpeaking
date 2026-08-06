@@ -15,6 +15,7 @@ import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.domain.dto.asset.SessionEvaluationRecord;
 import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
 import com.unispeaking.domain.po.achievement.AchievementEvaluationFact;
+import com.unispeaking.domain.po.evaluation.SessionScoreSnapshot;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.SessionEvaluationEntity;
 import com.unispeaking.infrastructure.persistence.mapper.evaluation.SessionEvaluationMapper;
 import java.math.BigDecimal;
@@ -223,6 +224,26 @@ class SessionEvaluationRepositoryTest {
 		assertEquals("session-1", facts.getFirst().sessionId());
 		assertEquals(new BigDecimal("91"), facts.getFirst().finalScore());
 		assertTrue(repository.findAchievementFacts(List.of(), null).isEmpty());
+	}
+
+	@Test
+	void listsFiveDimensionSnapshotsForOwnedSessions() {
+		SessionEvaluationMapper mapper = mock(SessionEvaluationMapper.class);
+		SessionEvaluationEntity entity = entity("scene-1", "session-1");
+		when(mapper.selectList(any())).thenReturn(List.of(entity));
+		SessionEvaluationRepository repository =
+				new SessionEvaluationRepository(mapper);
+
+		List<SessionScoreSnapshot> snapshots =
+				repository.findScoreSnapshotsBySessionIds(
+						List.of("session-1", "session-1", " "));
+
+		assertEquals(1, snapshots.size());
+		assertEquals("session-1", snapshots.getFirst().sessionId());
+		assertEquals(new BigDecimal("90"), snapshots.getFirst().accuracy());
+		assertEquals(new BigDecimal("86"), snapshots.getFirst().naturalness());
+		assertTrue(repository.findScoreSnapshotsBySessionIds(List.of()).isEmpty());
+		assertTrue(repository.findScoreSnapshotsBySessionIds(null).isEmpty());
 	}
 
 	private DialogueReportResult report() {

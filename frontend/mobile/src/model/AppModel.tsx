@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   createContext,
   type PropsWithChildren,
@@ -10,6 +9,18 @@ import {
 } from 'react';
 
 import {
+  AuthSessionController,
+  type AuthSessionState,
+} from '@/features/auth/AuthSessionController';
+import { AuthService, type UserPreference } from '@/features/auth/AuthService';
+import {
+  cefrLevelForLevel,
+  levelForCefrLevel,
+  speedLabelForCode,
+  teacherForVoice,
+  voiceForTeacher,
+} from '@/features/auth/preferenceMappings';
+import {
   initialIeltsLearningRecords,
   initialInterviewLearningRecords,
   initialSceneLearningRecords,
@@ -17,16 +28,40 @@ import {
   type InterviewLearningRecord,
   type SceneLearningRecord,
 } from '@/data/learningAssets';
-import { teachers, type Teacher } from '@/theme/tokens';
+import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
+import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
+import { ApiClient } from '@/infrastructure/http/ApiClient';
+import { levels, teachers, type Teacher } from '@/theme/tokens';
+
+export type AppModelAuthController = {
+  getSnapshot(): AuthSessionState;
+  subscribe(listener: (state: AuthSessionState) => void): () => void;
+  bootstrap(): Promise<void>;
+  login(input: { username: string; password: string }): Promise<void>;
+  register(input: {
+    username: string;
+    password: string;
+    nickname: string | null;
+  }): Promise<void>;
+  updatePreference(patch: Partial<UserPreference>): Promise<UserPreference>;
+  logout(): Promise<void>;
+  unauthorized(): Promise<void>;
+};
 
 type AppModelValue = {
   isModelReady: boolean;
   isAuthenticated: boolean;
   hasCompletedOnboarding: boolean;
-  signIn: () => void;
-  signUp: () => void;
-  completeOnboarding: () => void;
-  signOut: () => void;
+  authStatus: AuthSessionState['status'];
+  authError: string | null;
+  signIn: (input: { username: string; password: string }) => Promise<void>;
+  signUp: (input: {
+    username: string;
+    password: string;
+    nickname: string | null;
+  }) => Promise<void>;
+  completeOnboarding: () => Promise<void>;
+  signOut: () => Promise<void>;
   nickname: string;
   setNickname: (value: string) => void;
   speed: string;
@@ -47,12 +82,32 @@ type AppModelValue = {
 };
 
 const AppModelContext = createContext<AppModelValue | null>(null);
-const onboardingStorageKey = 'unispeaking.onboarding.v1';
 
-export function AppModelProvider({ children }: PropsWithChildren) {
-  const [isModelReady, setIsModelReady] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
+function createDefaultAuthController(): AppModelAuthController {
+  const tokenStore = new SecureTokenStore();
+  let controller: AuthSessionController;
+  const apiClient = new ApiClient({
+    baseUrl: getRuntimeConfig().backendUrl,
+    tokenStore,
+    onUnauthorized: () => controller.unauthorized(),
+  });
+  controller = new AuthSessionController({
+    tokenStore,
+    authService: new AuthService(apiClient),
+  });
+  return controller;
+}
+
+export function AppModelProvider({
+  children,
+  authController: injectedAuthController,
+}: PropsWithChildren<{ authController?: AppModelAuthController }>) {
+  const [authController] = useState<AppModelAuthController>(
+    () => injectedAuthController ?? createDefaultAuthController(),
+  );
+  const [authState, setAuthState] = useState<AuthSessionState>(
+    () => authController.getSnapshot(),
+  );
   const [nickname, setNickname] = useState('Yufan');
   const [speed, setSpeed] = useState('自然');
   const [level, setLevel] = useState('starter');
@@ -63,27 +118,19 @@ export function AppModelProvider({ children }: PropsWithChildren) {
   const [membership, setMembership] = useState('免费版');
 
   useEffect(() => {
-    let active = true;
-    const hydrateOnboarding = async () => {
-      try {
-        const saved = await AsyncStorage.getItem(onboardingStorageKey);
-        if (!saved || !active) return;
-        const preference = JSON.parse(saved) as { completed?: boolean; level?: string; teacherId?: string };
-        if (preference.completed) setHasCompletedOnboarding(true);
-        if (preference.level) setLevel(preference.level);
-        const savedTeacher = teachers.find((item) => item.id === preference.teacherId);
-        if (savedTeacher) setTeacher(savedTeacher);
-      } catch {
-        // A damaged local preference should never block sign-in.
-      } finally {
-        if (active) setIsModelReady(true);
-      }
-    };
-    void hydrateOnboarding();
-    return () => {
-      active = false;
-    };
-  }, []);
+    const unsubscribe = authController.subscribe(setAuthState);
+    setAuthState(authController.getSnapshot());
+    void authController.bootstrap();
+    return unsubscribe;
+  }, [authController]);
+
+  useEffect(() => {
+    if (authState.user?.nickname) setNickname(authState.user.nickname);
+    if (!authState.preference) return;
+    setLevel(levelForCefrLevel(authState.preference.cefrLevel, levels).id);
+    setTeacher(teacherForVoice(authState.preference.preferredVoice, teachers));
+    setSpeed(speedLabelForCode(authState.preference.preferredAiSpeechSpeed));
+  }, [authState.preference, authState.user]);
 
   const addSceneRecord = useCallback((record: SceneLearningRecord) => {
     setSceneRecords((current) => [record, ...current.filter((item) => item.id !== record.id)]);
@@ -101,32 +148,40 @@ export function AppModelProvider({ children }: PropsWithChildren) {
     setSceneRecords((current) => current.filter((item) => item.id !== id));
   }, []);
 
-  const signIn = useCallback(() => {
-    setIsAuthenticated(true);
-  }, []);
+  const signIn = useCallback(
+    (input: { username: string; password: string }) => authController.login(input),
+    [authController],
+  );
 
-  const signUp = useCallback(() => {
-    setIsAuthenticated(true);
-    setHasCompletedOnboarding(false);
-  }, []);
+  const signUp = useCallback(
+    (input: { username: string; password: string; nickname: string | null }) =>
+      authController.register(input),
+    [authController],
+  );
 
-  const completeOnboarding = useCallback(() => {
-    setHasCompletedOnboarding(true);
-    void AsyncStorage.setItem(
-      onboardingStorageKey,
-      JSON.stringify({ completed: true, level, teacherId: teacher.id }),
-    );
-  }, [level, teacher.id]);
+  const completeOnboarding = useCallback(async () => {
+    const selectedLevel = levels.find((option) => option.id === level) ?? levels[0];
+    await authController.updatePreference({
+      cefrLevel: cefrLevelForLevel(selectedLevel),
+      preferredVoice: voiceForTeacher(teacher),
+    });
+  }, [authController, level, teacher]);
 
-  const signOut = useCallback(() => {
-    setIsAuthenticated(false);
-  }, []);
+  const signOut = useCallback(() => authController.logout(), [authController]);
+
+  const isModelReady = authState.status !== 'booting';
+  const isAuthenticated = authState.status === 'authenticated';
+  const hasCompletedOnboarding = Boolean(
+    authState.preference?.cefrLevel && authState.preference?.preferredVoice,
+  );
 
   const value = useMemo(
     () => ({
       isModelReady,
       isAuthenticated,
       hasCompletedOnboarding,
+      authStatus: authState.status,
+      authError: authState.error,
       signIn,
       signUp,
       completeOnboarding,
@@ -157,6 +212,8 @@ export function AppModelProvider({ children }: PropsWithChildren) {
       hasCompletedOnboarding,
       isModelReady,
       isAuthenticated,
+      authState.error,
+      authState.status,
       level,
       membership,
       nickname,

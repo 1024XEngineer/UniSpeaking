@@ -55,6 +55,116 @@ Authorization: Bearer <accessToken>
 - 有效会话跨越上海零点时，时长按每个自然日实际覆盖区间拆分。
 - 接口始终返回精确秒数；当前页面对非零有效秒数按分钟向上展示，因此 30～59 秒显示为 1 分钟。
 
+### 查询学习目标与洞察
+
+```text
+GET /api/profile/insights
+Authorization: Bearer <accessToken>
+```
+
+返回本周学习目标、真实完成进度、训练类型时长占比、最近五维能力趋势、薄弱项与推荐训练：
+
+```json
+{
+  "weeklyGoals": {
+    "weekStartsAt": "2026-08-03T00:00:00+08:00",
+    "weekEndsAt": "2026-08-10T00:00:00+08:00",
+    "durationTargetMinutes": 120,
+    "completedDurationSeconds": 4560,
+    "remainingDurationSeconds": 2640,
+    "durationProgress": 63.3,
+    "durationAchieved": false,
+    "trainingCountTarget": 5,
+    "completedTrainingCount": 3,
+    "remainingTrainingCount": 2,
+    "countProgress": 60.0,
+    "countAchieved": false
+  },
+  "trainingTypeDistribution": [
+    {
+      "type": "CUSTOM_SCENE",
+      "durationSeconds": 4560,
+      "percentage": 100.0
+    }
+  ],
+  "abilityTrends": [
+    {
+      "sessionId": "custom_session1",
+      "completedAt": "2026-08-03T15:37:00+08:00",
+      "trainingType": "CUSTOM_SCENE",
+      "scores": {
+        "accuracy": 62.5,
+        "fluency": 84.8,
+        "grammar": 55.0,
+        "vocabulary": 50.0,
+        "naturalness": 63.2
+      }
+    }
+  ],
+  "weaknessAnalysis": {
+    "sampleCount": 3,
+    "minimumSampleCount": 3,
+    "reliable": true
+  },
+  "weaknesses": [
+    {
+      "dimension": "vocabulary",
+      "rank": 1,
+      "averageScore": 50.0,
+      "recentChange": 4.0,
+      "basis": "最近 3 次有效评分平均分最低"
+    }
+  ],
+  "recommendations": [
+    {
+      "dimension": "vocabulary",
+      "trainingType": "CUSTOM_SCENE",
+      "reason": "通过主题词汇和情景表达训练提升词汇运用"
+    }
+  ]
+}
+```
+
+统计口径：
+
+- 周期为 `Asia/Shanghai` 时区的周一 00:00 至当前时刻。
+- 仅统计 `COMPLETED` 且整场时长不少于 30 秒的会话。
+- 当前仅统计 `FREE_CHAT` 和 `CUSTOM_SCENE`；IELTS 与 Interview 完成真实会话链路后再纳入。
+- 时长按会话与本周的实际重叠区间计算；次数按会话完成时间所在周归属。
+- 进度保留一位小数并封顶 100%，超额完成仍会在实际时长或次数中体现。
+- 未设置目标时使用 120 分钟和 5 次的业务默认值。数据库字段保持可空，不设数据库默认值或数值范围约束。
+- `trainingTypeDistribution` 按相同有效会话口径聚合本周重叠时长，只返回实际产生有效时长的类型。
+- 当前占比仅纳入 `FREE_CHAT` 和 `CUSTOM_SCENE`，百分比保留一位小数；无有效训练时返回空数组。
+- 客户端预留 `IELTS_SCENE`、`INTERVIEW_SCENE` 和未知类型显示，真实训练链路接入后再调整后端纳入范围。
+- `abilityTrends` 只读取当前用户状态为 `COMPLETED` 且已经生成 `session_evaluation` 五维报告的会话。
+- 能力趋势按训练完成时间选取最近 10 次，再按时间正序返回；时间使用 `Asia/Shanghai` 时区。
+- 五维字段保持为准确度、流利度、语法、词汇和自然度，不将准确度改名为发音。
+- 无报告或报告无法关联到当前用户已完成会话时不返回数据点，数组为空。
+- 薄弱项使用与 `abilityTrends` 相同的最近 10 次有效评分，至少 3 次才生成可靠结论。
+- `weaknesses` 返回平均分最低和第二低的维度；平分时按准确度、流利度、语法、词汇、自然度的固定顺序排序。
+- `averageScore` 是该维度样本平均分，`recentChange` 是最近一次与最早一次的分差，均保留一位小数。
+- 样本不足时 `weaknessAnalysis.reliable` 为 `false`，`weaknesses` 和 `recommendations` 均为空数组。
+- 推荐映射为：准确度、语法、词汇使用 `CUSTOM_SCENE`；流利度、自然度使用 `FREE_CHAT`。
+- 推荐仅指向当前真实可用的 Web 训练入口，未知或尚未接入的训练类型不得跳转到占位页面。
+
+### 修改每周学习目标
+
+```text
+PUT /api/profile/insights/goals
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+```json
+{
+  "durationTargetMinutes": 120,
+  "trainingCountTarget": 5
+}
+```
+
+`durationTargetMinutes` 必须为 1～1260 的整数，`trainingCountTarget` 必须为
+1～70 的整数。更新成功后返回与查询接口相同的完整洞察结构。
+
 ### 修改用户名（昵称）
 
 ```text

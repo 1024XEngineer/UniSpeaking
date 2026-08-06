@@ -1,5 +1,6 @@
 import { ArrowLeft, CaretRight, Lifebuoy } from "@phosphor-icons/react";
 import { paths } from "../router.js";
+import { ExternalFeedbackLink } from "./ExternalFeedbackLink.jsx";
 import { handleHelpLinkClick } from "./helpUtils.js";
 
 export function HelpCategory({ category, articles, onNavigate }) {
@@ -42,13 +43,10 @@ export function HelpCategory({ category, articles, onNavigate }) {
       {category.id === "feedback" && (
         <aside className="help-category-feedback">
           <Lifebuoy weight="duotone" aria-hidden="true" />
-          <div><strong>已经完成基础排查？</strong><p>使用反馈页整理复现步骤和环境信息，当前阶段不会自动上传内容。</p></div>
-          <a
-            href={paths.help.feedback}
-            onClick={(event) => handleHelpLinkClick(event, paths.help.feedback, onNavigate)}
-          >
-            前往问题反馈
-          </a>
+          <div><strong>已经完成基础排查？</strong><p>通过独立问卷提交复现步骤和设备环境，反馈数据由问卷平台收集。</p></div>
+          <ExternalFeedbackLink>
+            {(configured) => configured ? "前往问题反馈" : "反馈入口待配置"}
+          </ExternalFeedbackLink>
         </aside>
       )}
     </main>

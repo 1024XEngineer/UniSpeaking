@@ -25,7 +25,6 @@ import {
   MicrophoneSlash,
   PaperPlaneTilt,
   Pause,
-  Password,
   PencilSimple,
   PhoneDisconnect,
   Play,
@@ -50,10 +49,12 @@ import {
   ChevronRight,
   Compass,
   Footprints,
+  Info,
   MessagesSquare,
   PackageCheck,
   Sparkles,
   Target,
+  ChartLine,
 } from "lucide-react";
 import { learningItems, levels, plans, recommendations, teachers } from "./data.js";
 import {
@@ -87,6 +88,10 @@ import { InterviewAssets, InterviewTrainingCenter } from "./InterviewModule.jsx"
 import { HelpCenter } from "./help/HelpCenter.jsx";
 import { HelpLayout } from "./help/HelpLayout.jsx";
 import { NewtonsCradle } from "./NewtonsCradle.jsx";
+import { LearningInsights } from "./profile/LearningInsights.jsx";
+import { AccountSecurity } from "./profile/AccountSecurity.jsx";
+import { AboutProduct } from "./profile/AboutProduct.jsx";
+import { ProductLegalDocument } from "./profile/ProductLegalDocument.jsx";
 import { hrefForPage, paths, resolveRoute } from "./router.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
@@ -703,7 +708,7 @@ function AppShell({ page, setPage, teacher, avatarUrl, children }) {
       <aside className={cx("sidebar", sidebarOpen && "is-open")} onMouseEnter={() => setSidebarOpen(true)} onMouseLeave={() => setSidebarOpen(false)}>
         <Brand compact={!sidebarOpen} />
         <nav>{items.map(({ id, label, icon: Icon }) => <button key={id} className={cx("sidebar__item", activePage === id && "is-active")} onClick={() => { if (activePage !== id) setPage(id); }} aria-label={label} title={label}><Icon weight={activePage === id ? "bold" : "regular"} /><span className="sidebar__label"><span>{label}</span></span></button>)}</nav>
-        <button className={cx("sidebar__avatar", ["profile", "membership", "settings", "help"].includes(page) && "is-active")} onClick={() => setPage("profile")}><img src={avatarUrl || teacher.image} alt="个人中心" /></button>
+        <button className={cx("sidebar__avatar", ["profile", "insights", "membership", "settings", "help", "about"].includes(page) && "is-active")} onClick={() => setPage("profile")}><img src={avatarUrl || teacher.image} alt="个人中心" /></button>
       </aside>
       <div className="app-main">{children}</div>
     </div>
@@ -2171,12 +2176,19 @@ function ProfileEditModal({ account, user, avatarUrl, onClose, onNicknameChange,
   return <Modal onClose={submitting ? undefined : onClose} className="profile-edit-modal"><p className="eyebrow">EDIT PROFILE</p><h2>编辑个人资料</h2><p className="modal-lead">修改你的展示用户名或个人头像。</p><form className="profile-edit-form" onSubmit={submit}><div className="profile-edit-avatar"><img src={previewUrl} alt="头像预览" /><div><strong>个人头像</strong><small>支持 JPEG、PNG，文件不超过 2 MiB</small><label className="profile-avatar-picker">选择新头像<input type="file" accept="image/jpeg,image/png" disabled={submitting} onChange={selectAvatar} /></label></div></div><label className="profile-edit-name">用户名<input type="text" minLength={1} maxLength={80} required disabled={submitting} value={nickname} onChange={(event) => setNickname(event.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><Button type="button" variant="secondary" disabled={submitting} onClick={onClose}>取消</Button><Button type="submit" disabled={submitting}>{submitting ? "正在保存" : "保存修改"}</Button></div></form></Modal>;
 }
 
-function Profile({ section, setSection, helpRoute, onHelpNavigate, user, profile, teacher, speed, level, onSettingsChange, onMonthChange, onNicknameChange, onAvatarChange, onPasswordChange, onAssets, onLogout }) {
+function Profile({ section, setSection, helpRoute, aboutRoute, onHelpNavigate, onAboutNavigate, user, profile, teacher, speed, level, onSettingsChange, onMonthChange, onNicknameChange, onAvatarChange, onPasswordChange, onAssets, onLogout }) {
   const account = profile?.account;
   const displayName = account?.displayName || user?.nickname || user?.username?.split("@")[0] || "UniSpeaking User";
   const email = account?.email || user?.username || "";
   const avatarUrl = account?.avatarUrl || teacher.image;
   const [profileEditOpen, setProfileEditOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const startRecommendedTraining = (trainingType) => {
+    const destination = trainingType === "FREE_CHAT"
+      ? "conversation"
+      : trainingType === "CUSTOM_SCENE" ? "scenes" : null;
+    if (destination) setSection(destination);
+  };
   return (
     <main className="profile-layout">
       <aside className="profile-nav">
@@ -2189,19 +2201,28 @@ function Profile({ section, setSection, helpRoute, onHelpNavigate, user, profile
         </div>
         <nav aria-label="个人中心导航">
           <button className={section === "profile" ? "is-active" : ""} onClick={() => setSection("profile")}><User />个人概览</button>
+          <button className={section === "insights" ? "is-active" : ""} onClick={() => setSection("insights")}><ChartLine />学习目标与洞察</button>
           <button className={section === "membership" ? "is-active" : ""} onClick={() => setSection("membership")}><Crown />会员权益</button>
           <button className={section === "settings" ? "is-active" : ""} onClick={() => setSection("settings")}><SlidersHorizontal />助手设置</button>
-          <button className={section === "help" ? "is-active" : ""} onClick={() => setSection("help")}><Lifebuoy />帮助与反馈</button>
+          <button className={section === "security" ? "is-active" : ""} onClick={() => setSection("security")}><ShieldCheck />账号与安全</button>
+          <button className={section === "help" ? "is-active" : ""} onClick={() => setSection("help")}><Lifebuoy />帮助中心</button>
+          <button className={section === "about" ? "is-active" : ""} onClick={() => setSection("about")}><Info />关于产品</button>
         </nav>
         <button className="logout" onClick={onLogout}><SignOut />退出登录</button>
       </aside>
       <section className={cx("profile-content", section === "help" && "profile-content--help")}>
         {section === "profile" && <Overview calendar={profile?.calendar} statistics={profile?.statistics} onMonthChange={onMonthChange} onAssets={onAssets} />}
+        {section === "insights" && <LearningInsights onStartTraining={startRecommendedTraining} />}
         {section === "membership" && <Membership />}
-        {section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} onPasswordChange={onPasswordChange} />}
+        {section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} />}
+        {section === "security" && <AccountSecurity email={email} onOpenPassword={() => setPasswordOpen(true)} onLogout={onLogout} />}
         {section === "help" && <HelpCenter route={helpRoute} onNavigate={onHelpNavigate} />}
+        {section === "about" && (aboutRoute?.screen === "document"
+          ? <ProductLegalDocument documentId={aboutRoute.documentId} onNavigate={onAboutNavigate} />
+          : <AboutProduct onNavigate={onAboutNavigate} onHelpNavigate={onHelpNavigate} />)}
       </section>
       {profileEditOpen && <ProfileEditModal account={account} user={user} avatarUrl={avatarUrl} onClose={() => setProfileEditOpen(false)} onNicknameChange={onNicknameChange} onAvatarChange={onAvatarChange} />}
+      {passwordOpen && <PasswordChangeModal onClose={() => setPasswordOpen(false)} onSubmit={onPasswordChange} />}
     </main>
   );
 }
@@ -2469,15 +2490,14 @@ function PasswordChangeModal({ onClose, onSubmit }) {
   return <Modal onClose={submitting ? undefined : onClose}><p className="eyebrow">ACCOUNT SECURITY</p><h2>修改密码</h2><p className="modal-lead">修改成功后，所有已登录设备都需要重新登录。</p><form className="password-form" onSubmit={submit}><label>当前密码<input type="password" autoComplete="current-password" minLength={6} maxLength={72} required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label><label>新密码<input type="password" autoComplete="new-password" minLength={6} maxLength={72} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><label>确认新密码<input type="password" autoComplete="new-password" minLength={6} maxLength={72} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><Button type="button" variant="secondary" disabled={submitting} onClick={onClose}>取消</Button><Button type="submit" disabled={submitting}>{submitting ? "正在修改" : "确认修改"}</Button></div></form></Modal>;
 }
 
-function Settings({ teacher, speed, level, onSettingsChange, onPasswordChange }) {
+function Settings({ teacher, speed, level, onSettingsChange }) {
   const [syncPulse, setSyncPulse] = useState(0);
-  const [passwordOpen, setPasswordOpen] = useState(false);
   const updateSettings = async (next) => {
     if (await onSettingsChange(next)) {
       setSyncPulse((current) => current + 1);
     }
   };
-  return <div className="assistant-settings-page"><PageHeader eyebrow="ASSISTANT SETTINGS" title="AI 助手设置" subtitle="只调整真正影响对话体验的选项。" action={<span key={syncPulse} className="sync-state"><CheckCircle />设置已同步</span>} /><section className="settings-list"><article><div><h2>对话语速</h2><p>选择更舒适的回应节奏。</p></div><SpeedSelector className="assistant-settings__speed" value={speed} onChange={(nextSpeed) => updateSettings({ speed: nextSpeed })} /></article><article><div><h2>英语水平</h2><p>新对话会按照该难度调整表达。</p></div><LevelSelect value={level} onChange={(nextLevel) => updateSettings({ level: nextLevel })} /></article><article className="teacher-settings"><div><h2>AI 老师</h2><p>每位老师有固定口音和陪练方式。</p></div><TeacherSelector className="assistant-settings__teachers" selectedId={teacher.id} onSelect={(nextTeacher) => updateSettings({ teacher: nextTeacher })} /></article><article><div><h2>账户与隐私</h2><p>管理密码与账户数据。</p></div><div className="account-actions"><button type="button" onClick={() => setPasswordOpen(true)}><Password />修改密码<CaretRight /></button><button type="button" className="danger"><Trash />删除账户<CaretRight /></button></div></article></section>{passwordOpen && <PasswordChangeModal onClose={() => setPasswordOpen(false)} onSubmit={onPasswordChange} />}</div>;
+  return <div className="assistant-settings-page"><PageHeader eyebrow="ASSISTANT SETTINGS" title="AI 助手设置" subtitle="只调整真正影响对话体验的选项。" action={<span key={syncPulse} className="sync-state"><CheckCircle />设置已同步</span>} /><section className="settings-list"><article><div><h2>对话语速</h2><p>选择更舒适的回应节奏。</p></div><SpeedSelector className="assistant-settings__speed" value={speed} onChange={(nextSpeed) => updateSettings({ speed: nextSpeed })} /></article><article><div><h2>英语水平</h2><p>新对话会按照该难度调整表达。</p></div><LevelSelect value={level} onChange={(nextLevel) => updateSettings({ level: nextLevel })} /></article><article className="teacher-settings"><div><h2>AI 老师</h2><p>每位老师有固定口音和陪练方式。</p></div><TeacherSelector className="assistant-settings__teachers" selectedId={teacher.id} onSelect={(nextTeacher) => updateSettings({ teacher: nextTeacher })} /></article></section></div>;
 }
 
 function Paywall({ title, onClose, onMembership }) {
@@ -2510,6 +2530,7 @@ export function App() {
   const [ieltsRoute, setIeltsRoute] = useState(initialRoute.ieltsRoute || null);
   const [interviewRoute, setInterviewRoute] = useState(initialRoute.interviewRoute || null);
   const [helpRoute, setHelpRoute] = useState(initialRoute.helpRoute || null);
+  const [aboutRoute, setAboutRoute] = useState(initialRoute.aboutRoute || null);
   const [paywall, setPaywall] = useState(null);
   const preferenceWriteChainRef = useRef(Promise.resolve());
   const preferenceWriteVersionRef = useRef(0);
@@ -2525,6 +2546,7 @@ export function App() {
     setIeltsRoute(route.ieltsRoute || null);
     setInterviewRoute(route.interviewRoute || null);
     setHelpRoute(route.helpRoute || null);
+    setAboutRoute(route.aboutRoute || null);
     setPaywall(null);
     const routeSceneId = route.sceneId || route.assetSceneId;
     if (routeSceneId) {
@@ -2823,6 +2845,7 @@ export function App() {
   const navigateIelts = (path) => navigate(path, { authMode });
   const navigateInterview = (path) => navigate(path, { authMode });
   const navigateHelp = (path) => navigate(path, { authMode });
+  const navigateAbout = (path) => navigate(path, { authMode });
   const openCompletedAssetDetail = (requestedSceneId = null) => {
     const explicitSceneId = typeof requestedSceneId === "string" ? requestedSceneId : null;
     const sceneId = explicitSceneId || training?.sceneId || generatedScene?.sceneId || assetSceneId;
@@ -2851,6 +2874,6 @@ export function App() {
   else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBackToAssets={() => setMainPage("assets")} onInterviewAssets={() => setMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
   else if (page === "interview") content = <InterviewTrainingCenter route={interviewRoute} onNavigate={navigateInterview} onExit={() => setMainPage("scenes")} onAssets={() => navigateInterview(paths.interview.assets.root)} />;
   else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBackToAssets={() => setMainPage("assets")} onIeltsAssets={() => setMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} />;
-  else content = <Profile section={page} setSection={setMainPage} helpRoute={helpRoute} onHelpNavigate={navigateHelp} user={user} profile={profileOverview} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onMonthChange={loadProfileMonth} onNicknameChange={updateNickname} onAvatarChange={updateAvatar} onPasswordChange={updatePassword} onAssets={() => setMainPage("assets")} onLogout={logout} />;
+  else content = <Profile section={page} setSection={setMainPage} helpRoute={helpRoute} aboutRoute={aboutRoute} onHelpNavigate={navigateHelp} onAboutNavigate={navigateAbout} user={user} profile={profileOverview} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onMonthChange={loadProfileMonth} onNicknameChange={updateNickname} onAvatarChange={updateAvatar} onPasswordChange={updatePassword} onAssets={() => setMainPage("assets")} onLogout={logout} />;
   return <AppShell page={page} setPage={setMainPage} teacher={teacher} avatarUrl={profileOverview?.account?.avatarUrl}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}</AppShell>;
 }

@@ -12,6 +12,7 @@ services:
       context: ../frontend/web
       args:
         VITE_BACKEND_URL: ${VITE_BACKEND_URL:-/backend}
+        VITE_FEEDBACK_URL: ${VITE_FEEDBACK_URL:-}
     ports:
       - "3000:80"
 

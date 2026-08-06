@@ -21,12 +21,13 @@
 - 句子音频采集与朗读评分。
 - 自定义场景对话、状态机、逐轮评分、五维报告。
 - 学习资产列表、详情和场景复练。
+- 个人主页每周学习目标、真实进度、训练类型占比、五维能力趋势、薄弱项识别与推荐训练。
+- 个人主页关于产品、用户协议、隐私政策与 AI 服务说明。
 
 仍以页面和演示数据为主的功能：
 
 - IELTS 训练及报告。
 - 英文模拟面试。
-- 个人主页统计与成就。
 - 会员、额度和支付。
 
 ## 本地启动
@@ -36,7 +37,7 @@
 ```bash
 cd frontend/web
 npm install
-VITE_BACKEND_URL=http://localhost:8080 npm run dev
+VITE_BACKEND_URL=http://localhost:8080 VITE_FEEDBACK_URL= npm run dev
 ```
 
 默认地址：
@@ -47,6 +48,10 @@ http://localhost:5173
 
 `VITE_BACKEND_URL` 同时用于 REST 和认证 WebSocket。留空时请求会发送到前端源，
 只有经过 Nginx 同源代理的生产部署才应使用 `/backend`。
+
+`VITE_FEEDBACK_URL` 用于配置外部腾讯问卷地址。留空时所有反馈入口显示为待配置且
+不可点击；配置有效的 HTTP(S) 地址后，入口会在新窗口打开问卷。反馈数据不经过
+UniSpeaking 后端，也不提供处理进度查询。
 
 浏览器麦克风需要 `localhost` 或 HTTPS，并需要用户授权。
 
@@ -104,6 +109,11 @@ web
 | `/ielts` | IELTS 模块 |
 | `/interview` | 英文面试模块 |
 | `/profile` | 个人主页 |
+| `/profile/insights` | 学习目标与洞察 |
+| `/about` | 关于产品 |
+| `/about/user-agreement` | 用户协议草案 |
+| `/about/privacy-policy` | 隐私政策草案 |
+| `/about/ai-service` | AI 服务说明草案 |
 | `/settings` | 用户设置 |
 
 路由契约由 `npm run check:routes` 校验。页面切换必须使用 `router.js` 中的路径

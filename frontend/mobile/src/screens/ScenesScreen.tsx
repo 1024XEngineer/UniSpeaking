@@ -18,14 +18,36 @@ import {
   recommendations,
   type ScenePromptExample,
 } from '@/data/content';
+import { SceneService, type GeneratedScene } from '@/features/scenes/SceneService';
+import { SceneTrainingController, type SceneTrainingSnapshot } from '@/features/scenes/SceneTrainingController';
+import { WavRecorder } from '@/features/audio/WavRecorder';
+import { SceneSpeechClient, TtsPlayer } from '@/features/audio/TtsPlayer';
+import {
+  useFreeChatSession,
+  type FreeChatConfig,
+  type FreeChatControllerPort,
+} from '@/features/conversation/useFreeChatSession';
+import { ReactNativeWebRTCTransport } from '@/features/realtime/ReactNativeWebRTCTransport';
+import { RealtimeSessionApi } from '@/features/realtime/RealtimeSessionApi';
+import { RealtimeSessionController } from '@/features/realtime/RealtimeSessionController';
+import { SessionMessageSocket } from '@/features/realtime/SessionMessageSocket';
+import {
+  SceneDialogueApi,
+  type DialogueCompletion,
+  type DialogueReport,
+} from '@/features/scenes/SceneDialogueApi';
+import { speedCodeForLabel } from '@/features/auth/preferenceMappings';
+import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
+import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
+import { ApiClient } from '@/infrastructure/http/ApiClient';
 import { useAppModel } from '@/model/AppModel';
 import { colors } from '@/theme/tokens';
-import { CallExperience } from './ConversationScreen';
+import { CallExperience, selectCallCaption } from './ConversationScreen';
 import { IeltsFlow, InterviewFlow } from './SpecialtyFlows';
 
 export type SceneRoute =
   | { name: 'home' }
-  | { name: 'training'; id: string }
+  | { name: 'training'; scene: GeneratedScene }
   | { name: 'ielts' }
   | { name: 'interview' };
 
@@ -146,6 +168,19 @@ const defaultSceneMetrics: readonly SceneMetric[] = [
   { label: '自然', value: 87 },
 ];
 
+export function sceneMetricsForReport(
+  report?: DialogueReport,
+): readonly SceneMetric[] {
+  if (!report) return defaultSceneMetrics;
+  return [
+    { label: '准确', value: report.accuracyScore },
+    { label: '流利', value: report.fluencyScore },
+    { label: '语法', value: report.grammarScore },
+    { label: '词汇', value: report.vocabularyScore },
+    { label: '自然', value: report.naturalnessScore },
+  ];
+}
+
 function SceneRadar({ metrics }: { metrics: readonly SceneMetric[] }) {
   const size = 208;
   const center = size / 2;
@@ -174,9 +209,91 @@ function SceneRadar({ metrics }: { metrics: readonly SceneMetric[] }) {
   );
 }
 
-export function Training({ id, initialStage = 'learn', onBack, onFinish }: { id: string; initialStage?: TrainingStage; onBack: () => void; onFinish: () => void }) {
-  const { addSceneRecord } = useAppModel();
-  const scenario = recommendations.find((item) => item.id === id) ?? recommendations[0];
+type SceneControllerFactory = (
+  sceneId: string,
+  config: FreeChatConfig,
+) => FreeChatControllerPort;
+
+function createDefaultSceneController(
+  sceneId: string,
+  config: FreeChatConfig,
+): FreeChatControllerPort {
+  const tokenStore = new SecureTokenStore();
+  const { backendUrl } = getRuntimeConfig();
+  const apiClient = new ApiClient({ baseUrl: backendUrl, tokenStore });
+  return new RealtimeSessionController(
+    {
+      transport: new ReactNativeWebRTCTransport(),
+      sessionApi: new RealtimeSessionApi(apiClient),
+      sessionSocket: new SessionMessageSocket({ baseUrl: backendUrl, tokenStore }),
+      sceneDialogue: new SceneDialogueApi(apiClient, sceneId),
+    },
+    {
+      mode: 'scene',
+      sceneId,
+      ...config,
+    },
+  );
+}
+
+export function SceneCallStage({
+  scene,
+  progressCollapsed,
+  onComplete,
+  createController = createDefaultSceneController,
+}: {
+  scene: GeneratedScene;
+  progressCollapsed: boolean;
+  onComplete: (completion: DialogueCompletion) => void;
+  createController?: SceneControllerFactory;
+}) {
+  const { teacher, speed } = useAppModel();
+  const deliveredCompletion = useRef<DialogueCompletion | null>(null);
+  const session = useFreeChatSession(
+    {
+      voice: teacher.voiceId,
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: speedCodeForLabel(speed),
+    },
+    (config) => createController(scene.sceneId, config),
+  );
+
+  useEffect(() => {
+    if (
+      session.completion &&
+      session.completion !== deliveredCompletion.current
+    ) {
+      deliveredCompletion.current = session.completion;
+      onComplete(session.completion);
+    }
+  }, [onComplete, session.completion]);
+
+  const caption = selectCallCaption(session, teacher.name, session.statusLabel);
+  return (
+    <CallExperience
+      allowSubtitleToggle={false}
+      compactTranscriptLayout
+      elapsed={session.elapsed}
+      muted={session.muted}
+      onEnd={() => {
+        void session.end().catch(() => undefined);
+      }}
+      onMutedChange={() => session.toggleMuted()}
+      progressCollapsed={progressCollapsed}
+      statusLabel={session.statusLabel}
+      transcriptSpeaker={caption.speaker}
+      transcriptEnglish={caption.text}
+      transcriptChinese=""
+      userTranscript={session.userTranscript}
+    />
+  );
+}
+
+export function Training({ id, scene, trainingController: injectedTrainingController, wavRecorder: injectedWavRecorder, ttsPlayer: injectedTtsPlayer, initialStage = 'learn', onBack, onFinish }: { id?: string; scene?: GeneratedScene; trainingController?: SceneTrainingController; wavRecorder?: Pick<WavRecorder, 'start' | 'stop' | 'cancel'>; ttsPlayer?: Pick<TtsPlayer, 'play' | 'stop'>; initialStage?: TrainingStage; onBack: () => void; onFinish: () => void }) {
+  const sceneId = scene?.sceneId ?? id ?? recommendations[0].id;
+  const scenario = scene
+    ? { id: scene.sceneId, title: scene.title }
+    : recommendations.find((item) => item.id === sceneId) ?? recommendations[0];
   const wordItems = learningItems.filter((item) => item.type === '单词');
   const phraseItems = learningItems.filter((item) => item.type === '短语');
   const readItems = learningItems.filter((item) => item.type === '句子');
@@ -189,14 +306,102 @@ export function Training({ id, initialStage = 'learn', onBack, onFinish }: { id:
   const [readFeedbackOpen, setReadFeedbackOpen] = useState(false);
   const [demoPlaying, setDemoPlaying] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
   const [completionOpen, setCompletionOpen] = useState(false);
+  const [dialogueCompletion, setDialogueCompletion] = useState<DialogueCompletion | null>(null);
   const [progressCollapsed, setProgressCollapsed] = useState(false);
-  const learnItems = learningGroup === 'words' ? wordItems : phraseItems;
-  const learnItem = learnItems[learnIndex] ?? learnItems[0];
-  const readItem = readItems[readIndex] ?? readItems[0];
+  const readRecordingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [trainingController] = useState<SceneTrainingController | null>(() =>
+    scene
+      ? injectedTrainingController ?? new SceneTrainingController(createDefaultSceneService())
+      : null,
+  );
+  const [wavRecorder] = useState<Pick<WavRecorder, 'start' | 'stop' | 'cancel'> | null>(
+    () => (scene ? injectedWavRecorder ?? new WavRecorder() : null),
+  );
+  const [ttsPlayer] = useState<Pick<TtsPlayer, 'play' | 'stop'> | null>(
+    () => (scene ? injectedTtsPlayer ?? createDefaultTtsPlayer() : null),
+  );
+  const [trainingSnapshot, setTrainingSnapshot] = useState<SceneTrainingSnapshot | null>(
+    () => trainingController?.getSnapshot() ?? null,
+  );
+
+  useEffect(() => {
+    if (!scene || !trainingController) return;
+    const unsubscribe = trainingController.subscribe(setTrainingSnapshot);
+    void trainingController.start(scene).catch(() => undefined);
+    return unsubscribe;
+  }, [scene, trainingController]);
+
+  useEffect(
+    () => () => {
+      if (readRecordingTimer.current) {
+        clearTimeout(readRecordingTimer.current);
+        readRecordingTimer.current = null;
+      }
+      void wavRecorder?.cancel().catch(() => undefined);
+      ttsPlayer?.stop();
+    },
+    [ttsPlayer, wavRecorder],
+  );
+
+  const displayedStage = scene && trainingSnapshot ? trainingSnapshot.stage : stage;
+  const displayedLearningGroup = scene && trainingSnapshot
+    ? trainingSnapshot.learningGroup
+    : learningGroup;
+  const displayedUnlockedStage = scene && trainingSnapshot
+    ? trainingSnapshot.unlockedStage
+    : unlockedStage;
+  const displayedIndex = scene && trainingSnapshot ? trainingSnapshot.index : learnIndex;
+  const backendItems = trainingSnapshot?.items.map((item) => ({
+    type: displayedStage === 'read' ? '句子' : displayedLearningGroup === 'words' ? '单词' : '短语',
+    en: item.englishText,
+    zh: item.chineseText,
+    phonetic: item.phonetic ?? '',
+  })) ?? [];
+  const learnItems = scene && displayedStage === 'learn'
+    ? backendItems
+    : displayedLearningGroup === 'words' ? wordItems : phraseItems;
+  const displayedReadItems = scene && displayedStage === 'read' ? backendItems : readItems;
+  const learnItem = learnItems[displayedIndex] ?? learnItems[0] ?? learningItems[0];
+  const displayedReadIndex = scene && trainingSnapshot ? trainingSnapshot.index : readIndex;
+  const readItem = displayedReadItems[displayedReadIndex] ?? displayedReadItems[0] ?? learningItems[3];
+  const displayedReadPassed = scene && trainingSnapshot
+    ? Boolean(trainingSnapshot.readingResult?.passed)
+    : readPassed;
+  const isLastReadItem = displayedReadIndex >= displayedReadItems.length - 1;
+  const readingResult = trainingSnapshot?.readingResult;
+  const completionMetrics = sceneMetricsForReport(dialogueCompletion?.evaluation);
+
+  const toggleDemo = async (text: string) => {
+    if (!scene || !ttsPlayer) {
+      setDemoPlaying((current) => !current);
+      return;
+    }
+    if (demoPlaying) {
+      ttsPlayer.stop();
+      setDemoPlaying(false);
+      return;
+    }
+    setAudioError(null);
+    try {
+      await ttsPlayer.play(scene.sceneId, text);
+      setDemoPlaying(true);
+    } catch (error) {
+      setDemoPlaying(false);
+      setAudioError(
+        error instanceof Error ? error.message : '标准发音播放失败',
+      );
+    }
+  };
 
   const nextLearn = () => {
+    ttsPlayer?.stop();
     setDemoPlaying(false);
+    if (scene && trainingController) {
+      void trainingController.next();
+      return;
+    }
     if (learnIndex < learnItems.length - 1) setLearnIndex((current) => current + 1);
     else if (learningGroup === 'words' && phraseItems.length > 0) {
       setLearningGroup('phrases');
@@ -208,14 +413,58 @@ export function Training({ id, initialStage = 'learn', onBack, onFinish }: { id:
     }
   };
   const previousLearn = () => {
+    ttsPlayer?.stop();
     setDemoPlaying(false);
+    if (scene && trainingController) {
+      trainingController.previous();
+      return;
+    }
     if (learnIndex > 0) setLearnIndex((current) => current - 1);
     else if (learningGroup === 'phrases' && wordItems.length > 0) {
       setLearningGroup('words');
       setLearnIndex(wordItems.length - 1);
     }
   };
-  const toggleReadRecording = () => {
+  const clearReadRecordingTimer = () => {
+    if (!readRecordingTimer.current) return;
+    clearTimeout(readRecordingTimer.current);
+    readRecordingTimer.current = null;
+  };
+  const submitReadRecording = async () => {
+    clearReadRecordingTimer();
+    setRecording(false);
+    if (!scene || !trainingController || !wavRecorder) return;
+    try {
+      const wavUri = await wavRecorder.stop();
+      await trainingController.scoreReading(wavUri);
+      setReadFeedbackOpen(true);
+    } catch (error) {
+      setAudioError(
+        error instanceof Error ? error.message : '朗读录音或评分失败',
+      );
+    }
+  };
+  const toggleReadRecording = async () => {
+    if (scene && trainingController && wavRecorder) {
+      setAudioError(null);
+      if (recording) {
+        await submitReadRecording();
+        return;
+      }
+      try {
+        await wavRecorder.start();
+        setRecording(true);
+        readRecordingTimer.current = setTimeout(() => {
+          void submitReadRecording();
+        }, 30_000);
+      } catch (error) {
+        setRecording(false);
+        setAudioError(
+          error instanceof Error ? error.message : '朗读录音或评分失败',
+        );
+      }
+      return;
+    }
     if (recording) {
       setRecording(false);
       setReadPassed(true);
@@ -226,34 +475,6 @@ export function Training({ id, initialStage = 'learn', onBack, onFinish }: { id:
     }
   };
   const finishTraining = () => {
-    addSceneRecord({
-      id,
-      title: scenario.title,
-      date: '刚刚',
-      status: '已完成',
-      score: 86,
-      practiceCount: 1,
-      expressions: learningItems.map((item, index) => ({
-        id: `${id}-${index}`,
-        type: item.type === '短语' ? '词组' : item.type,
-        englishText: item.en,
-        chineseText: item.zh,
-        phonetic: item.phonetic,
-      })),
-      conversation: [
-        { id: `${id}-assistant`, role: 'assistant', speaker: 'James', text: 'Good morning! What can I get started for you today?' },
-        {
-          id: `${id}-user`,
-          role: 'user',
-          speaker: '你',
-          text: 'Could you recommend something less sweet?',
-          feedback: {
-            suggestedExpression: 'Could you recommend something that is not too sweet?',
-            feedbackSummary: '表达清楚自然；补充 “not too” 可以让甜度需求更具体。',
-          },
-        },
-      ],
-    });
     setCompletionOpen(false);
     onFinish();
   };
@@ -273,23 +494,26 @@ export function Training({ id, initialStage = 'learn', onBack, onFinish }: { id:
       </View>
 
       <StageProgressRail
-        stage={stage}
-        unlockedStage={unlockedStage}
+        stage={displayedStage}
+        unlockedStage={displayedUnlockedStage}
         onCollapsedChange={setProgressCollapsed}
         onSelect={(nextStage) => {
           setRecording(false);
           setDemoPlaying(false);
+          if (scene) return;
           setStage(nextStage);
         }}
       />
 
-      {stage === 'learn' ? (
+      {trainingSnapshot?.error ? <Text style={styles.generationError}>{trainingSnapshot.error}</Text> : null}
+
+      {displayedStage === 'learn' ? (
         <View style={styles.stageShell}>
           <View style={styles.stageMetaRow}>
-            <Text style={styles.stageHeading}>{learningGroup === 'words' ? '场景单词' : '场景短语'}</Text>
+            <Text style={styles.stageHeading}>{displayedLearningGroup === 'words' ? '场景单词' : '场景短语'}</Text>
           </View>
           <View style={styles.languageCard}>
-            <Text style={styles.languageCount}>{learnIndex + 1} / {learnItems.length}</Text>
+            <Text style={styles.languageCount}>{displayedIndex + 1} / {learnItems.length}</Text>
             <Text style={styles.languageType}>{learnItem.type}</Text>
             <Text style={styles.languageEnglish}>{learnItem.en}</Text>
             <View style={styles.pronunciationRow}>
@@ -297,7 +521,7 @@ export function Training({ id, initialStage = 'learn', onBack, onFinish }: { id:
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="播放发音"
-                onPress={() => setDemoPlaying((current) => !current)}
+                onPress={() => void toggleDemo(learnItem.en)}
                 style={({ pressed }) => [styles.speakerButton, (pressed || demoPlaying) && styles.speakerButtonActive]}
               >
                 <AppIcon name="volume" size={21} color={colors.subtle} />
@@ -309,15 +533,15 @@ export function Training({ id, initialStage = 'learn', onBack, onFinish }: { id:
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="上一个表达"
-              disabled={learnIndex === 0 && learningGroup === 'words'}
+              disabled={displayedIndex === 0 && displayedLearningGroup === 'words'}
               onPress={previousLearn}
-              style={[styles.roundNavButton, learnIndex === 0 && learningGroup === 'words' && styles.roundNavDisabled]}
+              style={[styles.roundNavButton, displayedIndex === 0 && displayedLearningGroup === 'words' && styles.roundNavDisabled]}
             >
               <AppIcon name="arrow-left" size={20} />
             </Pressable>
             <Pressable accessibilityRole="button" onPress={nextLearn} style={styles.primaryPillButton}>
               <Text style={styles.primaryPillText}>
-                {learnIndex < learnItems.length - 1 ? '下一个' : learningGroup === 'words' && phraseItems.length > 0 ? '进入词组' : '进入朗读'}
+                {displayedIndex < learnItems.length - 1 ? '下一个' : displayedLearningGroup === 'words' ? '进入词组' : '进入朗读'}
               </Text>
               <AppIcon name="arrow-right" size={18} color={colors.white} />
             </Pressable>
@@ -325,24 +549,25 @@ export function Training({ id, initialStage = 'learn', onBack, onFinish }: { id:
         </View>
       ) : null}
 
-      {stage === 'read' ? (
+      {displayedStage === 'read' ? (
         <View style={styles.stageShell}>
           <View style={styles.stageMetaRow}>
             <Text style={styles.stageHeading}>场景句子</Text>
-            <Text style={styles.stageCount}>{readIndex + 1} / {readItems.length}</Text>
+            <Text style={styles.stageCount}>{displayedReadIndex + 1} / {displayedReadItems.length}</Text>
           </View>
           <View style={styles.readCard}>
-            {readPassed ? <View style={styles.scoreBadge}><Text style={styles.scoreBadgeValue}>86</Text><Text style={styles.scoreBadgeMax}>/100</Text></View> : null}
+            {displayedReadPassed ? <View style={styles.scoreBadge}><Text style={styles.scoreBadgeValue}>{trainingSnapshot?.readingResult?.overallScore ?? 86}</Text><Text style={styles.scoreBadgeMax}>/100</Text></View> : null}
             <Text style={styles.readSentence}>
-              {readPassed ? <><Text style={styles.scoreCorrect}>Could you </Text><Text style={styles.scoreIncorrect}>recommend</Text><Text style={styles.scoreCorrect}> something less sweet?</Text></> : readItem.en}
+              {displayedReadPassed ? readItem.en : readItem.en}
             </Text>
             <Text style={styles.readTranslation}>{readItem.zh}</Text>
-            <Pressable accessibilityRole="button" accessibilityLabel={recording ? '结束朗读' : '开始朗读'} onPress={toggleReadRecording} style={[styles.readRecordButton, recording && styles.readRecordButtonActive]}>
+            <Pressable accessibilityRole="button" accessibilityLabel={recording ? '结束朗读' : '开始朗读'} onPress={() => void toggleReadRecording()} style={[styles.readRecordButton, recording && styles.readRecordButtonActive]}>
               <AppIcon name={recording ? 'microphone' : 'microphone-off'} size={28} color={recording ? '#B94D44' : colors.subtle} />
             </Pressable>
-            <Text style={styles.readStatus}>{recording ? '正在听你朗读' : readPassed ? '朗读通过' : '点击麦克风开始朗读'}</Text>
-            <Text style={styles.readInstruction}>{recording ? '再次点击麦克风结束录音并提交评分。' : readPassed ? '本句已达到 80 分，可以进入下一步。' : '再次点击麦克风结束录音并提交评分。'}</Text>
-            <Pressable accessibilityRole="button" accessibilityLabel="听标准示范" onPress={() => setDemoPlaying((current) => !current)} style={styles.readDemoButton}>
+            <Text style={styles.readStatus}>{recording ? '正在听你朗读' : displayedReadPassed ? '朗读通过' : '点击麦克风开始朗读'}</Text>
+            <Text style={styles.readInstruction}>{recording ? '再次点击麦克风结束录音并提交评分，最长录制 30 秒。' : displayedReadPassed ? '本句已达到通过标准，可以进入下一步。' : '再次点击麦克风结束录音并提交评分，最长录制 30 秒。'}</Text>
+            {audioError ? <Text style={styles.generationError}>{audioError}</Text> : null}
+            <Pressable accessibilityRole="button" accessibilityLabel="听标准示范" onPress={() => void toggleDemo(readItem.en)} style={styles.readDemoButton}>
               <Text style={styles.readDemoText}>{demoPlaying ? '正在播放' : '听标准示范'}</Text>
               <AppIcon name="volume" size={18} color={colors.subtle} />
             </Pressable>
@@ -353,39 +578,61 @@ export function Training({ id, initialStage = 'learn', onBack, onFinish }: { id:
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              disabled={!readPassed}
-              onPress={() => { setUnlockedStage(2); setStage('speak'); setRecording(false); setDemoPlaying(false); }}
-              style={[styles.primaryPillButton, !readPassed && styles.primaryPillDisabled]}
+              disabled={!displayedReadPassed}
+              onPress={() => {
+                if (scene && trainingController) void trainingController.next();
+                else { setUnlockedStage(2); setStage('speak'); }
+                setRecording(false);
+                setDemoPlaying(false);
+              }}
+              style={[styles.primaryPillButton, !displayedReadPassed && styles.primaryPillDisabled]}
             >
-              <Text style={styles.primaryPillText}>进入模拟</Text>
+              <Text style={styles.primaryPillText}>{isLastReadItem ? '进入模拟' : '下一句'}</Text>
               <AppIcon name="arrow-right" size={18} color={colors.white} />
             </Pressable>
           </View>
         </View>
       ) : null}
 
-      {stage === 'speak' ? (
+      {displayedStage === 'speak' ? (
         <View style={styles.sceneCallStage}>
-          <CallExperience
-            allowSubtitleToggle={false}
-            compactTranscriptLayout
-            onEnd={() => setCompletionOpen(true)}
-            progressCollapsed={progressCollapsed}
-            transcriptEnglish="Good morning! What can I get started for you today?"
-            transcriptChinese="早上好！今天想点些什么？"
-          />
+          {scene ? (
+            <SceneCallStage
+              scene={scene}
+              progressCollapsed={progressCollapsed}
+              onComplete={(completion) => {
+                setDialogueCompletion(completion);
+                setCompletionOpen(true);
+              }}
+            />
+          ) : (
+            <CallExperience
+              allowSubtitleToggle={false}
+              compactTranscriptLayout
+              onEnd={() => setCompletionOpen(true)}
+              progressCollapsed={progressCollapsed}
+              transcriptEnglish="Good morning! What can I get started for you today?"
+              transcriptChinese="早上好！今天想点些什么？"
+            />
+          )}
         </View>
       ) : null}
     </AppScreen>
     {readFeedbackOpen ? (
       <View style={styles.scoreModalBackdrop}>
         <View style={styles.scoreModal}>
-          <View style={styles.scoreModalValueRow}><Text style={styles.scoreModalValue}>86</Text><Text style={styles.scoreModalMax}>/100</Text></View>
+          <View style={styles.scoreModalValueRow}><Text style={styles.scoreModalValue}>{readingResult?.overallScore ?? 86}</Text><Text style={styles.scoreModalMax}>/100</Text></View>
           <Text style={styles.scoreModalTitle}>本句发音评估</Text>
-          <Text style={styles.scoreModalLead}>本句已达到 80 分，可以进入下一句；红色部分仍可继续练习。</Text>
+          <Text style={styles.scoreModalLead}>{readingResult?.passed ? `本句已达到通过标准，可以${isLastReadItem ? '进入模拟' : '进入下一句'}；低分词仍可继续练习。` : '本句尚未达到通过标准，请根据逐词结果再次朗读。'}</Text>
           <View style={styles.scoreFocusCard}>
             <Text style={styles.scoreFocusLabel}>逐词结果</Text>
-            <Text style={styles.scoreFocusSentence}><Text style={styles.scoreCorrect}>Could you </Text><Text style={styles.scoreIncorrect}>recommend</Text><Text style={styles.scoreCorrect}> something less sweet?</Text></Text>
+            <Text style={styles.scoreFocusSentence}>
+              {readingResult?.words.length
+                ? readingResult.words.map((word, index) => (
+                    <Text key={`${word.word}-${index}`} style={word.wordScore >= 80 ? styles.scoreCorrect : styles.scoreIncorrect}>{word.word}{index < readingResult.words.length - 1 ? ' ' : ''}</Text>
+                  ))
+                : <Text style={styles.scoreCorrect}>{readItem.en}</Text>}
+            </Text>
           </View>
           <Pressable accessibilityRole="button" onPress={() => setReadFeedbackOpen(false)} style={styles.scoreConfirmButton}>
             <Text style={styles.scoreConfirmText}>知道了</Text>
@@ -403,14 +650,14 @@ export function Training({ id, initialStage = 'learn', onBack, onFinish }: { id:
               <Text style={styles.completionLead}>本次场景对话已结束，下面是你的五维表现。</Text>
             </View>
             <View style={styles.completionScoreRow}>
-              <Text style={styles.completionScore}>86</Text>
+              <Text style={styles.completionScore}>{dialogueCompletion?.evaluation?.finalScore ?? 86}</Text>
               <Text style={styles.completionScoreMax}>/100</Text>
             </View>
           </View>
           <View style={styles.completionOverview}>
-            <SceneRadar metrics={defaultSceneMetrics} />
+            <SceneRadar metrics={completionMetrics} />
             <View style={styles.completionMetrics}>
-              {defaultSceneMetrics.map((metric) => (
+              {completionMetrics.map((metric) => (
                 <View key={metric.label} style={styles.completionMetricRow}>
                   <Text style={styles.completionMetricLabel}>{metric.label}</Text>
                   <Text style={styles.completionMetricValue}>{metric.value}</Text>
@@ -429,68 +676,57 @@ export function Training({ id, initialStage = 'learn', onBack, onFinish }: { id:
   );
 }
 
-type ScenePreview = {
-  id: string;
-  title: string;
-  background: string;
-  aiRole: string;
-  userRole: string;
-  learningGoal: string;
-  duration: string;
-};
+function createDefaultSceneService() {
+  const tokenStore = new SecureTokenStore();
+  return new SceneService(
+    new ApiClient({
+      baseUrl: getRuntimeConfig().backendUrl,
+      tokenStore,
+    }),
+  );
+}
 
-const scenePreviewDetails: Record<string, Omit<ScenePreview, 'id'>> = {
-  coffee: {
-    title: '咖啡店点单',
-    background: '工作日早晨，一家繁忙的本地咖啡店。',
-    aiRole: '咖啡师',
-    userRole: '客户',
-    learningGoal: '成功下单一款带定制选项的咖啡饮品及一份食品，并完成支付流程。',
-    duration: '6 分钟',
-  },
-  hotel: {
-    title: '酒店入住',
-    background: '抵达酒店前台，确认预订信息并办理入住。',
-    aiRole: '酒店前台接待',
-    userRole: '住客',
-    learningGoal: '礼貌确认预订、房型、早餐和退房时间等入住细节。',
-    duration: '8 分钟',
-  },
-  pharmacy: {
-    title: '药店咨询',
-    background: '在当地药店向药剂师描述身体不适并寻求建议。',
-    aiRole: '药剂师',
-    userRole: '顾客',
-    learningGoal: '清晰描述症状，并确认药品用法、用量和注意事项。',
-    duration: '8 分钟',
-  },
-};
-
-function getScenePreview(id: string): ScenePreview {
-  return { id, ...(scenePreviewDetails[id] ?? scenePreviewDetails.coffee) };
+function createDefaultTtsPlayer() {
+  const tokenStore = new SecureTokenStore();
+  return new TtsPlayer({
+    speechClient: new SceneSpeechClient({
+      baseUrl: getRuntimeConfig().backendUrl,
+      tokenStore,
+    }),
+  });
 }
 
 export function ScenesHome({
   onOpen,
   promptExample = getDailyScenePromptExample(),
+  sceneService: injectedSceneService,
 }: {
   onOpen: (route: SceneRoute) => void;
   promptExample?: ScenePromptExample;
+  sceneService?: Pick<SceneService, 'generate'>;
 }) {
+  const [sceneService] = useState(
+    () => injectedSceneService ?? createDefaultSceneService(),
+  );
   const [prompt, setPrompt] = useState('');
   const [specialtyOpen, setSpecialtyOpen] = useState(false);
-  const [preview, setPreview] = useState<ScenePreview | null>(null);
-  const startCustomScene = () => {
-    if (!prompt.trim()) return;
-    setPreview({
-      id: 'coffee',
-      title: '自定义练习场景',
-      background: prompt.trim(),
-      aiRole: '英语对话伙伴',
-      userRole: '学习者',
-      learningGoal: '围绕设定情境完成自然、清晰的英语交流。',
-      duration: '8 分钟',
-    });
+  const [preview, setPreview] = useState<GeneratedScene | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const generatePreview = async (sceneInput: string) => {
+    if (!sceneInput.trim() || generating) return;
+    setGenerating(true);
+    setGenerationError(null);
+    try {
+      setPreview(await sceneService.generate(sceneInput.trim()));
+    } catch (error) {
+      setPreview(null);
+      setGenerationError(
+        error instanceof Error ? error.message : '场景生成失败，请重试',
+      );
+    } finally {
+      setGenerating(false);
+    }
   };
 
   return (
@@ -572,18 +808,19 @@ export function ScenesHome({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="生成练习场景"
-              disabled={!prompt.trim()}
-              onPress={startCustomScene}
+            disabled={!prompt.trim()}
+              onPress={() => void generatePreview(prompt)}
               style={({ pressed }) => [
                 styles.generateButton,
                 !prompt.trim() && styles.generateButtonDisabled,
                 pressed && prompt.trim() && styles.compactPressed,
               ]}
             >
-              <Text style={[styles.generateButtonText, !prompt.trim() && styles.generateButtonTextDisabled]}>生成练习场景</Text>
+              <Text style={[styles.generateButtonText, !prompt.trim() && styles.generateButtonTextDisabled]}>{generating ? '正在生成…' : '生成练习场景'}</Text>
               <AppIcon name="arrow-right" size={18} color={colors.white} />
             </Pressable>
           </View>
+          {generationError ? <Text style={styles.generationError}>{generationError}</Text> : null}
         </View>
 
         <View style={styles.recommendationHeader}>
@@ -597,7 +834,7 @@ export function ScenesHome({
             <Pressable
               accessibilityRole="button"
               key={item.id}
-              onPress={() => setPreview(getScenePreview(item.id))}
+              onPress={() => void generatePreview(`${item.title}：${item.goal}`)}
               style={({ pressed }) => [styles.recommendation, pressed && styles.compactPressed]}
             >
               <Text style={styles.number}>0{index + 1}</Text>
@@ -631,7 +868,7 @@ export function ScenesHome({
                 ['AI 扮演', preview.aiRole],
                 ['你将扮演', preview.userRole],
                 ['练习重点', preview.learningGoal],
-                ['预计用时', preview.duration],
+                ['预计用时', `${preview.estimatedMinutes} 分钟`],
               ].map(([label, value]) => (
                 <View key={label} style={styles.previewSummaryRow}>
                   <Text style={styles.previewSummaryLabel}>{label}</Text>
@@ -645,7 +882,7 @@ export function ScenesHome({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                onPress={() => onOpen({ name: 'training', id: preview.id })}
+                onPress={() => onOpen({ name: 'training', scene: preview })}
                 style={[styles.previewButton, styles.previewButtonPrimary]}
               >
                 <Text style={styles.previewButtonPrimaryText}>确认进入</Text>
@@ -662,7 +899,7 @@ export function ScenesHome({
 export function ScenesScreen() {
   const [route, setRoute] = useState<SceneRoute>({ name: 'home' });
   if (route.name === 'training') {
-    return <Training id={route.id} onBack={() => setRoute({ name: 'home' })} onFinish={() => setRoute({ name: 'home' })} />;
+    return <Training scene={route.scene} onBack={() => setRoute({ name: 'home' })} onFinish={() => setRoute({ name: 'home' })} />;
   }
   if (route.name === 'ielts') return <IeltsFlow onExit={() => setRoute({ name: 'home' })} />;
   if (route.name === 'interview') return <InterviewFlow onExit={() => setRoute({ name: 'home' })} />;
@@ -765,6 +1002,7 @@ const styles = StyleSheet.create({
   generateButtonDisabled: { backgroundColor: '#A7A7A2' },
   generateButtonText: { color: colors.white, fontSize: 14, fontWeight: '600' },
   generateButtonTextDisabled: { color: colors.white },
+  generationError: { marginTop: 6, color: '#B94D44', fontSize: 11, lineHeight: 16 },
   compactPressed: { opacity: 0.72, transform: [{ scale: 0.98 }] },
   recommendationHeader: { marginTop: 28, marginBottom: 9, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   recommendationHeading: { marginTop: 3, color: colors.ink, fontSize: 23, fontWeight: '600', letterSpacing: -0.7 },

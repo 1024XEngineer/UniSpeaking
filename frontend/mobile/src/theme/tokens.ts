@@ -28,6 +28,7 @@ export type Teacher = {
   name: string;
   accent: string;
   personality: string;
+  voiceId: 'Katerina' | 'Aiden' | 'Raymond' | 'Tina' | 'Harvey' | 'Dolce';
   image: ImageSourcePropType;
 };
 
@@ -37,6 +38,7 @@ export const teachers: Teacher[] = [
     name: 'Clara',
     accent: '美式口音',
     personality: '温柔耐心',
+    voiceId: 'Katerina',
     image: require('../../assets/images/unispeaking/teachers/clara.png'),
   },
   {
@@ -44,6 +46,7 @@ export const teachers: Teacher[] = [
     name: 'James',
     accent: '英式口音',
     personality: '清晰理性',
+    voiceId: 'Harvey',
     image: require('../../assets/images/unispeaking/teachers/james.png'),
   },
   {
@@ -51,6 +54,7 @@ export const teachers: Teacher[] = [
     name: 'Leo',
     accent: '美式口音',
     personality: '开朗活力',
+    voiceId: 'Raymond',
     image: require('../../assets/images/unispeaking/teachers/leo.png'),
   },
   {
@@ -58,6 +62,7 @@ export const teachers: Teacher[] = [
     name: 'David',
     accent: '美式口音',
     personality: '沉稳直接',
+    voiceId: 'Aiden',
     image: require('../../assets/images/unispeaking/teachers/david.png'),
   },
   {
@@ -65,6 +70,7 @@ export const teachers: Teacher[] = [
     name: 'Emily',
     accent: '英式口音',
     personality: '自然亲切',
+    voiceId: 'Tina',
     image: require('../../assets/images/unispeaking/teachers/emily.png'),
   },
   {
@@ -72,15 +78,16 @@ export const teachers: Teacher[] = [
     name: 'Arthur',
     accent: '英式口音',
     personality: '睿智从容',
+    voiceId: 'Dolce',
     image: require('../../assets/images/unispeaking/teachers/arthur.png'),
   },
 ];
 
 export const levels = [
-  { id: 'starter', title: '刚开始学', note: '能听懂或说出少量单词' },
-  { id: 'basic', title: '可以简单交流', note: '能用简单句表达基本需求' },
-  { id: 'independent', title: '可以连续表达', note: '能围绕熟悉话题说一段话' },
-  { id: 'fluent', title: '表达比较流利', note: '能自然参与大多数日常交流' },
+  { id: 'starter', cefrLevel: 'A', title: '刚开始学', note: '能听懂或说出少量单词' },
+  { id: 'basic', cefrLevel: 'B', title: '可以简单交流', note: '能用简单句表达基本需求' },
+  { id: 'independent', cefrLevel: 'C', title: '可以连续表达', note: '能围绕熟悉话题说一段话' },
+  { id: 'fluent', cefrLevel: 'D', title: '表达比较流利', note: '能自然参与大多数日常交流' },
 ] as const;
 
 export const speedOptions = ['慢一些', '适中', '自然', '快一些'] as const;
