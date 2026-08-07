@@ -1,7 +1,8 @@
 # Deployment and configuration
 
-The deploy stack contains three services:
+The local deploy stack contains four services:
 
+- `postgres`: local PostgreSQL database for development;
 - `backend`: Spring Boot API and Qwen signaling integration;
 - `frontend`: React client;
 - `nginx`: reverse proxy for the frontend and `/backend/` API route.

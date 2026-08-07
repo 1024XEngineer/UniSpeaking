@@ -25,6 +25,9 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+web:
+  allowed-origin-patterns: "${WEB_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*,https://unispeaking.cn,https://www.unispeaking.cn}"
+
 profile:
   time-zone: ${PROFILE_TIME_ZONE:Asia/Shanghai}
 

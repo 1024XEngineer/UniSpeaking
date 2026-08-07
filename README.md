@@ -30,7 +30,7 @@ IELTS、英文面试、个人主页统计和会员页面目前主要完成了前
 - Spring Web MVC / WebSocket / Security
 - JWT
 - MyBatis-Plus 3.5.17
-- PostgreSQL
+- Docker Desktop（本地 Compose 会启动 PostgreSQL）
 - JUnit 5 / Mockito
 
 ### 前端
@@ -103,9 +103,13 @@ cp deploy/env/.env.example deploy/env/.env
 至少配置数据库和 JWT：
 
 ```properties
-DATABASE_URL=jdbc:postgresql://localhost:5432/unispeaking
-DATABASE_USERNAME=postgres
-DATABASE_PASSWORD=your-postgres-password
+POSTGRES_DB=unispeaking
+POSTGRES_USER=unispeaking
+POSTGRES_PASSWORD=your-local-postgres-password
+
+DATABASE_URL=jdbc:postgresql://postgres:5432/unispeaking
+DATABASE_USERNAME=unispeaking
+DATABASE_PASSWORD=your-local-postgres-password
 
 JWT_SECRET=replace-with-at-least-32-random-bytes-in-base64
 JWT_ISSUER=unispeaking
@@ -258,6 +262,7 @@ npm run android
 
 当前 Compose 包含：
 
+- `postgres`
 - `backend`
 - `frontend`
 - `nginx`
@@ -278,9 +283,12 @@ http://localhost
 Nginx 将 `/backend/` 同时代理给后端 REST 和 WebSocket，前端生产构建使用
 `VITE_BACKEND_URL=/backend`。
 
-Compose 当前不创建 PostgreSQL 容器。`DATABASE_URL` 必须指向后端容器可以访问的
-数据库地址；在 macOS Docker Desktop 中访问宿主机数据库时可使用
-`host.docker.internal`，不能使用容器自身的 `localhost`。
+开发 Compose 会创建独立的 PostgreSQL 容器，后端通过 Docker 服务名 `postgres`
+连接数据库。第一次启动空数据库时，Spring Boot 会自动执行 V1-V8 Flyway
+迁移。开发数据库卷名为 `unispeaking_dev_postgres_data`，与生产数据库隔离。
+
+如果直接在宿主机运行 Maven，而不是通过 Compose 运行后端，再把
+`DATABASE_URL` 改为 `jdbc:postgresql://localhost:5432/unispeaking`。
 
 ## 认证与统一响应
 
