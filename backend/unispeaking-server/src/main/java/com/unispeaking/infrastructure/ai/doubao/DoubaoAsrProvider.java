@@ -109,9 +109,9 @@ public class DoubaoAsrProvider extends TranscriptionProvider {
 	}
 
 	@Override
-	public String convertAudioToText(Byte[] audio, String token) {
+	public String convertAudioToText(byte[] audio, String token) {
 		AudioInput input = new AudioInput(
-				unboxAudio(audio, "Doubao ASR"),
+				requireAudio(audio, "Doubao ASR"),
 				"wav");
 		requireAudio(input);
 		requireCredentials();

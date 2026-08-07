@@ -1,9 +1,9 @@
 package com.unispeaking.websocket;
 
 import com.unispeaking.common.logging.RealtimeFlowLog;
+import com.unispeaking.component.session.SessionMessageDispatcher;
 import com.unispeaking.domain.dto.session.SessionSocketAck;
 import com.unispeaking.domain.dto.session.SessionSocketMessage;
-import com.unispeaking.service.session.SessionService;
 import java.io.IOException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.TextMessage;
@@ -15,13 +15,13 @@ import tools.jackson.databind.ObjectMapper;
 public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 
 	private final ObjectMapper objectMapper;
-	private final SessionService sessionService;
+	private final SessionMessageDispatcher sessionDispatcher;
 
 	public SessionMessageWebSocketHandler(
 			ObjectMapper objectMapper,
-			SessionService sessionService) {
+			SessionMessageDispatcher sessionDispatcher) {
 		this.objectMapper = objectMapper;
-		this.sessionService = sessionService;
+		this.sessionDispatcher = sessionDispatcher;
 	}
 
 	@Override
@@ -44,7 +44,7 @@ public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 		String userId = requireAuthenticatedUserId(webSocketSession);
 		switch (normalize(frame.type())) {
 			case "message" -> {
-				sessionService.addMessage(userId, sessionId, frame.message());
+				sessionDispatcher.addMessage(userId, sessionId, frame.message());
 				RealtimeFlowLog.info("session.websocket.message sessionId={} owner={} content={} audioBytes={}",
 						sessionId,
 						frame.message() == null ? null : frame.message().owner(),
@@ -54,7 +54,7 @@ public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 				send(webSocketSession, SessionSocketAck.success("session.message.accepted", sessionId, null));
 			}
 			case "end" -> {
-				sessionService.endSession(userId, sessionId, frame.stopTime());
+				sessionDispatcher.endSession(userId, sessionId, frame.stopTime());
 				RealtimeFlowLog.info("session.websocket.end sessionId={} stopTime={}",
 						sessionId, frame.stopTime());
 				send(webSocketSession, SessionSocketAck.success("session.end.accepted", sessionId, null));

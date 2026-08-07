@@ -59,13 +59,13 @@ public final class PronunciationAssessmentClient {
 			String referenceText,
 			byte[] wavAudio) {
 		String requiredReferenceText = requireReferenceText(referenceText);
-		Byte[] boxedAudio = boxAudio(wavAudio);
+		Byte[] requiredAudio = boxAudio(wavAudio);
 
 		RoutedResult<String> routedResult;
 		try {
 			routedResult = aiProviderRegistry.evaluatePronunciationRouted(
 					requiredReferenceText,
-					boxedAudio,
+					requiredAudio,
 					null);
 		}
 		catch (BusinessException exception) {
@@ -87,11 +87,9 @@ public final class PronunciationAssessmentClient {
 		if (wavAudio == null || wavAudio.length == 0) {
 			throw new EvaluationException(EvaluationErrorCode.AUDIO_REQUIRED);
 		}
-		Byte[] boxedAudio = new Byte[wavAudio.length];
-		for (int index = 0; index < wavAudio.length; index++) {
-			boxedAudio[index] = wavAudio[index];
-		}
-		return boxedAudio;
+		Byte[] boxed = new Byte[wavAudio.length];
+		for (int index = 0; index < wavAudio.length; index++) boxed[index] = wavAudio[index];
+		return boxed;
 	}
 
 	private String requireSupportedResponse(

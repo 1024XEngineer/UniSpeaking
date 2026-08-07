@@ -1,6 +1,7 @@
 package com.unispeaking.controller;
 
 import com.unispeaking.common.response.ApiResponse;
+import com.unispeaking.component.recording.IeltsRecordingStore;
 import com.unispeaking.domain.dto.scene.CreateSceneFlowRequest;
 import com.unispeaking.domain.dto.scene.IeltsGenerationRequest;
 import com.unispeaking.domain.dto.scene.IeltsGenerationResponse;
@@ -19,9 +20,10 @@ import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationResult;
 import com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult;
 import com.unispeaking.domain.dto.evaluation.IeltsEvaluationHistoryItem;
 import com.unispeaking.domain.vo.scene.IeltsPart;
-import com.unispeaking.service.scene.IELTSSceneService;
-import com.unispeaking.service.scene.SceneFlowService;
-import com.unispeaking.service.evaluation.EvaluationService;
+import com.unispeaking.service.scene.impl.IeltsSceneServiceImpl;
+import com.unispeaking.service.scene.impl.IeltsSceneFlowServiceImpl;
+import com.unispeaking.service.evaluation.impl.IeltsEvaluationServiceImpl;
+import com.unispeaking.service.session.impl.IeltsSessionServiceImpl;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -36,6 +38,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.http.MediaType;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ResponseEntity;
+import org.springframework.core.io.Resource;
 import java.io.IOException;
 import java.util.List;
 
@@ -44,17 +49,33 @@ import java.util.List;
 @Validated
 public class IELTSSceneController {
 
-	private final IELTSSceneService ieltsSceneService;
-	private final SceneFlowService sceneFlowService;
-	private final EvaluationService evaluationService;
+	private final IeltsSceneServiceImpl ieltsSceneService;
+	private final IeltsSceneFlowServiceImpl sceneFlowService;
+	private final IeltsEvaluationServiceImpl evaluationService;
+	private final IeltsSessionServiceImpl ieltsSessionService;
+	private final IeltsRecordingStore recordingStore;
 
 	public IELTSSceneController(
-			IELTSSceneService ieltsSceneService,
-			SceneFlowService sceneFlowService,
-			EvaluationService evaluationService) {
+			IeltsSceneServiceImpl ieltsSceneService,
+			IeltsSceneFlowServiceImpl sceneFlowService,
+			IeltsEvaluationServiceImpl evaluationService,
+			IeltsSessionServiceImpl ieltsSessionService,
+			IeltsRecordingStore recordingStore) {
 		this.ieltsSceneService = ieltsSceneService;
 		this.sceneFlowService = sceneFlowService;
 		this.evaluationService = evaluationService;
+		this.ieltsSessionService = ieltsSessionService;
+		this.recordingStore = recordingStore;
+	}
+
+	@GetMapping(value = "/recordings/{sessionId}/{fileName:.+}", produces = "audio/wav")
+	public ResponseEntity<Resource> getRecording(
+			@PathVariable String sessionId,
+			@PathVariable String fileName) {
+		return ResponseEntity.ok()
+				.contentType(MediaType.parseMediaType("audio/wav"))
+				.cacheControl(CacheControl.noStore().cachePrivate())
+				.body(recordingStore.loadOwned(sessionId, fileName));
 	}
 
 	@GetMapping("/settings")
@@ -65,7 +86,7 @@ public class IELTSSceneController {
 				settings.todayCompletedCount(),
 				settings.examinerId(),
 				settings.preferredVoice(),
-				evaluationService.getLatestIeltsEstimatedScore(),
+				evaluationService.getLatestEstimatedScore(),
 				settings.currentStreakDays(),
 				settings.totalCheckInDays(),
 				settings.lastCheckInDate()));
@@ -80,7 +101,7 @@ public class IELTSSceneController {
 				settings.todayCompletedCount(),
 				settings.examinerId(),
 				settings.preferredVoice(),
-				evaluationService.getLatestIeltsEstimatedScore(),
+				evaluationService.getLatestEstimatedScore(),
 				settings.currentStreakDays(),
 				settings.totalCheckInDays(),
 				settings.lastCheckInDate()));
@@ -118,15 +139,15 @@ public class IELTSSceneController {
 	@PostMapping("/flows")
 	public ApiResponse<SceneFlowResponse> createFlow(
 			@RequestBody CreateSceneFlowRequest request) {
-		return ApiResponse.success(
-				sceneFlowService.createFlow(request.sceneId()));
+		sceneFlowService.start(request.sceneId());
+		return ApiResponse.success(sceneFlowService.response(request.sceneId()));
 	}
 
 	@PostMapping("/{ieltsId}/sessions")
 	public ApiResponse<StartIeltsSessionResponse> startSession(
 			@PathVariable String ieltsId,
 			@Valid @RequestBody StartIeltsDialogueRequest request) {
-		return ApiResponse.success(ieltsSceneService.startSession(ieltsId, request));
+		return ApiResponse.success(ieltsSessionService.startSession(ieltsId, request));
 	}
 
 	@PostMapping(
@@ -139,8 +160,7 @@ public class IELTSSceneController {
 			@RequestParam String transcript,
 			@RequestParam(required = false) MultipartFile audio)
 			throws IOException {
-		return ApiResponse.success(evaluationService.evaluateIeltsTurn(
-				ieltsId,
+		return ApiResponse.success(evaluationService.evaluateTurn(
 				new DialogueTurnEvaluationCommand(
 						sessionId,
 						turnNo,
@@ -154,7 +174,7 @@ public class IELTSSceneController {
 			@PathVariable String sessionId,
 			@PathVariable int turnNo,
 			@RequestParam(defaultValue = "false") boolean timedOut) {
-		return ApiResponse.success(ieltsSceneService.advanceSessionState(
+		return ApiResponse.success(ieltsSessionService.advanceState(
 				ieltsId,
 				sessionId,
 				turnNo,
@@ -166,7 +186,7 @@ public class IELTSSceneController {
 			@PathVariable String ieltsId,
 			@PathVariable String sessionId) {
 		return ApiResponse.success(
-				ieltsSceneService.getSessionState(ieltsId, sessionId));
+				ieltsSessionService.getState(ieltsId, sessionId));
 	}
 
 	@PostMapping("/{ieltsId}/sessions/{sessionId}/part2/state")
@@ -174,7 +194,7 @@ public class IELTSSceneController {
 			@PathVariable String ieltsId,
 			@PathVariable String sessionId,
 			@Valid @RequestBody IeltsPart2StateRequest request) {
-		return ApiResponse.success(ieltsSceneService.advancePart2State(
+		return ApiResponse.success(ieltsSessionService.advancePart2State(
 				ieltsId,
 				sessionId,
 				request.event()));
@@ -185,7 +205,7 @@ public class IELTSSceneController {
 			@PathVariable String ieltsId,
 			@PathVariable String sessionId) {
 		return ApiResponse.success(
-				ieltsSceneService.getPart2State(ieltsId, sessionId));
+				ieltsSessionService.getPart2State(ieltsId, sessionId));
 	}
 
 	@PostMapping("/{ieltsId}/sessions/{sessionId}/evaluation")
@@ -193,12 +213,12 @@ public class IELTSSceneController {
 			@PathVariable String ieltsId,
 			@PathVariable String sessionId) {
 		return ApiResponse.success(
-				evaluationService.generateIeltsEvaluation(ieltsId, sessionId));
+				evaluationService.generateEvaluation(ieltsId, sessionId));
 	}
 
 	@GetMapping("/evaluations")
 	public ApiResponse<List<IeltsEvaluationHistoryItem>> getEvaluationHistory() {
 		return ApiResponse.success(
-				evaluationService.getIeltsEvaluationHistory());
+				evaluationService.getHistory());
 	}
 }

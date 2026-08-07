@@ -1,16 +1,23 @@
 package com.unispeaking.service.session;
 
 import com.unispeaking.domain.dto.session.Message;
+import com.unispeaking.domain.dto.session.SessionDetail;
+import com.unispeaking.domain.dto.session.StartSessionCommand;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
-import com.unispeaking.domain.vo.scene.SceneType;
+import java.util.List;
 
+/**
+ * Scene-neutral session lifecycle contract.
+ */
 public interface SessionService {
 
-	StartSessionResponse startSession(
-			SceneType sceneType,
-			String sceneId,
-			String prompt);
-	void endSession(String userId, String sessionId, String stopTime);
+	StartSessionResponse startSession(StartSessionCommand command);
 
-	void addMessage(String userId, String sessionId, Message message);
+	void addMessage(String sessionId, Message message);
+
+	void endSession(String sessionId);
+
+	SessionDetail getSession(String sessionId);
+
+	List<SessionDetail> getBySceneId(String sceneId);
 }

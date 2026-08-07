@@ -97,13 +97,13 @@ public class AliyunTtsProvider extends TtsProvider {
 	}
 
 	@Override
-	public Byte[] generateSpeechAudio(String text, String token) {
+	public byte[] generateSpeechAudio(String text, String token) {
 		if (apiKey.isBlank()) {
 			throw retryableFailure(
 					"ALIYUN_TTS_CREDENTIAL_MISSING",
 					"Set DASHSCOPE_API_KEY before calling Aliyun TTS");
 		}
-		return boxAudio(synthesize(text, apiKey));
+		return synthesize(text, apiKey);
 	}
 
 	private byte[] synthesize(String textValue, String credential) {

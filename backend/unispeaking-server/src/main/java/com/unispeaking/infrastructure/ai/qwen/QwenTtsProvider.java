@@ -134,14 +134,14 @@ public class QwenTtsProvider extends TtsProvider {
 	}
 
 	@Override
-	public Byte[] generateSpeechAudio(String text, String token) {
+	public byte[] generateSpeechAudio(String text, String token) {
 		if (apiKey.isBlank()) {
 			throw retryableFailure(
 					"QWEN_TTS_CREDENTIAL_MISSING",
 					"Set DASHSCOPE_API_KEY before calling Qwen TTS");
 		}
 		String normalizedText = trim(text);
-		return boxAudio(cachedSynthesize(normalizedText, apiKey));
+		return cachedSynthesize(normalizedText, apiKey);
 	}
 
 	private byte[] cachedSynthesize(String text, String credential) {

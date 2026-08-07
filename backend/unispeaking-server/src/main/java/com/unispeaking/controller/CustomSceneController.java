@@ -25,9 +25,10 @@ import com.unispeaking.domain.dto.scene.TranslateTextRequest;
 import com.unispeaking.domain.dto.scene.TranslateTextResponse;
 import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.service.asset.LearningAssetService;
-import com.unispeaking.service.evaluation.EvaluationService;
-import com.unispeaking.service.scene.SceneFlowService;
-import com.unispeaking.service.scene.CustomSceneService;
+import com.unispeaking.service.evaluation.impl.CustomEvaluationServiceImpl;
+import com.unispeaking.service.scene.impl.CustomSceneFlowServiceImpl;
+import com.unispeaking.service.scene.impl.CustomSceneServiceImpl;
+import com.unispeaking.service.session.impl.CustomSessionServiceImpl;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.util.List;
@@ -48,46 +49,54 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/api/custom-scenes")
 public class CustomSceneController {
 
-	private final CustomSceneService customSceneService;
-	private final SceneFlowService sceneFlowService;
-	private final EvaluationService evaluationService;
+	private final CustomSceneServiceImpl customSceneService;
+	private final CustomSceneFlowServiceImpl sceneFlowService;
+	private final CustomEvaluationServiceImpl evaluationService;
+	private final CustomSessionServiceImpl customSessionService;
 	private final LearningAssetService learningAssetService;
 
 	public CustomSceneController(
-			CustomSceneService customSceneService,
-			SceneFlowService sceneFlowService,
-			EvaluationService evaluationService,
+			CustomSceneServiceImpl customSceneService,
+			CustomSceneFlowServiceImpl sceneFlowService,
+			CustomEvaluationServiceImpl evaluationService,
+			CustomSessionServiceImpl customSessionService,
 			LearningAssetService learningAssetService) {
 		this.customSceneService = customSceneService;
 		this.sceneFlowService = sceneFlowService;
 		this.evaluationService = evaluationService;
+		this.customSessionService = customSessionService;
 		this.learningAssetService = learningAssetService;
 	}
 
 	@PostMapping("/generate")
 	public ApiResponse<CustomSceneGenerationResponse> generate(
 			@Valid @RequestBody CustomSceneRequest request) {
-		return ApiResponse.success(customSceneService.generate(request));
+		return ApiResponse.success(customSceneService.generateResponse(request));
 	}
 
 	@PostMapping("/flows")
 	public ApiResponse<SceneFlowResponse> createFlow(
 			@RequestBody CreateSceneFlowRequest request) {
-		return ApiResponse.success(sceneFlowService.createFlow(request.sceneId()));
+		sceneFlowService.start(request.sceneId());
+		return ApiResponse.success(sceneFlowService.response(request.sceneId()));
 	}
 
 	@PostMapping("/flows/advance")
 	public ApiResponse<SceneFlowResponse> advanceStage(
 			@RequestBody AdvanceSceneStageRequest request) {
-		return ApiResponse.success(sceneFlowService.advanceStage(
-				request.sceneId(),
-				request.stage()));
+		sceneFlowService.next(request.sceneId());
+		return ApiResponse.success(sceneFlowService.response(request.sceneId()));
 	}
 
 	@PostMapping("/flows/complete")
 	public ApiResponse<Void> completeFlow(
 			@RequestBody CompleteSceneFlowRequest request) {
-		sceneFlowService.completeFlow(request.sceneId(), request.completed());
+		if (Boolean.TRUE.equals(request.completed())) {
+			while (!sceneFlowService.isCompleted(request.sceneId())) {
+				sceneFlowService.next(request.sceneId());
+			}
+			sceneFlowService.clear(request.sceneId());
+		}
 		return ApiResponse.success(null);
 	}
 
@@ -95,8 +104,7 @@ public class CustomSceneController {
 	public ApiResponse<List<LearningContentItem>> getByCurrentStage(
 			@PathVariable String sceneId,
 			@RequestParam(required = false) SceneFlowStage stage) {
-		return ApiResponse.success(
-				sceneFlowService.getByCurrentStage(sceneId, stage));
+		return ApiResponse.success(sceneFlowService.content(sceneId));
 	}
 
 	@PostMapping("/{sceneId}/sessions")
@@ -104,7 +112,7 @@ public class CustomSceneController {
 			@PathVariable String sceneId,
 			@Valid @RequestBody StartCustomSceneDialogueRequest request) {
 		return ApiResponse.success(
-				customSceneService.startSession(sceneId, request));
+				customSessionService.startSession(sceneId, request));
 	}
 
 	@PostMapping(
@@ -118,7 +126,7 @@ public class CustomSceneController {
 			@RequestParam(required = false) MultipartFile audio)
 			throws IOException {
 		return ApiResponse.success(
-				evaluationService.evaluateDialogueTurn(
+				evaluationService.evaluateTurn(
 						new DialogueTurnEvaluationCommand(
 								sessionId,
 								turnNo,
@@ -133,7 +141,7 @@ public class CustomSceneController {
 			@PathVariable int turnNo,
 			@Valid @RequestBody AdvanceScenarioDialogueTurnRequest request) {
 		return ApiResponse.success(
-				customSceneService.advanceSessionState(
+				customSessionService.advanceState(
 						sceneId,
 						sessionId,
 						turnNo,
@@ -146,7 +154,7 @@ public class CustomSceneController {
 			@PathVariable String sessionId,
 			@RequestBody(required = false)
 					CompleteCustomSceneDialogueRequest request) {
-		return ApiResponse.success(customSceneService.completeSession(
+		return ApiResponse.success(customSessionService.completeSession(
 				sceneId,
 				sessionId,
 				request == null ? null : request.stopTime()));
@@ -176,7 +184,7 @@ public class CustomSceneController {
 			@PathVariable String sceneId,
 			@PathVariable String sessionId) {
 		return ApiResponse.success(
-				customSceneService.getSessionState(sceneId, sessionId));
+				customSessionService.getState(sceneId, sessionId));
 	}
 
 	@PostMapping(
@@ -187,7 +195,7 @@ public class CustomSceneController {
 			@PathVariable String sentenceId,
 			@RequestPart("audio") MultipartFile audio) throws IOException {
 		return ApiResponse.success(
-				evaluationService.evaluateSentenceReading(
+				evaluationService.evaluateSentence(
 						sentenceId,
 						audio.getBytes()));
 	}
