@@ -86,11 +86,15 @@ class EvaluationServiceImplSpeechTest {
 				sessionEvaluationRepository,
 				sceneSentenceReadingRepository,
 				ieltsPracticeRepository,
+				mock(com.unispeaking.infrastructure.persistence.repository.scene.IeltsRepository.class),
 				sceneFlowService,
 				practiceSessionRepository,
 				ieltsEvaluationRepository,
 				ieltsLlmClient,
-				authService);
+				authService,
+				mock(com.unispeaking.infrastructure.storage.ObjectStorageProvider.class),
+				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
+				mock(com.unispeaking.service.recording.IeltsRecordingService.class));
 	}
 
 	@AfterEach

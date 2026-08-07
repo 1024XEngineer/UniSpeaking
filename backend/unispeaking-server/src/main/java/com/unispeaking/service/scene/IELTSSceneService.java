@@ -41,6 +41,14 @@ public interface IELTSSceneService extends SceneService<
 			String sessionId,
 			int turnNo);
 
+	default IeltsDialogueStateResponse advanceSessionState(
+			String ieltsId,
+			String sessionId,
+			int turnNo,
+			boolean timedOut) {
+		return advanceSessionState(ieltsId, sessionId, turnNo);
+	}
+
 	IeltsDialogueStateResponse getSessionState(
 			String ieltsId,
 			String sessionId);

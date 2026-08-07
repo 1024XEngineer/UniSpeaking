@@ -85,11 +85,15 @@ class EvaluationServiceImplReportTest {
 				reportRepository,
 				mock(SceneSentenceReadingRepository.class),
 				mock(IeltsPracticeRepository.class),
+				mock(com.unispeaking.infrastructure.persistence.repository.scene.IeltsRepository.class),
 				mock(SceneFlowService.class),
 				mock(PracticeSessionRepository.class),
 				mock(IeltsEvaluationRepository.class),
 				mock(IeltsEvaluationLlmClient.class),
-				mock(AuthService.class));
+				mock(AuthService.class),
+				mock(com.unispeaking.infrastructure.storage.ObjectStorageProvider.class),
+				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
+				mock(com.unispeaking.service.recording.IeltsRecordingService.class));
 
 		var report = service.generateDialogueReport(sessionId, dialogue);
 

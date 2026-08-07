@@ -54,10 +54,39 @@ public final class IeltsTextAssessmentParser {
 				wholeBand(fc, "band"),
 				wholeBand(lr, "band"),
 				wholeBand(gra, "band"),
+				criterionReason(fc, "流利度与连贯性"),
+				criterionReason(lr, "词汇资源"),
+				criterionReason(gra, "语法多样性与准确性"),
 				text(root, "summary_zh"),
 				strengths.stream().limit(6).toList(),
 				improvements.stream().limit(3).toList(),
 				text(root, "confidence"));
+	}
+
+	private String criterionReason(JsonNode node, String label) {
+		JsonNode reason = node.get("reason_zh");
+		if (reason != null && reason.isTextual()
+				&& !reason.asString().isBlank()) {
+			return reason.asString().strip();
+		}
+		List<String> strengths = textArray(node, "strengths");
+		List<String> issues = textArray(node, "issues");
+		List<String> evidence = textArray(node, "evidence");
+		StringBuilder result = new StringBuilder(label)
+				.append("评分为 ")
+				.append(wholeBand(node, "band").toPlainString())
+				.append("：");
+		if (!strengths.isEmpty()) result.append(strengths.getFirst());
+		if (!issues.isEmpty()) {
+			if (!strengths.isEmpty()) result.append("；但");
+			result.append(issues.getFirst());
+		}
+		if (!evidence.isEmpty()) {
+			result.append("。回答中的具体依据包括“")
+					.append(evidence.getFirst())
+					.append("”。");
+		}
+		return result.toString();
 	}
 
 	private BigDecimal wholeBand(JsonNode node, String field) {

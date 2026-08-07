@@ -46,13 +46,21 @@ public class IeltsQuestionStateMachine {
 			String sceneId,
 			String sessionId,
 			int turnNo) {
+		return advance(sceneId, sessionId, turnNo, false);
+	}
+
+	public IeltsDialogueStateResponse advance(
+			String sceneId,
+			String sessionId,
+			int turnNo,
+			boolean timedOut) {
 		if (turnNo < 1) {
 			throw new BusinessException(
 					"INVALID_IELTS_TURN",
 					"IELTS 会话轮次必须大于 0");
 		}
 		State state = requireState(sceneId, sessionId);
-		state.advance(turnNo);
+		state.advance(turnNo, timedOut);
 		IeltsDialogueStateResponse response = state.response();
 		if (response.completed()) {
 			states.remove(sessionId, state);
@@ -90,6 +98,7 @@ public class IeltsQuestionStateMachine {
 		private boolean openingCompleted;
 		private int answeredQuestions;
 		private boolean completed;
+		private boolean lastTurnTimedOut;
 
 		private State(
 				String sceneId,
@@ -103,10 +112,12 @@ public class IeltsQuestionStateMachine {
 			this.openingCompleted = part != IeltsPart.PART_1;
 		}
 
-		private synchronized void advance(int turnNo) {
+		private synchronized void advance(int turnNo, boolean timedOut) {
 			if (completed || !processedTurns.add(turnNo)) return;
+			lastTurnTimedOut = timedOut && part == IeltsPart.PART_3;
 			if (part == IeltsPart.PART_1 && !openingCompleted) {
 				openingCompleted = true;
+				lastTurnTimedOut = false;
 				return;
 			}
 			answeredQuestions++;
@@ -132,7 +143,12 @@ public class IeltsQuestionStateMachine {
 						: exact("Thank you. That is the end of Part " + partNumber() + ".", true);
 			}
 			int nextQuestionIndex = Math.min(answeredQuestions, questions.size() - 1);
-			return exact(questions.get(nextQuestionIndex), false);
+			String nextQuestion = questions.get(nextQuestionIndex);
+			return exact(
+					lastTurnTimedOut
+							? "Let's move on to the next question. " + nextQuestion
+							: nextQuestion,
+					false);
 		}
 
 		private String exact(String utterance, boolean closing) {
