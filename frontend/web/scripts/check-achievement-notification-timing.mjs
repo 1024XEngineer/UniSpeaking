@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+const appSource = await readFile(new URL("../src/controller/App.jsx", import.meta.url), "utf8");
 const notificationSource = await readFile(
-  new URL("../src/AchievementNotifications.jsx", import.meta.url),
+  new URL("../src/component/achievement/AchievementNotifications.jsx", import.meta.url),
   "utf8",
 );
 

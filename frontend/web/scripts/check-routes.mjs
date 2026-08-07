@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { paths, resolveRoute } from "../src/router.js";
+import { paths, resolveRoute } from "../src/controller/router.js";
 
 const route = (pathname, search = "") => resolveRoute({ pathname, search });
 

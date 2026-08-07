@@ -1,5 +1,5 @@
 import { ArrowRight } from "@phosphor-icons/react";
-import { paths } from "../router.js";
+import { paths } from "../../controller/router.js";
 import { handleHelpLinkClick } from "./helpUtils.js";
 
 export function HelpLayout({ children, onNavigate }) {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, CaretRight, CheckCircle, ChatCircleDots, XCircle } from "@phosphor-icons/react";
-import { paths } from "../router.js";
+import { paths } from "../../controller/router.js";
 import { ExternalFeedbackLink } from "./ExternalFeedbackLink.jsx";
 import { formatHelpDate, handleHelpLinkClick } from "./helpUtils.js";
 

@@ -1,5 +1,5 @@
 import { ArrowLeft, CaretRight, Lifebuoy } from "@phosphor-icons/react";
-import { paths } from "../router.js";
+import { paths } from "../../controller/router.js";
 import { ExternalFeedbackLink } from "./ExternalFeedbackLink.jsx";
 import { handleHelpLinkClick } from "./helpUtils.js";
 

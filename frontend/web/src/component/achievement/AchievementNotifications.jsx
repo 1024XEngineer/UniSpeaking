@@ -11,7 +11,7 @@ import { Check, Trophy, X } from "@phosphor-icons/react";
 import {
   acknowledgeAchievementUnlock,
   syncAchievementUnlocks,
-} from "./apiClient.js";
+} from "../../infrastructure/http/apiClient.js";
 
 const AUTO_DISMISS_MS = 5_000;
 const AchievementNotificationContext = createContext(null);

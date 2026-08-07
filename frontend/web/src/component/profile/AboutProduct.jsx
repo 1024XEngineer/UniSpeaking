@@ -8,7 +8,7 @@ import {
   ShieldCheck,
   WarningCircle,
 } from "@phosphor-icons/react";
-import { paths } from "../router.js";
+import { paths } from "../../controller/router.js";
 import { ExternalFeedbackLink } from "../help/ExternalFeedbackLink.jsx";
 import { PRODUCT_INFORMATION } from "./productDocuments.js";
 
