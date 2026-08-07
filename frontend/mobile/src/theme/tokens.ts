@@ -103,3 +103,17 @@ export const examinerAssets = {
   margaret: require('../../assets/images/unispeaking/examiners/margaret.png'),
   sophia: require('../../assets/images/unispeaking/examiners/sophia.png'),
 } as const;
+
+export const ieltsAssets = {
+  flame: require('../../assets/images/specialty/ielts-flame.png'),
+  calendar: require('../../assets/images/specialty/ielts-calendar.png'),
+  target: require('../../assets/images/specialty/ielts-target.png'),
+  badge: require('../../assets/images/specialty/ielts-badge.png'),
+} as const;
+
+export const interviewAssets = {
+  hero: require('../../assets/images/specialty/interview-hero.png'),
+  resume: require('../../assets/images/specialty/interview-resume.png'),
+  company: require('../../assets/images/specialty/interview-company.png'),
+  briefcase: require('../../assets/images/specialty/interview-briefcase.png'),
+} as const;

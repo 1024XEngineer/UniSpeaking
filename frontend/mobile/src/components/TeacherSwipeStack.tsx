@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { SpeakerHighIcon } from 'phosphor-react-native/src/icons/SpeakerHigh';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -130,22 +130,6 @@ export function TeacherSwipeStack({
     setPosition(nextPosition);
     onSelect(teachers[modIndex(nextPosition, teachers.length)]);
   }, [onSelect]);
-
-  useEffect(() => {
-    const current = Math.round(dialPosition.value);
-    const currentIndex = modIndex(current, teachers.length);
-    if (currentIndex === selectedIndex) return;
-
-    let delta = modIndex(selectedIndex - currentIndex, teachers.length);
-    if (delta > teachers.length / 2) delta -= teachers.length;
-    const target = current + delta;
-    setPosition(target);
-    reportedIndex.value = selectedIndex;
-    dialPosition.value = withTiming(target, {
-      duration: 340,
-      easing: Easing.inOut(Easing.cubic),
-    });
-  }, [dialPosition, reportedIndex, selectedIndex]);
 
   const dragGesture = Gesture.Pan()
     .activeOffsetX([-6, 6])
