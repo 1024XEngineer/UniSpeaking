@@ -9,7 +9,6 @@ import com.unispeaking.infrastructure.persistence.entity.evaluation.TurnEvaluati
 import com.unispeaking.infrastructure.persistence.entity.scene.ScenePhraseEntity;
 import com.unispeaking.infrastructure.persistence.entity.scene.SceneSentenceEntity;
 import com.unispeaking.infrastructure.persistence.entity.scene.SceneWordEntity;
-import com.unispeaking.infrastructure.persistence.entity.scene.InterviewQuestionEntity;
 import com.unispeaking.infrastructure.persistence.entity.session.SessionMessageEntity;
 import java.lang.reflect.Field;
 import java.util.Arrays;
@@ -39,10 +38,6 @@ class CompositeKeyEntityTest {
 				TurnEvaluationEntity.class,
 				"sessionId",
 				"turnNo");
-		assertCompositeKey(
-				InterviewQuestionEntity.class,
-				"interviewId",
-				"questionNo");
 	}
 
 	private void assertCompositeKey(

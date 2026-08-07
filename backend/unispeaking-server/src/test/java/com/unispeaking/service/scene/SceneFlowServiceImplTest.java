@@ -1,264 +1,119 @@
 package com.unispeaking.service.scene;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
-import com.unispeaking.domain.vo.scene.SceneFlowStage;
-import com.unispeaking.common.exception.BusinessException;
-import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
-import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPracticeRepository;
 import com.unispeaking.domain.po.scene.IeltsPracticeRecord;
+import com.unispeaking.domain.vo.scene.CustomStage;
 import com.unispeaking.domain.vo.scene.IeltsContent;
 import com.unispeaking.domain.vo.scene.IeltsMode;
 import com.unispeaking.domain.vo.scene.IeltsPart;
-import com.unispeaking.service.scene.impl.SceneFlowServiceImpl;
+import com.unispeaking.domain.vo.scene.IeltsStage;
+import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPracticeRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
+import com.unispeaking.service.scene.impl.CustomSceneFlowServiceImpl;
+import com.unispeaking.service.scene.impl.FreeChatSceneServiceImpl;
+import com.unispeaking.service.scene.impl.IeltsSceneFlowServiceImpl;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 class SceneFlowServiceImplTest {
 
 	@Test
-	void interviewStartsDirectlyAtDialogueWithoutLoadingScene() {
+	void flowContractMatchesTheArchitectureDocument() {
+		Set<String> methods = List.of(SceneFlowService.class.getDeclaredMethods())
+				.stream()
+				.filter(method -> !method.isSynthetic())
+				.map(java.lang.reflect.Method::getName)
+				.collect(Collectors.toSet());
+
+		assertEquals(Set.of("start", "current", "next", "isCompleted"), methods);
+		assertTrue(SceneFlowService.class.isAssignableFrom(
+				CustomSceneFlowServiceImpl.class));
+		assertTrue(SceneFlowService.class.isAssignableFrom(
+				IeltsSceneFlowServiceImpl.class));
+		assertTrue(!SceneFlowService.class.isAssignableFrom(
+				FreeChatSceneServiceImpl.class));
+	}
+
+	@Test
+	void customFlowFollowsLearningStagesAndExposesCurrentContent() {
 		SceneRepository repository = mock(SceneRepository.class);
-		var service = new SceneFlowServiceImpl(
-				repository,
-				mock(IeltsPracticeRepository.class));
-
-		var flow = service.createFlow("interview_abc123");
-
-		assertEquals(SceneFlowStage.DIALOGUE, flow.stage());
-		assertFalse(flow.completed());
-		verifyNoInteractions(repository);
-	}
-
-	@Test
-	void freeChatStillStartsDirectlyAtDialogueWithoutLoadingScene() {
-		SceneRepository repository = mock(SceneRepository.class);
-		var service = new SceneFlowServiceImpl(
-				repository,
-				mock(IeltsPracticeRepository.class));
-
-		var flow = service.createFlow("freechat_abc123");
-
-		assertEquals(SceneFlowStage.DIALOGUE, flow.stage());
-		assertFalse(flow.completed());
-		assertTrue(service.getByCurrentStage(
-				"freechat_abc123",
-				SceneFlowStage.DIALOGUE).isEmpty());
-		verifyNoInteractions(repository);
-	}
-
-	@Test
-	void partPracticeStartsDirectlyAtDialogue() {
-		IeltsPracticeRepository practices = mock(IeltsPracticeRepository.class);
-		when(practices.findPractice("ielts_session_abc123"))
-				.thenReturn(Optional.of(practice(IeltsMode.PART_PRACTICE)));
-		var service = new SceneFlowServiceImpl(
-				mock(SceneRepository.class),
-				practices);
-
-		var flow = service.createFlow("ielts_session_abc123");
-
-		assertEquals(SceneFlowStage.DIALOGUE, flow.stage());
-		assertFalse(flow.completed());
-	}
-
-	@Test
-	void mockTestFlowsThroughAllThreeIeltsParts() {
-		IeltsPracticeRepository practices = mock(IeltsPracticeRepository.class);
-		when(practices.findPractice("ielts_mock_abc123"))
-				.thenReturn(Optional.of(practice(IeltsMode.MOCK_TEST)));
-		var service = new SceneFlowServiceImpl(
-				mock(SceneRepository.class),
-				practices);
-
-		assertEquals(SceneFlowStage.IELTS_PART_1,
-				service.createFlow("ielts_mock_abc123").stage());
-		assertEquals(SceneFlowStage.IELTS_PART_2,
-				service.advanceStage("ielts_mock_abc123", SceneFlowStage.IELTS_PART_1).stage());
-		assertEquals(SceneFlowStage.IELTS_PART_3,
-				service.advanceStage("ielts_mock_abc123", SceneFlowStage.IELTS_PART_2).stage());
-		var completed = service.advanceStage(
-				"ielts_mock_abc123",
-				SceneFlowStage.IELTS_PART_3);
-		assertEquals(SceneFlowStage.COMPLETED, completed.stage());
-		assertTrue(completed.completed());
-	}
-
-	@Test
-	void customSceneExposesContentForEachLearningStage() {
-		SceneRepository repository = repositoryWith(
-				scene("custom_def456", true));
-		var service = new SceneFlowServiceImpl(
-				repository,
-				mock(IeltsPracticeRepository.class));
-
-		var wordStage = service.createFlow("custom_def456");
-		assertEquals(SceneFlowStage.WORD_LEARNING, wordStage.stage());
-		assertEquals("membership", service
-					.getByCurrentStage(
-							"custom_def456",
-							SceneFlowStage.WORD_LEARNING)
-				.getFirst()
-				.englishText());
-
-		var phraseStage = service.advanceStage(
-				"custom_def456",
-				SceneFlowStage.WORD_LEARNING);
-		assertEquals(SceneFlowStage.PHRASE_LEARNING, phraseStage.stage());
-		assertEquals("ask about", service
-					.getByCurrentStage(
-							"custom_def456",
-							SceneFlowStage.PHRASE_LEARNING)
-				.getFirst()
-				.englishText());
-
-		service.completeFlow("custom_def456", true);
-		BusinessException exception = assertThrows(
-				BusinessException.class,
-				() -> service.getByCurrentStage(
-						"custom_def456",
-						SceneFlowStage.COMPLETED));
-		assertEquals("SCENE_FLOW_NOT_FOUND", exception.code());
-	}
-
-	@Test
-	void rejectsSceneIdsWithoutARegisteredScenePrefix() {
-		SceneRepository repository = repositoryWith(
-				scene("scene_legacy", true));
-		var service = new SceneFlowServiceImpl(
-				repository,
-				mock(IeltsPracticeRepository.class));
-
-		BusinessException exception = assertThrows(
-				BusinessException.class,
-				() -> service.createFlow("scene_legacy"));
-
-		assertEquals("INVALID_SCENE_ID", exception.code());
-	}
-
-	@Test
-	void completingWithTrueReleasesExistingFlow() {
-		SceneRepository repository = mock(SceneRepository.class);
-		var service = new SceneFlowServiceImpl(
-				repository,
-				mock(IeltsPracticeRepository.class));
-		service.createFlow("interview_true123");
-
-		service.completeFlow("interview_true123", true);
-
-		BusinessException exception = assertThrows(
-				BusinessException.class,
-				() -> service.advanceStage(
-						"interview_true123",
-						SceneFlowStage.DIALOGUE));
-		assertEquals("SCENE_FLOW_NOT_FOUND", exception.code());
-	}
-
-	@Test
-	void completingWithFalseReleasesExistingFlow() {
-		SceneRepository repository = mock(SceneRepository.class);
-		var service = new SceneFlowServiceImpl(
-				repository,
-				mock(IeltsPracticeRepository.class));
-		service.createFlow("interview_false123");
-
-		service.completeFlow("interview_false123", false);
-
-		BusinessException exception = assertThrows(
-				BusinessException.class,
-				() -> service.advanceStage(
-						"interview_false123",
-						SceneFlowStage.DIALOGUE));
-		assertEquals("SCENE_FLOW_NOT_FOUND", exception.code());
-	}
-
-	@Test
-	void repeatedlyCompletingMissingFlowIsIdempotentForBothStatuses() {
-		SceneRepository repository = mock(SceneRepository.class);
-		var service = new SceneFlowServiceImpl(
-				repository,
-				mock(IeltsPracticeRepository.class));
-
-		assertDoesNotThrow(() -> {
-			service.completeFlow("interview_missing123", true);
-			service.completeFlow("interview_missing123", true);
-			service.completeFlow("interview_missing123", false);
-			service.completeFlow("interview_missing123", false);
-		});
-		verifyNoInteractions(repository);
-	}
-
-	@Test
-	void nullCompletionStatusIsRejectedAndKeepsExistingFlow() {
-		SceneRepository repository = mock(SceneRepository.class);
-		var service = new SceneFlowServiceImpl(
-				repository,
-				mock(IeltsPracticeRepository.class));
-		service.createFlow("interview_null123");
-
-		BusinessException exception = assertThrows(
-				BusinessException.class,
-				() -> service.completeFlow("interview_null123", null));
-
-		assertEquals("SCENE_FLOW_COMPLETION_STATUS_REQUIRED", exception.code());
-		var retainedFlow = service.advanceStage(
-				"interview_null123",
-				SceneFlowStage.DIALOGUE);
-		assertEquals(SceneFlowStage.COMPLETED, retainedFlow.stage());
-		assertTrue(retainedFlow.completed());
-		verifyNoInteractions(repository);
-	}
-
-	@Test
-	void completingAnAlreadyRemovedFlowDoesNotPreventRecreation() {
-		SceneRepository repository = repositoryWith(
-				scene("custom_repeat123", true));
-		var service = new SceneFlowServiceImpl(
-				repository,
-				mock(IeltsPracticeRepository.class));
-
-		service.completeFlow("custom_repeat123", false);
-
-		var flow = service.createFlow("custom_repeat123");
-		assertEquals(SceneFlowStage.WORD_LEARNING, flow.stage());
-	}
-
-	private SceneGenerationResponse scene(String sceneId, boolean withLearningContent) {
-		return new SceneGenerationResponse(
-				sceneId,
-				withLearningContent ? List.of(item("word_1", "membership")) : List.of(),
-				withLearningContent ? List.of(item("phrase_1", "ask about")) : List.of(),
-				withLearningContent ? List.of(item("sentence_1", "Could you help me?")) : List.of(),
-				"layer 1\n\nlayer 2\n\nlayer 3\n\nlayer 4\n\nlayer 5");
-	}
-
-	private IeltsPracticeRecord practice(IeltsMode mode) {
-		return new IeltsPracticeRecord(
-				"ielts_test",
-				UUID.randomUUID(),
-				mode,
-				mode == IeltsMode.PART_PRACTICE ? IeltsPart.PART_1 : null,
-				null,
-				new IeltsContent(List.of(), List.of(), List.of()));
-	}
-
-	private SceneRepository repositoryWith(SceneGenerationResponse scene) {
-		SceneRepository repository = mock(SceneRepository.class);
+		SceneGenerationResponse scene = scene("custom_def456");
 		when(repository.findGeneratedById(scene.sceneId()))
 				.thenReturn(Optional.of(scene));
-		return repository;
+		CustomSceneFlowServiceImpl service = new CustomSceneFlowServiceImpl(repository);
+
+		assertEquals(CustomStage.WORD, service.start(scene.sceneId()));
+		assertEquals("membership", service.content(scene.sceneId()).getFirst().englishText());
+		assertEquals(CustomStage.PHRASE, service.next(scene.sceneId()));
+		assertEquals(CustomStage.SENTENCE, service.next(scene.sceneId()));
+		assertEquals(CustomStage.DIALOGUE, service.next(scene.sceneId()));
+		assertEquals(CustomStage.COMPLETED, service.next(scene.sceneId()));
+		assertTrue(service.isCompleted(scene.sceneId()));
+	}
+
+	@Test
+	void partPracticeStartsAtSelectedPartAndCompletesInOneStep() {
+		IeltsPracticeRepository repository = mock(IeltsPracticeRepository.class);
+		IeltsPracticeRecord practice = practice(
+				"ielts_practice",
+				IeltsMode.PART_PRACTICE,
+				IeltsPart.PART_2);
+		when(repository.findPractice(practice.ieltsId()))
+				.thenReturn(Optional.of(practice));
+		IeltsSceneFlowServiceImpl service = new IeltsSceneFlowServiceImpl(repository);
+
+		assertEquals(IeltsStage.PART2, service.start(practice.ieltsId()));
+		assertEquals(IeltsStage.COMPLETED, service.next(practice.ieltsId()));
+		assertTrue(service.isCompleted(practice.ieltsId()));
+	}
+
+	@Test
+	void mockExamFlowsThroughAllThreeParts() {
+		IeltsPracticeRepository repository = mock(IeltsPracticeRepository.class);
+		IeltsPracticeRecord practice = practice(
+				"ielts_mock",
+				IeltsMode.MOCK_TEST,
+				null);
+		when(repository.findPractice(practice.ieltsId()))
+				.thenReturn(Optional.of(practice));
+		IeltsSceneFlowServiceImpl service = new IeltsSceneFlowServiceImpl(repository);
+
+		assertEquals(IeltsStage.PART1, service.start(practice.ieltsId()));
+		assertEquals(IeltsStage.PART2, service.next(practice.ieltsId()));
+		assertEquals(IeltsStage.PART3, service.next(practice.ieltsId()));
+		assertEquals(IeltsStage.COMPLETED, service.next(practice.ieltsId()));
+	}
+
+	private SceneGenerationResponse scene(String sceneId) {
+		return new SceneGenerationResponse(
+				sceneId,
+				List.of(item("word_1", "membership")),
+				List.of(item("phrase_1", "ask about")),
+				List.of(item("sentence_1", "Could you help me?")),
+				"dialogue prompt");
+	}
+
+	private IeltsPracticeRecord practice(
+			String id,
+			IeltsMode mode,
+			IeltsPart part) {
+		return new IeltsPracticeRecord(
+				id,
+				UUID.randomUUID(),
+				mode,
+				part,
+				null,
+				new IeltsContent(List.of(), List.of(), List.of()));
 	}
 
 	private LearningContentItem item(String contentId, String englishText) {

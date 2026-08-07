@@ -1,6 +1,7 @@
 package com.unispeaking.infrastructure.ai.qwen;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -290,10 +291,9 @@ class QwenRealtimeProviderTest {
 				Duration.ofSeconds(20),
 				1_048_576);
 
-		Byte[] response = provider.generateSpeechAudio("Practice makes progress.", null);
+		byte[] response = provider.generateSpeechAudio("Practice makes progress.", null);
 
-		assertEquals(List.of((byte) 1, (byte) 2, (byte) 3, (byte) 4),
-				List.of(response));
+		assertArrayEquals(new byte[] {1, 2, 3, 4}, response);
 		assertEquals(2, httpClient.requests.size());
 		String requestBody = readBody(httpClient.requests.getFirst());
 		assertTrue(requestBody.contains("\"model\":\"cosyvoice-v3-flash\""));
@@ -330,15 +330,15 @@ class QwenRealtimeProviderTest {
 				Duration.ofSeconds(20),
 				1_048_576);
 
-		Byte[] response = provider.generateSpeechAudio(
+		byte[] response = provider.generateSpeechAudio(
 				"Practice makes progress.",
 				"must-not-be-used");
-		Byte[] cachedResponse = provider.generateSpeechAudio(
+		byte[] cachedResponse = provider.generateSpeechAudio(
 				"Practice makes progress.",
 				"must-not-be-used");
 
-		assertEquals(List.of(box(wav)), List.of(response));
-		assertEquals(List.of(box(wav)), List.of(cachedResponse));
+		assertArrayEquals(wav, response);
+		assertArrayEquals(wav, cachedResponse);
 		assertEquals(2, httpClient.requests.size());
 		HttpRequest request = httpClient.requests.getFirst();
 		assertEquals(
@@ -408,7 +408,7 @@ class QwenRealtimeProviderTest {
 
 		String response = provider.evaluatePronunciation(
 				"Practice makes progress.",
-				box(wavWithSampleRate(16_000)),
+				wavWithSampleRate(16_000),
 				null);
 
 		assertEquals(finalMessage, response);
@@ -447,7 +447,7 @@ class QwenRealtimeProviderTest {
 				BusinessException.class,
 				() -> provider.evaluatePronunciation(
 						"Practice makes progress.",
-						box(wavWithSampleRate(16_000)),
+						wavWithSampleRate(16_000),
 						null));
 
 		assertEquals("IFLYTEK_SUNTONE_ENDPOINT_INVALID", exception.code());
@@ -471,7 +471,7 @@ class QwenRealtimeProviderTest {
 				BusinessException.class,
 				() -> provider.evaluatePronunciation(
 						"Practice makes progress.",
-						box(wavWithSampleRate(16_000)),
+						wavWithSampleRate(16_000),
 						null));
 
 		assertEquals("IFLYTEK_SUNTONE_TIMEOUT", exception.code());
@@ -489,7 +489,7 @@ class QwenRealtimeProviderTest {
 				BusinessException.class,
 				() -> provider.evaluatePronunciation(
 						"Practice makes progress.",
-						box(wavWithSampleRate(44_100)),
+						wavWithSampleRate(44_100),
 						null));
 
 		assertEquals("INVALID_PRONUNCIATION_WAV", exception.code());
@@ -510,7 +510,7 @@ class QwenRealtimeProviderTest {
 
 		String response = provider.evaluatePronunciation(
 				"Practice makes progress.",
-				box(wavWithSampleRate(16_000)),
+				wavWithSampleRate(16_000),
 				null);
 
 		assertEquals(finalMessage, response);
@@ -589,10 +589,11 @@ class QwenRealtimeProviderTest {
 				Duration.ofSeconds(20),
 				1_048_576);
 
-		Byte[] response = provider.generateSpeechAudio("Practice makes progress.", null);
+		byte[] response = provider.generateSpeechAudio("Practice makes progress.", null);
 
-		assertEquals(List.of((byte) 0x49, (byte) 0x44, (byte) 0x33, (byte) 0x04, (byte) 0, (byte) 0),
-				List.of(response));
+		assertArrayEquals(
+				new byte[] {(byte) 0x49, (byte) 0x44, (byte) 0x33, (byte) 0x04, 0, 0},
+				response);
 		HttpRequest request = httpClient.requests.getFirst();
 		assertEquals("Bearer minimax-key",
 				request.headers().firstValue("Authorization").orElseThrow());
@@ -657,7 +658,7 @@ class QwenRealtimeProviderTest {
 				1_048_576);
 
 		String response = provider.convertAudioToText(
-				box(new byte[] {1, 2, 3}),
+				new byte[] {1, 2, 3},
 				null);
 
 		assertEquals("Practice makes progress.", response);
@@ -694,7 +695,7 @@ class QwenRealtimeProviderTest {
 				4_194_304);
 
 		String response = provider.convertAudioToText(
-				box(new byte[] {1, 2, 3}),
+				new byte[] {1, 2, 3},
 				null);
 
 		assertEquals("Practice makes progress.", response);
@@ -735,7 +736,7 @@ class QwenRealtimeProviderTest {
 		BusinessException exception = assertThrows(
 				BusinessException.class,
 				() -> provider.convertAudioToText(
-						box(new byte[] {1, 2, 3}),
+						new byte[] {1, 2, 3},
 						null));
 
 		assertEquals("DOUBAO_ASR_REQUEST_FAILED", exception.code());

@@ -19,8 +19,8 @@ import com.unispeaking.infrastructure.persistence.repository.scene.SceneReposito
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.service.evaluation.impl.EvaluationServiceImpl;
-import com.unispeaking.service.scene.SceneFlowService;
+import com.unispeaking.component.evaluation.EvaluationProcessor;
+import com.unispeaking.service.scene.impl.IeltsSceneFlowServiceImpl;
 import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.infrastructure.evaluation.client.EvaluationLlmClient;
@@ -75,7 +75,7 @@ class EvaluationServiceImplReportTest {
 				mock(SessionEvaluationRepository.class);
 		when(reportRepository.find(sessionId)).thenReturn(Optional.empty());
 
-		EvaluationServiceImpl service = new EvaluationServiceImpl(
+		EvaluationProcessor service = new EvaluationProcessor(
 				mock(PronunciationAssessmentClient.class),
 				llmClient,
 				runtimeStore,
@@ -86,14 +86,14 @@ class EvaluationServiceImplReportTest {
 				mock(SceneSentenceReadingRepository.class),
 				mock(IeltsPracticeRepository.class),
 				mock(com.unispeaking.infrastructure.persistence.repository.scene.IeltsRepository.class),
-				mock(SceneFlowService.class),
+				mock(IeltsSceneFlowServiceImpl.class),
 				mock(PracticeSessionRepository.class),
 				mock(IeltsEvaluationRepository.class),
 				mock(IeltsEvaluationLlmClient.class),
 				mock(AuthService.class),
 				mock(com.unispeaking.infrastructure.storage.ObjectStorageProvider.class),
 				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
-				mock(com.unispeaking.service.recording.IeltsRecordingService.class));
+				mock(com.unispeaking.component.recording.IeltsRecordingStore.class));
 
 		var report = service.generateDialogueReport(sessionId, dialogue);
 

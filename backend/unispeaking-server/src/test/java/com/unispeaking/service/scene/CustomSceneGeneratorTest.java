@@ -11,7 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.provider.AiProviderRegistry;
-import com.unispeaking.service.scene.impl.CustomSceneGenerator;
+import com.unispeaking.component.scene.CustomSceneGenerator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;

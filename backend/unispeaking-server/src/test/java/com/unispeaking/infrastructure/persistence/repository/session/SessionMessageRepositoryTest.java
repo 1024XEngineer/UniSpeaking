@@ -50,7 +50,7 @@ class SessionMessageRepositoryTest {
 				new SessionMessageRepository(mapper);
 
 		repository.append(
-				"interview_1",
+				"custom_1",
 				"session_1",
 				2,
 				new Message(1, "  Answer  ", new byte[] {1, 2}));
@@ -60,7 +60,7 @@ class SessionMessageRepositoryTest {
 		ArgumentCaptor<SessionMessageEntity> captor =
 				ArgumentCaptor.forClass(SessionMessageEntity.class);
 		verify(mapper).insert(captor.capture());
-		assertEquals("interview_1", captor.getValue().getSceneId());
+		assertEquals("custom_1", captor.getValue().getSceneId());
 		assertEquals("session_1", captor.getValue().getSessionId());
 		assertEquals(2, captor.getValue().getMessageNo());
 		assertEquals("Answer", captor.getValue().getContent());
@@ -80,7 +80,7 @@ class SessionMessageRepositoryTest {
 		assertTrue(repository.findSceneId(" ").isEmpty());
 		assertTrue(repository.findSceneId("missing").isEmpty());
 		assertEquals(3, repository.deleteObsoleteForScene(
-				"interview_1",
+				"custom_1",
 				"session_current"));
 	}
 
@@ -119,7 +119,7 @@ class SessionMessageRepositoryTest {
 				new SessionMessageRepository(mapper);
 		when(mapper.insert(any(SessionMessageEntity.class))).thenReturn(0);
 		assertFailure(() -> repository.append(
-				"interview_1", "session_1", 1, new Message(0, "Q", null)));
+				"custom_1", "session_1", 1, new Message(0, "Q", null)));
 
 		when(mapper.selectList(any(Wrapper.class)))
 				.thenThrow(new IllegalStateException("read"));
@@ -129,7 +129,7 @@ class SessionMessageRepositoryTest {
 		when(mapper.delete(any(Wrapper.class)))
 				.thenThrow(new IllegalStateException("delete"));
 		assertFailure(() -> repository.deleteObsoleteForScene(
-				"interview_1", "session_1"));
+				"custom_1", "session_1"));
 	}
 
 	private void assertFailure(org.junit.jupiter.api.function.Executable action) {

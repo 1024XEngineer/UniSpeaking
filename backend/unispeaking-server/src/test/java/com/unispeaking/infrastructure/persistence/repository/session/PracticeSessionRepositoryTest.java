@@ -156,8 +156,8 @@ class PracticeSessionRepositoryTest {
 		PracticeSessionEntity entity = new PracticeSessionEntity();
 		entity.setSessionId("active_session");
 		entity.setUserId(UUID.randomUUID());
-		entity.setSceneId("interview_1");
-		entity.setSceneType(SceneType.INTERVIEW_SCENE.name());
+		entity.setSceneId("custom_1");
+		entity.setSceneType(SceneType.CUSTOM_SCENE.name());
 		entity.setStatus(SessionStatus.CREATED.name());
 		entity.setStartedAt(Instant.parse("2026-08-04T08:00:00Z")
 				.atOffset(java.time.ZoneOffset.UTC));
@@ -199,8 +199,8 @@ class PracticeSessionRepositoryTest {
 		PracticeSessionRecord completed = new PracticeSessionRecord(
 				"session_completed",
 				userId,
-				"interview_1",
-				SceneType.INTERVIEW_SCENE,
+				"custom_1",
+				SceneType.CUSTOM_SCENE,
 				SessionStatus.COMPLETED,
 				endedAt.minusSeconds(60),
 				endedAt);
@@ -229,8 +229,8 @@ class PracticeSessionRepositoryTest {
 		return new PracticeSessionRecord(
 				"session_1",
 				userId,
-				"interview_1",
-				SceneType.INTERVIEW_SCENE,
+				"custom_1",
+				SceneType.CUSTOM_SCENE,
 				SessionStatus.CREATED,
 				Instant.parse("2026-08-04T08:00:00Z"),
 				null);

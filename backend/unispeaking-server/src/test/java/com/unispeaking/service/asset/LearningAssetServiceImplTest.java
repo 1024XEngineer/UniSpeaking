@@ -15,7 +15,7 @@ import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionE
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
 import com.unispeaking.service.asset.impl.LearningAssetServiceImpl;
 import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.service.evaluation.EvaluationService;
+import com.unispeaking.service.evaluation.impl.CustomEvaluationServiceImpl;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -68,7 +68,8 @@ class LearningAssetServiceImplTest {
 		SceneRepository sceneRepository = mock(SceneRepository.class);
 		SessionEvaluationRepository reportRepository =
 				mock(SessionEvaluationRepository.class);
-		EvaluationService evaluationService = mock(EvaluationService.class);
+		CustomEvaluationServiceImpl evaluationService =
+				mock(CustomEvaluationServiceImpl.class);
 		when(authService.requireUserId(null)).thenReturn(userId);
 		when(sceneRepository.findCustomDefinitionById(sceneId))
 				.thenReturn(Optional.of(scene));

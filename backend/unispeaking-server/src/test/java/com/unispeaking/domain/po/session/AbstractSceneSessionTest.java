@@ -52,8 +52,8 @@ class AbstractSceneSessionTest {
 				null,
 				Instant.parse("2026-08-04T08:00:00Z"));
 
-		session.setSceneId("interview_1");
-		session.setSceneType(SceneType.INTERVIEW_SCENE);
+		session.setSceneId("custom_1");
+		session.setSceneType(SceneType.CUSTOM_SCENE);
 		session.setPrompt(new SessionPrompt("prompt"));
 		session.setProviderType(ProviderType.QWEN);
 		session.setModel("model");
@@ -73,8 +73,8 @@ class AbstractSceneSessionTest {
 		assertEquals("session_1", session.getId());
 		assertEquals("user_1", session.getUserId());
 		assertTrue(session.getCreatedAt().isBefore(Instant.now().plusSeconds(1)));
-		assertEquals("interview_1", session.getSceneId());
-		assertEquals(SceneType.INTERVIEW_SCENE, session.getSceneType());
+		assertEquals("custom_1", session.getSceneId());
+		assertEquals(SceneType.CUSTOM_SCENE, session.getSceneType());
 		assertEquals("provider_session", session.getProviderSessionId());
 		assertEquals(new SessionPrompt("prompt"), session.getPrompt());
 		assertEquals(ProviderType.QWEN, session.getProviderType());

@@ -74,7 +74,7 @@ class DialogueTurnEvaluationPromptBuilderTest {
 								"First user answer")));
 		DialogueTurnEvaluationPromptInput input =
 				new DialogueTurnEvaluationPromptInput(
-						"INTERVIEW",
+						"CUSTOM",
 						null,
 						null,
 						null,

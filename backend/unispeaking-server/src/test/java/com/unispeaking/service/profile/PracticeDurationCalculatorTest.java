@@ -1,5 +1,7 @@
 package com.unispeaking.service.profile;
 
+import com.unispeaking.component.profile.PracticeDurationCalculator;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.unispeaking.domain.po.session.PracticeSessionRecord;

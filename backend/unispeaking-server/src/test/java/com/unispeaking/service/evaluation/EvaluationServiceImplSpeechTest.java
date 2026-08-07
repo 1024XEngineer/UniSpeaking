@@ -32,8 +32,8 @@ import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPractice
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.service.evaluation.impl.EvaluationServiceImpl;
-import com.unispeaking.service.scene.SceneFlowService;
+import com.unispeaking.component.evaluation.EvaluationProcessor;
+import com.unispeaking.service.scene.impl.IeltsSceneFlowServiceImpl;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -52,12 +52,12 @@ class EvaluationServiceImplSpeechTest {
 	private SessionEvaluationRepository sessionEvaluationRepository;
 	private SceneSentenceReadingRepository sceneSentenceReadingRepository;
 	private IeltsPracticeRepository ieltsPracticeRepository;
-	private SceneFlowService sceneFlowService;
+	private IeltsSceneFlowServiceImpl sceneFlowService;
 	private PracticeSessionRepository practiceSessionRepository;
 	private IeltsEvaluationRepository ieltsEvaluationRepository;
 	private IeltsEvaluationLlmClient ieltsLlmClient;
 	private AuthService authService;
-	private EvaluationService service;
+	private EvaluationProcessor service;
 
 	@BeforeEach
 	void setUp() {
@@ -71,12 +71,12 @@ class EvaluationServiceImplSpeechTest {
 		sceneSentenceReadingRepository =
 				mock(SceneSentenceReadingRepository.class);
 		ieltsPracticeRepository = mock(IeltsPracticeRepository.class);
-		sceneFlowService = mock(SceneFlowService.class);
+		sceneFlowService = mock(IeltsSceneFlowServiceImpl.class);
 		practiceSessionRepository = mock(PracticeSessionRepository.class);
 		ieltsEvaluationRepository = mock(IeltsEvaluationRepository.class);
 		ieltsLlmClient = mock(IeltsEvaluationLlmClient.class);
 		authService = mock(AuthService.class);
-		service = new EvaluationServiceImpl(
+		service = new EvaluationProcessor(
 				pronunciationClient,
 				llmClient,
 				activeSessionRegistry,
@@ -94,7 +94,7 @@ class EvaluationServiceImplSpeechTest {
 				authService,
 				mock(com.unispeaking.infrastructure.storage.ObjectStorageProvider.class),
 				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
-				mock(com.unispeaking.service.recording.IeltsRecordingService.class));
+				mock(com.unispeaking.component.recording.IeltsRecordingStore.class));
 	}
 
 	@AfterEach
