@@ -1,5 +1,6 @@
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { ArrowLeftIcon } from 'phosphor-react-native/src/icons/ArrowLeft';
+import { type ReactNode, useEffect, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
@@ -23,7 +24,7 @@ import { colors, levels } from '@/theme/tokens';
 
 function AnimatedSloganLine({ text, delay }: { text: string; delay: number }) {
   const characters = Array.from(text);
-  const progress = useRef(characters.map(() => new Animated.Value(0))).current;
+  const [progress] = useState(() => characters.map(() => new Animated.Value(0)));
 
   useEffect(() => {
     let mounted = true;
@@ -119,7 +120,7 @@ function AuthHeader({ title, onBack }: { title: string; onBack: () => void }) {
   return (
     <View style={styles.authHeader}>
       <Pressable accessibilityRole="button" accessibilityLabel="返回" onPress={onBack} style={styles.backButton}>
-        <AppIcon name="arrow-left" size={20} />
+        <ArrowLeftIcon color={colors.ink} size={25} weight="bold" />
       </Pressable>
       <Text style={styles.authHeaderTitle}>{title}</Text>
       <View style={styles.headerBalance} />
@@ -365,10 +366,11 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   safeArea: { flex: 1, backgroundColor: colors.white },
   authHeader: {
-    height: 58,
+    height: 56,
     paddingHorizontal: 18,
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: colors.paper,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
@@ -377,11 +379,8 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 20,
   },
-  authHeaderTitle: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '500', textAlign: 'center' },
+  authHeaderTitle: { flex: 1, color: colors.ink, fontSize: 20, lineHeight: 26, fontWeight: '600', textAlign: 'center' },
   headerBalance: { width: 40 },
   authContent: { flexGrow: 1, paddingHorizontal: 22, paddingTop: 28, paddingBottom: 48, gap: 24 },
   heading: { gap: 8 },

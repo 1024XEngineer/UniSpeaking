@@ -1,8 +1,10 @@
 import { useRouter } from 'expo-router';
 
+import { useAppModel } from '@/model/AppModel';
 import { AccountSettings } from '@/screens/ProfileScreen';
 
 export default function AccountRoute() {
   const router = useRouter();
-  return <AccountSettings onBack={() => router.back()} />;
+  const { signOut } = useAppModel();
+  return <AccountSettings onBack={() => router.back()} onLogout={signOut} />;
 }
