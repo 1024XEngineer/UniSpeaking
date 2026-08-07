@@ -8,7 +8,7 @@ import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.common.prompt.evaluation.IeltsEvaluationPromptBuilder;
 import com.unispeaking.domain.vo.scene.IeltsPart;
-import com.unispeaking.infrastructure.evaluation.provider.EvaluationProviderFailureTranslator;
+import com.unispeaking.common.evaluation.EvaluationProviderFailureTranslator;
 import com.unispeaking.provider.AiProviderRegistry;
 import org.springframework.stereotype.Component;
 import org.slf4j.Logger;

@@ -7,9 +7,12 @@ import java.util.List;
 
 public interface LearningAssetService {
 
+	/** Lists the learning assets owned by the current user. */
 	List<LearningAssetSummary> listAssets();
 
+	/** Returns the complete learning asset for a scene. */
 	LearningAssetDetail getAsset(String sceneId);
 
+	/** Returns the evaluation report for a scene session. */
 	DialogueReportResult getReport(String sceneId, String sessionId);
 }

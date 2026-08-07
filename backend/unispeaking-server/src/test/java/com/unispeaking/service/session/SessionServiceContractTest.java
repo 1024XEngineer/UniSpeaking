@@ -24,9 +24,8 @@ class SessionServiceContractTest {
 		assertEquals(Set.of(
 				"startSession",
 				"endSession",
-				"addMessage",
-				"getSession",
-				"getBySceneId"), methodNames);
+				"addMessage"), methodNames);
+		assertEquals(3, SessionService.class.getDeclaredMethods().length);
 	}
 
 	@Test
@@ -36,6 +35,12 @@ class SessionServiceContractTest {
 		assertTrue(SessionService.class.isAssignableFrom(
 				CustomSessionServiceImpl.class));
 		assertTrue(SessionService.class.isAssignableFrom(
+				IeltsSessionServiceImpl.class));
+		assertTrue(FreeChatSessionService.class.isAssignableFrom(
+				FreeChatSessionServiceImpl.class));
+		assertTrue(CustomSessionService.class.isAssignableFrom(
+				CustomSessionServiceImpl.class));
+		assertTrue(IeltsSessionService.class.isAssignableFrom(
 				IeltsSessionServiceImpl.class));
 	}
 
@@ -49,6 +54,30 @@ class SessionServiceContractTest {
 			boolean dependsOnAuth = java.util.Arrays.stream(type.getDeclaredFields())
 					.anyMatch(field -> AuthService.class.isAssignableFrom(field.getType()));
 			assertTrue(!dependsOnAuth, type.getSimpleName() + " must not depend on AuthService");
+		}
+	}
+
+	@Test
+	void sessionLayerDoesNotOwnSceneStateMachines() {
+		for (Class<?> type : Set.of(
+				CustomSessionService.class,
+				IeltsSessionService.class)) {
+			boolean exposesStateTransition = java.util.Arrays.stream(
+					type.getDeclaredMethods())
+					.map(java.lang.reflect.Method::getName)
+					.anyMatch(name -> name.contains("State"));
+			assertTrue(!exposesStateTransition,
+					type.getSimpleName() + " must not expose scene state transitions");
+		}
+		for (Class<?> type : Set.of(
+				FreeChatSessionServiceImpl.class,
+				CustomSessionServiceImpl.class,
+				IeltsSessionServiceImpl.class)) {
+			boolean ownsStateMachine = java.util.Arrays.stream(type.getDeclaredFields())
+					.map(field -> field.getType().getPackageName())
+					.anyMatch(packageName -> packageName.endsWith(".statemachine"));
+			assertTrue(!ownsStateMachine,
+					type.getSimpleName() + " must not own scene state machines");
 		}
 	}
 }

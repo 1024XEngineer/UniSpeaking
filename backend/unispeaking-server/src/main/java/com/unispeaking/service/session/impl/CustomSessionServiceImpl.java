@@ -2,16 +2,17 @@ package com.unispeaking.service.session.impl;
 
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.logging.RealtimeFlowLog;
+import com.unispeaking.component.session.ObsoleteDialogueCleanup;
 import com.unispeaking.component.session.RealtimeSessionCoordinator;
 import com.unispeaking.component.session.SessionLifecycleManager;
-import com.unispeaking.component.statemachine.ScenarioDialogueStateMachine;
 import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
 import com.unispeaking.domain.dto.scene.CustomDialogueSceneContext;
 import com.unispeaking.domain.dto.session.CompleteCustomSceneDialogueResponse;
+import com.unispeaking.domain.dto.session.EndCustomSessionCommand;
 import com.unispeaking.domain.dto.session.Message;
-import com.unispeaking.domain.dto.session.SessionDetail;
 import com.unispeaking.domain.dto.session.ScenarioDialogueStateResponse;
 import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
+import com.unispeaking.domain.dto.session.StartCustomSessionCommand;
 import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
 import com.unispeaking.domain.dto.session.StartSessionCommand;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
@@ -19,60 +20,52 @@ import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.po.session.AbstractSceneSession;
 import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.domain.vo.scene.SceneType;
-import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
-import com.unispeaking.component.session.ObsoleteDialogueCleanup;
-import com.unispeaking.service.evaluation.impl.CustomEvaluationServiceImpl;
-import com.unispeaking.service.scene.impl.CustomSceneFlowServiceImpl;
-import com.unispeaking.service.scene.impl.CustomSceneServiceImpl;
-import com.unispeaking.service.session.SessionService;
-import java.util.List;
+import com.unispeaking.service.evaluation.CustomEvaluationService;
+import com.unispeaking.service.scene.CustomSceneFlowService;
+import com.unispeaking.service.scene.CustomSceneService;
+import com.unispeaking.service.session.CustomSessionService;
 import org.springframework.stereotype.Service;
 
 @Service
-public class CustomSessionServiceImpl implements SessionService {
+public class CustomSessionServiceImpl implements CustomSessionService {
 
-	private final CustomSceneServiceImpl sceneService;
+	private final CustomSceneService sceneService;
 	private final SessionLifecycleManager sessionLifecycle;
-	private final CustomSceneFlowServiceImpl flowService;
+	private final CustomSceneFlowService flowService;
 	private final RealtimeSessionCoordinator sessionCoordinator;
-	private final CustomEvaluationServiceImpl evaluationService;
-	private final ScenarioDialogueStateMachine stateMachine;
-	private final SessionMessageRepository messageRepository;
+	private final CustomEvaluationService evaluationService;
 	private final ObsoleteDialogueCleanup dialogueCleanup;
 
 	public CustomSessionServiceImpl(
-			CustomSceneServiceImpl sceneService,
+			CustomSceneService sceneService,
 			SessionLifecycleManager sessionLifecycle,
-			CustomSceneFlowServiceImpl flowService,
+			CustomSceneFlowService flowService,
 			RealtimeSessionCoordinator sessionCoordinator,
-			CustomEvaluationServiceImpl evaluationService,
-			ScenarioDialogueStateMachine stateMachine,
-			SessionMessageRepository messageRepository,
+			CustomEvaluationService evaluationService,
 			ObsoleteDialogueCleanup dialogueCleanup) {
 		this.sceneService = sceneService;
 		this.sessionLifecycle = sessionLifecycle;
 		this.flowService = flowService;
 		this.sessionCoordinator = sessionCoordinator;
 		this.evaluationService = evaluationService;
-		this.stateMachine = stateMachine;
-		this.messageRepository = messageRepository;
 		this.dialogueCleanup = dialogueCleanup;
 	}
 
-	public StartSceneSessionResponse startSession(
-			String sceneId,
-			StartCustomSceneDialogueRequest request) {
+	@Override
+	public StartSceneSessionResponse startSession(StartCustomSessionCommand command) {
+		String sceneId = command.sceneId();
+		StartCustomSceneDialogueRequest request = command.request();
 		CustomDialogueSceneContext prepared = sceneService.prepareDialogue(sceneId);
-		StartSessionResponse started = startSession(
+		StartSessionResponse started = sessionLifecycle.startSession(
 				new StartSessionCommand(
 						prepared.userId(),
 						prepared.sceneId(),
 						SceneType.CUSTOM_SCENE,
 						"DIALOGUE",
 						prepared.prompt()));
-		stateMachine.start(
-				started.sessionId(),
+		flowService.startDialogueState(
 				prepared.sceneId(),
+				started.sessionId(),
 				prepared.successFactorJson(),
 				prepared.learningGoal());
 		try {
@@ -92,24 +85,25 @@ public class CustomSessionServiceImpl implements SessionService {
 					request.translationEnabled());
 		}
 		catch (RuntimeException exception) {
-			stateMachine.remove(started.sessionId());
+			flowService.clearDialogueState(started.sessionId());
 			throw exception;
 		}
 	}
 
-	public CompleteCustomSceneDialogueResponse completeSession(
-			String sceneId,
-			String sessionId,
-			String stopTime) {
+	@Override
+	public CompleteCustomSceneDialogueResponse endSession(
+			EndCustomSessionCommand command) {
+		String sceneId = command.sceneId();
+		String sessionId = command.sessionId();
 		CustomSceneDefinition definition = sceneService.getOwnedDefinition(sceneId);
 		AbstractSceneSession session = sessionCoordinator.requireOwnedSession(
 				definition.userId(),
 				sessionId);
 		requireBinding(session, sceneId);
-		ScenarioDialogueStateResponse state = stateMachine.findState(sessionId)
-				.map(ignored -> stateMachine.beginClosing(sessionId))
-				.orElse(null);
-		endSession(sessionId);
+		ScenarioDialogueStateResponse state = flowService.beginDialogueClosing(
+				sceneId,
+				sessionId);
+		sessionLifecycle.endSession(sessionId);
 		String endedAt = session.getEndedAt().toString();
 		RealtimeFlowLog.info(
 				"evaluation.report.start sceneId={} sessionId={}",
@@ -117,13 +111,11 @@ public class CustomSessionServiceImpl implements SessionService {
 				sessionId);
 		DialogueReportResult report;
 		try {
-			report = evaluationService.generateDialogueReport(
-					sessionId,
-					messageRepository.findMessages(sessionId));
+			report = evaluationService.generateReport(sceneId);
 		}
 		finally {
 			if (!flowService.isCompleted(sceneId)) flowService.next(sceneId);
-			stateMachine.remove(sessionId);
+			flowService.clearDialogueState(sessionId);
 			sessionCoordinator.remove(sessionId);
 		}
 		dialogueCleanup.retainLatestDialogue(sceneId, sessionId);
@@ -136,70 +128,8 @@ public class CustomSessionServiceImpl implements SessionService {
 	}
 
 	@Override
-	public StartSessionResponse startSession(StartSessionCommand command) {
-		requireSceneType(command, SceneType.CUSTOM_SCENE);
-		return sessionLifecycle.startSession(command);
-	}
-
-	@Override
 	public void addMessage(String sessionId, Message message) {
 		sessionLifecycle.addMessage(sessionId, message);
-	}
-
-	public void addMessage(String userId, String sessionId, Message message) {
-		sessionLifecycle.addMessage(userId, sessionId, message);
-	}
-
-	@Override
-	public void endSession(String sessionId) {
-		sessionLifecycle.endSession(sessionId);
-	}
-
-	public void endSession(String userId, String sessionId, String stopTime) {
-		sessionLifecycle.endSession(userId, sessionId, stopTime);
-	}
-
-	@Override
-	public SessionDetail getSession(String sessionId) {
-		return sessionLifecycle.getSession(sessionId);
-	}
-
-	@Override
-	public List<SessionDetail> getBySceneId(String sceneId) {
-		return sessionLifecycle.getBySceneId(sceneId);
-	}
-
-	private void requireSceneType(StartSessionCommand command, SceneType expected) {
-		if (command == null || command.sceneType() != expected) {
-			throw new BusinessException(
-					"SESSION_SCENE_TYPE_MISMATCH",
-					"session command does not belong to " + expected);
-		}
-	}
-
-	public ScenarioDialogueStateResponse advanceState(
-			String sceneId,
-			String sessionId,
-			int turnNo,
-			String transcript) {
-		requireOwnedBinding(sceneId, sessionId);
-		return stateMachine.advance(sessionId, turnNo, transcript);
-	}
-
-	public ScenarioDialogueStateResponse getState(
-			String sceneId,
-			String sessionId) {
-		requireOwnedBinding(sceneId, sessionId);
-		return stateMachine.getState(sessionId);
-	}
-
-	private void requireOwnedBinding(String sceneId, String sessionId) {
-		CustomSceneDefinition definition = sceneService.getOwnedDefinition(sceneId);
-		requireBinding(
-				sessionCoordinator.requireOwnedSession(
-						definition.userId(),
-						sessionId),
-				sceneId);
 	}
 
 	private void requireBinding(AbstractSceneSession session, String sceneId) {

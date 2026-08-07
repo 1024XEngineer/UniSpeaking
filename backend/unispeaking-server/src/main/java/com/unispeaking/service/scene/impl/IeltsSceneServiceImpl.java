@@ -9,9 +9,6 @@ import com.unispeaking.domain.dto.scene.IeltsGenerationRequest;
 import com.unispeaking.domain.dto.scene.IeltsGenerationResponse;
 import com.unispeaking.domain.dto.scene.IeltsDialogueSceneContext;
 import com.unispeaking.domain.dto.scene.IeltsQuestionResponse;
-import com.unispeaking.domain.dto.scene.IeltsPartContent;
-import com.unispeaking.domain.dto.scene.IeltsSceneRequest;
-import com.unispeaking.domain.dto.scene.IeltsSceneResult;
 import com.unispeaking.domain.dto.scene.IeltsSettingsResponse;
 import com.unispeaking.domain.dto.scene.IeltsTopicSearchResponse;
 import com.unispeaking.domain.dto.scene.IeltsTopicSummaryResponse;
@@ -32,7 +29,8 @@ import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPracticeRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.IeltsRepository;
 import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.service.scene.SceneService;
+import com.unispeaking.service.scene.IeltsSceneFlowService;
+import com.unispeaking.service.scene.IeltsSceneService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -46,8 +44,7 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 
 @Service
-public class IeltsSceneServiceImpl
-		implements SceneService<IeltsSceneRequest, IeltsSceneResult> {
+public class IeltsSceneServiceImpl implements IeltsSceneService {
 
 	private static final int DAILY_PRACTICE_LIMIT = 5;
 	private static final int PART_ONE_QUESTION_COUNT = 4;
@@ -64,7 +61,7 @@ public class IeltsSceneServiceImpl
 	private final IeltsPracticeRepository practiceRepository;
 	private final AuthService authService;
 	private final IeltsExaminerPromptBuilder promptBuilder;
-	private final IeltsSceneFlowServiceImpl flowService;
+	private final IeltsSceneFlowService flowService;
 
 	public IeltsSceneServiceImpl(
 			IeltsRepository repository,
@@ -72,7 +69,7 @@ public class IeltsSceneServiceImpl
 			IeltsPracticeRepository practiceRepository,
 			AuthService authService,
 			IeltsExaminerPromptBuilder promptBuilder,
-			IeltsSceneFlowServiceImpl flowService) {
+			IeltsSceneFlowService flowService) {
 		this.repository = repository;
 		this.relevanceCalculator = relevanceCalculator;
 		this.practiceRepository = practiceRepository;
@@ -81,6 +78,7 @@ public class IeltsSceneServiceImpl
 		this.flowService = flowService;
 	}
 
+	@Override
 	public IeltsDialogueSceneContext prepareDialogue(
 			String ieltsId,
 			String requestedVoiceId) {
@@ -96,7 +94,14 @@ public class IeltsSceneServiceImpl
 					null,
 					selectedVoice.voiceId());
 		}
-		IeltsPart activePart = flowService.currentPart(ieltsId);
+		IeltsPart activePart = switch (flowService.current(ieltsId)) {
+			case PART1 -> IeltsPart.PART_1;
+			case PART2 -> IeltsPart.PART_2;
+			case PART3 -> IeltsPart.PART_3;
+			case COMPLETED -> throw new BusinessException(
+					"IELTS_FLOW_COMPLETED",
+					"IELTS flow is already completed");
+		};
 		String topicId = switch (activePart) {
 			case PART_1 -> practice.part1TopicId();
 			case PART_2 -> practice.part2TopicId();
@@ -129,6 +134,7 @@ public class IeltsSceneServiceImpl
 				selectedVoice.voiceId());
 	}
 
+	@Override
 	public IeltsStage completeDialogue(String ieltsId, String userId) {
 		IeltsPracticeRecord practice = requirePracticeOwnedBy(ieltsId, userId);
 		IeltsStage next = flowService.next(ieltsId);
@@ -138,6 +144,7 @@ public class IeltsSceneServiceImpl
 		return next;
 	}
 
+	@Override
 	public IeltsPracticeRecord requireOwnedPractice(String ieltsId) {
 		return requirePracticeOwnedBy(
 				ieltsId,
@@ -160,18 +167,6 @@ public class IeltsSceneServiceImpl
 	}
 
 	@Override
-	public IeltsSceneResult generate(IeltsSceneRequest request) {
-		IeltsGenerationResponse generated = generate(
-				request.toGenerationRequest());
-		return new IeltsSceneResult(
-				generated.ieltsId(),
-				generated.mode(),
-				request.targetPart(),
-				part(generated, IeltsPart.PART_1, 1),
-				part(generated, IeltsPart.PART_2, 2),
-				part(generated, IeltsPart.PART_3, 3));
-	}
-
 	public IeltsTopicSearchResponse searchTopics(
 			IeltsPart part,
 			String category,
@@ -241,6 +236,7 @@ public class IeltsSceneServiceImpl
 				totalPages);
 	}
 
+	@Override
 	public IeltsTrainingResponse prepareTraining(
 			IeltsPart part,
 			String topicId) {
@@ -253,6 +249,7 @@ public class IeltsSceneServiceImpl
 				questions.stream().map(this::toQuestion).toList());
 	}
 
+	@Override
 	public IeltsGenerationResponse generate(IeltsGenerationRequest request) {
 		validate(request);
 		UUID userId = UUID.fromString(authService.requireUserId(null));
@@ -340,6 +337,7 @@ public class IeltsSceneServiceImpl
 								.examinerName()));
 	}
 
+	@Override
 	public String buildDialoguePrompt(String ieltsId, IeltsPart part) {
 		IeltsPracticeRecord practice = practiceRepository.findPractice(ieltsId)
 				.orElseThrow(() -> new BusinessException(
@@ -374,32 +372,13 @@ public class IeltsSceneServiceImpl
 				IeltsExaminerVoice.fromVoiceId(voiceId).examinerName());
 	}
 
-	private IeltsPartContent part(
-			IeltsGenerationResponse generated,
-			IeltsPart part,
-			int number) {
-		List<IeltsContentQuestion> questions =
-				generated.content().questionsFor(part);
-		if (questions.isEmpty()) return null;
-		return new IeltsPartContent(
-				number,
-				questions.stream()
-						.map(IeltsContentQuestion::question)
-						.toList(),
-				questions.stream()
-						.flatMap(question -> question
-								.recommendedExpressions().stream())
-						.map(expression -> expression.expression())
-						.distinct()
-						.toList(),
-				buildDialoguePrompt(generated.ieltsId(), part));
-	}
-
+	@Override
 	public IeltsSettingsResponse getSettings() {
 		UUID userId = UUID.fromString(authService.requireUserId(null));
 		return toSettingsResponse(practiceRepository.getOrCreateSettings(userId));
 	}
 
+	@Override
 	public IeltsSettingsResponse updateSettings(UpdateIeltsSettingsRequest request) {
 		if (request == null
 				|| (request.targetScore() == null

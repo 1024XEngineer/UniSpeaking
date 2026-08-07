@@ -91,7 +91,7 @@ class EvaluationServiceImplReportTest {
 				mock(IeltsEvaluationRepository.class),
 				mock(IeltsEvaluationLlmClient.class),
 				mock(AuthService.class),
-				mock(com.unispeaking.infrastructure.storage.ObjectStorageProvider.class),
+				mock(com.unispeaking.provider.ObjectStorageProvider.class),
 				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
 				mock(com.unispeaking.component.recording.IeltsRecordingStore.class));
 

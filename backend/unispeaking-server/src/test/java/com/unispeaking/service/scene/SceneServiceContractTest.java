@@ -22,6 +22,15 @@ class SceneServiceContractTest {
 		assertTrue(SceneService.class.isAssignableFrom(CustomSceneServiceImpl.class));
 		assertTrue(SceneService.class.isAssignableFrom(FreeChatSceneServiceImpl.class));
 		assertTrue(SceneService.class.isAssignableFrom(IeltsSceneServiceImpl.class));
+		assertTrue(SceneService.class.isAssignableFrom(CustomSceneService.class));
+		assertTrue(SceneService.class.isAssignableFrom(FreeChatSceneService.class));
+		assertTrue(SceneService.class.isAssignableFrom(IeltsSceneService.class));
+		assertTrue(CustomSceneService.class.isAssignableFrom(
+				CustomSceneServiceImpl.class));
+		assertTrue(FreeChatSceneService.class.isAssignableFrom(
+				FreeChatSceneServiceImpl.class));
+		assertTrue(IeltsSceneService.class.isAssignableFrom(
+				IeltsSceneServiceImpl.class));
 	}
 
 	@Test

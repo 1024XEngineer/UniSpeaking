@@ -8,7 +8,7 @@ import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.common.evaluation.model.PronunciationAssessmentResult;
 import com.unispeaking.common.evaluation.parser.IflytekSuntoneAssessmentParser;
-import com.unispeaking.infrastructure.evaluation.provider.EvaluationProviderFailureTranslator;
+import com.unispeaking.common.evaluation.EvaluationProviderFailureTranslator;
 import java.util.Objects;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;

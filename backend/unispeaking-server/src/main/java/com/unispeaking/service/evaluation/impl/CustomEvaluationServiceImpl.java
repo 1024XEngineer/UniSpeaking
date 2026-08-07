@@ -4,21 +4,18 @@ import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.component.session.SessionLifecycleManager;
 import com.unispeaking.component.evaluation.EvaluationProcessor;
 import com.unispeaking.domain.dto.evaluation.CustomEvaluationDetail;
-import com.unispeaking.domain.dto.evaluation.CustomEvaluationReport;
 import com.unispeaking.domain.dto.evaluation.DialogueEvaluationResult;
 import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
 import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationCommand;
 import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationResult;
 import com.unispeaking.domain.dto.evaluation.SentenceEvaluationResponse;
 import com.unispeaking.domain.dto.session.SessionDetail;
-import com.unispeaking.service.evaluation.EvaluationService;
+import com.unispeaking.service.evaluation.CustomEvaluationService;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
-public class CustomEvaluationServiceImpl implements EvaluationService<
-		CustomEvaluationReport,
-		CustomEvaluationDetail> {
+public class CustomEvaluationServiceImpl implements CustomEvaluationService {
 
 	private final EvaluationProcessor delegate;
 	private final SessionLifecycleManager sessionLifecycle;
@@ -37,11 +34,11 @@ public class CustomEvaluationServiceImpl implements EvaluationService<
 	}
 
 	@Override
-	public CustomEvaluationReport generateReport(String sceneId) {
+	public DialogueReportResult generateReport(String sceneId) {
 		SessionDetail session = latestSession(sceneId);
-		return toReport(delegate.generateDialogueReport(
+		return delegate.generateDialogueReport(
 				session.sessionId(),
-				session.dialogue()));
+				session.dialogue());
 	}
 
 	@Override
@@ -52,18 +49,14 @@ public class CustomEvaluationServiceImpl implements EvaluationService<
 		return new CustomEvaluationDetail(generateReport(sceneId), detail);
 	}
 
+	@Override
 	public SentenceEvaluationResponse evaluateSentence(
 			String sentenceId,
 			byte[] audio) {
 		return delegate.evaluateSentenceReading(sentenceId, audio);
 	}
 
-	public DialogueReportResult generateDialogueReport(
-			String sessionId,
-			List<com.unispeaking.domain.dto.session.Message> dialogue) {
-		return delegate.generateDialogueReport(sessionId, dialogue);
-	}
-
+	@Override
 	public DialogueEvaluationResult getDialogueEvaluation(String sessionId) {
 		return delegate.getDialogueEvaluation(sessionId);
 	}
@@ -78,14 +71,4 @@ public class CustomEvaluationServiceImpl implements EvaluationService<
 		return sessions.getLast();
 	}
 
-	private CustomEvaluationReport toReport(DialogueReportResult result) {
-		return new CustomEvaluationReport(
-				result.accuracyScore(),
-				result.fluencyScore(),
-				result.grammarScore(),
-				result.vocabularyScore(),
-				result.naturalnessScore(),
-				result.finalScore(),
-				result.summary());
-	}
 }

@@ -1,5 +1,6 @@
 package com.unispeaking.infrastructure.ai.qwen;
 
+import com.unispeaking.infrastructure.config.RealtimeProperties;
 import com.unispeaking.common.logging.RealtimeFlowLog;
 import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.provider.AiProviderRegistry;

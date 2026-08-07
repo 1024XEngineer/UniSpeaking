@@ -1,7 +1,10 @@
 package com.unispeaking.service.evaluation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.unispeaking.service.evaluation.impl.CustomEvaluationServiceImpl;
+import com.unispeaking.service.evaluation.impl.IeltsEvaluationServiceImpl;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -21,5 +24,15 @@ class EvaluationServiceContractTest {
 				"generateReport",
 				"getEvaluation"), methods);
 		assertEquals(3, EvaluationService.class.getDeclaredMethods().length);
+		assertTrue(EvaluationService.class.isAssignableFrom(
+				CustomEvaluationService.class));
+		assertTrue(EvaluationService.class.isAssignableFrom(
+				IeltsEvaluationService.class));
+		assertTrue(CustomEvaluationService.class.isAssignableFrom(
+				CustomEvaluationServiceImpl.class));
+		assertTrue(IeltsEvaluationService.class.isAssignableFrom(
+				IeltsEvaluationServiceImpl.class));
+		assertTrue(Arrays.stream(CustomEvaluationService.class.getDeclaredMethods())
+				.noneMatch(method -> method.getName().equals("generateDialogueReport")));
 	}
 }

@@ -67,10 +67,14 @@ public interface SceneService<R, T> {
 ## 2.1 FreeChatSceneService
 
 ```java
-public class FreeChatSceneService
-        implements SceneService<
+public interface FreeChatSceneService
+        extends SceneService<
             FreeChatSceneRequest,
             FreeChatSceneResult> {
+}
+
+public class FreeChatSceneServiceImpl
+        implements FreeChatSceneService {
 
     @Override
     public FreeChatSceneResult generate(
@@ -98,10 +102,16 @@ FreeChatSceneResult {
 ## 2.2 CustomSceneService
 
 ```java
-public class CustomSceneService
-        implements SceneService<
+public interface CustomSceneService
+        extends SceneService<
             CustomSceneRequest,
             CustomSceneResult> {
+
+    CustomSceneResult getOwnedScene(String sceneId);
+}
+
+public class CustomSceneServiceImpl
+        implements CustomSceneService {
 
     @Override
     public CustomSceneResult generate(
@@ -141,10 +151,16 @@ MOCK_EXAM  模拟考试
 ```
 
 ```java
-public class IeltsSceneService
-        implements SceneService<
+public interface IeltsSceneService
+        extends SceneService<
             IeltsSceneRequest,
             IeltsSceneResult> {
+
+    IeltsTopicSearchResponse searchTopics(...);
+}
+
+public class IeltsSceneServiceImpl
+        implements IeltsSceneService {
 
     @Override
     public IeltsSceneResult generate(
@@ -197,7 +213,11 @@ SceneFlowService 只负责：
 获取当前阶段
 进入下一阶段
 判断是否完成
+推进场景专属的会话内子流程
 ```
+
+公共接口只定义通用阶段方法；题目序列、Part 2 计时阶段和自定义对话目标等能力，
+声明在对应的场景专用 Flow 接口中。状态机执行器由 Flow 实现持有，不放入 Session。
 
 FreeChat 没有学习流程，因此不实现 SceneFlowService。
 
@@ -232,8 +252,16 @@ public enum CustomStage {
 ```
 
 ```java
-public class CustomSceneFlowService
-        implements SceneFlowService<CustomStage> {
+public interface CustomSceneFlowService
+        extends SceneFlowService<CustomStage> {
+
+    ScenarioDialogueStateResponse advanceDialogueState(...);
+
+    ScenarioDialogueStateResponse getDialogueState(...);
+}
+
+public class CustomSceneFlowServiceImpl
+        implements CustomSceneFlowService {
 
     @Override
     public CustomStage start(String sceneId) {
@@ -305,8 +333,16 @@ public enum IeltsStage {
 ```
 
 ```java
-public class IeltsSceneFlowService
-        implements SceneFlowService<IeltsStage> {
+public interface IeltsSceneFlowService
+        extends SceneFlowService<IeltsStage> {
+
+    IeltsDialogueStateResponse advanceDialogueState(...);
+
+    IeltsPart2StateResponse advancePart2State(...);
+}
+
+public class IeltsSceneFlowServiceImpl
+        implements IeltsSceneFlowService {
 
     @Override
     public IeltsStage start(String sceneId) {
@@ -383,7 +419,8 @@ PART1
 
 SessionService 所有场景共用。
 
-不按照 FreeChat / Custom / IELTS 分 Service。
+公共接口保持场景无关；FreeChat、Custom、IELTS 分别通过场景专用接口继承它，
+具体实现类只实现对应的场景专用接口。
 
 ```java
 public class SessionService {
@@ -400,16 +437,14 @@ public class SessionService {
     void endSession(
         String sessionId
     );
-
-    SessionDetail getSession(
-        String sessionId
-    );
-
-    List<SessionDetail> getBySceneId(
-        String sceneId
-    );
 }
 ```
+
+`getSession`、`getBySceneId` 属于会话模块内部查询能力，由
+`SessionLifecycleManager` 提供，不暴露在公共或场景专用 Session 接口中。
+
+题目推进、Part 2 阶段和自定义对话状态属于 SceneFlow；Session 只在会话启动和结束时
+通知 SceneFlow 初始化或清理相应的 session 状态。
 
 Session 保存：
 
@@ -475,10 +510,14 @@ public interface EvaluationService<R, D> {
 ## 5.1 CustomEvaluationService
 
 ```java
-public class CustomEvaluationService
-        implements EvaluationService<
+public interface CustomEvaluationService
+        extends EvaluationService<
             CustomEvaluationReport,
             CustomEvaluationDetail> {
+}
+
+public class CustomEvaluationServiceImpl
+        implements CustomEvaluationService {
 
     /**
      * Custom 特有：
@@ -536,10 +575,14 @@ CustomEvaluationReport {
 ## 5.2 IeltsEvaluationService
 
 ```java
-public class IeltsEvaluationService
-        implements EvaluationService<
+public interface IeltsEvaluationService
+        extends EvaluationService<
             IeltsEvaluationReport,
             IeltsEvaluationDetail> {
+}
+
+public class IeltsEvaluationServiceImpl
+        implements IeltsEvaluationService {
 
     @Override
     public DialogueTurnEvaluationResult
@@ -555,7 +598,7 @@ public class IeltsEvaluationService
             String sceneId) {
 
         List<SessionDetail> sessions =
-            sessionService.getBySceneId(
+            sessionLifecycle.getBySceneId(
                 sceneId
             );
 
@@ -976,7 +1019,7 @@ IeltsSceneFlowService.next(
 
 【6. 聚合三个 Part】
 
-SessionService.getBySceneId(
+SessionLifecycleManager.getBySceneId(
     sceneId
 )
 
@@ -1077,4 +1120,6 @@ AiProvider
 
 公共接口只定义真正公共的方法。
 
-具体场景存在特殊能力时，可以直接在具体实现类中扩展，不需要继续增加新的 Service。
+具体场景通过专用接口继承公共接口，例如 `CustomSceneService extends SceneService`，并由
+`CustomSceneServiceImpl` 实现专用接口。场景特有能力声明在专用接口中，Impl 不得跳过
+专用接口直接实现公共接口。

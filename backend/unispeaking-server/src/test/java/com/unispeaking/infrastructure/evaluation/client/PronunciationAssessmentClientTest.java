@@ -1,6 +1,6 @@
 package com.unispeaking.infrastructure.evaluation.client;
 
-import com.unispeaking.infrastructure.evaluation.provider.EvaluationProviderFailureTranslator;
+import com.unispeaking.common.evaluation.EvaluationProviderFailureTranslator;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;

@@ -211,6 +211,9 @@
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
 					<skipTests>${skipUnitTests}</skipTests>
+					<excludes>
+						<exclude>**/*IT.java</exclude>
+					</excludes>
 					<argLine>@{jacoco.unit.argLine} -javaagent:${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar</argLine>
 				</configuration>
 			</plugin>
@@ -239,7 +242,7 @@
 						<exclude>com/unispeaking/UniSpeakingApplication*</exclude>
 						<exclude>com/unispeaking/domain/dto/**</exclude>
 						<exclude>com/unispeaking/infrastructure/config/JwtProperties*</exclude>
-						<exclude>com/unispeaking/infrastructure/ai/qwen/RealtimeProperties*</exclude>
+						<exclude>com/unispeaking/infrastructure/config/RealtimeProperties*</exclude>
 					</excludes>
 				</configuration>
 				<executions>

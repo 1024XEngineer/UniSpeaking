@@ -11,7 +11,7 @@ import static org.mockito.Mockito.when;
 import com.unispeaking.common.prompt.evaluation.IeltsEvaluationPromptBuilder;
 import com.unispeaking.domain.vo.provider.AiCapability;
 import com.unispeaking.domain.vo.scene.IeltsPart;
-import com.unispeaking.infrastructure.evaluation.provider.EvaluationProviderFailureTranslator;
+import com.unispeaking.common.evaluation.EvaluationProviderFailureTranslator;
 import com.unispeaking.provider.AiProviderRegistry;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;

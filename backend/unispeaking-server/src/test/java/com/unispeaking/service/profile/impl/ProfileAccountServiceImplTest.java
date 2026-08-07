@@ -20,7 +20,7 @@ import com.unispeaking.domain.po.auth.UserRole;
 import com.unispeaking.domain.po.auth.UserStatus;
 import com.unispeaking.infrastructure.config.ObjectStorageProperties;
 import com.unispeaking.infrastructure.persistence.repository.user.UserAccountRepository;
-import com.unispeaking.infrastructure.storage.ObjectStorageProvider;
+import com.unispeaking.provider.ObjectStorageProvider;
 import com.unispeaking.component.profile.image.AvatarImageProcessor;
 import com.unispeaking.component.profile.image.AvatarImageProcessor.ProcessedAvatar;
 import java.net.URI;

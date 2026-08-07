@@ -7,8 +7,8 @@ import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
 import com.unispeaking.domain.dto.scene.TranslateTextRequest;
 import com.unispeaking.domain.dto.scene.TranslateTextResponse;
 import com.unispeaking.domain.vo.scene.SceneType;
-import com.unispeaking.service.session.impl.FreeChatSessionServiceImpl;
-import com.unispeaking.service.scene.impl.FreeChatSceneServiceImpl;
+import com.unispeaking.service.session.FreeChatSessionService;
+import com.unispeaking.service.scene.FreeChatSceneService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,12 +20,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/scene-sessions")
 public class FreeChatSessionController {
 
-	private final FreeChatSessionServiceImpl freeChatSessionService;
-	private final FreeChatSceneServiceImpl freeChatSceneService;
+	private final FreeChatSessionService freeChatSessionService;
+	private final FreeChatSceneService freeChatSceneService;
 
 	public FreeChatSessionController(
-			FreeChatSessionServiceImpl freeChatSessionService,
-			FreeChatSceneServiceImpl freeChatSceneService) {
+			FreeChatSessionService freeChatSessionService,
+			FreeChatSceneService freeChatSceneService) {
 		this.freeChatSessionService = freeChatSessionService;
 		this.freeChatSceneService = freeChatSceneService;
 	}

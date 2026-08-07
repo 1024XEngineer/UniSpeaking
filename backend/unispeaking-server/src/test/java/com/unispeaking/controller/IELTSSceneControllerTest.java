@@ -23,6 +23,7 @@ import com.unispeaking.domain.dto.scene.IeltsTrainingResponse;
 import com.unispeaking.domain.dto.scene.SceneFlowResponse;
 import com.unispeaking.domain.dto.session.StartIeltsDialogueRequest;
 import com.unispeaking.domain.dto.session.StartIeltsSessionResponse;
+import com.unispeaking.domain.dto.session.StartIeltsSessionCommand;
 import com.unispeaking.domain.dto.session.IeltsPart2StateResponse;
 import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.scene.IeltsContent;
@@ -76,7 +77,7 @@ class IELTSSceneControllerTest {
 		IeltsSceneServiceImpl sceneService = mock(IeltsSceneServiceImpl.class);
 		IeltsSceneFlowServiceImpl flowService = mock(IeltsSceneFlowServiceImpl.class);
 		IeltsSessionServiceImpl sessionService = mock(IeltsSessionServiceImpl.class);
-		when(sessionService.advancePart2State(
+		when(flowService.advancePart2State(
 				"ielts_2",
 				"session_2",
 				IeltsPart2Event.PREPARATION_COMPLETE)).thenReturn(
@@ -103,7 +104,7 @@ class IELTSSceneControllerTest {
 				.andExpect(jsonPath("$.data.phase").value("LONG_TURN"))
 				.andExpect(jsonPath("$.data.completed").value(false));
 
-		verify(sessionService).advancePart2State(
+		verify(flowService).advancePart2State(
 				"ielts_2",
 				"session_2",
 				IeltsPart2Event.PREPARATION_COMPLETE);
@@ -292,7 +293,8 @@ class IELTSSceneControllerTest {
 				"qwen3.5-omni-flash-realtime",
 				"Harvey",
 				true);
-		when(sessionService.startSession("ielts_123", request)).thenReturn(
+		when(sessionService.startSession(
+				new StartIeltsSessionCommand("ielts_123", request))).thenReturn(
 				new StartIeltsSessionResponse(
 						"ielts_123",
 						"Weekends",
@@ -336,6 +338,7 @@ class IELTSSceneControllerTest {
 				.andExpect(jsonPath("$.data.currentStage").value("PART_1"))
 				.andExpect(jsonPath("$.data.answerSdp").value("answer-sdp"));
 
-		verify(sessionService).startSession("ielts_123", request);
+		verify(sessionService).startSession(
+				new StartIeltsSessionCommand("ielts_123", request));
 	}
 }
