@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -120,52 +120,71 @@ export function ConversationSettings({
   onSave: (settings: { speed: string; level: string; teacher: Teacher }) => void;
   onClose: () => void;
 }) {
+  return (
+    <Modal animationType="slide" transparent visible={open} onRequestClose={onClose}>
+      {open ? (
+        <ConversationSettingsSheet
+          speed={speed}
+          level={level}
+          teacher={teacher}
+          onSave={onSave}
+          onClose={onClose}
+        />
+      ) : null}
+    </Modal>
+  );
+}
+
+function ConversationSettingsSheet({
+  speed,
+  level,
+  teacher,
+  onSave,
+  onClose,
+}: {
+  speed: string;
+  level: string;
+  teacher: Teacher;
+  onSave: (settings: { speed: string; level: string; teacher: Teacher }) => void;
+  onClose: () => void;
+}) {
   const [draftSpeed, setDraftSpeed] = useState(speed);
   const [draftLevel, setDraftLevel] = useState(level);
   const [draftTeacher, setDraftTeacher] = useState(teacher);
 
-  useEffect(() => {
-    if (!open) return;
-    setDraftSpeed(speed);
-    setDraftLevel(level);
-    setDraftTeacher(teacher);
-  }, [level, open, speed, teacher]);
-
   return (
-    <Modal animationType="slide" transparent visible={open} onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Pressable accessibilityLabel="关闭设置" onPress={onClose} style={styles.backdrop} />
-        <SafeAreaView edges={['bottom']} style={styles.sheet}>
-          <View style={styles.handle} />
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>对话设置</Text>
-            <Text style={styles.sheetDescription}>调整后会从下一次对话开始生效。</Text>
+    <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <Pressable accessibilityLabel="关闭设置" onPress={onClose} style={styles.backdrop} />
+      <SafeAreaView edges={['bottom']} style={styles.sheet}>
+        <View style={styles.handle} />
+        <View style={styles.sheetHeader}>
+          <Text style={styles.sheetTitle}>对话设置</Text>
+          <Text style={styles.sheetDescription}>调整后会从下一次对话开始生效。</Text>
+        </View>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.sheetContent}>
+          <View style={styles.group}>
+            <Text style={styles.groupTitle}>对话语速</Text>
+            <SpeedSelector value={draftSpeed} onChange={setDraftSpeed} />
           </View>
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.sheetContent}>
-            <View style={styles.group}>
-              <Text style={styles.groupTitle}>对话语速</Text>
-              <SpeedSelector value={draftSpeed} onChange={setDraftSpeed} />
-            </View>
-            <View style={styles.group}>
-              <Text style={styles.groupTitle}>英语水平</Text>
-              <LevelSelector value={draftLevel} onChange={setDraftLevel} />
-            </View>
-            <View style={styles.group}>
-              <Text style={styles.groupTitle}>AI 老师</Text>
-              <TeacherSelector selectedId={draftTeacher.id} onSelect={setDraftTeacher} />
-            </View>
-            <View style={styles.actions}>
-              <AppButton title="取消" variant="secondary" onPress={onClose} style={styles.flex} />
-              <AppButton
-                title="保存设置"
-                onPress={() => onSave({ speed: draftSpeed, level: draftLevel, teacher: draftTeacher })}
-                style={styles.flex}
-              />
-            </View>
-          </ScrollView>
-        </SafeAreaView>
-      </KeyboardAvoidingView>
-    </Modal>
+          <View style={styles.group}>
+            <Text style={styles.groupTitle}>英语水平</Text>
+            <LevelSelector value={draftLevel} onChange={setDraftLevel} />
+          </View>
+          <View style={styles.group}>
+            <Text style={styles.groupTitle}>AI 老师</Text>
+            <TeacherSelector selectedId={draftTeacher.id} onSelect={setDraftTeacher} />
+          </View>
+          <View style={styles.actions}>
+            <AppButton title="取消" variant="secondary" onPress={onClose} style={styles.flex} />
+            <AppButton
+              title="保存设置"
+              onPress={() => onSave({ speed: draftSpeed, level: draftLevel, teacher: draftTeacher })}
+              style={styles.flex}
+            />
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
