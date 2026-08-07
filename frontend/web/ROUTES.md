@@ -37,17 +37,6 @@
 
 | 路径 | 页面 |
 | --- | --- |
-| `/interview` | 材料与时长设置 |
-| `/interview/preparing` | 面试准备 |
-| `/interview/live` | 实时面试 |
-| `/interview/finalizing` | 报告分析中 |
-| `/interview/report` | 完整报告 |
-| `/interview/report/partial` | 部分结果 |
-| `/interview/report/failed` | 报告失败 |
-| `/interview/assets` | 学习资产概览 |
-| `/interview/assets/history` | 面试记录 |
-| `/interview/assets/trends` | 能力趋势 |
-| `/interview/assets/:recordId` | 单次面试报告 |
 
 ## 合并约定
 
@@ -55,6 +44,5 @@
 - 页面刷新、前进后退和直接访问深层地址均由 `resolveRoute` 解析。
 - 未知的 IELTS/面试子路径回到各自模块首页；完全未知地址回到启动页。
 - 旧路径 `/training`、`/result`、`/ielts-assets` 保持兼容。
-- 后端接口路径不需要与页面路由相同；建议分别使用 `/api/ielts/*`、`/api/interviews/*`、`/api/assets/*`。
 - 合并部署时，除 `/api/*` 和静态资源外，所有前端 `GET` 路径都需要回退到 `index.html`，否则刷新深层地址会得到服务器 404。
 - 合并前可运行 `npm run check:routes` 检查路由契约，再运行 `npm run build` 检查前端构建。

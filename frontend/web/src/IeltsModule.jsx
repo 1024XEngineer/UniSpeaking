@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  Briefcase,
   BookOpenText,
   CaretDown,
   CaretRight,
@@ -1580,7 +1579,7 @@ function AssetsTrends({ settings, reports }) {
   );
 }
 
-export function IeltsAssets({ route, onNavigate, onBackToAssets, onInterviewAssets, onTraining }) {
+export function IeltsAssets({ route, onNavigate, onBackToAssets, onTraining }) {
   const availableTabs = ["overview", "history", "trends"];
   const tab = availableTabs.includes(route?.tab) ? route.tab : "overview";
   const setTab = (nextTab) => onNavigate(nextTab === "overview" ? paths.ielts.assets.root : paths.ielts.assets[nextTab]);
@@ -1621,6 +1620,6 @@ export function IeltsAssets({ route, onNavigate, onBackToAssets, onInterviewAsse
     return () => window.removeEventListener("resize", updateIndicator);
   }, [tab]);
 
-  const otherAssetsButton = <div className="asset-module-menu ielts-other-assets"><button className="asset-module-menu__trigger" type="button" aria-label="切换学习资产模块" aria-haspopup="menu"><SquaresFour weight="bold" /><span>其他资产</span><CaretDown weight="bold" /></button><div className="asset-module-menu__popover" role="menu"><button type="button" role="menuitem" onClick={onBackToAssets}><BookOpenText /><span><strong>场景训练学习资产</strong><small>对话记录、纠错与场景复练</small></span><CaretRight /></button><button type="button" role="menuitem" onClick={onInterviewAssets}><Briefcase /><span><strong>英文面试学习资产</strong><small>历史报告与口语复盘</small></span><CaretRight /></button></div></div>;
+  const otherAssetsButton = <div className="asset-module-menu ielts-other-assets"><button className="asset-module-menu__trigger" type="button" aria-label="切换学习资产模块" aria-haspopup="menu"><SquaresFour weight="bold" /><span>其他资产</span><CaretDown weight="bold" /></button><div className="asset-module-menu__popover" role="menu"><button type="button" role="menuitem" onClick={onBackToAssets}><BookOpenText /><span><strong>场景训练学习资产</strong><small>对话记录、纠错与场景复练</small></span><CaretRight /></button></div></div>;
   return <main className={cx("ielts-page", "ielts-assets", tab === "overview" && "ielts-assets--overview", tab === "trends" && "ielts-assets--trends")}><IeltsHeader title="IELTS 学习资产" subtitle="集中查看数据库中已生成的训练评分与总体报告。" action={<div className="ielts-assets-actions">{otherAssetsButton}<SimpleCta className="ielts-assets-header-cta" onClick={onTraining}>返回训练中心</SimpleCta></div>} /><nav className="ielts-asset-tabs" ref={tabRef}><span className={cx("ielts-asset-tab-indicator", tabIndicator.ready && "is-ready")} style={{ width: tabIndicator.width, transform: `translateX(${tabIndicator.x}px)` }} />{tabs.map((item) => <button ref={(node) => { tabButtons.current[item.id] = node; }} key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>{loading ? <div className="ielts-history-empty"><NewtonsCradle label="正在读取后端评分记录" /></div> : loadError ? <div className="ielts-history-empty"><h2>学习资产加载失败</h2><p>{loadError}</p></div> : tab === "overview" ? <AssetsOverview settings={settings} reports={reports} onTab={setTab} /> : tab === "history" ? <AssetsHistory items={reports} /> : <AssetsTrends settings={settings} reports={reports} />}</main>;
 }

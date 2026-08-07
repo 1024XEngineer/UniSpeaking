@@ -20,7 +20,6 @@ const TRAINING_TYPE_META = {
   FREE_CHAT: { label: "自由对话", color: "#287057" },
   CUSTOM_SCENE: { label: "情景口语", color: "#c65d43" },
   IELTS_SCENE: { label: "雅思口语", color: "#3468a0" },
-  INTERVIEW_SCENE: { label: "AI 面试", color: "#a67a24" },
 };
 const UNKNOWN_TYPE_META = { label: "其他训练", color: "#74746f" };
 

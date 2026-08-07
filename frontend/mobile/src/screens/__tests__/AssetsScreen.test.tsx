@@ -44,7 +44,6 @@ describe('AssetsScreen backend binding', () => {
         assetService={service}
         onOpenRecord={onOpenRecord}
         onOpenIelts={jest.fn()}
-        onOpenInterview={jest.fn()}
       />,
     );
 
@@ -68,7 +67,6 @@ describe('AssetsScreen backend binding', () => {
         assetService={service}
         onOpenRecord={jest.fn()}
         onOpenIelts={jest.fn()}
-        onOpenInterview={jest.fn()}
       />,
     );
 

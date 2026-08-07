@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
 import { BookOpenTextIcon } from 'phosphor-react-native/src/icons/BookOpenText';
-import { BriefcaseIcon } from 'phosphor-react-native/src/icons/Briefcase';
 import { CaretDownIcon } from 'phosphor-react-native/src/icons/CaretDown';
 import Svg, { Circle, Line, Polygon, Text as SvgText } from 'react-native-svg';
 
@@ -43,13 +42,12 @@ import { ApiClient } from '@/infrastructure/http/ApiClient';
 import { useAppModel } from '@/model/AppModel';
 import { colors } from '@/theme/tokens';
 import { CallExperience, selectCallCaption } from './ConversationScreen';
-import { IeltsFlow, InterviewFlow } from './SpecialtyFlows';
+import { IeltsFlow } from './SpecialtyFlows';
 
 export type SceneRoute =
   | { name: 'home' }
   | { name: 'training'; scene: GeneratedScene }
-  | { name: 'ielts' }
-  | { name: 'interview' };
+  | { name: 'ielts' };
 
 const stages = [
   { key: 'learn', label: '学', note: '积累表达' },
@@ -777,18 +775,6 @@ export function ScenesHome({
                 </View>
                 <ArrowRightIcon color={colors.subtle} size={14} />
               </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => onOpen({ name: 'interview' })}
-                style={({ pressed }) => [styles.specialtyMenuRow, pressed && styles.compactPressed]}
-              >
-                <View style={styles.specialtyMenuIcon}><BriefcaseIcon color={colors.ink} size={18} /></View>
-                <View style={uiStyles.flex}>
-                  <Text style={styles.specialtyMenuTitle}>英文面试</Text>
-                  <Text style={styles.specialtyMenuNote}>职位与简历模拟追问</Text>
-                </View>
-                <ArrowRightIcon color={colors.subtle} size={14} />
-              </Pressable>
             </View>
           ) : null}
 
@@ -902,7 +888,6 @@ export function ScenesScreen() {
     return <Training scene={route.scene} onBack={() => setRoute({ name: 'home' })} onFinish={() => setRoute({ name: 'home' })} />;
   }
   if (route.name === 'ielts') return <IeltsFlow onExit={() => setRoute({ name: 'home' })} />;
-  if (route.name === 'interview') return <InterviewFlow onExit={() => setRoute({ name: 'home' })} />;
   return <ScenesHome onOpen={setRoute} />;
 }
 

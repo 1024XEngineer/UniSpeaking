@@ -56,9 +56,3 @@ export const ieltsTopics = {
     { title: '科技', category: '独立分类', state: '已练习' },
   ],
 } as const;
-
-export const interviewQuestions = [
-  'Could you walk me through a product decision you made with incomplete information?',
-  'What trade-off did you make, and how did you communicate it to the team?',
-  'What did you learn from the result, and what would you do differently next time?',
-] as const;

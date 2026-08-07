@@ -48,7 +48,7 @@ export function MainApp() {
           <View style={styles.content}>
             {activeTab === 'conversation' ? <ConversationScreen onImmersiveChange={setImmersive} /> : null}
             {activeTab === 'scenes' ? <ScenesScreen /> : null}
-            {activeTab === 'assets' ? <AssetsScreen onOpenRecord={() => undefined} onOpenIelts={() => undefined} onOpenInterview={() => undefined} /> : null}
+            {activeTab === 'assets' ? <AssetsScreen onOpenRecord={() => undefined} onOpenIelts={() => undefined} /> : null}
             {activeTab === 'profile' ? <ProfileScreen /> : null}
           </View>
           {!immersive ? (

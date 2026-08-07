@@ -17,7 +17,6 @@ const TRAINING_TYPE_META = {
   FREE_CHAT: { label: "自由对话", supported: true },
   CUSTOM_SCENE: { label: "情景口语", supported: true },
   IELTS_SCENE: { label: "雅思口语", supported: false },
-  INTERVIEW_SCENE: { label: "AI 面试", supported: false },
 };
 const UNKNOWN_DIMENSION = { label: "综合能力", color: "#74746f" };
 const UNKNOWN_TRAINING = { label: "推荐训练", supported: false };

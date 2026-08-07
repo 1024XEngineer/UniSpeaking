@@ -9,7 +9,6 @@ export default function LearningHomeRoute() {
     <AssetsScreen
       onOpenRecord={(record) => router.push(routes.learning.sceneDetail(record.id))}
       onOpenIelts={() => router.push(routes.learning.ielts.overview)}
-      onOpenInterview={() => router.push(routes.learning.interview.overview)}
     />
   );
 }

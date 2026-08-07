@@ -17,11 +17,6 @@ const cases = [
   [paths.ielts.assets.history, "ielts-assets"],
   [paths.ielts.step("part1", "home", "report"), "ielts"],
   [paths.ielts.step("mock", "random", "session"), "ielts"],
-  [paths.interview.root, "interview"],
-  [paths.interview.live, "interview"],
-  [paths.interview.reportPartial, "interview"],
-  [paths.interview.assets.trends, "interview-assets"],
-  [paths.interview.assets.record("product-manager"), "interview-assets"],
   [paths.app.insights, "insights"],
   [paths.app.security, "security"],
   [paths.help.root, "help"],
@@ -40,9 +35,7 @@ for (const [pathname, expectedPage] of cases) {
 assert.equal(route("/training").canonicalPath, paths.scenes.training);
 assert.equal(route("/result").canonicalPath, paths.scenes.result);
 assert.equal(route("/ielts-assets").canonicalPath, paths.ielts.assets.root);
-assert.equal(route("/interview/unknown").canonicalPath, paths.interview.root);
 assert.equal(route("/unknown").canonicalPath, paths.root);
-assert.equal(route(paths.interview.assets.record("岗位 1")).interviewRoute.record, "岗位 1");
 assert.equal(route(paths.assets.latest).assetView, "detail");
 assert.equal(route("/assets", "?view=detail").assetView, "detail");
 assert.equal(route(paths.conversation.session("free chat/1")).conversationSessionId, "free chat/1");

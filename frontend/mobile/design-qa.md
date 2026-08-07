@@ -18,7 +18,6 @@ The Web source and final mobile capture were opened together in one comparison i
 **Focused region comparison evidence**
 
 - Custom builder: `CREATE YOUR OWN`, title, explanatory copy, one uninterrupted 200-character input, count, and primary generation action are preserved. The quick-start/“场景灵感” surface has been removed.
-- Specialty training: IELTS and English interview are removed from the main hierarchy and exposed through a small pill trigger with a two-option overlay menu.
 - Daily recommendations: all three source cards retain numbering, category, task goal, duration, and a direct action affordance. The redundant “直接开始练习” label is removed and the section is given more separation from the builder.
 - Scene confirmation: the full-page mobile intro has been removed from the entry flow. Recommendations and generated prompts now open an in-place modal that reproduces the Web hierarchy, summary rows, close action, return action, and confirmation action.
 - Fixed layout: the page uses a non-scrolling viewport. Browser inspection found overflow hidden rather than a scrollable content surface.
@@ -34,7 +33,6 @@ The Web source and final mobile capture were opened together in one comparison i
 **Primary interactions tested**
 
 - The generate action is disabled when empty and enabled after input.
-- The specialty pill opens a compact menu containing IELTS and English interview flows.
 - A daily recommendation opens the Web-style confirmation modal without leaving the marketplace.
 - “返回修改” and the close action dismiss the modal; “确认进入” opens training directly; the training back action returns to the marketplace.
 - TypeScript validation and whitespace checks complete with zero errors.
