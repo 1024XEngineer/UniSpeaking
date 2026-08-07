@@ -75,21 +75,21 @@ web
 │   ├── check-realtime-events.mjs
 │   └── check-routes.mjs
 ├── src
-│   ├── App.jsx
-│   ├── IeltsModule.jsx
-│   ├── apiClient.js
-│   ├── realtimeClient.js
-│   ├── router.js
-│   └── styles.css
+│   ├── common                 # 公共样式和跨模块基础能力
+│   ├── component              # 按业务域拆分的页面与可复用 UI
+│   ├── controller              # 应用入口、路由和页面编排
+│   ├── domain/content          # 业务演示数据和领域内容
+│   ├── infrastructure          # HTTP、浏览器音频等外部能力
+│   └── websocket               # 实时会话与消息归一化
 ├── Dockerfile
 ├── nginx.conf
 └── package.json
 ```
 
-- `apiClient.js`：HTTP API、JWT Header 和统一响应解包。
-- `realtimeClient.js`：WebRTC、DataChannel、WebSocket 和实时事件归一化。
-- `router.js`：页面路径生成和解析。
-- `App.jsx`：自由对话、自定义场景、学习流程和主要页面状态。
+- `infrastructure/http/apiClient.js`：HTTP API、JWT Header 和统一响应解包。
+- `websocket/realtimeClient.js`：WebRTC、DataChannel、WebSocket 和实时事件归一化。
+- `controller/router.js`：页面路径生成和解析。
+- `controller/App.jsx`：自由对话、自定义场景、学习流程和主要页面状态。
 
 ## 主要路由
 
@@ -113,7 +113,7 @@ web
 | `/about/ai-service` | AI 服务说明草案 |
 | `/settings` | 用户设置 |
 
-路由契约由 `npm run check:routes` 校验。页面切换必须使用 `router.js` 中的路径
+路由契约由 `npm run check:routes` 校验。页面切换必须使用 `controller/router.js` 中的路径
 生成器，不能重新退回只改 React state、不更新浏览器地址的方式。
 
 ## 鉴权与实时连接

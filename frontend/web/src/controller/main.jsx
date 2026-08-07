@@ -1,8 +1,8 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { AchievementNotificationProvider } from "./AchievementNotifications.jsx";
+import { AchievementNotificationProvider } from "../component/achievement/AchievementNotifications.jsx";
 import { App } from "./App.jsx";
-import "./styles.css";
+import "../common/styles.css";
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {

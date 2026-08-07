@@ -7,7 +7,7 @@ import {
   isActiveResponseConflict,
   normalizeBaseUrl,
   websocketUrl,
-} from "../src/realtimeClient.js";
+} from "../src/websocket/realtimeClient.js";
 
 assert.deepEqual(
   buildResponseCreateEvent({

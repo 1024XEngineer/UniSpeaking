@@ -1,5 +1,5 @@
 import { ArrowLeft, WarningCircle } from "@phosphor-icons/react";
-import { paths } from "../router.js";
+import { paths } from "../../controller/router.js";
 import { PRODUCT_INFORMATION, productDocuments } from "./productDocuments.js";
 
 function followInternalLink(event, path, onNavigate) {

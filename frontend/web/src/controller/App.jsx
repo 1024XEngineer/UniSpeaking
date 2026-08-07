@@ -55,7 +55,7 @@ import {
   Target,
   ChartLine,
 } from "lucide-react";
-import { learningItems, levels, plans, recommendations, teachers } from "./data.js";
+import { learningItems, levels, plans, recommendations, teachers } from "../domain/content/data.js";
 import {
   changePassword,
   clearAuthSession,
@@ -78,18 +78,18 @@ import {
   updateProfile,
   updateUserPreference,
   uploadProfileAvatar,
-} from "./apiClient.js";
-import { createPcmWavRecorder } from "./audioRecorder.js";
-import { useAchievementNotifications } from "./AchievementNotifications.jsx";
-import { createRealtimeClient } from "./realtimeClient.js";
-import { IeltsAssets, IeltsTrainingCenter } from "./IeltsModule.jsx";
-import { HelpCenter } from "./help/HelpCenter.jsx";
-import { HelpLayout } from "./help/HelpLayout.jsx";
-import { NewtonsCradle } from "./NewtonsCradle.jsx";
-import { LearningInsights } from "./profile/LearningInsights.jsx";
-import { AccountSecurity } from "./profile/AccountSecurity.jsx";
-import { AboutProduct } from "./profile/AboutProduct.jsx";
-import { ProductLegalDocument } from "./profile/ProductLegalDocument.jsx";
+} from "../infrastructure/http/apiClient.js";
+import { createPcmWavRecorder } from "../infrastructure/audio/audioRecorder.js";
+import { useAchievementNotifications } from "../component/achievement/AchievementNotifications.jsx";
+import { createRealtimeClient } from "../websocket/realtimeClient.js";
+import { IeltsAssets, IeltsTrainingCenter } from "../component/ielts/IeltsModule.jsx";
+import { HelpCenter } from "../component/help/HelpCenter.jsx";
+import { HelpLayout } from "../component/help/HelpLayout.jsx";
+import { NewtonsCradle } from "../component/common/NewtonsCradle.jsx";
+import { LearningInsights } from "../component/profile/LearningInsights.jsx";
+import { AccountSecurity } from "../component/profile/AccountSecurity.jsx";
+import { AboutProduct } from "../component/profile/AboutProduct.jsx";
+import { ProductLegalDocument } from "../component/profile/ProductLegalDocument.jsx";
 import { hrefForPage, paths, resolveRoute } from "./router.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");

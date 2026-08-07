@@ -15,7 +15,7 @@ import {
   Subtitles,
   X,
 } from "@phosphor-icons/react";
-import { NewtonsCradle } from "./NewtonsCradle.jsx";
+import { NewtonsCradle } from "../common/NewtonsCradle.jsx";
 import {
   createIeltsSceneFlow,
   fetchAuthenticatedMedia,
@@ -26,9 +26,9 @@ import {
   getIeltsTopics,
   getIeltsTraining,
   updateIeltsSettings,
-} from "./apiClient.js";
-import { createRealtimeClient } from "./realtimeClient.js";
-import { paths } from "./router.js";
+} from "../../infrastructure/http/apiClient.js";
+import { createRealtimeClient } from "../../websocket/realtimeClient.js";
+import { paths } from "../../controller/router.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
 
