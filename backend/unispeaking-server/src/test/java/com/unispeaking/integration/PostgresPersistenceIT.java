@@ -133,6 +133,7 @@ class PostgresPersistenceIT {
 		jdbcTemplate.execute("""
 				TRUNCATE TABLE
 				    user_feedback,
+				    ielts_part_evaluation,
 				    ielts_evaluation,
 				    ielts,
 				    user_ielts,
@@ -198,7 +199,7 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8"), migrationVersions);
+		assertEquals(List.of("1", "2", "3", "4", "5", "6", "7"), migrationVersions);
 		assertEquals(303, topicCount);
 		assertEquals(1771, questionCount);
 		assertEquals(0, questionLikeTitleCount);
@@ -517,7 +518,7 @@ class PostgresPersistenceIT {
 	}
 
 	@Test
-	void persistsIeltsUserContentAndBandEvaluation() {
+	void persistsIeltsUserContentAndPartEvaluation() {
 		UUID userId = UUID.fromString("33333333-3333-4333-8333-333333333333");
 		jdbcTemplate.update(
 				"""
@@ -538,9 +539,9 @@ class PostgresPersistenceIT {
 				"""
 				INSERT INTO ielts
 				    (ielts_id, user_id, mode, selected_part, selected_topic_id,
-				     content)
+				     topic_selection_method, part1_topic_id, content)
 				VALUES ('session_ielts_it1', ?::uuid, 'PART_PRACTICE', 'PART_1',
-				        'ielts_group_it1',
+				        'ielts_group_it1', 'USER_SELECTED', 'ielts_group_it1',
 				        '{
 				          "part1": [{
 				            "question": "What do you enjoy doing on weekends?",
@@ -552,16 +553,17 @@ class PostgresPersistenceIT {
 				""",
 				userId.toString());
 		jdbcTemplate.update("""
-				INSERT INTO ielts_evaluation
-				    (session_id, ielts_id, part, assessment_type,
-				     overall_band_score, fluency_coherence_score,
+				INSERT INTO ielts_part_evaluation
+				    (part_evaluation_id, session_id, ielts_id, part,
+				     fluency_coherence_score,
 				     lexical_resource_score,
 				     grammatical_range_accuracy_score,
-				     pronunciation_score, summary, strengths, improvements)
-				VALUES ('session_ielts_it1', 'session_ielts_it1', 'PART_1',
-				        'DIAGNOSTIC', 7.0, 7.5, 7.0, 6.5, 7.0,
+				     pronunciation_score, summary, strengths, improvements,
+				     evaluation_status, completed_at)
+				VALUES ('ielts_part_session_ielts_it1', 'session_ielts_it1',
+				        'session_ielts_it1', 'PART_1', 7.5, 7.0, 6.5, 7.0,
 				        '表达清晰，细节可以更充分。', ARRAY['词汇自然'],
-				        ARRAY['补充例子'])
+				        ARRAY['补充例子'], 'COMPLETED', CURRENT_TIMESTAMP)
 				""");
 		jdbcTemplate.update(
 				"""
@@ -573,11 +575,11 @@ class PostgresPersistenceIT {
 				userId.toString());
 
 		assertEquals(
-				new BigDecimal("7.0"),
+				new BigDecimal("7.5"),
 				jdbcTemplate.queryForObject(
 						"""
-						SELECT overall_band_score
-						FROM ielts_evaluation
+						SELECT fluency_coherence_score
+						FROM ielts_part_evaluation
 						WHERE session_id = 'session_ielts_it1'
 						""",
 						BigDecimal.class));
@@ -586,7 +588,7 @@ class PostgresPersistenceIT {
 				jdbcTemplate.queryForObject(
 						"""
 						SELECT ielts_id
-						FROM ielts_evaluation
+						FROM ielts_part_evaluation
 						WHERE session_id = 'session_ielts_it1'
 						""",
 						String.class));
@@ -647,8 +649,9 @@ class PostgresPersistenceIT {
 				"C",
 				"喜欢旅行和咖啡"));
 		assertNull(jdbcTemplate.queryForObject(
-				"SELECT weekly_duration_target_minutes FROM user_preference WHERE user_id = ?",
-				Integer.class,
+				"SELECT preferences ->> 'weekly_duration_target_minutes' "
+						+ "FROM user_preference WHERE user_id = ?",
+				String.class,
 				userId));
 		assertEquals(
 				WeeklyLearningGoals.defaults(),
@@ -885,7 +888,7 @@ class PostgresPersistenceIT {
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
 		assertEquals(
-				List.of("0", "1", "2", "3", "4", "5", "6", "7", "8"),
+				List.of("0", "1", "2", "3", "4", "5", "6", "7"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version

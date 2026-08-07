@@ -25,7 +25,9 @@ public class UserPreferenceEntity {
 	private String preferences;
 	private String memoryText;
 	private String cefrLevel;
+	@TableField(exist = false)
 	private Integer weeklyDurationTargetMinutes;
+	@TableField(exist = false)
 	private Integer weeklyTrainingCountTarget;
 	private OffsetDateTime createdAt;
 	private OffsetDateTime updatedAt;

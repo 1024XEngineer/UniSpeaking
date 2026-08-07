@@ -52,9 +52,9 @@ sessions shorter than 30 seconds are excluded at query time. New databases use
 the Flyway migrations in
 `backend/unispeaking-server/src/main/resources/db/migration`.
 
-Spring Boot runs `V2__practice_session.sql` automatically on startup. For an
-existing environment, either let Flyway apply V2 or run `profile.sql` manually;
-do not run both concurrently. Verify the migration with:
+The consolidated `V1__baseline.sql` creates `practice_session` automatically
+for a fresh database. Environments that used the former multi-version migration
+history must be rebuilt before adopting the consolidated baseline. Verify with:
 
 ```sql
 SELECT column_name, data_type
@@ -70,16 +70,16 @@ scene tables as progress sources. It adds only the server-owned unlock and
 notification state required to make the center-screen achievement notification
 idempotent across refreshes and devices.
 
-Spring Boot applies
-`backend/unispeaking-server/src/main/resources/db/migration/V4__achievement_unlock.sql`
-automatically. V4 creates:
+Spring Boot applies the achievement section in
+`backend/unispeaking-server/src/main/resources/db/migration/V1__baseline.sql`
+automatically for a fresh database. The section creates:
 
 - `user_achievement_unlock`, keyed by `user_id + achievement_id`, containing
   the first unlock time and optional notification acknowledgement time;
 - `user_achievement_state`, keyed by `user_id`, containing the first
   achievement initialization time.
 
-V4 does not rewrite practice sessions, evaluation reports, scenes, or user
+The achievement section does not rewrite practice sessions, evaluation reports, scenes, or user
 accounts. It does not add Redis, a message queue, an achievement definition
 table, or a client-controlled progress field.
 

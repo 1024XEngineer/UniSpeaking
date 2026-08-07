@@ -69,6 +69,20 @@ class IeltsRepositoryTest {
 	}
 
 	@Test
+	void findsTopicTitlesForTrainingHistoryInOneBatch() {
+		when(topicMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+				topicEntity("topic-home", "Home"),
+				topicEntity("topic-work", "Work or Studies")));
+
+		var topics = repository.findTopicsByIds(List.of(
+				"topic-home",
+				"topic-work"));
+
+		assertEquals(2, topics.size());
+		assertEquals("Work or Studies", topics.get(1).title());
+	}
+
+	@Test
 	void mapsQuestionJsonFieldsThroughCodec() {
 		IeltsQuestionEntity entity = new IeltsQuestionEntity();
 		entity.setId("question-1");

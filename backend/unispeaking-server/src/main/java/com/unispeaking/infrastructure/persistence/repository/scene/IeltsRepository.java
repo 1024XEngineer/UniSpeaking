@@ -10,6 +10,7 @@ import com.unispeaking.infrastructure.persistence.entity.scene.IeltsQuestionEnti
 import com.unispeaking.infrastructure.persistence.entity.scene.IeltsTopicEntity;
 import com.unispeaking.infrastructure.persistence.mapper.scene.IeltsQuestionMapper;
 import com.unispeaking.infrastructure.persistence.mapper.scene.IeltsTopicMapper;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
@@ -47,6 +48,19 @@ public class IeltsRepository {
 			return Optional.empty();
 		}
 		return Optional.of(toTopic(entity));
+	}
+
+	public List<IeltsTopic> findTopicsByIds(Collection<String> topicIds) {
+		if (topicIds == null || topicIds.isEmpty()) {
+			return List.of();
+		}
+		return topicMapper.selectList(
+				new LambdaQueryWrapper<IeltsTopicEntity>()
+						.in(IeltsTopicEntity::getId, topicIds)
+						.ne(IeltsTopicEntity::getStatus, "DISABLED"))
+				.stream()
+				.map(this::toTopic)
+				.toList();
 	}
 
 	public List<IeltsQuestion> findQuestions(

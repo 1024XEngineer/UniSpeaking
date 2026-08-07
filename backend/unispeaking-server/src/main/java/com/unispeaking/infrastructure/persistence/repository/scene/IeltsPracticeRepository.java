@@ -1,9 +1,11 @@
 package com.unispeaking.infrastructure.persistence.repository.scene;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.domain.po.scene.IeltsPracticeRecord;
 import com.unispeaking.domain.po.scene.IeltsUserSettings;
+import com.unispeaking.domain.po.scene.IeltsTopicPracticeSummary;
 import com.unispeaking.domain.vo.scene.IeltsContent;
 import com.unispeaking.domain.vo.scene.IeltsMode;
 import com.unispeaking.domain.vo.scene.IeltsPart;
@@ -11,9 +13,20 @@ import com.unispeaking.infrastructure.persistence.entity.scene.IeltsPracticeEnti
 import com.unispeaking.infrastructure.persistence.entity.scene.UserIeltsEntity;
 import com.unispeaking.infrastructure.persistence.mapper.scene.IeltsPracticeMapper;
 import com.unispeaking.infrastructure.persistence.mapper.scene.UserIeltsMapper;
+import com.unispeaking.infrastructure.persistence.entity.evaluation.IeltsPartEvaluationEntity;
+import com.unispeaking.infrastructure.persistence.mapper.evaluation.IeltsPartEvaluationMapper;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.OffsetDateTime;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
 import tools.jackson.core.JacksonException;
@@ -21,18 +34,113 @@ import tools.jackson.databind.ObjectMapper;
 
 @Repository
 public class IeltsPracticeRepository {
+	private static final ZoneId CHECK_IN_ZONE = ZoneId.of("Asia/Shanghai");
 
 	private final IeltsPracticeMapper practiceMapper;
 	private final UserIeltsMapper userIeltsMapper;
+	private final IeltsPartEvaluationMapper partEvaluationMapper;
 	private final ObjectMapper objectMapper;
 
 	public IeltsPracticeRepository(
 			IeltsPracticeMapper practiceMapper,
 			UserIeltsMapper userIeltsMapper,
+			IeltsPartEvaluationMapper partEvaluationMapper,
 			ObjectMapper objectMapper) {
 		this.practiceMapper = practiceMapper;
 		this.userIeltsMapper = userIeltsMapper;
+		this.partEvaluationMapper = partEvaluationMapper;
 		this.objectMapper = objectMapper;
+	}
+
+	public Map<String, IeltsTopicPracticeSummary> findTopicPracticeSummaries(
+			UUID userId,
+			IeltsPart part,
+			List<String> topicIds) {
+		if (topicIds == null || topicIds.isEmpty()) return Map.of();
+		LambdaQueryWrapper<IeltsPracticeEntity> query =
+				new LambdaQueryWrapper<IeltsPracticeEntity>()
+						.eq(IeltsPracticeEntity::getUserId, userId)
+						.orderByDesc(IeltsPracticeEntity::getCreatedAt);
+		switch (part) {
+			case PART_1 -> query.in(IeltsPracticeEntity::getPart1TopicId, topicIds);
+			case PART_2 -> query.in(IeltsPracticeEntity::getPart2TopicId, topicIds);
+			case PART_3 -> query.in(IeltsPracticeEntity::getPart3TopicId, topicIds);
+		}
+		List<IeltsPracticeEntity> practices = practiceMapper.selectList(query);
+		if (practices.isEmpty()) return Map.of();
+		List<String> practiceIds = practices.stream()
+				.map(IeltsPracticeEntity::getIeltsId)
+				.toList();
+		Map<String, IeltsPartEvaluationEntity> evaluations = partEvaluationMapper
+				.selectList(new LambdaQueryWrapper<IeltsPartEvaluationEntity>()
+						.eq(IeltsPartEvaluationEntity::getPart, part.name())
+						.eq(IeltsPartEvaluationEntity::getEvaluationStatus, "COMPLETED")
+						.in(IeltsPartEvaluationEntity::getIeltsId, practiceIds)
+						.orderByDesc(IeltsPartEvaluationEntity::getCompletedAt))
+				.stream()
+				.collect(Collectors.toMap(
+						IeltsPartEvaluationEntity::getIeltsId,
+						Function.identity(),
+						(left, right) -> left,
+						LinkedHashMap::new));
+		Map<String, List<IeltsPracticeEntity>> byTopic = practices.stream()
+				.filter(item -> evaluations.containsKey(item.getIeltsId()))
+				.collect(Collectors.groupingBy(
+						item -> topicId(item, part),
+						LinkedHashMap::new,
+						Collectors.toList()));
+		Map<String, IeltsTopicPracticeSummary> result = new LinkedHashMap<>();
+		byTopic.forEach((topicId, items) -> {
+			IeltsPracticeEntity latest = items.getFirst();
+			IeltsPartEvaluationEntity latestEvaluation = evaluations.get(
+					latest.getIeltsId());
+			int mockCount = (int) items.stream()
+					.filter(item -> "MOCK_TEST".equals(item.getMode()))
+					.count();
+			int randomCount = (int) items.stream()
+					.filter(item -> "PART_PRACTICE".equals(item.getMode()))
+					.filter(item -> "RANDOM".equals(item.getTopicSelectionMethod()))
+					.count();
+			int selectedCount = items.size() - mockCount - randomCount;
+			String latestType = "MOCK_TEST".equals(latest.getMode())
+					? "MOCK_TEST"
+					: "RANDOM".equals(latest.getTopicSelectionMethod())
+							? "RANDOM_PART_PRACTICE"
+							: "SELECTED_PART_PRACTICE";
+			result.put(topicId, new IeltsTopicPracticeSummary(
+					topicId,
+					items.size(),
+					mockCount,
+					randomCount,
+					selectedCount,
+					latestType,
+					averageScore(latestEvaluation),
+					latestEvaluation.getSummary(),
+					latestEvaluation.getCompletedAt()));
+		});
+		return result;
+	}
+
+	private String topicId(IeltsPracticeEntity practice, IeltsPart part) {
+		return switch (part) {
+			case PART_1 -> practice.getPart1TopicId();
+			case PART_2 -> practice.getPart2TopicId();
+			case PART_3 -> practice.getPart3TopicId();
+		};
+	}
+
+	private BigDecimal averageScore(IeltsPartEvaluationEntity evaluation) {
+		List<BigDecimal> values = java.util.stream.Stream.of(
+				evaluation.getFluencyCoherenceScore(),
+				evaluation.getLexicalResourceScore(),
+				evaluation.getGrammaticalRangeAccuracyScore(),
+				evaluation.getPronunciationScore())
+				.filter(java.util.Objects::nonNull)
+				.toList();
+		if (values.isEmpty()) return null;
+		return values.stream()
+				.reduce(BigDecimal.ZERO, BigDecimal::add)
+				.divide(BigDecimal.valueOf(values.size()), 1, RoundingMode.HALF_UP);
 	}
 
 	public IeltsUserSettings getOrCreateSettings(UUID userId) {
@@ -44,6 +152,8 @@ public class IeltsPracticeRepository {
 		UserIeltsEntity created = new UserIeltsEntity();
 		created.setUserId(userId);
 		created.setTodayCompletedCount(0);
+		created.setCurrentStreakDays(0);
+		created.setTotalCheckInDays(0);
 		created.setCreatedAt(now);
 		created.setUpdatedAt(now);
 		try {
@@ -98,6 +208,10 @@ public class IeltsPracticeRepository {
 				? null
 				: record.selectedPart().name());
 		entity.setSelectedTopicId(record.selectedTopicId());
+		entity.setTopicSelectionMethod(record.topicSelectionMethod());
+		entity.setPart1TopicId(record.part1TopicId());
+		entity.setPart2TopicId(record.part2TopicId());
+		entity.setPart3TopicId(record.part3TopicId());
 		try {
 			entity.setContent(objectMapper.writeValueAsString(record.content()));
 		}
@@ -139,6 +253,10 @@ public class IeltsPracticeRepository {
 							? null
 							: IeltsPart.valueOf(entity.getSelectedPart()),
 					entity.getSelectedTopicId(),
+					entity.getTopicSelectionMethod(),
+					entity.getPart1TopicId(),
+					entity.getPart2TopicId(),
+					entity.getPart3TopicId(),
 					objectMapper.readValue(
 							entity.getContent(),
 							IeltsContent.class)));
@@ -164,8 +282,16 @@ public class IeltsPracticeRepository {
 				if (completed >= 5) {
 					throw dailyLimitReached();
 				}
-				int updated = userIeltsMapper.update(
-						null,
+				LocalDate today = LocalDate.now(CHECK_IN_ZONE);
+				LocalDate lastCheckInDate = current.getLastCheckInDate();
+				boolean firstCompletionToday = !today.equals(lastCheckInDate);
+				int currentStreak = current.getCurrentStreakDays() == null
+						? 0
+						: current.getCurrentStreakDays();
+				int totalCheckIns = current.getTotalCheckInDays() == null
+						? 0
+						: current.getTotalCheckInDays();
+				LambdaUpdateWrapper<UserIeltsEntity> update =
 						new LambdaUpdateWrapper<UserIeltsEntity>()
 								.eq(UserIeltsEntity::getUserId, userId)
 								.eq(
@@ -173,7 +299,27 @@ public class IeltsPracticeRepository {
 										completed)
 								.set(
 										UserIeltsEntity::getTodayCompletedCount,
-										completed + 1));
+										completed + 1)
+								.set(
+										UserIeltsEntity::getUpdatedAt,
+										OffsetDateTime.now(ZoneOffset.UTC));
+				if (lastCheckInDate == null) {
+					update.isNull(UserIeltsEntity::getLastCheckInDate);
+				}
+				else {
+					update.eq(UserIeltsEntity::getLastCheckInDate, lastCheckInDate);
+				}
+				if (firstCompletionToday) {
+					int nextStreak = today.minusDays(1).equals(lastCheckInDate)
+							? currentStreak + 1
+							: 1;
+					update.set(UserIeltsEntity::getCurrentStreakDays, nextStreak)
+							.set(UserIeltsEntity::getTotalCheckInDays, totalCheckIns + 1)
+							.set(UserIeltsEntity::getLastCheckInDate, today);
+				}
+				int updated = userIeltsMapper.update(
+						null,
+						update);
 				if (updated == 1) {
 					return;
 				}
@@ -214,7 +360,14 @@ public class IeltsPracticeRepository {
 				entity.getTodayCompletedCount() == null
 						? 0
 						: entity.getTodayCompletedCount(),
-				entity.getPreferredVoice());
+				entity.getPreferredVoice(),
+				entity.getCurrentStreakDays() == null
+						? 0
+						: entity.getCurrentStreakDays(),
+				entity.getTotalCheckInDays() == null
+						? 0
+						: entity.getTotalCheckInDays(),
+				entity.getLastCheckInDate());
 	}
 
 	private BusinessException persistenceFailure(Throwable cause) {
