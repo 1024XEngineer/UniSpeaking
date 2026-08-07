@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS practice_session (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT practice_session_scene_type_check
         CHECK (scene_type IN (
-            'FREE_CHAT', 'CUSTOM_SCENE', 'INTERVIEW_SCENE', 'IELTS_SCENE'
+			'FREE_CHAT', 'CUSTOM_SCENE', 'IELTS_SCENE'
         )),
     CONSTRAINT practice_session_status_check
         CHECK (status IN (
