@@ -1,4 +1,4 @@
-import { getAccessToken } from "./apiClient.js";
+import { getAccessToken } from "../infrastructure/http/apiClient.js";
 import {
   advanceCustomDialogueState,
   advanceIeltsDialogueState,
@@ -7,8 +7,8 @@ import {
   evaluateCustomDialogueTurn,
   evaluateIeltsDialogueTurn,
   getCustomDialogueEvaluation,
-} from "./apiClient.js";
-import { createPcmWavSegmentRecorder } from "./audioRecorder.js";
+} from "../infrastructure/http/apiClient.js";
+import { createPcmWavSegmentRecorder } from "../infrastructure/audio/audioRecorder.js";
 
 const DEFAULT_API_BASE = "";
 const DEFAULT_VOICE = "Katerina";

@@ -8,7 +8,7 @@ import {
   Repeat2,
   X,
 } from "lucide-react";
-import { getProfileInsights, updateWeeklyLearningGoals } from "../apiClient.js";
+import { getProfileInsights, updateWeeklyLearningGoals } from "../../infrastructure/http/apiClient.js";
 import { AbilityTrendChart } from "./AbilityTrendChart.jsx";
 import { WeaknessRecommendations } from "./WeaknessRecommendations.jsx";
 

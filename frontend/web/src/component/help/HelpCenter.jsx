@@ -14,7 +14,7 @@ import {
   UserCircle,
   X,
 } from "@phosphor-icons/react";
-import { paths } from "../router.js";
+import { paths } from "../../controller/router.js";
 import { ExternalFeedbackLink } from "./ExternalFeedbackLink.jsx";
 import { HelpArticle } from "./HelpArticle.jsx";
 import { HelpCategory } from "./HelpCategory.jsx";

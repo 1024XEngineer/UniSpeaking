@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
-const stylesSource = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+const appSource = await readFile(new URL("../src/controller/App.jsx", import.meta.url), "utf8");
+const stylesSource = await readFile(new URL("../src/common/styles.css", import.meta.url), "utf8");
 
 const achievementStart = appSource.indexOf("function AchievementSystem()");
 const achievementEnd = appSource.indexOf("function Overview(", achievementStart);
