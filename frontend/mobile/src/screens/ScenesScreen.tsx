@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Image, PanResponder, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
 import { LinearGradient } from 'expo-linear-gradient';
 import Reanimated, {
   cancelAnimation,

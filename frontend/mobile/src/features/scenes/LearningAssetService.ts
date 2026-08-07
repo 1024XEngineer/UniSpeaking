@@ -128,6 +128,7 @@ export class LearningAssetService {
       date: displayDate(summary.latestPracticedAt ?? summary.createdAt),
       status: summary.latestSessionId ? '已完成' : '待练习',
       score: summary.latestScore,
+      category: 'other',
       practiceCount: summary.practiceCount,
       expressions: [],
       conversation: [],
@@ -146,6 +147,7 @@ export class LearningAssetService {
       date: displayDate(latestHistory?.createdAt),
       status: value.latestSessionId ? '已完成' : '待练习',
       score: value.latestReport?.finalScore ?? null,
+      category: 'other',
       practiceCount: value.reportHistory.length,
       expressions: [
         ...mapExpressions(value.wordList, '单词'),

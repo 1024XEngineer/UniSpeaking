@@ -24,7 +24,7 @@ export type AssetDialogueMessage = {
 export type SceneLearningRecord = {
   id: string;
   title: string;
-  category: SceneCategory;
+  category?: SceneCategory;
   date: string;
   status: '已完成' | '待练习';
   score: number | null;
@@ -41,6 +41,17 @@ export type IeltsLearningRecord = {
   duration: string;
   result: string;
   estimatedBand: number;
+  scores: readonly [number, number, number, number];
+};
+
+export type InterviewLearningRecord = {
+  id: string;
+  role: string;
+  company: string;
+  date: string;
+  duration: string;
+  score: number | null;
+  summary: string;
   scores: readonly [number, number, number, number];
 };
 
@@ -119,4 +130,9 @@ export const initialIeltsLearningRecords: IeltsLearningRecord[] = [
   { id: 'ielts-mock-01', type: '完整模考', title: '完整口语模拟', date: '今天', duration: '14 分钟', result: '预估 6.5', estimatedBand: 6.5, scores: [68, 72, 64, 70] },
   { id: 'ielts-p2-travel', type: 'Part 2', title: '一次难忘的旅行', date: '2 天前', duration: '4 分钟', result: '结构完整', estimatedBand: 6.5, scores: [70, 67, 63, 71] },
   { id: 'ielts-p1-home', type: 'Part 1', title: 'Home & Accommodation', date: '5 天前', duration: '3 分钟', result: '建议复练', estimatedBand: 6, scores: [65, 61, 62, 68] },
+];
+
+export const initialInterviewLearningRecords: InterviewLearningRecord[] = [
+  { id: 'interview-pm', role: '产品经理英文面试', company: '消费互联网', date: '今天', duration: '15 分钟', score: 82, summary: '回答结构清楚，下一步需要用数据强化业务影响。', scores: [84, 86, 76, 81] },
+  { id: 'interview-operations', role: '海外运营英文面试', company: 'SaaS', date: '6 天前', duration: '12 分钟', score: 78, summary: '沟通自然，案例结尾需要更明确地总结个人贡献。', scores: [80, 82, 72, 78] },
 ];

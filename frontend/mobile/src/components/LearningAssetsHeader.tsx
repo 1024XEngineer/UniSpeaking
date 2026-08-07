@@ -3,7 +3,6 @@ import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
 import { BookOpenTextIcon } from 'phosphor-react-native/src/icons/BookOpenText';
 import { BriefcaseIcon } from 'phosphor-react-native/src/icons/Briefcase';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HeaderIconButton, MainModuleHeader } from '@/components/ui';
 import { colors } from '@/theme/tokens';
@@ -57,7 +56,6 @@ export function LearningAssetsHeader({
   onInterview?: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const insets = useSafeAreaInsets();
   const theme = assetHeaderThemes[current];
   const allOptions: ModuleOption[] = [
     {
@@ -90,7 +88,7 @@ export function LearningAssetsHeader({
   };
 
   const menu = (
-    <View style={[styles.menuRoot, { paddingTop: insets.top + 74 }]}>
+    <View style={[styles.menuRoot, { paddingTop: 74 }]}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="关闭学习资产菜单"
