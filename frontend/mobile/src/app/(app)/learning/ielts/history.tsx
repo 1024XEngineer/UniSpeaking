@@ -1,9 +1,7 @@
-import { useRouter } from 'expo-router';
+import { Redirect } from 'expo-router';
 
 import { routes } from '@/navigation/routes';
-import { SpecialtyAssetsScreen } from '@/screens/SpecialtyAssetsScreen';
 
 export default function IeltsAssetsHistoryRoute() {
-  const router = useRouter();
-  return <SpecialtyAssetsScreen kind="ielts" tab="history" onTabChange={(tab) => router.replace(routes.learning.ielts[tab])} onScenes={() => router.replace(routes.tabs.learning)} onIelts={() => undefined} />;
+  return <Redirect href={routes.learning.ielts.history} />;
 }
