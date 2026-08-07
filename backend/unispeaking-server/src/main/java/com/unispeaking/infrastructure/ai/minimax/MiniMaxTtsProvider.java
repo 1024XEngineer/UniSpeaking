@@ -110,13 +110,13 @@ public class MiniMaxTtsProvider extends TtsProvider {
 	}
 
 	@Override
-	public Byte[] generateSpeechAudio(String text, String token) {
+	public byte[] generateSpeechAudio(String text, String token) {
 		if (apiKey.isBlank()) {
 			throw retryableFailure(
 					"MINIMAX_TTS_CREDENTIAL_MISSING",
 					"Set MINIMAX_API_KEY before calling MiniMax TTS");
 		}
-		return boxAudio(synthesize(text, apiKey));
+		return synthesize(text, apiKey);
 	}
 
 	private byte[] synthesize(String textValue, String credential) {

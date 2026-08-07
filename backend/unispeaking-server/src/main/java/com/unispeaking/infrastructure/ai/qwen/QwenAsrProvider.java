@@ -92,9 +92,9 @@ public class QwenAsrProvider extends TranscriptionProvider {
 	}
 
 	@Override
-	public String convertAudioToText(Byte[] audio, String token) {
+	public String convertAudioToText(byte[] audio, String token) {
 		AudioInput input = new AudioInput(
-				unboxAudio(audio, "Qwen ASR"),
+				requireAudio(audio, "Qwen ASR"),
 				"wav");
 		requireAudio(input);
 		if (apiKey.isBlank()) {

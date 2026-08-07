@@ -11,7 +11,7 @@ import com.unispeaking.infrastructure.persistence.repository.session.PracticeSes
 import com.unispeaking.infrastructure.persistence.repository.user.UserAccountRepository;
 import com.unispeaking.infrastructure.storage.ObjectStorageProvider;
 import com.unispeaking.service.profile.ProfileOverviewService;
-import com.unispeaking.service.profile.PracticeDurationCalculator;
+import com.unispeaking.component.profile.PracticeDurationCalculator;
 import java.net.URI;
 import java.time.Clock;
 import java.time.Instant;

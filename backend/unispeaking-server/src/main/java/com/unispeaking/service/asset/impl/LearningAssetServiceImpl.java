@@ -12,7 +12,7 @@ import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionE
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
 import com.unispeaking.service.asset.LearningAssetService;
 import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.service.evaluation.EvaluationService;
+import com.unispeaking.service.evaluation.impl.CustomEvaluationServiceImpl;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
@@ -22,13 +22,13 @@ public class LearningAssetServiceImpl implements LearningAssetService {
 	private final AuthService authService;
 	private final SceneRepository sceneRepository;
 	private final SessionEvaluationRepository evaluationRepository;
-	private final EvaluationService evaluationService;
+	private final CustomEvaluationServiceImpl evaluationService;
 
 	public LearningAssetServiceImpl(
 			AuthService authService,
 			SceneRepository sceneRepository,
 			SessionEvaluationRepository evaluationRepository,
-			EvaluationService evaluationService) {
+			CustomEvaluationServiceImpl evaluationService) {
 		this.authService = authService;
 		this.sceneRepository = sceneRepository;
 		this.evaluationRepository = evaluationRepository;

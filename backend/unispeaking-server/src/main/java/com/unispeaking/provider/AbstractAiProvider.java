@@ -1,11 +1,40 @@
 package com.unispeaking.provider;
 
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.domain.vo.provider.AiCapability;
 import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 public abstract class AbstractAiProvider implements AiProvider {
+
+	@Override
+	public String exchangeRealtimeSdp(String offerSdp, String token) {
+		throw unsupported("Realtime");
+	}
+
+	@Override
+	public byte[] generateSpeechAudio(String text, String token) {
+		throw unsupported("TTS");
+	}
+
+	@Override
+	public String executeLlmTask(String prompt, String token) {
+		throw unsupported("LLM");
+	}
+
+	@Override
+	public String convertAudioToText(byte[] audio, String token) {
+		throw unsupported("ASR");
+	}
+
+	@Override
+	public String evaluatePronunciation(
+			String text,
+			byte[] audio,
+			String token) {
+		throw unsupported("pronunciation scoring");
+	}
 
 	private final String providerId;
 	private final Set<String> supportedModels;
@@ -20,12 +49,10 @@ public abstract class AbstractAiProvider implements AiProvider {
 				.collect(Collectors.toUnmodifiableSet());
 	}
 
-	@Override
 	public final String providerId() {
 		return providerId;
 	}
 
-	@Override
 	public final Set<String> supportedModels() {
 		return supportedModels;
 	}
@@ -54,30 +81,15 @@ public abstract class AbstractAiProvider implements AiProvider {
 		return new ClassifiedProviderException(code, message, false);
 	}
 
-	protected static byte[] unboxAudio(Byte[] audio, String operationName) {
+	public abstract AiCapability capability();
+
+	protected static byte[] requireAudio(byte[] audio, String operationName) {
 		if (audio == null || audio.length == 0) {
 			throw nonRetryableFailure(
 					"INVALID_AUDIO",
 					operationName + " WAV audio is required");
 		}
-		byte[] bytes = new byte[audio.length];
-		for (int index = 0; index < audio.length; index++) {
-			if (audio[index] == null) {
-				throw nonRetryableFailure(
-						"INVALID_AUDIO",
-						operationName + " WAV audio contains a null byte");
-			}
-			bytes[index] = audio[index];
-		}
-		return bytes;
-	}
-
-	protected static Byte[] boxAudio(byte[] audio) {
-		Byte[] boxed = new Byte[audio.length];
-		for (int index = 0; index < audio.length; index++) {
-			boxed[index] = audio[index];
-		}
-		return boxed;
+		return audio;
 	}
 
 	static Boolean retryable(BusinessException exception) {
@@ -93,6 +105,11 @@ public abstract class AbstractAiProvider implements AiProvider {
 
 	private static String normalizeProviderId(String providerId) {
 		return providerId == null ? "" : providerId.trim().toLowerCase(Locale.ROOT);
+	}
+
+	private UnsupportedOperationException unsupported(String operation) {
+		return new UnsupportedOperationException(
+				getClass().getSimpleName() + " does not support " + operation);
 	}
 
 	private static final class ClassifiedProviderException extends BusinessException {

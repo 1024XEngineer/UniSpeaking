@@ -163,10 +163,10 @@ public class IflytekScoringProvider extends ScoringProvider {
 	@Override
 	public String evaluatePronunciation(
 			String text,
-			Byte[] audio,
+			byte[] audio,
 			String token) {
 		String referenceText = validateReferenceText(text);
-		byte[] wav = unboxAudio(
+		byte[] wav = requireAudio(
 				audio,
 				"iFlytek pronunciation evaluation");
 		if (wav.length > maxAudioBytes) {

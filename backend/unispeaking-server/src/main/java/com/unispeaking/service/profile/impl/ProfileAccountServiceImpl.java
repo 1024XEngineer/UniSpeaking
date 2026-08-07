@@ -9,7 +9,7 @@ import com.unispeaking.infrastructure.config.ObjectStorageProperties;
 import com.unispeaking.infrastructure.persistence.repository.user.UserAccountRepository;
 import com.unispeaking.infrastructure.storage.ObjectStorageProvider;
 import com.unispeaking.service.profile.ProfileAccountService;
-import com.unispeaking.service.profile.image.AvatarImageProcessor;
+import com.unispeaking.component.profile.image.AvatarImageProcessor;
 import java.net.URI;
 import java.time.Instant;
 import java.util.UUID;

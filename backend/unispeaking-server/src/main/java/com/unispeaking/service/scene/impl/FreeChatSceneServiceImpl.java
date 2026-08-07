@@ -1,83 +1,89 @@
 package com.unispeaking.service.scene.impl;
 
-import com.unispeaking.common.exception.BusinessException;
-import com.unispeaking.component.session.RealtimeSessionCoordinator;
-import com.unispeaking.domain.dto.scene.SceneFlowResponse;
-import com.unispeaking.domain.dto.scene.SceneGenerationRequest;
-import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
+import com.unispeaking.common.exception.SceneNotFoundException;
+import com.unispeaking.common.prompt.FiveLayerPromptBuilder;
+import com.unispeaking.common.util.SceneIdGenerator;
+import com.unispeaking.domain.dto.scene.FreeChatSceneRequest;
+import com.unispeaking.domain.dto.scene.FreeChatSceneResult;
+import com.unispeaking.domain.dto.scene.FreeChatSceneContext;
 import com.unispeaking.domain.dto.scene.TranslateTextResponse;
-import com.unispeaking.domain.dto.session.StartFreeChatRequest;
-import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
-import com.unispeaking.domain.dto.session.StartSessionResponse;
+import com.unispeaking.domain.po.profile.UserProfile;
+import com.unispeaking.domain.vo.scene.SceneConfig;
 import com.unispeaking.domain.vo.scene.SceneType;
-import com.unispeaking.provider.AiProviderRegistry;
+import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
 import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.service.scene.CustomSceneService;
-import com.unispeaking.service.scene.FreeChatSceneService;
-import com.unispeaking.service.scene.SceneFlowService;
-import com.unispeaking.service.session.SessionService;
+import com.unispeaking.service.profile.ProfileService;
+import com.unispeaking.service.scene.SceneService;
+import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.provider.AiProviderRegistry;
+import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
-public class FreeChatSceneServiceImpl implements FreeChatSceneService {
+public class FreeChatSceneServiceImpl
+		implements SceneService<FreeChatSceneRequest, FreeChatSceneResult> {
 
-	private final CustomSceneService sceneService;
-	private final SceneFlowService sceneFlowService;
-	private final SessionService sessionService;
-	private final RealtimeSessionCoordinator sessionCoordinator;
 	private final AuthService authService;
+	private final ProfileService profileService;
+	private final SceneRepository sceneRepository;
+	private final FiveLayerPromptBuilder promptBuilder;
 	private final AiProviderRegistry providerRegistry;
 
 	public FreeChatSceneServiceImpl(
-			CustomSceneService sceneService,
-			SceneFlowService sceneFlowService,
-			SessionService sessionService,
-			RealtimeSessionCoordinator sessionCoordinator,
 			AuthService authService,
+			ProfileService profileService,
+			SceneRepository sceneRepository,
+			FiveLayerPromptBuilder promptBuilder,
 			AiProviderRegistry providerRegistry) {
-		this.sceneService = sceneService;
-		this.sceneFlowService = sceneFlowService;
-		this.sessionService = sessionService;
-		this.sessionCoordinator = sessionCoordinator;
 		this.authService = authService;
+		this.profileService = profileService;
+		this.sceneRepository = sceneRepository;
+		this.promptBuilder = promptBuilder;
 		this.providerRegistry = providerRegistry;
 	}
 
 	@Override
-	public StartSceneSessionResponse startSession(StartFreeChatRequest request) {
-		SceneGenerationResponse scene = sceneService.generateScene(
-				new SceneGenerationRequest(null, null, SceneType.FREE_CHAT, null));
-		SceneFlowResponse flow = sceneFlowService.createFlow(scene.sceneId());
-		StartSessionResponse started = sessionService.startSession(
-				SceneType.FREE_CHAT,
-				scene.sceneId(),
-				scene.scenePrompt());
-		return sessionCoordinator.connect(
-				scene,
-				"Free Chat",
-				flow.stage(),
-				false,
-				started,
-				SceneType.FREE_CHAT,
-				scene.sceneId(),
-				scene.scenePrompt(),
-				request.offerSdp(),
-				request.provider(),
-				request.model(),
-				request.voice(),
-				request.translationEnabled());
+	public FreeChatSceneResult generate(FreeChatSceneRequest request) {
+		return prepare(request).scene();
 	}
 
-	@Override
-	public TranslateTextResponse translate(String sessionId, String text) {
+	public FreeChatSceneContext prepare(FreeChatSceneRequest request) {
 		String userId = authService.requireUserId(null);
-		sessionCoordinator.requireOwnedSession(userId, sessionId);
+		UserProfile profile = profileService.getProfile(userId);
+		SceneConfig config = sceneRepository.findByType(SceneType.FREE_CHAT)
+				.orElseThrow(() -> new SceneNotFoundException(
+						SceneType.FREE_CHAT.name()));
+		String input = request == null || request.prompt() == null
+				? ""
+				: request.prompt().trim();
+		String prompt = String.join("\n\n", promptBuilder.compose(
+				profile,
+				config,
+				SceneType.FREE_CHAT,
+				input,
+				null,
+				List.of(),
+				List.of(),
+				List.of()));
+		return new FreeChatSceneContext(
+				userId,
+				new FreeChatSceneResult(
+						SceneIdGenerator.generate(SceneType.FREE_CHAT),
+						prompt));
+	}
+
+	public TranslateTextResponse translate(String text) {
+		authService.requireUserId(null);
 		if (text == null || text.isBlank()) {
-			throw new BusinessException("TRANSLATION_TEXT_REQUIRED", "待翻译文本不能为空");
+			throw new BusinessException(
+					"TRANSLATION_TEXT_REQUIRED",
+					"待翻译文本不能为空");
 		}
 		String source = text.strip();
 		if (source.length() > 4000) {
-			throw new BusinessException("TRANSLATION_TEXT_TOO_LONG", "待翻译文本不能超过4000个字符");
+			throw new BusinessException(
+					"TRANSLATION_TEXT_TOO_LONG",
+					"待翻译文本不能超过4000个字符");
 		}
 		String prompt = """
 				Translate the text enclosed in <source> into natural Simplified Chinese.
@@ -93,7 +99,9 @@ public class FreeChatSceneServiceImpl implements FreeChatSceneService {
 				prompt,
 				null);
 		if (translated == null || translated.isBlank()) {
-			throw new BusinessException("TRANSLATION_EMPTY", "翻译模型没有返回有效文本");
+			throw new BusinessException(
+					"TRANSLATION_EMPTY",
+					"翻译模型没有返回有效文本");
 		}
 		return new TranslateTextResponse(source, translated.strip(), "zh-CN");
 	}

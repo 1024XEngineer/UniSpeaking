@@ -232,7 +232,7 @@ public class AiProviderRegistry {
 	}
 
 	public Byte[] generateSpeechAudio(String modelId, String text, String token) {
-		return getTtsProvider(modelId).generateSpeechAudio(text, token);
+		return boxAudio(getTtsProvider(modelId).generateSpeechAudio(text, token));
 	}
 
 	public Byte[] generateSpeechAudio(String text, String token) {
@@ -243,6 +243,14 @@ public class AiProviderRegistry {
 		return invokeRouteWithResult(
 				AiCapability.TTS,
 				modelId -> generateSpeechAudio(modelId, text, token));
+	}
+
+	public byte[] generateSpeechAudioBytes(String modelId, String text, String token) {
+		return getTtsProvider(modelId).generateSpeechAudio(text, token);
+	}
+
+	public byte[] generateSpeechAudioBytes(String text, String token) {
+		return unboxAudio(generateSpeechAudio(text, token));
 	}
 
 	public String executeLlmTask(String modelId, String prompt, String token) {
@@ -260,7 +268,9 @@ public class AiProviderRegistry {
 	}
 
 	public String convertAudioToText(String modelId, Byte[] audio, String token) {
-		return getTranscriptionProvider(modelId).convertAudioToText(audio, token);
+		return getTranscriptionProvider(modelId).convertAudioToText(
+				unboxAudio(audio),
+				token);
 	}
 
 	public String convertAudioToText(Byte[] audio, String token) {
@@ -278,7 +288,10 @@ public class AiProviderRegistry {
 			String text,
 			Byte[] audio,
 			String token) {
-		return getScoringProvider(modelId).evaluatePronunciation(text, audio, token);
+		return getScoringProvider(modelId).evaluatePronunciation(
+				text,
+				unboxAudio(audio),
+				token);
 	}
 
 	public String evaluatePronunciation(String text, Byte[] audio, String token) {
@@ -297,12 +310,12 @@ public class AiProviderRegistry {
 	private Map<String, AiModelDefinition> buildModelDefinitions() {
 		Map<String, AiModelDefinition> definitions = new LinkedHashMap<>();
 		for (AiCapability capability : AiCapability.values()) {
-			Map<String, ? extends AiProvider> providers = providers(capability);
+			Map<String, ? extends AbstractAiProvider> providers = providers(capability);
 			if (providers.isEmpty()) {
 				continue;
 			}
 			for (String modelId : orderedModelIds(capability, providers.keySet())) {
-				AiProvider provider = providers.get(modelId);
+				AbstractAiProvider provider = providers.get(modelId);
 				AiModelDefinition definition = new AiModelDefinition(
 						modelId,
 						provider.providerId(),
@@ -323,7 +336,7 @@ public class AiProviderRegistry {
 				? Map.of()
 				: configuredRoutes;
 		for (AiCapability capability : AiCapability.values()) {
-			Map<String, ? extends AiProvider> registered = providers(capability);
+			Map<String, ? extends AbstractAiProvider> registered = providers(capability);
 			if (registered.isEmpty()) {
 				continue;
 			}
@@ -345,7 +358,7 @@ public class AiProviderRegistry {
 
 	private List<String> defaultRoute(
 			AiCapability capability,
-			Map<String, ? extends AiProvider> registeredProviders) {
+			Map<String, ? extends AbstractAiProvider> registeredProviders) {
 		LinkedHashSet<String> route = new LinkedHashSet<>();
 		for (String modelId : DEFAULT_MODEL_ROUTES.getOrDefault(capability, List.of())) {
 			if (registeredProviders.containsKey(modelId)) {
@@ -355,7 +368,7 @@ public class AiProviderRegistry {
 		for (String providerId : DEFAULT_PROVIDER_ROUTES.getOrDefault(capability, List.of())) {
 			addProviderModelsIfAbsent(route, registeredProviders, providerId);
 		}
-		for (AiProvider provider : registeredProviders.values()) {
+		for (AbstractAiProvider provider : registeredProviders.values()) {
 			addProviderModelsIfAbsent(route, registeredProviders, provider.providerId());
 		}
 		return List.copyOf(route);
@@ -363,7 +376,7 @@ public class AiProviderRegistry {
 
 	private void addProviderModelsIfAbsent(
 			LinkedHashSet<String> route,
-			Map<String, ? extends AiProvider> registeredProviders,
+			Map<String, ? extends AbstractAiProvider> registeredProviders,
 			String providerId) {
 		boolean alreadyRouted = route.stream()
 				.map(registeredProviders::get)
@@ -379,7 +392,7 @@ public class AiProviderRegistry {
 		});
 	}
 
-	private <T extends AiProvider> Map<String, T> registerProviders(
+	private <T extends AbstractAiProvider> Map<String, T> registerProviders(
 			List<T> providers,
 			AiCapability capability) {
 		Map<String, T> registered = new LinkedHashMap<>();
@@ -488,7 +501,7 @@ public class AiProviderRegistry {
 		return provider;
 	}
 
-	private Map<String, ? extends AiProvider> providers(AiCapability capability) {
+	private Map<String, ? extends AbstractAiProvider> providers(AiCapability capability) {
 		return switch (capability) {
 			case REALTIME -> realtimeProviders;
 			case LLM -> llmProviders;
@@ -504,6 +517,25 @@ public class AiProviderRegistry {
 		LinkedHashSet<String> ordered = new LinkedHashSet<>(route(capability));
 		ordered.addAll(registeredModelIds);
 		return List.copyOf(ordered);
+	}
+
+	private Byte[] boxAudio(byte[] audio) {
+		if (audio == null) return null;
+		Byte[] boxed = new Byte[audio.length];
+		for (int index = 0; index < audio.length; index++) boxed[index] = audio[index];
+		return boxed;
+	}
+
+	private byte[] unboxAudio(Byte[] audio) {
+		if (audio == null) return null;
+		byte[] unboxed = new byte[audio.length];
+		for (int index = 0; index < audio.length; index++) {
+			if (audio[index] == null) {
+				throw new BusinessException("INVALID_AUDIO", "audio contains a null byte");
+			}
+			unboxed[index] = audio[index];
+		}
+		return unboxed;
 	}
 
 	private static List<String> parseRoute(String value) {

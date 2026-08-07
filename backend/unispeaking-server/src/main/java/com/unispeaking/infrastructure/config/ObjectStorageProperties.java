@@ -11,7 +11,6 @@ public class ObjectStorageProperties {
 	private String secretKey = "";
 	private String domain = "";
 	private String avatarPrefix = "avatars";
-	private String interviewRecordingPrefix = "interviews/recordings";
 	private String ieltsRecordingPrefix = "ielts/recordings";
 	private Duration signedUrlTtl = Duration.ofHours(1);
 
@@ -30,11 +29,6 @@ public class ObjectStorageProperties {
 	public String getAvatarPrefix() { return avatarPrefix; }
 	public void setAvatarPrefix(String value) {
 		avatarPrefix = normalizeObjectPrefix(value, "avatars");
-	}
-	public String getInterviewRecordingPrefix() { return interviewRecordingPrefix; }
-	public void setInterviewRecordingPrefix(String value) {
-		interviewRecordingPrefix = normalizeObjectPrefix(
-				value, "interviews/recordings");
 	}
 	public String getIeltsRecordingPrefix() { return ieltsRecordingPrefix; }
 	public void setIeltsRecordingPrefix(String value) {

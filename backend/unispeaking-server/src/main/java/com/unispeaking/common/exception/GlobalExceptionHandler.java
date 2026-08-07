@@ -1,8 +1,6 @@
 package com.unispeaking.common.exception;
 
-import com.unispeaking.common.exception.interview.InterviewException;
 import com.unispeaking.common.response.ApiResponse;
-import com.unispeaking.domain.dto.scene.InterviewApiRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,9 +15,7 @@ public class GlobalExceptionHandler {
 
 	@ExceptionHandler(BusinessException.class)
 	public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException exception) {
-		HttpStatus status = exception instanceof InterviewException interviewException
-				? interviewException.errorCode().status()
-				: switch (exception.code()) {
+		HttpStatus status = switch (exception.code()) {
 			case "AUTHENTICATION_REQUIRED", "INVALID_ACCESS_TOKEN", "ACCESS_TOKEN_REVOKED",
 					"INVALID_CREDENTIALS", "USER_NOT_ACTIVE" -> HttpStatus.UNAUTHORIZED;
 			case "SESSION_ACCESS_DENIED", "ADMIN_ACCESS_DENIED" -> HttpStatus.FORBIDDEN;
@@ -41,7 +37,7 @@ public class GlobalExceptionHandler {
 			case "AVATAR_DIMENSION_INVALID", "AVATAR_CONTENT_INVALID" ->
 					HttpStatus.UNPROCESSABLE_ENTITY;
 			default -> HttpStatus.BAD_REQUEST;
-			};
+		};
 		return ResponseEntity.status(status)
 				.body(ApiResponse.failure(exception.code(), exception.getMessage()));
 	}
@@ -53,44 +49,23 @@ public class GlobalExceptionHandler {
 				.findFirst()
 				.map(error -> error.getField() + " " + error.getDefaultMessage())
 				.orElse("Invalid request");
-		boolean interviewRequest = exception.getBindingResult().getTarget()
-				instanceof InterviewApiRequest;
-		String code = interviewRequest ? "INTERVIEW_INPUT_INVALID" : "VALIDATION_ERROR";
-		HttpStatus status = interviewRequest
-				? HttpStatus.UNPROCESSABLE_ENTITY
-				: HttpStatus.BAD_REQUEST;
-		return ResponseEntity.status(status).body(ApiResponse.failure(code, message));
+		return ResponseEntity.badRequest()
+				.body(ApiResponse.failure("VALIDATION_ERROR", message));
 	}
 
 	@ExceptionHandler(MaxUploadSizeExceededException.class)
 	public ResponseEntity<ApiResponse<Void>> handleUploadTooLarge(
 			MaxUploadSizeExceededException exception,
 			HttpServletRequest request) {
-		boolean interviewRequest = isInterviewRequest(request);
-		String code = interviewRequest
-				? "INTERVIEW_PAYLOAD_TOO_LARGE"
-				: "PAYLOAD_TOO_LARGE";
 		return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-				.body(ApiResponse.failure(code, "Request payload is too large"));
+				.body(ApiResponse.failure("PAYLOAD_TOO_LARGE", "Request payload is too large"));
 	}
 
 	@ExceptionHandler(HttpMediaTypeNotSupportedException.class)
 	public ResponseEntity<ApiResponse<Void>> handleUnsupportedMediaType(
 			HttpMediaTypeNotSupportedException exception,
 			HttpServletRequest request) {
-		boolean interviewRequest = isInterviewRequest(request);
-		String code = interviewRequest
-				? "INTERVIEW_MEDIA_TYPE_UNSUPPORTED"
-				: "MEDIA_TYPE_UNSUPPORTED";
 		return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
-				.body(ApiResponse.failure(code, "Request media type is not supported"));
-	}
-
-	private static boolean isInterviewRequest(HttpServletRequest request) {
-		if (request == null) {
-			return false;
-		}
-		String uri = request.getRequestURI();
-		return uri.equals("/api/interviews") || uri.startsWith("/api/interviews/");
+				.body(ApiResponse.failure("MEDIA_TYPE_UNSUPPORTED", "Request media type is not supported"));
 	}
 }

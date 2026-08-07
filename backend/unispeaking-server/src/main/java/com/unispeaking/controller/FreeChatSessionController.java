@@ -7,9 +7,8 @@ import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
 import com.unispeaking.domain.dto.scene.TranslateTextRequest;
 import com.unispeaking.domain.dto.scene.TranslateTextResponse;
 import com.unispeaking.domain.vo.scene.SceneType;
-import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.service.scene.FreeChatSceneService;
-import com.unispeaking.service.session.SessionService;
+import com.unispeaking.service.session.impl.FreeChatSessionServiceImpl;
+import com.unispeaking.service.scene.impl.FreeChatSceneServiceImpl;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,17 +20,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/scene-sessions")
 public class FreeChatSessionController {
 
-	private final SessionService sessionService;
-	private final FreeChatSceneService freeChatSceneService;
-	private final AuthService authService;
+	private final FreeChatSessionServiceImpl freeChatSessionService;
+	private final FreeChatSceneServiceImpl freeChatSceneService;
 
 	public FreeChatSessionController(
-			SessionService sessionService,
-			FreeChatSceneService freeChatSceneService,
-			AuthService authService) {
-		this.sessionService = sessionService;
+			FreeChatSessionServiceImpl freeChatSessionService,
+			FreeChatSceneServiceImpl freeChatSceneService) {
+		this.freeChatSessionService = freeChatSessionService;
 		this.freeChatSceneService = freeChatSceneService;
-		this.authService = authService;
 	}
 
 	@PostMapping
@@ -42,15 +38,12 @@ public class FreeChatSessionController {
 				SceneType.FREE_CHAT,
 				request.model(),
 				request.voice());
-		return ApiResponse.success(freeChatSceneService.startSession(request));
+		return ApiResponse.success(freeChatSessionService.startSession(request));
 	}
 
 	@PostMapping("/{sessionId}/end")
 	public ApiResponse<Void> end(@PathVariable String sessionId) {
-		sessionService.endSession(
-				authService.requireUserId(null),
-				sessionId,
-				null);
+		freeChatSessionService.endSession(sessionId);
 		return ApiResponse.success(null);
 	}
 
@@ -59,6 +52,6 @@ public class FreeChatSessionController {
 			@PathVariable String sessionId,
 			@Valid @RequestBody TranslateTextRequest request) {
 		return ApiResponse.success(
-				freeChatSceneService.translate(sessionId, request.text()));
+				freeChatSceneService.translate(request.text()));
 	}
 }
