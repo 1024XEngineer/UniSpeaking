@@ -1,32 +1,26 @@
 import { useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { ArrowLeftIcon } from 'phosphor-react-native/src/icons/ArrowLeft';
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
 import { BookOpenTextIcon } from 'phosphor-react-native/src/icons/BookOpenText';
-import { BriefcaseIcon } from 'phosphor-react-native/src/icons/Briefcase';
 import { CaretDownIcon } from 'phosphor-react-native/src/icons/CaretDown';
 import { PlayIcon } from 'phosphor-react-native/src/icons/Play';
 import { SquaresFourIcon } from 'phosphor-react-native/src/icons/SquaresFour';
 
 import { AppButton, AppScreen, Card, Metric, PageHeader, ProgressBar, SectionTitle } from '@/components/ui';
-import type { InterviewLearningRecord } from '@/data/learningAssets';
 import { useAppModel } from '@/model/AppModel';
 import { colors } from '@/theme/tokens';
 
-export type SpecialtyAssetKind = 'ielts' | 'interview';
+export type SpecialtyAssetKind = 'ielts';
 export type SpecialtyAssetTab = 'overview' | 'history' | 'trends';
 
 const scoreLabels = {
   ielts: ['流利与连贯', '词汇资源', '语法范围', '发音'],
-  interview: ['内容结构', '表达清晰', '语言准确', '沟通自然'],
 } as const;
 
-function ModuleSwitcher({ kind, onScenes, onIelts, onInterview }: { kind: SpecialtyAssetKind; onScenes: () => void; onIelts: () => void; onInterview: () => void }) {
+function ModuleSwitcher({ onScenes }: { onScenes: () => void }) {
   const [open, setOpen] = useState(false);
   const options = [
     { id: 'scenes', title: '场景训练学习资产', note: '对话记录、纠错与场景复练', icon: <BookOpenTextIcon color={colors.ink} size={20} weight="fill" />, onPress: onScenes },
-    ...(kind !== 'ielts' ? [{ id: 'ielts', title: 'IELTS 学习资产', note: '专项训练、模考与能力趋势', icon: <Text style={styles.ieltsMark}>IELTS</Text>, onPress: onIelts }] : []),
-    ...(kind !== 'interview' ? [{ id: 'interview', title: '英文面试学习资产', note: '历史报告与口语复盘', icon: <BriefcaseIcon color={colors.ink} size={20} weight="fill" />, onPress: onInterview }] : []),
   ];
   return (
     <>
@@ -82,27 +76,6 @@ function IeltsOverview() {
   );
 }
 
-function InterviewOverview() {
-  const { interviewRecords } = useAppModel();
-  const latest = interviewRecords[0];
-  return (
-    <View style={styles.sectionStack}>
-      <Card style={styles.heroCard}>
-        <Text style={styles.cardLabel}>最近一次完整面试</Text>
-        <Text style={styles.heroScore}>{latest?.score ?? '—'}</Text>
-        <Text style={styles.heroCopy}>{latest?.role} · {latest?.company}</Text>
-        <View style={styles.targetRow}><Text style={styles.targetLabel}>优先提升</Text><Text style={styles.targetStrong}>回答深度</Text></View>
-      </Card>
-      <Card>
-        <Text style={styles.cardLabel}>近七天训练</Text>
-        <View style={styles.metrics}><Metric label="模拟次数" value="3" /><Metric label="训练时长" value="42" suffix="分钟" /><Metric label="岗位覆盖" value="2" /></View>
-      </Card>
-      <SectionTitle title="最近面试" />
-      <Card style={styles.listCard}>{interviewRecords.map((item) => <AssetListRow key={item.id} title={item.role} subtitle={`${item.company} · ${item.date}`} meta={item.score === null ? '部分结果' : `${item.score} 分`} />)}</Card>
-    </View>
-  );
-}
-
 function AssetListRow({ title, subtitle, meta, onPress }: { title: string; subtitle: string; meta: string; onPress?: () => void }) {
   return (
     <Pressable onPress={onPress} style={styles.listRow}>
@@ -129,59 +102,34 @@ function IeltsHistory() {
   );
 }
 
-function InterviewHistory({ onOpenRecord }: { onOpenRecord: (id: string) => void }) {
-  const { interviewRecords } = useAppModel();
-  return (
-    <View style={styles.sectionStack}>
-      <SectionTitle title="面试记录" action={<Text style={styles.count}>{interviewRecords.length} 条</Text>} />
-      <Card style={styles.listCard}>{interviewRecords.map((item) => <AssetListRow key={item.id} title={item.role} subtitle={`${item.company} · ${item.date} · ${item.duration}`} meta={item.score === null ? '部分结果' : `${item.score} 分`} onPress={() => onOpenRecord(item.id)} />)}</Card>
-    </View>
-  );
-}
-
 function ScoreRow({ label, value }: { label: string; value: number }) {
   return <View style={styles.scoreRow}><Text style={styles.scoreLabel}>{label}</Text><View style={styles.scoreProgress}><ProgressBar value={value} /></View><Text style={styles.scoreValue}>{value}</Text></View>;
 }
 
-function Trends({ kind }: { kind: SpecialtyAssetKind }) {
-  const labels = scoreLabels[kind];
-  const values = kind === 'ielts' ? [68, 70, 64, 71] : [82, 86, 76, 81];
+function Trends() {
+  const labels = scoreLabels.ielts;
+  const values = [68, 70, 64, 71];
   return (
     <View style={styles.sectionStack}>
       <Card style={styles.trendHero}>
-        <Text style={styles.cardLabel}>{kind === 'ielts' ? '预估分数趋势' : '面试表现趋势'}</Text>
-        <Text style={styles.trendValue}>{kind === 'ielts' ? '6.0 → 6.5' : '76 → 82'}</Text>
+        <Text style={styles.cardLabel}>预估分数趋势</Text>
+        <Text style={styles.trendValue}>6.0 → 6.5</Text>
         <Text style={styles.heroCopy}>最近三次训练保持上升，重点能力正在形成稳定改善。</Text>
       </Card>
       <Card style={styles.reportCard}><Text style={styles.reportTitle}>能力平均表现</Text>{labels.map((label, index) => <ScoreRow key={label} label={label} value={values[index]} />)}</Card>
-      <Card><Text style={styles.reportTitle}>下一阶段建议</Text><Text style={styles.reportCopy}>{kind === 'ielts' ? '优先练习观点展开与段落衔接，让 Part 2 的长回答更加稳定。' : '使用 STAR 结构组织案例，并用具体数字说明个人贡献与业务影响。'}</Text></Card>
+      <Card><Text style={styles.reportTitle}>下一阶段建议</Text><Text style={styles.reportCopy}>优先练习观点展开与段落衔接，让 Part 2 的长回答更加稳定。</Text></Card>
     </View>
   );
 }
 
-export function SpecialtyAssetsScreen({ kind, tab, onTabChange, onScenes, onIelts, onInterview, onOpenRecord }: { kind: SpecialtyAssetKind; tab: SpecialtyAssetTab; onTabChange: (tab: SpecialtyAssetTab) => void; onScenes: () => void; onIelts: () => void; onInterview: () => void; onOpenRecord?: (id: string) => void }) {
-  const title = kind === 'ielts' ? 'IELTS 学习资产' : '英文面试学习资产';
-  const subtitle = kind === 'ielts' ? '集中查看每次训练记录、总体报告与原始录音。' : '集中查看每次面试记录、总体报告与原始录音。';
+export function SpecialtyAssetsScreen({ tab, onTabChange, onScenes }: { kind: SpecialtyAssetKind; tab: SpecialtyAssetTab; onTabChange: (tab: SpecialtyAssetTab) => void; onScenes: () => void; onIelts: () => void }) {
   return (
     <AppScreen>
-      <PageHeader title={title} subtitle={subtitle} action={<ModuleSwitcher kind={kind} onScenes={onScenes} onIelts={onIelts} onInterview={onInterview} />} />
+      <PageHeader title="IELTS 学习资产" subtitle="集中查看每次训练记录、总体报告与原始录音。" action={<ModuleSwitcher onScenes={onScenes} />} />
       <AssetTabs tab={tab} onChange={onTabChange} />
-      {tab === 'overview' ? (kind === 'ielts' ? <IeltsOverview /> : <InterviewOverview />) : null}
-      {tab === 'history' ? (kind === 'ielts' ? <IeltsHistory /> : <InterviewHistory onOpenRecord={onOpenRecord ?? (() => undefined)} />) : null}
-      {tab === 'trends' ? <Trends kind={kind} /> : null}
-    </AppScreen>
-  );
-}
-
-export function InterviewAssetReport({ record, onBack }: { record: InterviewLearningRecord; onBack: () => void }) {
-  return (
-    <AppScreen>
-      <View style={styles.detailBar}><Pressable accessibilityRole="button" accessibilityLabel="返回" onPress={onBack} style={styles.roundButton}><ArrowLeftIcon color={colors.ink} size={20} weight="bold" /></Pressable></View>
-      <PageHeader eyebrow="INTERVIEW REPORT" title={record.role} subtitle={`${record.company} · ${record.date} · ${record.duration}`} />
-      <Card style={styles.heroCard}><Text style={styles.cardLabel}>综合表现</Text><Text style={styles.heroScore}>{record.score ?? '—'}</Text><Text style={styles.heroCopy}>{record.summary}</Text></Card>
-      <Card style={styles.reportCard}><Text style={styles.reportTitle}>四项能力评分</Text>{scoreLabels.interview.map((label, index) => <ScoreRow key={label} label={label} value={record.scores[index]} />)}</Card>
-      <Card><Text style={styles.reportTitle}>下一次重点</Text><Text style={styles.reportCopy}>让案例结果更具体，并在回答结尾明确总结你的个人贡献。</Text></Card>
-      <AppButton title="快速复练" icon="arrow-right" />
+      {tab === 'overview' ? <IeltsOverview /> : null}
+      {tab === 'history' ? <IeltsHistory /> : null}
+      {tab === 'trends' ? <Trends /> : null}
     </AppScreen>
   );
 }

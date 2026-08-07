@@ -77,7 +77,6 @@ web
 ├── src
 │   ├── App.jsx
 │   ├── IeltsModule.jsx
-│   ├── InterviewModule.jsx
 │   ├── apiClient.js
 │   ├── realtimeClient.js
 │   ├── router.js
@@ -91,7 +90,6 @@ web
 - `realtimeClient.js`：WebRTC、DataChannel、WebSocket 和实时事件归一化。
 - `router.js`：页面路径生成和解析。
 - `App.jsx`：自由对话、自定义场景、学习流程和主要页面状态。
-- `IeltsModule.jsx`、`InterviewModule.jsx`：尚在完善后端接口的独立模块。
 
 ## 主要路由
 
@@ -107,7 +105,6 @@ web
 | `/scenes/{sceneId}/assets` | 场景学习资产 |
 | `/assets` | 学习资产首页 |
 | `/ielts` | IELTS 模块 |
-| `/interview` | 英文面试模块 |
 | `/profile` | 个人主页 |
 | `/profile/insights` | 学习目标与洞察 |
 | `/about` | 关于产品 |

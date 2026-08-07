@@ -27,7 +27,6 @@ export const routes = {
   },
   specialty: {
     ielts: href('/specialty/ielts'),
-    interview: href('/specialty/interview'),
   },
   learning: {
     sceneDetail: (id: string) => href(`/learning/scenes/${id}`),
@@ -35,12 +34,6 @@ export const routes = {
       overview: href('/learning/ielts'),
       history: href('/learning/ielts/history'),
       trends: href('/learning/ielts/trends'),
-    },
-    interview: {
-      overview: href('/learning/interview'),
-      history: href('/learning/interview/history'),
-      trends: href('/learning/interview/trends'),
-      record: (id: string) => href(`/learning/interview/${id}`),
     },
   },
   profile: {

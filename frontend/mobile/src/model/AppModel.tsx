@@ -22,10 +22,8 @@ import {
 } from '@/features/auth/preferenceMappings';
 import {
   initialIeltsLearningRecords,
-  initialInterviewLearningRecords,
   initialSceneLearningRecords,
   type IeltsLearningRecord,
-  type InterviewLearningRecord,
   type SceneLearningRecord,
 } from '@/data/learningAssets';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
@@ -72,10 +70,8 @@ type AppModelValue = {
   setTeacher: (value: Teacher) => void;
   sceneRecords: SceneLearningRecord[];
   ieltsRecords: IeltsLearningRecord[];
-  interviewRecords: InterviewLearningRecord[];
   addSceneRecord: (record: SceneLearningRecord) => void;
   addIeltsRecord: (record: IeltsLearningRecord) => void;
-  addInterviewRecord: (record: InterviewLearningRecord) => void;
   removeSceneRecord: (id: string) => void;
   membership: string;
   setMembership: (value: string) => void;
@@ -114,7 +110,6 @@ export function AppModelProvider({
   const [teacher, setTeacher] = useState(teachers[0]);
   const [sceneRecords, setSceneRecords] = useState(initialSceneLearningRecords);
   const [ieltsRecords, setIeltsRecords] = useState(initialIeltsLearningRecords);
-  const [interviewRecords, setInterviewRecords] = useState(initialInterviewLearningRecords);
   const [membership, setMembership] = useState('免费版');
 
   useEffect(() => {
@@ -138,10 +133,6 @@ export function AppModelProvider({
 
   const addIeltsRecord = useCallback((record: IeltsLearningRecord) => {
     setIeltsRecords((current) => [record, ...current.filter((item) => item.id !== record.id)]);
-  }, []);
-
-  const addInterviewRecord = useCallback((record: InterviewLearningRecord) => {
-    setInterviewRecords((current) => [record, ...current.filter((item) => item.id !== record.id)]);
   }, []);
 
   const removeSceneRecord = useCallback((id: string) => {
@@ -196,17 +187,14 @@ export function AppModelProvider({
       setTeacher,
       sceneRecords,
       ieltsRecords,
-      interviewRecords,
       addSceneRecord,
       addIeltsRecord,
-      addInterviewRecord,
       removeSceneRecord,
       membership,
       setMembership,
     }),
     [
       addIeltsRecord,
-      addInterviewRecord,
       addSceneRecord,
       completeOnboarding,
       hasCompletedOnboarding,
@@ -218,7 +206,6 @@ export function AppModelProvider({
       membership,
       nickname,
       ieltsRecords,
-      interviewRecords,
       removeSceneRecord,
       sceneRecords,
       signIn,

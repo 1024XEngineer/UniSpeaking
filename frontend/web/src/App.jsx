@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpenText,
-  Briefcase,
   CalendarBlank,
   CaretDown,
   CaretRight,
@@ -84,7 +83,6 @@ import { createPcmWavRecorder } from "./audioRecorder.js";
 import { useAchievementNotifications } from "./AchievementNotifications.jsx";
 import { createRealtimeClient } from "./realtimeClient.js";
 import { IeltsAssets, IeltsTrainingCenter } from "./IeltsModule.jsx";
-import { InterviewAssets, InterviewTrainingCenter } from "./InterviewModule.jsx";
 import { HelpCenter } from "./help/HelpCenter.jsx";
 import { HelpLayout } from "./help/HelpLayout.jsx";
 import { NewtonsCradle } from "./NewtonsCradle.jsx";
@@ -702,7 +700,7 @@ function AppShell({ page, setPage, teacher, avatarUrl, children }) {
     { id: "scenes", label: "场景广场", icon: SquaresFour },
     { id: "assets", label: "学习资产", icon: BookOpenText },
   ];
-  const activePage = ["ielts", "interview"].includes(page) ? "scenes" : ["ielts-assets", "interview-assets"].includes(page) ? "assets" : page;
+  const activePage = page === "ielts" ? "scenes" : page === "ielts-assets" ? "assets" : page;
   return (
     <div className={cx("app-shell", sidebarOpen && "is-sidebar-open")}>
       <aside className={cx("sidebar", sidebarOpen && "is-open")} onMouseEnter={() => setSidebarOpen(true)} onMouseLeave={() => setSidebarOpen(false)}>
@@ -1123,7 +1121,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   );
 }
 
-function Scenes({ onStartTraining, onIelts, onInterview }) {
+function Scenes({ onStartTraining, onIelts }) {
   const [prompt, setPrompt] = useState("");
   const promptRef = useRef(null);
   const previewSceneIdRef = useRef("");
@@ -1190,7 +1188,6 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
               <button type="button" className="scene-specialty-menu__trigger" aria-haspopup="menu" aria-expanded={specialtyOpen} onClick={() => setSpecialtyOpen(!specialtyOpen)}>专项训练<CaretDown weight="bold" /></button>
               {specialtyOpen && <div className="scene-specialty-menu__popover" role="menu">
                 <button type="button" role="menuitem" onClick={() => { setSpecialtyOpen(false); onIelts(); }}><span className="scene-specialty-menu__icon"><BookOpenText /></span><span><strong>雅思口语</strong><small>Part 1 / 2 / 3 与全真模考</small></span><ArrowRight /></button>
-                <button type="button" role="menuitem" onClick={() => { setSpecialtyOpen(false); onInterview(); }}><span className="scene-specialty-menu__icon"><Briefcase /></span><span><strong>英文面试</strong><small>根据简历与岗位进行模拟</small></span><ArrowRight /></button>
               </div>}
             </div>
           </div>
@@ -1912,7 +1909,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   );
 }
 
-function AssetModuleMenu({ onSelect, onIelts, onInterview }) {
+function AssetModuleMenu({ onIelts }) {
   return (
     <div className="asset-module-menu">
       <button className="asset-module-menu__trigger" type="button" aria-label="切换学习资产模块" aria-haspopup="menu">
@@ -1922,7 +1919,6 @@ function AssetModuleMenu({ onSelect, onIelts, onInterview }) {
       </button>
       <div className="asset-module-menu__popover" role="menu">
         <button type="button" role="menuitem" onClick={onIelts}><span className="asset-module-ielts-mark">IELTS</span><span><strong>IELTS 学习资产</strong><small>评分、建议与今日复习</small></span><CaretRight /></button>
-        <button type="button" role="menuitem" onClick={onInterview}><Briefcase /><span><strong>英文面试学习资产</strong><small>历史报告与口语复盘</small></span><CaretRight /></button>
       </div>
     </div>
   );
@@ -2011,7 +2007,7 @@ function AssetModulePlaceholder({ module, onBack }) {
   );
 }
 
-function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRecord, onCloseRecord, initialView = "home", initialRecordTitle }) {
+function Assets({ sceneId, onPractice, onRestart, onIelts, onOpenRecord, onCloseRecord, initialView = "home", initialRecordTitle }) {
   const [records, setRecords] = useState([]);
   const [selectedId, setSelectedId] = useState(sceneId || "");
   const [detail, setDetail] = useState(null);
@@ -2092,7 +2088,7 @@ function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRe
 
   return (
     <main className="page assets-page">
-      <PageHeader title="学习资产" subtitle="把场景练习中真正用过的表达，留在这里继续复习。" action={<AssetModuleMenu onSelect={setReservedModule} onIelts={onIelts} onInterview={onInterview} />} />
+      <PageHeader title="学习资产" subtitle="把场景练习中真正用过的表达，留在这里继续复习。" action={<AssetModuleMenu onIelts={onIelts} />} />
       {assetError && <p className="call-error" role="alert">{assetError}</p>}
       <section className="asset-layout">
         <aside className="asset-list asset-list--history" aria-label="场景训练历史">
@@ -2528,7 +2524,6 @@ export function App() {
   const [assetView, setAssetView] = useState(initialRoute.assetView || "home");
   const [assetSceneId, setAssetSceneId] = useState(initialRoute.assetSceneId || null);
   const [ieltsRoute, setIeltsRoute] = useState(initialRoute.ieltsRoute || null);
-  const [interviewRoute, setInterviewRoute] = useState(initialRoute.interviewRoute || null);
   const [helpRoute, setHelpRoute] = useState(initialRoute.helpRoute || null);
   const [aboutRoute, setAboutRoute] = useState(initialRoute.aboutRoute || null);
   const [paywall, setPaywall] = useState(null);
@@ -2544,7 +2539,6 @@ export function App() {
     setAssetView(route.assetView || "home");
     setAssetSceneId(route.assetSceneId || null);
     setIeltsRoute(route.ieltsRoute || null);
-    setInterviewRoute(route.interviewRoute || null);
     setHelpRoute(route.helpRoute || null);
     setAboutRoute(route.aboutRoute || null);
     setPaywall(null);
@@ -2843,7 +2837,6 @@ export function App() {
   };
   const setMainPage = (next) => navigate(hrefForPage(next), { page: next, authMode, training: null, result: null });
   const navigateIelts = (path) => navigate(path, { authMode });
-  const navigateInterview = (path) => navigate(path, { authMode });
   const navigateHelp = (path) => navigate(path, { authMode });
   const navigateAbout = (path) => navigate(path, { authMode });
   const openCompletedAssetDetail = (requestedSceneId = null) => {
@@ -2868,12 +2861,10 @@ export function App() {
   let content;
   if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={showResult} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
   else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={() => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); void synchronizeAchievements({ revealNotifications: true }); }} />;
-  else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={() => setMainPage("ielts")} onInterview={() => setMainPage("interview")} />;
-  else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => setMainPage("ielts-assets")} onInterview={() => setMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(scene) => startTraining(scene, "learn", { returnPage: "assets" })} />;
+  else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={() => setMainPage("ielts")} />;
+  else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => setMainPage("ielts-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(scene) => startTraining(scene, "learn", { returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
-  else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBackToAssets={() => setMainPage("assets")} onInterviewAssets={() => setMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
-  else if (page === "interview") content = <InterviewTrainingCenter route={interviewRoute} onNavigate={navigateInterview} onExit={() => setMainPage("scenes")} onAssets={() => navigateInterview(paths.interview.assets.root)} />;
-  else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBackToAssets={() => setMainPage("assets")} onIeltsAssets={() => setMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} />;
+  else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBackToAssets={() => setMainPage("assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
   else content = <Profile section={page} setSection={setMainPage} helpRoute={helpRoute} aboutRoute={aboutRoute} onHelpNavigate={navigateHelp} onAboutNavigate={navigateAbout} user={user} profile={profileOverview} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onMonthChange={loadProfileMonth} onNicknameChange={updateNickname} onAvatarChange={updateAvatar} onPasswordChange={updatePassword} onAssets={() => setMainPage("assets")} onLogout={logout} />;
   return <AppShell page={page} setPage={setMainPage} teacher={teacher} avatarUrl={profileOverview?.account?.avatarUrl}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}</AppShell>;
 }

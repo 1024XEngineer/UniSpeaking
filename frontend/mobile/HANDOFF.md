@@ -98,10 +98,6 @@ plugins/                 Expo 原生配置修正
 /(app)/learning/ielts
 /(app)/learning/ielts/history
 /(app)/learning/ielts/trends
-/(app)/learning/interview
-/(app)/learning/interview/history
-/(app)/learning/interview/trends
-/(app)/learning/interview/[id]
 ```
 
 ## 5. 当前设计基线

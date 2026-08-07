@@ -24,8 +24,6 @@ export const APP_PAGES = [
   "assets",
   "ielts",
   "ielts-assets",
-  "interview",
-  "interview-assets",
   "profile",
   "insights",
   "membership",
@@ -48,8 +46,6 @@ export const PAGE_PATHS = {
   about: "/about",
   ielts: "/ielts",
   "ielts-assets": "/ielts/assets",
-  interview: "/interview",
-  "interview-assets": "/interview/assets",
 };
 
 export const paths = {
@@ -92,23 +88,6 @@ export const paths = {
       trends: "/ielts/assets/trends",
     },
   },
-  interview: {
-    root: "/interview",
-    preparing: "/interview/preparing",
-    live: "/interview/live",
-    finalizing: "/interview/finalizing",
-    report: "/interview/report",
-    reportPartial: "/interview/report/partial",
-    reportFailed: "/interview/report/failed",
-    error: "/interview/error",
-    transcript: "/interview/report/transcript",
-    assets: {
-      root: "/interview/assets",
-      history: "/interview/assets/history",
-      trends: "/interview/assets/trends",
-      record: (recordId) => `/interview/assets/${encodeURIComponent(recordId)}`,
-    },
-  },
   help: {
     root: "/help",
     category: (categoryId) => `/help/category/${encodeURIComponent(categoryId)}`,
@@ -130,7 +109,6 @@ const ieltsPartBySegment = {
 };
 
 const ieltsScreens = ["setup", "session", "analysis", "report"];
-const interviewScreens = ["preparing", "live", "finalizing", "report", "error", "report-failed"];
 const assetTabs = ["history", "trends"];
 const safeDecode = (value) => {
   try {
@@ -184,39 +162,6 @@ export function parseIeltsRoute(pathname) {
   return appRoute("ielts", {
     ieltsRoute: { area: "training", part, screen, selection },
     canonicalPath: paths.ielts.step(segments[1], selection, screen),
-  });
-}
-
-export function parseInterviewRoute(pathname) {
-  const path = normalizePath(pathname);
-  const segments = path.split("/").filter(Boolean);
-  if (segments[0] !== "interview") return null;
-  if (segments[1] === "assets") {
-    if (segments[2] && !assetTabs.includes(segments[2])) {
-      return appRoute("interview-assets", {
-        interviewRoute: { area: "assets", record: safeDecode(segments[2]) },
-      });
-    }
-    const tab = assetTabs.includes(segments[2]) ? segments[2] : "overview";
-    return appRoute("interview-assets", {
-      interviewRoute: { area: "assets", tab },
-      canonicalPath: tab === "overview" ? paths.interview.assets.root : paths.interview.assets[tab],
-    });
-  }
-  if (segments[1] === "report" && segments[2] === "transcript") {
-    return appRoute("interview", { interviewRoute: { area: "training", screen: "transcript" } });
-  }
-  if (segments[1] === "report" && segments[2] === "partial") {
-    return appRoute("interview", { interviewRoute: { area: "training", screen: "report", result: "partial" } });
-  }
-  if (segments[1] === "report" && segments[2] === "failed") {
-    return appRoute("interview", { interviewRoute: { area: "training", screen: "report-failed" } });
-  }
-
-  const screen = interviewScreens.includes(segments[1]) ? segments[1] : "input";
-  return appRoute("interview", {
-    interviewRoute: { area: "training", screen },
-    ...(segments[1] && screen === "input" ? { canonicalPath: paths.interview.root } : {}),
   });
 }
 
@@ -373,8 +318,6 @@ export function resolveRoute(locationLike = window.location) {
   }
   const ieltsRoute = parseIeltsRoute(pathname);
   if (ieltsRoute) return ieltsRoute;
-  const interviewRoute = parseInterviewRoute(pathname);
-  if (interviewRoute) return interviewRoute;
   const helpRoute = parseHelpRoute(pathname);
   if (helpRoute) return helpRoute;
   const aboutRoute = parseAboutRoute(pathname);

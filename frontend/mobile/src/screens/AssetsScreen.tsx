@@ -3,7 +3,6 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ArrowLeftIcon } from 'phosphor-react-native/src/icons/ArrowLeft';
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
 import { BookOpenTextIcon } from 'phosphor-react-native/src/icons/BookOpenText';
-import { BriefcaseIcon } from 'phosphor-react-native/src/icons/Briefcase';
 import { CaretDownIcon } from 'phosphor-react-native/src/icons/CaretDown';
 import { ChatTextIcon } from 'phosphor-react-native/src/icons/ChatText';
 import { CheckCircleIcon } from 'phosphor-react-native/src/icons/CheckCircle';
@@ -34,7 +33,7 @@ function createLearningAssetService(): LearningAssetService {
   );
 }
 
-function AssetModuleMenu({ onIelts, onInterview }: { onIelts: () => void; onInterview: () => void }) {
+function AssetModuleMenu({ onIelts }: { onIelts: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -56,14 +55,6 @@ function AssetModuleMenu({ onIelts, onInterview }: { onIelts: () => void; onInte
               <View style={styles.flex}>
                 <Text style={styles.moduleTitle}>IELTS 学习资产</Text>
                 <Text style={styles.moduleNote}>专项训练、模考与能力趋势</Text>
-              </View>
-              <ArrowRightIcon color={colors.subtle} size={17} weight="bold" />
-            </Pressable>
-            <Pressable onPress={onInterview} style={({ pressed }) => [styles.moduleRow, pressed && styles.pressed]}>
-              <View style={styles.moduleIcon}><BriefcaseIcon color={colors.ink} size={20} weight="fill" /></View>
-              <View style={styles.flex}>
-                <Text style={styles.moduleTitle}>英文面试学习资产</Text>
-                <Text style={styles.moduleNote}>历史报告与口语复盘</Text>
               </View>
               <ArrowRightIcon color={colors.subtle} size={17} weight="bold" />
             </Pressable>
@@ -91,12 +82,10 @@ function SceneRecordRow({ record, onPress }: { record: SceneLearningRecord; onPr
 export function AssetsScreen({
   onOpenRecord,
   onOpenIelts,
-  onOpenInterview,
   assetService: injectedAssetService,
 }: {
   onOpenRecord: (record: SceneLearningRecord) => void;
   onOpenIelts: () => void;
-  onOpenInterview: () => void;
   assetService?: LearningAssetServicePort;
 }) {
   const [assetService] = useState<LearningAssetServicePort>(
@@ -136,7 +125,7 @@ export function AssetsScreen({
         eyebrow="LEARNING ASSETS"
         title="学习资产"
         subtitle="把场景练习中真正用过的表达，留在这里继续复习。"
-        action={<AssetModuleMenu onIelts={onOpenIelts} onInterview={onOpenInterview} />}
+        action={<AssetModuleMenu onIelts={onOpenIelts} />}
       />
       <SectionTitle eyebrow="TRAINING HISTORY" title="场景训练记录" action={<Text style={styles.count}>{count} 条</Text>} />
       <Card style={styles.recordsCard}>

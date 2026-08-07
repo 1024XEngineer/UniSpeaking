@@ -5,5 +5,5 @@ import { SpecialtyAssetsScreen } from '@/screens/SpecialtyAssetsScreen';
 
 export default function IeltsAssetsHistoryRoute() {
   const router = useRouter();
-  return <SpecialtyAssetsScreen kind="ielts" tab="history" onTabChange={(tab) => router.replace(routes.learning.ielts[tab])} onScenes={() => router.replace(routes.tabs.learning)} onIelts={() => undefined} onInterview={() => router.replace(routes.learning.interview.overview)} />;
+  return <SpecialtyAssetsScreen kind="ielts" tab="history" onTabChange={(tab) => router.replace(routes.learning.ielts[tab])} onScenes={() => router.replace(routes.tabs.learning)} onIelts={() => undefined} />;
 }

@@ -26,8 +26,8 @@ import { colors } from '@/theme/tokens';
 export type ProfileRoute = 'home' | 'overview' | 'membership' | 'assistant' | 'account';
 
 export function Overview({ onBack }: { onBack: () => void }) {
-  const { sceneRecords, ieltsRecords, interviewRecords } = useAppModel();
-  const practiceCount = sceneRecords.length + ieltsRecords.length + interviewRecords.length;
+  const { sceneRecords, ieltsRecords } = useAppModel();
+  const practiceCount = sceneRecords.length + ieltsRecords.length;
   return (
     <AppScreen>
       <PageHeader onBack={onBack} eyebrow="LEARNING OVERVIEW" title="你的口语进步" subtitle="持续开口比一次完美更重要。" />
@@ -181,8 +181,8 @@ export function ProfileHome({
   onOpen: (route: ProfileRoute) => void;
   onLogout?: () => void;
 }) {
-  const { nickname, teacher, membership, sceneRecords, ieltsRecords, interviewRecords } = useAppModel();
-  const practiceCount = sceneRecords.length + ieltsRecords.length + interviewRecords.length;
+  const { nickname, teacher, membership, sceneRecords, ieltsRecords } = useAppModel();
+  const practiceCount = sceneRecords.length + ieltsRecords.length;
   const expressionCount = sceneRecords.reduce((sum, item) => sum + item.expressions.length, 0);
   return (
     <AppScreen>

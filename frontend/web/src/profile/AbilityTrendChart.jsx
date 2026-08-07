@@ -12,7 +12,6 @@ const TRAINING_TYPE_LABELS = {
   FREE_CHAT: "自由对话",
   CUSTOM_SCENE: "情景口语",
   IELTS_SCENE: "雅思口语",
-  INTERVIEW_SCENE: "AI 面试",
 };
 const CHART = {
   width: 760,

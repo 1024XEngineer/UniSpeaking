@@ -90,7 +90,6 @@ export const learningItems = [
 export const assetRecords = [
   { id: "coffee", title: "咖啡店点单", category: "普通场景", date: "今天", status: "已完成", score: 84, items: 4 },
   { id: "hotel", title: "酒店入住办理", category: "普通场景", date: "2 天前", status: "已完成", score: 78, items: 5 },
-  { id: "interview", title: "产品经理英文面试", category: "英文面试", date: "5 天前", status: "未完成", score: null, items: 6 },
   { id: "ielts", title: "IELTS Part 2 · 一次旅行", category: "IELTS", date: "1 周前", status: "已完成", score: 6.5, items: 5 },
 ];
 

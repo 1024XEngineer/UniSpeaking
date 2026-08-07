@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   AppButton,
@@ -14,7 +14,7 @@ import {
   SectionTitle,
   uiStyles,
 } from '@/components/ui';
-import { ieltsParts, ieltsTopics, interviewQuestions } from '@/data/content';
+import { ieltsParts, ieltsTopics } from '@/data/content';
 import { useAppModel } from '@/model/AppModel';
 import { colors, examinerAssets } from '@/theme/tokens';
 
@@ -273,161 +273,6 @@ export function IeltsFlow({ onExit }: { onExit: () => void }) {
   );
 }
 
-type InterviewRoute = 'input' | 'preparing' | 'live' | 'finalizing' | 'report';
-
-export function InterviewFlow({ onExit }: { onExit: () => void }) {
-  const { addInterviewRecord } = useAppModel();
-  const [route, setRoute] = useState<InterviewRoute>('input');
-  const [role, setRole] = useState('产品经理');
-  const [company, setCompany] = useState('');
-  const [duration, setDuration] = useState('15');
-  const [resume, setResume] = useState(false);
-  const [question, setQuestion] = useState(0);
-  const [progress, setProgress] = useState(0);
-
-  useEffect(() => {
-    if (route !== 'preparing' && route !== 'finalizing') return;
-    const timer = setInterval(() => setProgress((current) => Math.min(100, current + 16)), 230);
-    return () => clearInterval(timer);
-  }, [route]);
-
-  useEffect(() => {
-    if ((route !== 'preparing' && route !== 'finalizing') || progress < 100) return;
-    const timer = setTimeout(() => setRoute(route === 'preparing' ? 'live' : 'report'), 300);
-    return () => clearTimeout(timer);
-  }, [progress, route]);
-
-  if (route === 'input') {
-    return (
-      <AppScreen>
-        <PageHeader onBack={onExit} eyebrow="AI INTERVIEW" title="创建一次英文模拟面试" subtitle="输入职位背景，AI 会生成更贴近真实招聘的追问。" />
-        <View style={styles.interviewSteps}>
-          {['职位信息', 'AI 准备', '模拟面试'].map((item, index) => (
-            <View key={item} style={styles.interviewStep}>
-              <Text style={styles.stepNumber}>0{index + 1}</Text>
-              <Text style={styles.stepText}>{item}</Text>
-            </View>
-          ))}
-        </View>
-        <View style={styles.formGroup}>
-          <Text style={styles.fieldLabel}>目标职位</Text>
-          <TextInput value={role} onChangeText={setRole} placeholder="例如：Product Manager" placeholderTextColor={colors.subtle} style={styles.input} />
-        </View>
-        <View style={styles.formGroup}>
-          <Text style={styles.fieldLabel}>公司或行业（可选）</Text>
-          <TextInput value={company} onChangeText={setCompany} placeholder="例如：消费互联网" placeholderTextColor={colors.subtle} style={styles.input} />
-        </View>
-        <Pressable onPress={() => setResume((current) => !current)} style={[styles.uploadCard, resume && styles.selected]}>
-          <AppIcon name={resume ? 'check-circle' : 'upload'} size={24} />
-          <View style={uiStyles.flex}>
-            <Text style={uiStyles.title}>{resume ? 'resume-yufan.pdf' : '添加简历（可选）'}</Text>
-            <Text style={uiStyles.muted}>{resume ? '简历已加入本次面试上下文' : '支持 PDF / DOCX，当前为前端选择态'}</Text>
-          </View>
-        </Pressable>
-        <View style={styles.bandOptions}>
-          {['10', '15', '20'].map((item) => (
-            <Pressable key={item} onPress={() => setDuration(item)} style={[styles.bandOption, duration === item && styles.selected]}>
-              <Text style={[styles.bandOptionText, duration === item && styles.selectedText]}>{item} 分钟</Text>
-            </Pressable>
-          ))}
-        </View>
-        <AppButton
-          title="生成面试"
-          icon="arrow-right"
-          onPress={() => {
-            setProgress(0);
-            setRoute('preparing');
-          }}
-        />
-      </AppScreen>
-    );
-  }
-
-  if (route === 'preparing' || route === 'finalizing') {
-    const finalizing = route === 'finalizing';
-    return (
-      <AppScreen contentStyle={styles.analysis}>
-        <AppIcon name={finalizing ? 'document' : 'briefcase'} size={34} />
-        <Text style={styles.analysisTitle}>{finalizing ? '正在生成面试复盘' : 'AI 正在准备你的面试'}</Text>
-        <Text style={uiStyles.muted}>{finalizing ? '整理回答亮点、风险点和更好的表达方式。' : `基于“${role}”岗位生成问题与追问路径。`}</Text>
-        <ProgressBar value={progress} />
-        <Text style={styles.progressText}>{progress}%</Text>
-      </AppScreen>
-    );
-  }
-
-  if (route === 'live') {
-    const next = () => {
-      if (question >= interviewQuestions.length - 1) {
-        setProgress(0);
-        setRoute('finalizing');
-      } else {
-        setQuestion((current) => current + 1);
-      }
-    };
-    return (
-      <AppScreen>
-        <PageHeader onBack={() => setRoute('input')} eyebrow={`${role} · ${duration} 分钟`} title="模拟面试进行中" />
-        <ProgressBar value={question + 1} max={interviewQuestions.length} />
-        <View style={styles.sessionExaminer}>
-          <Image source={examinerAssets.sophia} style={styles.examinerLarge} contentFit="contain" />
-          <Text style={styles.examinerTitle}>AI 面试官</Text>
-          <Text style={uiStyles.muted}>正在等待你的回答</Text>
-        </View>
-        <Card style={styles.questionCard}>
-          <Text style={styles.questionNumber}>QUESTION {question + 1}</Text>
-          <Text style={styles.question}>{interviewQuestions[question]}</Text>
-        </Card>
-        <View style={styles.callControls}>
-          <Pressable style={[styles.roundControl, styles.roundControlOn]}>
-            <AppIcon name="microphone" size={25} />
-          </Pressable>
-        </View>
-        <AppButton title={question === interviewQuestions.length - 1 ? '结束面试' : '完成回答'} onPress={next} />
-      </AppScreen>
-    );
-  }
-
-  return (
-    <AppScreen>
-      <PageHeader onBack={onExit} eyebrow={`${role}${company ? ` · ${company}` : ''}`} title="面试复盘" subtitle="你的回答有清晰的决策过程，下一步要让结果和影响更具体。" />
-      <View style={styles.scoreHero}>
-        <Text style={styles.score}>82</Text>
-        <Text style={uiStyles.muted}>综合表现</Text>
-      </View>
-      <View style={styles.metrics}>
-        <Metric label="岗位匹配" value="84" />
-        <Metric label="表达清晰" value="86" />
-        <Metric label="回答深度" value="76" />
-      </View>
-      <Card>
-        <Text style={uiStyles.title}>更好的表达方式</Text>
-        <Text style={uiStyles.body}>I validated the riskiest assumption first, aligned the team on a reversible test, and used the result to decide whether to scale.</Text>
-      </Card>
-      <Card>
-        <Text style={uiStyles.title}>下一次重点</Text>
-        <Text style={uiStyles.body}>用数字说明决策带来的业务影响，并在回答结尾明确总结你的个人贡献。</Text>
-      </Card>
-      <AppButton
-        title="保存复盘并返回"
-        onPress={() => {
-          addInterviewRecord({
-            id: `interview-${Date.now()}`,
-            role: `${role}英文面试`,
-            company: company || '未填写公司',
-            date: '刚刚',
-            duration: `${duration} 分钟`,
-            score: 82,
-            summary: '回答结构清楚，下一步要让结果和影响更具体。',
-            scores: [84, 86, 76, 81],
-          });
-          onExit();
-        }}
-      />
-    </AppScreen>
-  );
-}
-
 const styles = StyleSheet.create({
   bandOptions: { flexDirection: 'row', gap: 8 },
   bandOption: { minHeight: 48, flex: 1, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 12, backgroundColor: colors.white },
@@ -464,8 +309,6 @@ const styles = StyleSheet.create({
   bandScore: { color: colors.white, fontSize: 82, fontWeight: '600', letterSpacing: -5 },
   bandLabel: { color: '#C7C7C1', fontSize: 11, fontWeight: '300', letterSpacing: 1.2 },
   metrics: { flexDirection: 'row', gap: 8 },
-  interviewSteps: { flexDirection: 'row', gap: 7 },
-  interviewStep: { flex: 1, padding: 11, gap: 6, borderRadius: 13, backgroundColor: colors.soft },
   stepNumber: { color: colors.subtle, fontSize: 10, fontWeight: '500' },
   stepText: { color: colors.ink, fontSize: 11, lineHeight: 16, fontWeight: '500' },
   formGroup: { gap: 8 },
