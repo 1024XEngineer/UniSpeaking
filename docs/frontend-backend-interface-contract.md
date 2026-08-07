@@ -129,13 +129,13 @@ Authorization: Bearer <accessToken>
 
 - 周期为 `Asia/Shanghai` 时区的周一 00:00 至当前时刻。
 - 仅统计 `COMPLETED` 且整场时长不少于 30 秒的会话。
-- 当前仅统计 `FREE_CHAT` 和 `CUSTOM_SCENE`；IELTS 与 Interview 完成真实会话链路后再纳入。
+- 当前仅统计 `FREE_CHAT` 和 `CUSTOM_SCENE`；IELTS 完成真实会话链路后再纳入。
 - 时长按会话与本周的实际重叠区间计算；次数按会话完成时间所在周归属。
 - 进度保留一位小数并封顶 100%，超额完成仍会在实际时长或次数中体现。
 - 未设置目标时使用 120 分钟和 5 次的业务默认值。数据库字段保持可空，不设数据库默认值或数值范围约束。
 - `trainingTypeDistribution` 按相同有效会话口径聚合本周重叠时长，只返回实际产生有效时长的类型。
 - 当前占比仅纳入 `FREE_CHAT` 和 `CUSTOM_SCENE`，百分比保留一位小数；无有效训练时返回空数组。
-- 客户端预留 `IELTS_SCENE`、`INTERVIEW_SCENE` 和未知类型显示，真实训练链路接入后再调整后端纳入范围。
+- 客户端预留 `IELTS_SCENE` 和未知类型显示，真实训练链路接入后再调整后端纳入范围。
 - `abilityTrends` 只读取当前用户状态为 `COMPLETED` 且已经生成 `session_evaluation` 五维报告的会话。
 - 能力趋势按训练完成时间选取最近 10 次，再按时间正序返回；时间使用 `Asia/Shanghai` 时区。
 - 五维字段保持为准确度、流利度、语法、词汇和自然度，不将准确度改名为发音。
