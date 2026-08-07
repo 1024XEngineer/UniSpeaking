@@ -4,7 +4,7 @@ import { MicrophoneIcon } from 'phosphor-react-native/src/icons/Microphone';
 import { MicrophoneSlashIcon } from 'phosphor-react-native/src/icons/MicrophoneSlash';
 import { PhoneDisconnectIcon } from 'phosphor-react-native/src/icons/PhoneDisconnect';
 import { SubtitlesIcon } from 'phosphor-react-native/src/icons/Subtitles';
-import { useEffect, useRef, useState } from 'react';
+import { type ComponentProps, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   cancelAnimation,
@@ -62,7 +62,7 @@ export function selectCallCaption(
   return { speaker: teacherName, text: statusLabel };
 }
 
-function VoiceWaveBar({ active, compact, index, level }: { active: boolean; compact: boolean; index: number; level: number }) {
+function VoiceWaveBar({ active, compact, index, level, tone }: { active: boolean; compact: boolean; index: number; level: number; tone: 'light' | 'navy' }) {
   const scale = useSharedValue(level);
 
   useEffect(() => {
@@ -92,6 +92,7 @@ function VoiceWaveBar({ active, compact, index, level }: { active: boolean; comp
     <Animated.View
       style={[
         styles.voiceWaveBar,
+        tone === 'navy' && styles.voiceWaveBarNavy,
         compact && styles.voiceWaveBarCompact,
         !active && styles.voiceWaveBarInactive,
         animatedStyle,
@@ -100,11 +101,11 @@ function VoiceWaveBar({ active, compact, index, level }: { active: boolean; comp
   );
 }
 
-function VoiceWaveform({ active, compact }: { active: boolean; compact: boolean }) {
+function VoiceWaveform({ active, compact, tone }: { active: boolean; compact: boolean; tone: 'light' | 'navy' }) {
   return (
     <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[styles.voiceWave, compact && styles.voiceWaveCompact]}>
       {voiceWaveRestingLevels.map((level, index) => (
-        <VoiceWaveBar key={index} active={active} compact={compact} index={index} level={level} />
+        <VoiceWaveBar key={index} active={active} compact={compact} index={index} level={level} tone={tone} />
       ))}
     </View>
   );
@@ -114,8 +115,16 @@ export function CallExperience({
   onEnd,
   allowSubtitleToggle = true,
   compactTranscriptLayout = false,
+  endAccessibilityLabel = '结束当前会话',
+  endControlIcon = 'phone',
+  initialSubtitles = true,
+  participant,
   progressCollapsed = false,
   transcriptSpeaker,
+  showMuteControl = true,
+  showTranslationControl = true,
+  statusText = '可以开始说了',
+  tone = 'light',
   transcriptEnglish = 'Hi there! How are you feeling today?',
   transcriptChinese = '嗨！你今天感觉怎么样？',
   userTranscript = '',
@@ -127,8 +136,19 @@ export function CallExperience({
   onEnd: () => void;
   allowSubtitleToggle?: boolean;
   compactTranscriptLayout?: boolean;
+  endAccessibilityLabel?: string;
+  endControlIcon?: 'phone' | 'arrow';
+  initialSubtitles?: boolean;
+  participant?: {
+    image: ComponentProps<typeof Image>['source'];
+    name: string;
+  };
   progressCollapsed?: boolean;
   transcriptSpeaker?: string;
+  showMuteControl?: boolean;
+  showTranslationControl?: boolean;
+  statusText?: string;
+  tone?: 'light' | 'navy';
   transcriptEnglish?: string;
   transcriptChinese?: string;
   userTranscript?: string;
@@ -138,12 +158,13 @@ export function CallExperience({
   onMutedChange?: (muted: boolean) => void;
 }) {
   const { teacher } = useAppModel();
+  const activeParticipant = participant ?? teacher;
   const [internalElapsed, setInternalElapsed] = useState(0);
   const [internalMuted, setInternalMuted] = useState(false);
-  const [subtitles, setSubtitles] = useState(true);
+  const [subtitles, setSubtitles] = useState(initialSubtitles);
   const [translated, setTranslated] = useState(false);
-  const subtitlesProgress = useSharedValue(1);
-  const transcriptVisibility = useSharedValue(1);
+  const subtitlesProgress = useSharedValue(initialSubtitles ? 1 : 0);
+  const transcriptVisibility = useSharedValue(initialSubtitles ? 1 : 0);
   const compactLayoutProgress = useSharedValue(progressCollapsed ? 1 : 0);
   const elapsed = controlledElapsed ?? internalElapsed;
   const muted = controlledMuted ?? internalMuted;
@@ -207,67 +228,68 @@ export function CallExperience({
   }));
 
   return (
-    <View style={styles.callExperience}>
+    <View style={[styles.callExperience, tone === 'navy' && styles.callExperienceNavy]}>
       <View style={styles.callStage}>
         <Animated.View style={[styles.callPresence, presenceTransitionStyle]}>
-          <Animated.View style={[styles.callPortrait, portraitTransitionStyle]}>
+          <Animated.View style={[styles.callPortrait, tone === 'navy' && styles.callPortraitNavy, portraitTransitionStyle]}>
             <Image
-              source={teacher.image}
+              source={activeParticipant.image}
               style={styles.callTeacherImage}
               contentFit="contain"
             />
           </Animated.View>
           <Animated.View style={[styles.listeningState, listeningTransitionStyle]}>
-            <VoiceWaveform active={!muted} compact={subtitles} />
-            <Text style={styles.timer}>{muted ? `已暂停 · ${formatDuration(elapsed)}` : formatDuration(elapsed)}</Text>
-            {!subtitles ? <Text style={styles.callStatus}>{statusLabel ?? (muted ? '会话已暂停' : '可以开始说了')}</Text> : null}
+            <VoiceWaveform active={!muted} compact={subtitles} tone={tone} />
+            <Text style={[styles.timer, tone === 'navy' && styles.timerNavy]}>{muted ? `已暂停 · ${formatDuration(elapsed)}` : formatDuration(elapsed)}</Text>
+            {!subtitles ? <Text style={[styles.callStatus, tone === 'navy' && styles.callStatusNavy]}>{muted ? '会话已暂停' : statusLabel ?? statusText}</Text> : null}
           </Animated.View>
         </Animated.View>
         <Animated.View
           accessibilityElementsHidden={!subtitles}
           importantForAccessibility={subtitles ? 'auto' : 'no-hide-descendants'}
           pointerEvents={subtitles ? 'auto' : 'none'}
-          style={[styles.transcript, compactTranscriptLayout && styles.transcriptCompact, transcriptTransitionStyle]}
+          style={[styles.transcript, tone === 'navy' && styles.transcriptNavy, compactTranscriptLayout && styles.transcriptCompact, transcriptTransitionStyle]}
         >
             {userTranscript ? (
               <View style={styles.userTranscriptBlock}>
-                <Text style={styles.speaker}>你</Text>
-                <Text style={[styles.userTranscriptText, compactTranscriptLayout && styles.userTranscriptTextCompact]}>{userTranscript}</Text>
+                <Text style={[styles.speaker, tone === 'navy' && styles.speakerNavy]}>你</Text>
+                <Text style={[styles.userTranscriptText, tone === 'navy' && styles.transcriptEnglishNavy, compactTranscriptLayout && styles.userTranscriptTextCompact]}>{userTranscript}</Text>
               </View>
             ) : null}
             {!primaryDuplicatesUser ? (
               <View style={userTranscript ? styles.assistantTranscriptBlock : undefined}>
-                <Text style={styles.speaker}>{transcriptSpeaker ?? teacher.name}</Text>
-                <Text style={[styles.transcriptEnglish, compactTranscriptLayout && styles.transcriptEnglishCompact]}>{transcriptEnglish}</Text>
-                <Pressable accessibilityRole="button" accessibilityLabel={translated ? '收起翻译' : '翻译'} onPress={() => setTranslated((current) => !current)} style={styles.translate}>
-                  <AppIcon name="translate" size={14} color={colors.subtle} />
-                  <Text style={styles.translateText}>{translated ? '收起翻译' : '翻译'}</Text>
-                </Pressable>
-                {translated ? <Text style={styles.translation}>{transcriptChinese}</Text> : null}
+                <Text style={[styles.speaker, tone === 'navy' && styles.speakerNavy]}>{transcriptSpeaker ?? activeParticipant.name}</Text>
+                <Text style={[styles.transcriptEnglish, tone === 'navy' && styles.transcriptEnglishNavy, compactTranscriptLayout && styles.transcriptEnglishCompact]}>{transcriptEnglish}</Text>
+                {showTranslationControl ? (
+                  <>
+                    <Pressable accessibilityRole="button" accessibilityLabel={translated ? '收起翻译' : '翻译'} onPress={() => setTranslated((current) => !current)} style={styles.translate}>
+                      <AppIcon name="translate" size={14} color={tone === 'navy' ? '#5D7896' : colors.subtle} />
+                      <Text style={[styles.translateText, tone === 'navy' && styles.translateTextNavy]}>{translated ? '收起翻译' : '翻译'}</Text>
+                    </Pressable>
+                    {translated ? <Text style={[styles.translation, tone === 'navy' && styles.translationNavy]}>{transcriptChinese}</Text> : null}
+                  </>
+                ) : null}
               </View>
             ) : null}
         </Animated.View>
       </View>
       <View style={[styles.callControls, compactTranscriptLayout && styles.callControlsCompact]}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={muted ? '恢复会话' : '暂停会话'}
-          onPress={() => {
+        {showMuteControl ? (
+          <Pressable accessibilityRole="button" accessibilityLabel={muted ? '恢复会话' : '暂停会话'} onPress={() => {
             const nextMuted = !muted;
             if (onMutedChange) onMutedChange(nextMuted);
             else setInternalMuted(nextMuted);
-          }}
-          style={[styles.callControl, muted && styles.callControlActive]}
-        >
-          {muted ? <MicrophoneSlashIcon size={24} color={colors.ink} /> : <MicrophoneIcon size={24} color={colors.ink} />}
-        </Pressable>
-        {allowSubtitleToggle ? (
-          <Pressable accessibilityRole="button" accessibilityLabel={subtitles ? '关闭字幕' : '打开字幕'} onPress={() => setSubtitles((current) => !current)} style={[styles.callControl, subtitles && styles.callControlActive]}>
-            <SubtitlesIcon size={24} color={colors.ink} />
+          }} style={[styles.callControl, tone === 'navy' && styles.callControlNavy, muted && (tone === 'navy' ? styles.callControlActiveNavy : styles.callControlActive)]}>
+            {muted ? <MicrophoneSlashIcon size={24} color={tone === 'navy' ? '#123255' : colors.ink} /> : <MicrophoneIcon size={24} color={tone === 'navy' ? '#123255' : colors.ink} />}
           </Pressable>
         ) : null}
-        <Pressable accessibilityRole="button" accessibilityLabel="结束当前会话" onPress={onEnd} style={[styles.callControl, styles.endControl]}>
-          <PhoneDisconnectIcon size={24} color={colors.white} weight="fill" />
+        {allowSubtitleToggle ? (
+          <Pressable accessibilityRole="button" accessibilityLabel={subtitles ? '关闭字幕' : '打开字幕'} onPress={() => setSubtitles((current) => !current)} style={[styles.callControl, tone === 'navy' && styles.callControlNavy, subtitles && (tone === 'navy' ? styles.callControlActiveNavy : styles.callControlActive)]}>
+            <SubtitlesIcon size={24} color={tone === 'navy' ? '#123255' : colors.ink} />
+          </Pressable>
+        ) : null}
+        <Pressable accessibilityRole="button" accessibilityLabel={endAccessibilityLabel} onPress={onEnd} style={[styles.callControl, tone === 'navy' && styles.callControlNavy, styles.endControl, tone === 'navy' && styles.endControlNavy]}>
+          {endControlIcon === 'arrow' ? <AppIcon name="arrow-right" size={25} color={colors.white} /> : <PhoneDisconnectIcon size={24} color={colors.white} weight="fill" />}
         </Pressable>
       </View>
     </View>
@@ -375,6 +397,8 @@ export function ConversationScreen({
       return;
     }
     setCallTransitioning(true);
+    // Reanimated shared values are mutable handles by design.
+    // eslint-disable-next-line react-hooks/immutability
     callTransitionProgress.value = withTiming(1, {
       duration: 620,
       easing: Easing.inOut(Easing.cubic),
@@ -389,6 +413,7 @@ export function ConversationScreen({
         onEnd={() => {
           setInCall(false);
           setCallTransitioning(false);
+          // eslint-disable-next-line react-hooks/immutability
           callTransitionProgress.value = 0;
         }}
       />
@@ -460,7 +485,7 @@ export function ConversationScreen({
 }
 
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: 18, paddingTop: 22, paddingBottom: 84, gap: 24 },
+  content: { paddingHorizontal: 18, paddingTop: 56, paddingBottom: 84, gap: 24 },
   brandHeader: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   settingsButton: { height: 36, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7, borderRadius: 18, backgroundColor: '#F0F0ED' },
   settingsLabel: { color: '#666662', fontSize: 12, fontWeight: '300' },
@@ -505,33 +530,46 @@ const styles = StyleSheet.create({
   homeContainer: { flex: 1 },
   callScreen: { flex: 1, paddingHorizontal: 22, paddingTop: 24, paddingBottom: 22, backgroundColor: colors.white },
   callExperience: { flex: 1 },
+  callExperienceNavy: { backgroundColor: '#DCEBFA' },
   timer: { marginTop: 7, color: colors.subtle, fontSize: 12, fontWeight: '300', fontVariant: ['tabular-nums'] },
+  timerNavy: { color: '#5D7896' },
   callStage: { flex: 1, position: 'relative', alignItems: 'center' },
   callPresence: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center' },
   callPortrait: { overflow: 'hidden', alignItems: 'center', justifyContent: 'flex-end', borderWidth: 1, borderColor: '#EDEDE9', backgroundColor: colors.soft },
+  callPortraitNavy: { borderColor: '#83B4DF', backgroundColor: '#C7E0F6' },
   callTeacherImage: { position: 'absolute', bottom: '-14%', width: '100%', height: '118%' },
   listeningState: { alignItems: 'center' },
   voiceWave: { width: 60, height: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
   voiceWaveCompact: { width: 27, height: 14, gap: 1.5 },
   voiceWaveBar: { width: 4, height: 30, borderRadius: 999, backgroundColor: '#969692' },
+  voiceWaveBarNavy: { backgroundColor: '#2875C8' },
   voiceWaveBarCompact: { width: 1.5, height: 12 },
   voiceWaveBarInactive: { opacity: 0.48 },
   callStatus: { marginTop: 13, color: colors.muted, fontSize: 14, fontWeight: '300' },
+  callStatusNavy: { color: '#5D7896' },
   transcript: { position: 'absolute', top: 220, left: 0, right: 0, bottom: 0, paddingHorizontal: 8, paddingTop: 12 },
+  transcriptNavy: { backgroundColor: '#DCEBFA' },
   transcriptCompact: { top: 126, paddingHorizontal: 2, paddingTop: 18 },
   speaker: { color: colors.subtle, fontSize: 13, fontWeight: '300' },
   userTranscriptBlock: { paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: colors.line },
   userTranscriptText: { marginTop: 6, color: colors.muted, fontSize: 18, lineHeight: 26, fontWeight: '300' },
   userTranscriptTextCompact: { fontSize: 19, lineHeight: 27 },
   assistantTranscriptBlock: { paddingTop: 14 },
+  speakerNavy: { color: '#5D7896' },
   transcriptEnglish: { marginTop: 10, maxWidth: 350, color: colors.ink, fontSize: 24, lineHeight: 34, fontWeight: '300', letterSpacing: -0.6 },
+  transcriptEnglishNavy: { color: '#123255' },
   transcriptEnglishCompact: { maxWidth: 380, fontSize: 27, lineHeight: 38, letterSpacing: -0.8 },
   translate: { marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 5 },
   translateText: { color: colors.subtle, fontSize: 12, fontWeight: '300' },
+  translateTextNavy: { color: '#5D7896' },
   translation: { marginTop: 8, color: colors.muted, fontSize: 13, lineHeight: 20, fontWeight: '300' },
+  translationNavy: { color: '#5D7896' },
   callControls: { paddingTop: 12, flexDirection: 'row', justifyContent: 'center', gap: 14 },
   callControlsCompact: { paddingTop: 8 },
   callControl: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 32, backgroundColor: colors.white },
+  callControlNavy: { borderColor: '#83B4DF', backgroundColor: '#F7FBFF' },
   callControlActive: { borderColor: '#D2D2CD', backgroundColor: '#E9E9E5' },
+  callControlActiveNavy: { borderColor: '#2875C8', backgroundColor: '#C7E0F6' },
   endControl: { borderColor: '#171716', backgroundColor: '#171716' },
+  endControlNavy: { borderColor: '#2875C8', backgroundColor: '#2875C8' },
 });
