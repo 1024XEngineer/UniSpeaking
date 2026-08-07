@@ -3,15 +3,13 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ArrowLeftIcon } from 'phosphor-react-native/src/icons/ArrowLeft';
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
 import { BookOpenTextIcon } from 'phosphor-react-native/src/icons/BookOpenText';
-import { CaretDownIcon } from 'phosphor-react-native/src/icons/CaretDown';
-import { ChatTextIcon } from 'phosphor-react-native/src/icons/ChatText';
 import { CheckCircleIcon } from 'phosphor-react-native/src/icons/CheckCircle';
 import { PlayIcon } from 'phosphor-react-native/src/icons/Play';
-import { SquaresFourIcon } from 'phosphor-react-native/src/icons/SquaresFour';
-import { TrashIcon } from 'phosphor-react-native/src/icons/Trash';
 import { TranslateIcon } from 'phosphor-react-native/src/icons/Translate';
 
-import { AppButton, AppScreen, Card, PageHeader, Pill, SectionTitle } from '@/components/ui';
+import { LearningAssetsHeader } from '@/components/LearningAssetsHeader';
+import { AppButton, AppScreen, Card, HeaderIconButton, PageHeader, Pill } from '@/components/ui';
+import { SceneCategoryTag } from '@/components/SceneCategoryTag';
 import type { LearningExpression, SceneLearningRecord } from '@/data/learningAssets';
 import { LearningAssetService } from '@/features/scenes/LearningAssetService';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
@@ -33,45 +31,17 @@ function createLearningAssetService(): LearningAssetService {
   );
 }
 
-function AssetModuleMenu({ onIelts }: { onIelts: () => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="切换学习资产模块"
-        onPress={() => setOpen(true)}
-        style={({ pressed }) => [styles.moduleTrigger, pressed && styles.pressed]}
-      >
-        <SquaresFourIcon color={colors.ink} size={17} weight="bold" />
-        <Text style={styles.moduleTriggerText}>其他资产</Text>
-        <CaretDownIcon color={colors.ink} size={14} weight="bold" />
-      </Pressable>
-      <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.menuBackdrop} onPress={() => setOpen(false)}>
-          <View style={styles.modulePopover}>
-            <Pressable onPress={onIelts} style={({ pressed }) => [styles.moduleRow, pressed && styles.pressed]}>
-              <View style={styles.moduleIcon}><Text style={styles.ieltsMark}>IELTS</Text></View>
-              <View style={styles.flex}>
-                <Text style={styles.moduleTitle}>IELTS 学习资产</Text>
-                <Text style={styles.moduleNote}>专项训练、模考与能力趋势</Text>
-              </View>
-              <ArrowRightIcon color={colors.subtle} size={17} weight="bold" />
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
-    </>
-  );
-}
+const PAGE_SIZE = 8;
 
 function SceneRecordRow({ record, onPress }: { record: SceneLearningRecord; onPress: () => void }) {
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.recordRow, pressed && styles.pressed]}>
-      <View style={styles.recordIcon}><ChatTextIcon color={colors.ink} size={21} weight="fill" /></View>
       <View style={styles.flex}>
-        <Text style={styles.recordTitle}>{record.title}</Text>
-        <Text style={styles.recordMeta}>普通场景 · {record.date} · {record.status}</Text>
+        <View style={styles.recordTitleRow}>
+          <Text style={styles.recordTitle}>{record.title}</Text>
+          <SceneCategoryTag category={record.category} />
+        </View>
+        <Text style={styles.recordMeta}>{record.date} · {record.status}</Text>
       </View>
       <Text style={styles.recordScore}>{record.score === null ? '待练习' : `${record.score} 分`}</Text>
       <ArrowRightIcon color={colors.subtle} size={18} weight="bold" />
@@ -82,10 +52,12 @@ function SceneRecordRow({ record, onPress }: { record: SceneLearningRecord; onPr
 export function AssetsScreen({
   onOpenRecord,
   onOpenIelts,
+  onOpenInterview,
   assetService: injectedAssetService,
 }: {
   onOpenRecord: (record: SceneLearningRecord) => void;
   onOpenIelts: () => void;
+  onOpenInterview: () => void;
   assetService?: LearningAssetServicePort;
 }) {
   const [assetService] = useState<LearningAssetServicePort>(
@@ -118,18 +90,22 @@ export function AssetsScreen({
     setReloadKey((current) => current + 1);
   };
 
-  const count = sceneRecords?.length ?? 0;
+  const records = sceneRecords ?? [];
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(records.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const visibleRecords = records.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+
   return (
-    <AppScreen>
-      <PageHeader
-        eyebrow="LEARNING ASSETS"
-        title="学习资产"
-        subtitle="把场景练习中真正用过的表达，留在这里继续复习。"
-        action={<AssetModuleMenu onIelts={onOpenIelts} />}
-      />
-      <SectionTitle eyebrow="TRAINING HISTORY" title="场景训练记录" action={<Text style={styles.count}>{count} 条</Text>} />
+    <AppScreen
+      contentStyle={styles.mainContent}
+      fixedHeader={<LearningAssetsHeader current="scenes" onIelts={onOpenIelts} onInterview={onOpenInterview} />}
+    >
+      <View style={styles.assetIntro}>
+        <Text style={styles.assetHeadingSubtitle}>把场景练习中真正用过的表达，留在这里继续复习。</Text>
+      </View>
       <Card style={styles.recordsCard}>
-        {sceneRecords?.map((record) => <SceneRecordRow key={record.id} record={record} onPress={() => onOpenRecord(record)} />)}
+        {visibleRecords.map((record) => <SceneRecordRow key={record.id} record={record} onPress={() => onOpenRecord(record)} />)}
         {sceneRecords === null && !error ? (
           <View style={styles.empty}>
             <BookOpenTextIcon color={colors.subtle} size={30} />
@@ -151,6 +127,29 @@ export function AssetsScreen({
           </View>
         ) : null}
       </Card>
+      {pageCount > 1 ? (
+        <View style={styles.pagination}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="上一页"
+            disabled={currentPage === 0}
+            onPress={() => setPage((value) => Math.max(0, value - 1))}
+            style={({ pressed }) => [styles.paginationButton, currentPage === 0 && styles.paginationButtonDisabled, pressed && styles.pressed]}
+          >
+            <ArrowLeftIcon color={currentPage === 0 ? colors.line : colors.ink} size={19} weight="bold" />
+          </Pressable>
+          <Text style={styles.paginationLabel}>{currentPage + 1} / {pageCount}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="下一页"
+            disabled={currentPage === pageCount - 1}
+            onPress={() => setPage((value) => Math.min(pageCount - 1, value + 1))}
+            style={({ pressed }) => [styles.paginationButton, currentPage === pageCount - 1 && styles.paginationButtonDisabled, pressed && styles.pressed]}
+          >
+            <ArrowRightIcon color={currentPage === pageCount - 1 ? colors.line : colors.ink} size={19} weight="bold" />
+          </Pressable>
+        </View>
+      ) : null}
     </AppScreen>
   );
 }
@@ -198,18 +197,21 @@ export function SceneAssetDetail({ record, onBack, onPractice, onDelete }: { rec
   const [confirmDelete, setConfirmDelete] = useState(false);
   return (
     <>
-      <AppScreen>
-        <View style={styles.detailBar}>
-          <Pressable accessibilityRole="button" accessibilityLabel="返回" onPress={onBack} style={styles.roundButton}><ArrowLeftIcon color={colors.ink} size={20} weight="bold" /></Pressable>
-          <View style={styles.detailActions}>
-            <AppButton title="复练场景" variant="soft" icon="play" onPress={onPractice} style={styles.practiceButton} />
-            <Pressable accessibilityRole="button" accessibilityLabel="删除当前学习资产" onPress={() => setConfirmDelete(true)} style={styles.roundButton}><TrashIcon color={colors.muted} size={19} /></Pressable>
-          </View>
-        </View>
+      <AppScreen
+        fixedHeader={
+          <PageHeader
+            fixed
+            onBack={onBack}
+            title="详情"
+            action={<HeaderIconButton icon="delete" accessibilityLabel="删除当前学习资产" onPress={() => setConfirmDelete(true)} color={colors.muted} />}
+          />
+        }
+      >
         <View style={styles.detailHeading}>
           <Text style={styles.eyebrow}>普通场景</Text>
           <Text style={styles.detailTitle}>{record.title}</Text>
           <Text style={styles.detailMeta}>{record.date} · 已完成 {record.practiceCount} 次模拟 · {record.score ?? '—'} 分</Text>
+          <AppButton title="复练场景" variant="secondary" icon="play" onPress={onPractice} style={styles.practiceButton} />
         </View>
         <View style={styles.segmented}>
           <Pressable onPress={() => setView('expressions')} style={[styles.segment, view === 'expressions' && styles.segmentActive]}><Text style={[styles.segmentText, view === 'expressions' && styles.segmentTextActive]}>学习表达</Text></Pressable>
@@ -310,32 +312,26 @@ export function SceneAssetDetailLoader({
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   pressed: { opacity: 0.72, transform: [{ scale: 0.985 }] },
-  moduleTrigger: { minHeight: 42, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: colors.line, borderRadius: 22, backgroundColor: colors.white },
-  moduleTriggerText: { color: colors.ink, fontSize: 12, fontWeight: '500' },
-  menuBackdrop: { flex: 1, paddingTop: 88, paddingRight: 22, alignItems: 'flex-end', backgroundColor: 'rgba(21,21,20,0.08)' },
-  modulePopover: { width: 302, padding: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 18, backgroundColor: colors.white, shadowColor: colors.ink, shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.16, shadowRadius: 28, elevation: 12, boxShadow: '0px 12px 30px rgba(21,21,20,0.16)' },
-  moduleRow: { minHeight: 70, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 13 },
-  moduleIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: colors.soft },
-  ieltsMark: { color: colors.ink, fontSize: 9, fontWeight: '600' },
-  moduleTitle: { color: colors.ink, fontSize: 14, fontWeight: '500' },
-  moduleNote: { marginTop: 4, color: colors.muted, fontSize: 11, fontWeight: '300' },
-  count: { color: colors.muted, fontSize: 12, fontWeight: '300' },
+  mainContent: {},
+  assetIntro: { alignItems: 'flex-start' },
+  assetHeadingSubtitle: { color: colors.muted, fontSize: 15, lineHeight: 23, fontWeight: '300' },
   recordsCard: { paddingHorizontal: 16, paddingVertical: 2 },
+  pagination: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 },
+  paginationButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 20, backgroundColor: colors.white },
+  paginationButtonDisabled: { opacity: 0.55 },
+  paginationLabel: { minWidth: 42, color: colors.muted, fontSize: 12, textAlign: 'center', fontWeight: '300' },
   recordRow: { minHeight: 88, paddingVertical: 15, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
-  recordIcon: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: colors.soft },
+  recordTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   recordTitle: { color: colors.ink, fontSize: 16, fontWeight: '500' },
   recordMeta: { marginTop: 5, color: colors.muted, fontSize: 12, fontWeight: '300' },
   recordScore: { color: colors.subtle, fontSize: 12, fontWeight: '300' },
   empty: { minHeight: 220, alignItems: 'center', justifyContent: 'center', gap: 9 },
   emptyTitle: { color: colors.ink, fontSize: 17, fontWeight: '500' },
   emptyText: { maxWidth: 250, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', fontWeight: '300' },
-  detailBar: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  detailActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  roundButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 22, backgroundColor: colors.white },
-  practiceButton: { minHeight: 44, paddingHorizontal: 16 },
   detailHeading: { gap: 7 },
+  practiceButton: { alignSelf: 'flex-start', marginTop: 5 },
   eyebrow: { color: colors.subtle, fontSize: 11, fontWeight: '500', letterSpacing: 1.4 },
-  detailTitle: { color: colors.ink, fontSize: 31, lineHeight: 38, fontWeight: '600', letterSpacing: -1 },
+  detailTitle: { color: colors.ink, fontSize: 27, lineHeight: 34, fontWeight: '600' },
   detailMeta: { color: colors.muted, fontSize: 13, lineHeight: 20, fontWeight: '300' },
   segmented: { padding: 4, flexDirection: 'row', borderRadius: 15, backgroundColor: colors.soft },
   segment: { minHeight: 42, flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },

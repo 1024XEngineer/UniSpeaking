@@ -1,3 +1,5 @@
+import type { SceneCategory } from './sceneCategories';
+
 export type LearningExpression = {
   id: string;
   type: '单词' | '词组' | '句子';
@@ -22,6 +24,7 @@ export type AssetDialogueMessage = {
 export type SceneLearningRecord = {
   id: string;
   title: string;
+  category: SceneCategory;
   date: string;
   status: '已完成' | '待练习';
   score: number | null;
@@ -52,6 +55,7 @@ export const initialSceneLearningRecords: SceneLearningRecord[] = [
   {
     id: 'coffee',
     title: '咖啡店点单',
+    category: 'food',
     date: '刚刚',
     status: '已完成',
     score: 86,
@@ -85,6 +89,7 @@ export const initialSceneLearningRecords: SceneLearningRecord[] = [
   {
     id: 'hotel',
     title: '酒店入住办理',
+    category: 'accommodation',
     date: '2 天前',
     status: '已完成',
     score: 78,

@@ -1,5 +1,10 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
+import { ArrowLeftIcon } from 'phosphor-react-native/src/icons/ArrowLeft';
+import { BookOpenTextIcon } from 'phosphor-react-native/src/icons/BookOpenText';
+import { PlayIcon } from 'phosphor-react-native/src/icons/Play';
+import { SquaresFourIcon } from 'phosphor-react-native/src/icons/SquaresFour';
+import { TrashIcon } from 'phosphor-react-native/src/icons/Trash';
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 import type { ComponentProps, PropsWithChildren, ReactNode } from 'react';
 import {
@@ -33,6 +38,7 @@ type IconName =
   | 'grid'
   | 'lock'
   | 'logout'
+  | 'menu'
   | 'medal'
   | 'microphone'
   | 'microphone-off'
@@ -40,6 +46,8 @@ type IconName =
   | 'phone-end'
   | 'play'
   | 'settings'
+  | 'search'
+  | 'shuffle'
   | 'sliders'
   | 'subtitles'
   | 'translate'
@@ -66,6 +74,7 @@ const symbolNames: Record<IconName, { ios: SFSymbol; android: AndroidSymbol }> =
   grid: { ios: 'square.grid.2x2', android: 'grid_view' },
   lock: { ios: 'lock', android: 'lock' },
   logout: { ios: 'rectangle.portrait.and.arrow.right', android: 'logout' },
+  menu: { ios: 'line.3.horizontal', android: 'menu' },
   medal: { ios: 'medal', android: 'military_tech' },
   microphone: { ios: 'mic.fill', android: 'mic' },
   'microphone-off': { ios: 'mic.slash.fill', android: 'mic_off' },
@@ -73,6 +82,8 @@ const symbolNames: Record<IconName, { ios: SFSymbol; android: AndroidSymbol }> =
   'phone-end': { ios: 'phone.down.fill', android: 'call_end' },
   play: { ios: 'play.fill', android: 'play_arrow' },
   settings: { ios: 'gearshape', android: 'settings' },
+  search: { ios: 'magnifyingglass', android: 'search' },
+  shuffle: { ios: 'shuffle', android: 'shuffle' },
   sliders: { ios: 'slider.horizontal.3', android: 'tune' },
   subtitles: { ios: 'captions.bubble', android: 'subtitles' },
   translate: { ios: 'character.book.closed', android: 'translate' },
@@ -100,6 +111,7 @@ const materialNames: Record<IconName, ComponentProps<typeof MaterialIcons>['name
   grid: 'grid-view',
   lock: 'lock',
   logout: 'logout',
+  menu: 'menu',
   medal: 'military-tech',
   microphone: 'mic',
   'microphone-off': 'mic-off',
@@ -107,6 +119,8 @@ const materialNames: Record<IconName, ComponentProps<typeof MaterialIcons>['name
   'phone-end': 'call-end',
   play: 'play-arrow',
   settings: 'settings',
+  search: 'search',
+  shuffle: 'shuffle',
   sliders: 'tune',
   subtitles: 'subtitles',
   translate: 'translate',
@@ -160,17 +174,27 @@ export function AppScreen({
   children,
   contentStyle,
   scrollEnabled = true,
-}: PropsWithChildren<{ contentStyle?: StyleProp<ViewStyle>; scrollEnabled?: boolean }>) {
+  stickyHeader = false,
+  fixedHeader,
+}: PropsWithChildren<{
+  contentStyle?: StyleProp<ViewStyle>;
+  scrollEnabled?: boolean;
+  stickyHeader?: boolean;
+  fixedHeader?: ReactNode;
+}>) {
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
+      {fixedHeader}
       <ScrollView
         bounces={scrollEnabled}
         keyboardShouldPersistTaps="handled"
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={[styles.screenContent, contentStyle]}
+        style={styles.screenScroll}
         overScrollMode={scrollEnabled ? 'auto' : 'never'}
         scrollEnabled={scrollEnabled}
         showsVerticalScrollIndicator={scrollEnabled}
+        stickyHeaderIndices={scrollEnabled && stickyHeader ? [0] : undefined}
       >
         {children}
       </ScrollView>
@@ -180,32 +204,92 @@ export function AppScreen({
 
 export function PageHeader({
   title,
-  subtitle,
-  eyebrow,
   onBack,
   action,
+  leadingAction,
+  fixed = false,
+  style,
 }: {
   title: string;
-  subtitle?: string;
-  eyebrow?: string;
   onBack?: () => void;
   action?: ReactNode;
+  leadingAction?: ReactNode;
+  fixed?: boolean;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={styles.header}>
-      <View style={styles.headerTop}>
-        {onBack ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="返回" onPress={onBack} style={styles.iconButton}>
-            <AppIcon name="arrow-left" size={20} />
-          </Pressable>
-        ) : null}
-        <View style={styles.headerSpacer} />
-        {action}
+    <View style={[styles.header, fixed && styles.fixedPageHeader, style]}>
+        <View style={styles.headerTop}>
+          <View style={styles.headerLeading}>
+            {onBack ? (
+              <Pressable accessibilityRole="button" accessibilityLabel="返回" onPress={onBack} style={styles.iconButton}>
+                <ArrowLeftIcon color={colors.ink} size={25} weight="bold" />
+              </Pressable>
+            ) : leadingAction ?? <View style={styles.headerSlot} />}
+          </View>
+        <View pointerEvents="none" style={styles.headerCenter}>
+          <Text numberOfLines={1} style={styles.pageTitle}>{title}</Text>
+        </View>
+        <View style={styles.headerActions}>
+          {action}
+        </View>
       </View>
-      {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
-      <Text style={styles.pageTitle}>{title}</Text>
-      {subtitle ? <Text style={styles.pageSubtitle}>{subtitle}</Text> : null}
     </View>
+  );
+}
+
+export function MainModuleHeader({
+  title,
+  englishTitle,
+  action,
+  light = false,
+  style,
+}: {
+  title: string;
+  englishTitle: string;
+  action?: ReactNode;
+  light?: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <View style={[styles.mainModuleHeader, style]}>
+      <View style={[styles.mainModuleHeaderCopy, action ? styles.mainModuleHeaderCopyWithAction : null]}>
+        <Text numberOfLines={1} style={[styles.mainModuleEyebrow, light && styles.mainModuleEyebrowLight]}>{englishTitle}</Text>
+        <Text numberOfLines={1} style={[styles.mainModuleTitle, light && styles.mainModuleTitleLight]}>{title}</Text>
+      </View>
+      {action ? <View style={styles.mainModuleHeaderAction}>{action}</View> : null}
+    </View>
+  );
+}
+
+export function HeaderIconButton({
+  icon,
+  accessibilityLabel,
+  onPress,
+  color = colors.ink,
+}: {
+  icon: IconName;
+  accessibilityLabel: string;
+  onPress: () => void;
+  color?: ColorValue;
+}) {
+  const iconColor = color as string;
+  const iconProps = { color: iconColor, size: 21 };
+
+  const glyph = icon === 'book'
+    ? <BookOpenTextIcon {...iconProps} weight="bold" />
+    : icon === 'grid'
+      ? <SquaresFourIcon {...iconProps} weight="bold" />
+      : icon === 'play'
+        ? <PlayIcon {...iconProps} weight="fill" />
+        : icon === 'delete'
+          ? <TrashIcon {...iconProps} weight="bold" />
+          : <AppIcon name={icon} size={20} color={color} />;
+
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} onPress={onPress} style={styles.headerIconButton}>
+      {glyph}
+    </Pressable>
   );
 }
 
@@ -346,27 +430,55 @@ export const uiStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.canvas },
+  screenScroll: { flex: 1 },
   screenContent: { flexGrow: 1, paddingHorizontal: 22, paddingTop: 18, paddingBottom: 132, gap: 22 },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 11 },
   brandMark: { width: 42, height: 42, borderRadius: 12 },
   brandMarkCompact: { width: 38, height: 38, borderRadius: 11 },
   wordmark: { width: 142, height: 24 },
-  header: { gap: 7 },
-  headerTop: { minHeight: 44, flexDirection: 'row', alignItems: 'center' },
-  headerSpacer: { flex: 1 },
+  header: {
+    marginHorizontal: -22,
+    marginTop: -18,
+    paddingHorizontal: 22,
+    paddingBottom: 0,
+    gap: 7,
+    backgroundColor: colors.paper,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+    zIndex: 2,
+  },
+  fixedPageHeader: { marginHorizontal: 0, marginTop: 0 },
+  headerTop: { minHeight: 56, position: 'relative' },
+  headerLeading: { position: 'absolute', left: 0, top: 0, width: 44, height: 56, alignItems: 'flex-start', justifyContent: 'center', zIndex: 1 },
+  headerCenter: { position: 'absolute', left: 0, right: 0, top: 0, height: 56, alignItems: 'center', justifyContent: 'center' },
+  headerActions: { position: 'absolute', right: 0, top: 0, minHeight: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8, zIndex: 1 },
+  headerSlot: { width: 44, height: 56 },
+  headerIconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   iconButton: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 22,
-    backgroundColor: colors.white,
   },
   eyebrow: { color: colors.subtle, fontSize: 11, fontWeight: '500', letterSpacing: 1.7 },
-  pageTitle: { color: colors.ink, fontSize: 31, lineHeight: 38, fontWeight: '600', letterSpacing: -1.2 },
-  pageSubtitle: { color: colors.muted, fontSize: 15, lineHeight: 23, fontWeight: '300' },
+  pageTitle: { color: colors.ink, fontSize: 20, lineHeight: 26, fontWeight: '600', letterSpacing: 0, textAlign: 'center' },
+  mainModuleHeader: {
+    height: 92,
+    position: 'relative',
+    paddingHorizontal: 22,
+    justifyContent: 'center',
+    backgroundColor: colors.paper,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+    zIndex: 2,
+  },
+  mainModuleHeaderCopy: { gap: 4 },
+  mainModuleHeaderCopyWithAction: { paddingRight: 52 },
+  mainModuleHeaderAction: { position: 'absolute', top: 26, right: 22, width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  mainModuleEyebrow: { color: colors.subtle, fontSize: 11, lineHeight: 15, fontWeight: '600', letterSpacing: 1.7 },
+  mainModuleEyebrowLight: { color: 'rgba(244,248,255,0.76)' },
+  mainModuleTitle: { color: colors.ink, fontSize: 31, lineHeight: 38, fontWeight: '600', letterSpacing: 0 },
+  mainModuleTitleLight: { color: colors.white },
   sectionTitle: { flexDirection: 'row', alignItems: 'flex-end', gap: 12 },
   sectionHeading: { marginTop: 5, color: colors.ink, fontSize: 21, fontWeight: '600', letterSpacing: -0.6 },
   flex: { flex: 1 },
