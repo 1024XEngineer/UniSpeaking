@@ -39,7 +39,7 @@ function SceneRecordRow({ record, onPress }: { record: SceneLearningRecord; onPr
       <View style={styles.flex}>
         <View style={styles.recordTitleRow}>
           <Text style={styles.recordTitle}>{record.title}</Text>
-          <SceneCategoryTag category={record.category} />
+          <SceneCategoryTag category={record.category ?? 'other'} />
         </View>
         <Text style={styles.recordMeta}>{record.date} · {record.status}</Text>
       </View>
@@ -57,7 +57,7 @@ export function AssetsScreen({
 }: {
   onOpenRecord: (record: SceneLearningRecord) => void;
   onOpenIelts: () => void;
-  onOpenInterview: () => void;
+  onOpenInterview?: () => void;
   assetService?: LearningAssetServicePort;
 }) {
   const [assetService] = useState<LearningAssetServicePort>(
@@ -99,7 +99,7 @@ export function AssetsScreen({
   return (
     <AppScreen
       contentStyle={styles.mainContent}
-      fixedHeader={<LearningAssetsHeader current="scenes" onIelts={onOpenIelts} onInterview={onOpenInterview} />}
+      fixedHeader={<LearningAssetsHeader current="scenes" onIelts={onOpenIelts} onInterview={onOpenInterview ?? (() => undefined)} />}
     >
       <View style={styles.assetIntro}>
         <Text style={styles.assetHeadingSubtitle}>把场景练习中真正用过的表达，留在这里继续复习。</Text>
@@ -293,10 +293,7 @@ export function SceneAssetDetailLoader({
   }
 
   return (
-    <AppScreen>
-      <View style={styles.detailBar}>
-        <Pressable accessibilityRole="button" accessibilityLabel="返回" onPress={onBack} style={styles.roundButton}><ArrowLeftIcon color={colors.ink} size={20} weight="bold" /></Pressable>
-      </View>
+    <AppScreen fixedHeader={<PageHeader fixed onBack={onBack} title="详情" />}>
       <Card style={styles.recordsCard}>
         <View style={styles.empty}>
           <BookOpenTextIcon color={colors.subtle} size={30} />

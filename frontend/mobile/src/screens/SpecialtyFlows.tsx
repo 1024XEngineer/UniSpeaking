@@ -13,7 +13,7 @@ import {
   ProgressBar,
   uiStyles,
 } from '@/components/ui';
-import { ieltsParts, ieltsTopics } from '@/data/content';
+import { ieltsParts, ieltsTopics, interviewQuestions } from '@/data/content';
 import { useAppModel } from '@/model/AppModel';
 import { useLearningStage } from '@/navigation/learningStage';
 import { colors, examinerAssets, ieltsAssets, interviewAssets, levels } from '@/theme/tokens';
