@@ -9,6 +9,9 @@ public record IeltsTextAssessment(
 		BigDecimal fluencyCoherenceBand,
 		BigDecimal lexicalResourceBand,
 		BigDecimal grammaticalRangeAccuracyBand,
+		String fluencyCoherenceReason,
+		String lexicalResourceReason,
+		String grammaticalRangeAccuracyReason,
 		String summary,
 		List<String> strengths,
 		List<String> improvements,
@@ -17,5 +20,28 @@ public record IeltsTextAssessment(
 	public IeltsTextAssessment {
 		strengths = List.copyOf(strengths);
 		improvements = List.copyOf(improvements);
+	}
+
+	public IeltsTextAssessment(
+			IeltsPart part,
+			BigDecimal fluencyCoherenceBand,
+			BigDecimal lexicalResourceBand,
+			BigDecimal grammaticalRangeAccuracyBand,
+			String summary,
+			List<String> strengths,
+			List<String> improvements,
+			String confidence) {
+		this(
+				part,
+				fluencyCoherenceBand,
+				lexicalResourceBand,
+				grammaticalRangeAccuracyBand,
+				null,
+				null,
+				null,
+				summary,
+				strengths,
+				improvements,
+				confidence);
 	}
 }

@@ -26,6 +26,7 @@ import com.unispeaking.domain.po.scene.IeltsPracticeRecord;
 import com.unispeaking.domain.po.scene.IeltsQuestion;
 import com.unispeaking.domain.po.scene.IeltsTopic;
 import com.unispeaking.domain.po.scene.IeltsUserSettings;
+import com.unispeaking.domain.po.scene.IeltsTopicPracticeSummary;
 import com.unispeaking.domain.vo.scene.IeltsContent;
 import com.unispeaking.domain.vo.scene.IeltsContentQuestion;
 import com.unispeaking.domain.vo.scene.IeltsExaminerVoice;
@@ -148,12 +149,18 @@ public class IELTSSceneServiceImpl implements IELTSSceneService {
 		int toIndex = Math.min(fromIndex + pageSize, topics.size());
 		List<IeltsTopic> pageTopics = topics.subList(fromIndex, toIndex);
 		Map<String, Long> counts = questionCounts(pageTopics, part);
+		Map<String, IeltsTopicPracticeSummary> practiceSummaries =
+				practiceRepository.findTopicPracticeSummaries(
+						UUID.fromString(authService.requireUserId(null)),
+						part,
+						pageTopics.stream().map(IeltsTopic::id).toList());
 		return new IeltsTopicSearchResponse(
 				categories,
 				pageTopics.stream()
 						.map(topic -> toSummary(
 								topic,
-								counts.getOrDefault(topic.id(), 0L)))
+								counts.getOrDefault(topic.id(), 0L),
+								practiceSummaries.get(topic.id())))
 						.toList(),
 				page,
 				pageSize,
@@ -189,6 +196,10 @@ public class IELTSSceneServiceImpl implements IELTSSceneService {
 		IeltsContent content;
 		IeltsPart promptPart;
 		String selectedTopicId;
+		String topicSelectionMethod;
+		String part1TopicId = null;
+		String part2TopicId = null;
+		String part3TopicId = null;
 		String title;
 		if (request.mode() == com.unispeaking.domain.vo.scene.IeltsMode.MOCK_TEST) {
 			IeltsTopic partOneTopic = selectTopic(IeltsPart.PART_1, null);
@@ -200,6 +211,10 @@ public class IELTSSceneServiceImpl implements IELTSSceneService {
 			topic = partOneTopic;
 			promptPart = IeltsPart.PART_1;
 			selectedTopicId = partTwoThreeTopic.id();
+			topicSelectionMethod = "RANDOM";
+			part1TopicId = partOneTopic.id();
+			part2TopicId = partTwoThreeTopic.id();
+			part3TopicId = partTwoThreeTopic.id();
 			title = "IELTS Speaking Mock Test";
 		}
 		else {
@@ -208,6 +223,15 @@ public class IELTSSceneServiceImpl implements IELTSSceneService {
 			content = toContent(request.part(), questions);
 			promptPart = request.part();
 			selectedTopicId = topic.id();
+			topicSelectionMethod = request.topicId() == null
+					|| request.topicId().isBlank()
+						? "RANDOM"
+						: "USER_SELECTED";
+			switch (request.part()) {
+				case PART_1 -> part1TopicId = topic.id();
+				case PART_2 -> part2TopicId = topic.id();
+				case PART_3 -> part3TopicId = topic.id();
+			}
 			title = topic.title();
 		}
 		String ieltsId = SceneIdGenerator.generate(SceneType.IELTS_SCENE);
@@ -217,6 +241,10 @@ public class IELTSSceneServiceImpl implements IELTSSceneService {
 				request.mode(),
 				request.part(),
 				selectedTopicId,
+				topicSelectionMethod,
+				part1TopicId,
+				part2TopicId,
+				part3TopicId,
 				content);
 		practiceRepository.createPractice(practice);
 		String voiceId = settings.preferredVoice();
@@ -367,8 +395,21 @@ public class IELTSSceneServiceImpl implements IELTSSceneService {
 			String ieltsId,
 			String sessionId,
 			int turnNo) {
+		return advanceSessionState(ieltsId, sessionId, turnNo, false);
+	}
+
+	@Override
+	public IeltsDialogueStateResponse advanceSessionState(
+			String ieltsId,
+			String sessionId,
+			int turnNo,
+			boolean timedOut) {
 		requireOwnedSession(ieltsId, sessionId);
-		return questionStateMachine.advance(ieltsId, sessionId, turnNo);
+		return questionStateMachine.advance(
+				ieltsId,
+				sessionId,
+				turnNo,
+				timedOut);
 	}
 
 	@Override
@@ -426,7 +467,10 @@ public class IELTSSceneServiceImpl implements IELTSSceneService {
 				settings.todayCompletedCount(),
 				examinerId,
 				settings.preferredVoice(),
-				null);
+				null,
+				settings.currentStreakDays(),
+				settings.totalCheckInDays(),
+				settings.lastCheckInDate());
 	}
 
 	private void validate(IeltsGenerationRequest request) {
@@ -533,7 +577,8 @@ public class IELTSSceneServiceImpl implements IELTSSceneService {
 
 	private IeltsTopicSummaryResponse toSummary(
 			IeltsTopic topic,
-			long questionCount) {
+			long questionCount,
+			IeltsTopicPracticeSummary practice) {
 		return new IeltsTopicSummaryResponse(
 				topic.id(),
 				topic.title(),
@@ -541,7 +586,15 @@ public class IELTSSceneServiceImpl implements IELTSSceneService {
 				topic.category(),
 				categoryLabel(topic.category()),
 				topic.source(),
-				questionCount);
+				questionCount,
+				practice == null ? 0 : practice.practiceCount(),
+				practice == null ? 0 : practice.mockTestCount(),
+				practice == null ? 0 : practice.randomPartPracticeCount(),
+				practice == null ? 0 : practice.selectedPartPracticeCount(),
+				practice == null ? null : practice.latestPracticeType(),
+				practice == null ? null : practice.latestPerformanceScore(),
+				practice == null ? null : practice.latestPerformanceSummary(),
+				practice == null ? null : practice.lastPracticedAt());
 	}
 
 	private IeltsQuestionResponse toQuestion(IeltsQuestion question) {

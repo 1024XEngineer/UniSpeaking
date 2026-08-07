@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
 
@@ -115,6 +116,19 @@ public class PracticeSessionRepository {
 					.stream()
 					.map(this::toDomain)
 					.toList();
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
+	public Optional<PracticeSessionRecord> findBySessionId(String sessionId) {
+		if (sessionId == null || sessionId.isBlank()) return Optional.empty();
+		try {
+			return Optional.ofNullable(mapper.selectOne(
+					new LambdaQueryWrapper<PracticeSessionEntity>()
+							.eq(PracticeSessionEntity::getSessionId, sessionId)))
+					.map(this::toDomain);
 		}
 		catch (RuntimeException exception) {
 			throw persistenceFailure();

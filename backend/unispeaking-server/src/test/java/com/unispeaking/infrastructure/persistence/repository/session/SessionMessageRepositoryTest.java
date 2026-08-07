@@ -85,6 +85,34 @@ class SessionMessageRepositoryTest {
 	}
 
 	@Test
+	void attachesAndReadsLearnerAudioUrlsInMessageOrder() {
+		SessionMessageMapper mapper = mock(SessionMessageMapper.class);
+		SessionMessageEntity learner = new SessionMessageEntity();
+		learner.setMessageNo(2);
+		learner.setOwner(1);
+		learner.setAudioUrl("/api/ielts/recordings/session_1/turn-1.wav");
+		when(mapper.selectList(any(Wrapper.class)))
+				.thenReturn(List.of(learner));
+		when(mapper.update(
+				any(SessionMessageEntity.class),
+				any(Wrapper.class))).thenReturn(1);
+		SessionMessageRepository repository =
+				new SessionMessageRepository(mapper);
+
+		repository.attachLearnerAudioUrl(
+				"session_1",
+				1,
+				"/api/ielts/recordings/session_1/turn-1.wav");
+
+		assertEquals(
+				List.of("/api/ielts/recordings/session_1/turn-1.wav"),
+				repository.findAudioUrls("session_1"));
+		verify(mapper).update(
+				any(SessionMessageEntity.class),
+				any(Wrapper.class));
+	}
+
+	@Test
 	void translatesWriteReadAndDeleteFailures() {
 		SessionMessageMapper mapper = mock(SessionMessageMapper.class);
 		SessionMessageRepository repository =

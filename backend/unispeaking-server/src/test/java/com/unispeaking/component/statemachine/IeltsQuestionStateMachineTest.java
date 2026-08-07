@@ -56,6 +56,22 @@ class IeltsQuestionStateMachineTest {
 		assertTrue(duplicate.controlInstruction().contains("Two?"));
 	}
 
+	@Test
+	void partThreeTimeLimitAddsOneShortTransitionBeforeNextQuestion() {
+		stateMachine.start("ielts_3", "session_3", IeltsPart.PART_3,
+				questions("One?", "Two?"));
+
+		var next = stateMachine.advance(
+				"ielts_3",
+				"session_3",
+				1,
+				true);
+
+		assertEquals(1, next.answeredQuestions());
+		assertTrue(next.controlInstruction().contains(
+				"Let's move on to the next question. Two?"));
+	}
+
 	private List<IeltsContentQuestion> questions(String... values) {
 		return java.util.Arrays.stream(values)
 				.map(value -> new IeltsContentQuestion(

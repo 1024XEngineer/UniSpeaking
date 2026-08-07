@@ -14,7 +14,7 @@ class IeltsSeedDataTest {
 	void partTwoAndThreeTopicTitlesAreEnglishSummaries() throws IOException {
 		String migration;
 		try (var input = getClass().getResourceAsStream(
-				"/db/migration/V3__ielts_question_bank.sql")) {
+				"/db/migration/V1__baseline.sql")) {
 			if (input == null) {
 				throw new IOException("IELTS seed migration is missing");
 			}

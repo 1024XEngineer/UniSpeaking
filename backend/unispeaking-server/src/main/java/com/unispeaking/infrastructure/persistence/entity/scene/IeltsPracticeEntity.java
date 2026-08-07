@@ -25,6 +25,10 @@ public class IeltsPracticeEntity {
 	private String mode;
 	private String selectedPart;
 	private String selectedTopicId;
+	private String topicSelectionMethod;
+	private String part1TopicId;
+	private String part2TopicId;
+	private String part3TopicId;
 	@TableField(typeHandler = PostgresJsonbStringTypeHandler.class)
 	private String content;
 	private OffsetDateTime createdAt;

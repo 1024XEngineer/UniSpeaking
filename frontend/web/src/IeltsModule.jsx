@@ -9,6 +9,8 @@ import {
   Check,
   MagnifyingGlass,
   NotePencil,
+  Pause,
+  Play,
   Shuffle,
   SquaresFour,
   Subtitles,
@@ -17,6 +19,7 @@ import {
 import { NewtonsCradle } from "./NewtonsCradle.jsx";
 import {
   createIeltsSceneFlow,
+  fetchAuthenticatedMedia,
   generateIeltsScene,
   generateIeltsEvaluation,
   getIeltsEvaluationHistory,
@@ -230,6 +233,11 @@ function TopicBrowser({ part, onBack, onStart }) {
   const filters = [{ code: "ALL", label: "全部" }, ...categories];
   const categoryKey = filters.map((item) => item.code).join("|");
   const pageNumbers = Array.from({ length: totalPages }, (_, index) => index + 1);
+  const practiceTypeLabel = (value) => ({
+    MOCK_TEST: "模考练习",
+    RANDOM_PART_PRACTICE: "随机专项练习",
+    SELECTED_PART_PRACTICE: "指定专项练习",
+  }[value] || "未练习");
 
   useEffect(() => {
     let cancelled = false;
@@ -295,7 +303,7 @@ function TopicBrowser({ part, onBack, onStart }) {
         {loading && <p className="ielts-topic-state">正在读取题库…</p>}
         {!loading && error && <p className="ielts-topic-state is-error">{error}</p>}
         {!loading && !error && topics.length === 0 && <p className="ielts-topic-state">没有找到相关话题</p>}
-        {!loading && !error && topics.map((topic) => <button key={topic.id} onClick={() => onStart(topic, false)}><span><small>{topic.categoryLabel}</small><strong>{topic.title}</strong><em>{topic.questionCount} 道问题</em></span><span><strong>题库已同步</strong><em>{topic.source || "雅思口语题库"}</em></span><span>暂无训练记录</span><CaretRight /></button>)}
+        {!loading && !error && topics.map((topic) => <button key={topic.id} onClick={() => onStart(topic, false)}><span><small>{topic.categoryLabel}</small><strong>{topic.title}</strong><em>{topic.questionCount} 道问题</em></span><span><strong>{practiceTypeLabel(topic.latestPracticeType)}</strong><em>{topic.practiceCount > 0 ? `共 ${topic.practiceCount} 次 · 模考 ${topic.mockTestCount || 0} 次` : "暂无训练记录"}</em></span><span>{topic.practiceCount > 0 ? <><strong>{topic.latestPerformanceScore == null ? "已完成" : `${formatBand(topic.latestPerformanceScore)} 分`}</strong><em>{topic.latestPerformanceSummary || reportDate(topic.lastPracticedAt)}</em></> : "未练习"}</span><CaretRight /></button>)}
       </section>
       {!loading && !error && totalPages > 0 && (
         <nav className="ielts-topic-pagination" aria-label="题库分页">
@@ -455,9 +463,28 @@ function formatTime(seconds) {
   return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`;
 }
 
+function IeltsEvaluationWaiting() {
+  return (
+    <section className="ielts-evaluation-waiting" role="status" aria-live="polite" aria-label="正在生成 IELTS 评分">
+      <div className="ielts-evaluation-loader" aria-hidden="true">
+        <span className="ielts-evaluation-loader__circle" />
+        <span className="ielts-evaluation-loader__circle" />
+        <span className="ielts-evaluation-loader__circle" />
+        <span className="ielts-evaluation-loader__shadow" />
+        <span className="ielts-evaluation-loader__shadow" />
+        <span className="ielts-evaluation-loader__shadow" />
+      </div>
+      <p>IELTS EVALUATION</p>
+      <h1>正在生成评分</h1>
+      <span>正在整理本次回答与四项能力反馈，请稍候。</span>
+    </section>
+  );
+}
+
 function IeltsConversationSession({ part, examiner, training, generated, onExit, onComplete, deferEvaluation = false }) {
   const isPartTwo = part === "p2";
-  const [subtitles, setSubtitles] = useState(true);
+  const isPartThree = part === "p3";
+  const [subtitles, setSubtitles] = useState(isPartTwo);
   const [status, setStatus] = useState("正在连接考官…");
   const [messages, setMessages] = useState([]);
   const [elapsed, setElapsed] = useState(0);
@@ -467,6 +494,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   const [partTwoPhase, setPartTwoPhase] = useState(isPartTwo ? "INTRODUCTION" : null);
   const [partTwoRemaining, setPartTwoRemaining] = useState(isPartTwo ? 60 : null);
   const [partTwoNotes, setPartTwoNotes] = useState("");
+  const [partThreeRemaining, setPartThreeRemaining] = useState(null);
   const remoteAudioRef = useRef(null);
   const clientRef = useRef(null);
   const finishRef = useRef(null);
@@ -474,6 +502,9 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   const partTwoPhaseRef = useRef(isPartTwo ? "INTRODUCTION" : null);
   const partTwoTimerRef = useRef(null);
   const partTwoCompletionTimerRef = useRef(null);
+  const partTwoSilenceTimerRef = useRef(null);
+  const partThreeTimerRef = useRef(null);
+  const partThreeTimerActiveRef = useRef(false);
   const transcriptRef = useRef(null);
   const subtitleQueueRef = useRef([]);
   const subtitleFrameRef = useRef(null);
@@ -502,6 +533,12 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
     partTwoCompletionTimerRef.current = null;
   };
 
+  const clearPartTwoSilenceTimer = () => {
+    if (!partTwoSilenceTimerRef.current) return;
+    window.clearTimeout(partTwoSilenceTimerRef.current);
+    partTwoSilenceTimerRef.current = null;
+  };
+
   const schedulePartTwoFinish = (delayMs) => {
     if (!isPartTwo || partTwoPhaseRef.current !== "FINISHING") return;
     clearPartTwoCompletionTimer();
@@ -524,9 +561,36 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
     }, 1000);
   };
 
+  const clearPartThreeTimer = () => {
+    partThreeTimerActiveRef.current = false;
+    if (partThreeTimerRef.current) {
+      window.clearInterval(partThreeTimerRef.current);
+      partThreeTimerRef.current = null;
+    }
+    setPartThreeRemaining(null);
+  };
+
+  const runPartThreeTimer = (client = clientRef.current) => {
+    clearPartThreeTimer();
+    let remaining = 60;
+    partThreeTimerActiveRef.current = true;
+    setPartThreeRemaining(remaining);
+    partThreeTimerRef.current = window.setInterval(() => {
+      remaining -= 1;
+      setPartThreeRemaining(Math.max(0, remaining));
+      if (remaining > 0) return;
+      clearPartThreeTimer();
+      setStatus("单题回答已到 60 秒，考官正在切换下一题");
+      void client?.forceIeltsPart3TurnTimeout().catch((timeoutError) => {
+        setError(timeoutError?.message || "Part 3 切换下一题失败");
+      });
+    }, 1000);
+  };
+
   const beginPartTwoAnswer = (client = clientRef.current) => {
     if (!client || partTwoPhaseRef.current !== "PREPARATION") return;
     clearPartTwoTimer();
+    clearPartTwoSilenceTimer();
     updatePartTwoPhase("STARTING");
     setStatus("准备结束，考官即将提示开始");
     void client.transitionIeltsPart2("PREPARATION_COMPLETE")
@@ -539,6 +603,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   const finishPartTwoAtLimit = (client = clientRef.current) => {
     if (!client || partTwoPhaseRef.current !== "LONG_TURN") return;
     clearPartTwoTimer();
+    clearPartTwoSilenceTimer();
     updatePartTwoPhase("FINISHING");
     setStatus("作答时间已到，正在结束 Part 2");
     void client.transitionIeltsPart2("LONG_TURN_TIME_LIMIT")
@@ -547,7 +612,33 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
       });
   };
 
+  const finishPartTwoAfterSilence = (client = clientRef.current) => {
+    if (!client || partTwoPhaseRef.current !== "LONG_TURN") return;
+    clearPartTwoTimer();
+    clearPartTwoSilenceTimer();
+    updatePartTwoPhase("FINISHING");
+    setStatus("检测到较长停顿，正在结束 Part 2");
+    void client.transitionIeltsPart2("ANSWER_COMPLETE")
+      .catch((transitionError) => {
+        setError(transitionError?.message || "无法结束 Part 2");
+        updatePartTwoPhase("LONG_TURN");
+      });
+  };
+
+  const schedulePartTwoSilenceFinish = (client = clientRef.current) => {
+    if (!client || partTwoPhaseRef.current !== "LONG_TURN") return;
+    clearPartTwoSilenceTimer();
+    // Provider VAD emits speech_stopped after roughly three seconds of
+    // silence. Waiting three more seconds yields an effective six-second
+    // continuous-silence threshold while still allowing natural pauses.
+    partTwoSilenceTimerRef.current = window.setTimeout(() => {
+      partTwoSilenceTimerRef.current = null;
+      finishPartTwoAfterSilence(client);
+    }, 3_000);
+  };
+
   const updateLiveMessage = ({ id, owner, delta = "", text = "", final = false }) => {
+    if (owner !== 0) return;
     const content = String(text || delta || "");
     if (!content) return;
     setMessages((current) => {
@@ -557,17 +648,17 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
         ? current.findLastIndex((message) => message.owner === owner && !message.final)
         : -1;
       const index = exactIndex >= 0 ? exactIndex : fallbackIndex;
-      if (index < 0) {
-        return [...current, { id: messageId, owner, text: content, final }].slice(-8);
-      }
-      const next = [...current];
-      next[index] = {
-        ...next[index],
+      if (index < 0) return [{ id: messageId, owner, text: content, final }];
+      const next = current.filter((message) => message.owner === 0).slice(-1);
+      const nextIndex = next.findIndex((message) => message.id === current[index].id);
+      if (nextIndex < 0) return [{ id: messageId, owner, text: content, final }];
+      next[nextIndex] = {
+        ...next[nextIndex],
         id: messageId,
-        text: text || `${next[index].text}${delta}`,
+        text: text || `${next[nextIndex].text}${delta}`,
         final,
       };
-      return next.slice(-8);
+      return next;
     });
   };
 
@@ -612,18 +703,31 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
           setStatus(isPartTwo ? "考官正在说明 Part 2 准备要求" : "考试进行中");
           if (isPartTwo) client.setMuted(true);
         }
-        else if (event.type === "input_audio_buffer.speech_started") setStatus("正在聆听你的回答");
-        else if (event.type === "response.created") setStatus(`${examiner.name} 正在提问`);
-        else if (event.type === "local.ielts_input_ready") setStatus("请开始回答");
+        else if (event.type === "input_audio_buffer.speech_started") {
+          clearPartTwoSilenceTimer();
+          setStatus("正在聆听你的回答");
+        }
+        else if (event.type === "input_audio_buffer.speech_stopped") {
+          if (isPartTwo) schedulePartTwoSilenceFinish(client);
+        }
+        else if (event.type === "response.created") {
+          setMessages([]);
+          setStatus(`${examiner.name} 正在提问`);
+        }
+        else if (event.type === "local.ielts_input_ready") {
+          setStatus("请开始回答");
+          if (isPartTwo && partTwoPhaseRef.current === "STARTING") {
+            updatePartTwoPhase("LONG_TURN");
+            runPartTwoTimer(120, () => finishPartTwoAtLimit(client));
+          } else if (isPartThree && !partThreeTimerActiveRef.current) {
+            runPartThreeTimer(client);
+          }
+        }
         else if (event.type === "response.done") {
           if (isPartTwo && partTwoPhaseRef.current === "INTRODUCTION") {
             updatePartTwoPhase("PREPARATION");
             setStatus("准备时间 · 60 秒");
             runPartTwoTimer(60, () => beginPartTwoAnswer(client));
-          } else if (isPartTwo && partTwoPhaseRef.current === "STARTING") {
-            updatePartTwoPhase("LONG_TURN");
-            setStatus("请开始回答");
-            runPartTwoTimer(120, () => finishPartTwoAtLimit(client));
           } else if (!isPartTwo) {
             setStatus("请开始回答");
           }
@@ -633,7 +737,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
           const suppressPartTwoClosingFragment = isPartTwo
             && partTwoPhaseRef.current === "FINISHING"
             && event.owner === 0;
-          if (!suppressPartTwoClosingFragment) {
+          if (!suppressPartTwoClosingFragment && event.owner === 0) {
             updateLiveMessage({
               id: event.itemId,
               owner: event.owner,
@@ -646,17 +750,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
             if (isPartTwo) schedulePartTwoFinish(1_800);
             else window.setTimeout(() => { void finishRef.current?.(); }, 1_800);
           }
-        } else if (
-          event.type === "conversation.item.input_audio_transcription.delta"
-          || event.type === "conversation.item.input_audio_transcription.text"
-        ) {
-          const preview = `${event.text || ""}${event.stash || ""}`;
-          queueLiveMessage({
-            id: event.item_id || event.item?.id || "ielts-user-live",
-            owner: 1,
-            ...(preview ? { text: preview } : { delta: event.delta || "" }),
-          });
-        } else if (event.type === "response.audio_transcript.delta" || event.type === "response.text.delta") {
+        } else if (event.type === "response.audio_transcript.delta") {
           if (!(isPartTwo && partTwoPhaseRef.current === "FINISHING")) {
             queueLiveMessage({
               id: event.item_id || event.response_id || "ielts-assistant-live",
@@ -665,14 +759,11 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
             });
           }
         } else if (event.type === "conversation.item.input_audio_transcription.completed") {
-          if (isPartTwo && partTwoPhaseRef.current === "LONG_TURN") {
-            clearPartTwoTimer();
-            updatePartTwoPhase("FINISHING");
-            setStatus("回答已完成，正在结束 Part 2");
-          }
+          if (isPartThree) clearPartThreeTimer();
         } else if (event.type === "local.ielts_part2_state") {
           if (event.state?.completed) {
             clearPartTwoTimer();
+            clearPartTwoSilenceTimer();
             updatePartTwoPhase("FINISHING");
             setStatus("Part 2 已完成，考官正在结束本部分");
             updateLiveMessage({
@@ -690,7 +781,10 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
           schedulePartTwoFinish(1_400);
         } else if (event.type === "local.ielts_state") {
           const state = event.state;
-          if (state?.completed) client.setMuted(true);
+          if (state?.completed) {
+            clearPartThreeTimer();
+            client.setMuted(true);
+          }
           setStatus(state?.completed
             ? `${partMeta[part].label} 已完成，考官正在结束本部分`
             : `已完成 ${state?.answeredQuestions || 0} / ${state?.totalQuestions || 0} 题`);
@@ -721,6 +815,8 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
       cancelled = true;
       clearPartTwoTimer();
       clearPartTwoCompletionTimer();
+      clearPartTwoSilenceTimer();
+      clearPartThreeTimer();
       if (subtitleFrameRef.current != null) {
         window.cancelAnimationFrame(subtitleFrameRef.current);
         subtitleFrameRef.current = null;
@@ -732,9 +828,10 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   }, [generated?.ieltsId, generated?.voiceId, examiner.id]);
 
   useEffect(() => {
+    if (ending) return undefined;
     const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [ending]);
 
   const finish = async () => {
     if (ending) return;
@@ -742,6 +839,8 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
     setError("");
     clearPartTwoTimer();
     clearPartTwoCompletionTimer();
+    clearPartTwoSilenceTimer();
+    clearPartThreeTimer();
     try {
       setStatus("正在结束本次练习…");
       const client = clientRef.current;
@@ -797,9 +896,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   };
 
   const latestExaminerMessage = [...messages].reverse().find((message) => message.owner === 0)?.text;
-  const visibleMessages = isPartTwo
-    ? messages.filter((message) => message.owner === 0).slice(-1)
-    : messages;
+  const visibleMessages = messages.filter((message) => message.owner === 0).slice(-1);
   const partTwoNotesEditable = isPartTwo
     && ["INTRODUCTION", "PREPARATION"].includes(partTwoPhase);
   const partTwoPhaseLabel = partTwoPhase === "LONG_TURN"
@@ -815,8 +912,8 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
     <main className={cx("conversation", "call", "ielts-call", subtitles && "call--subtitles", isPartTwo && "ielts-call--part-two")}>
       <audio ref={remoteAudioRef} autoPlay />
       <div className="conversation__top ielts-call-top">
-        <div><strong>{`${partMeta[part].label} · ${partMeta[part].title}`}</strong><span>{isPartTwo ? partTwoPhaseLabel : "考官会根据你的回答自动推进考试"}</span></div>
-        <button className="round-control ielts-call-exit" onClick={() => setExitOpen(true)} aria-label="退出训练"><X /></button>
+        <div><strong>{`${partMeta[part].label} · ${partMeta[part].title}`}</strong><span>{ending ? "考试计时已停止，正在生成评分" : isPartTwo ? partTwoPhaseLabel : "考官会根据你的回答自动推进考试"}</span></div>
+        <button className="round-control ielts-call-exit" disabled={ending} onClick={() => setExitOpen(true)} aria-label="退出训练"><X /></button>
       </div>
       <section className="call__stage">
         <div className={cx("call-presence", subtitles && "call-presence--compact")}>
@@ -825,12 +922,12 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
             <span className={cx("voice-wave", subtitles && "voice-wave--compact", "is-fallback")} aria-hidden="true">
               {[.28, .52, .78, 1, .72, .48, .3].map((level, index) => <i key={index} className="voice-wave__bar" style={{ "--rest-level": level }} />)}
             </span>
-            <time className="call-presence__time">{isPartTwo ? formatTime(partTwoRemaining) : formatTime(elapsed)}</time>
+            <time className="call-presence__time">{isPartTwo ? formatTime(partTwoRemaining) : isPartThree && partThreeRemaining != null ? formatTime(partThreeRemaining) : formatTime(elapsed)}</time>
             {!subtitles && <span>{status}</span>}
           </div>
         </div>
         {subtitles && <div ref={transcriptRef} className="transcript ielts-call-transcript" aria-label="实时会话字幕">
-          {visibleMessages.length ? visibleMessages.map((message) => <article key={message.id} className="transcript__line"><small>{message.owner === 0 ? examiner.name : "You"}</small><p>{message.text}</p></article>) : <article className="transcript__line"><small>{examiner.name}</small><p>{latestExaminerMessage || status}</p></article>}
+          {visibleMessages.length ? visibleMessages.map((message) => <article key={message.id} className="transcript__line"><small>{examiner.name}</small><p>{message.text}</p></article>) : <article className="transcript__line"><small>{examiner.name}</small><p>{latestExaminerMessage || status}</p></article>}
         </div>}
         {isPartTwo && <section className="ielts-part-two-compact-material" aria-label="Part 2 题卡与笔记">
           <article className="ielts-part-two-compact-cue">
@@ -853,7 +950,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
       <footer className={cx("call-controls", "ielts-call-controls", isPartTwo && "ielts-call-controls--part-two")}>
         <span className="ielts-recording-label">{partTwoPhase === "LONG_TURN" && <i className="recording-dot" />}{error || status}</span>
         <div className="ielts-call-control-buttons">
-          <button className={cx("round-control", subtitles && "is-on")} onClick={() => setSubtitles(!subtitles)} aria-label={subtitles ? "关闭字幕" : "开启字幕"}><Subtitles /></button>
+          {!isPartTwo && <button className={cx("round-control", subtitles && "is-on")} onClick={() => setSubtitles(!subtitles)} aria-label={subtitles ? "关闭字幕" : "开启字幕"}><Subtitles /></button>}
           {isPartTwo
             ? partTwoPhase === "PREPARATION" && <button className="round-control round-control--end" disabled={ending} onClick={() => beginPartTwoAnswer()} aria-label="结束准备并开始作答"><ArrowRight weight="bold" /></button>
             : <button className="round-control round-control--end" disabled={ending} onClick={() => void finish()} aria-label="结束本次训练"><X weight="bold" /></button>}
@@ -867,6 +964,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
           : "无需手动切题；考官会按照 IELTS 节奏判断回答结束并继续。"}</p>
       </footer>
       {exitDialog}
+      {ending && !deferEvaluation && <IeltsEvaluationWaiting />}
     </main>
   );
 }
@@ -900,8 +998,13 @@ function IeltsMockSession({ onComplete, ...props }) {
 
 function AnalysisPending({ evaluation, onHome, onReport }) {
   const available = Boolean(evaluation);
-  const partEvaluations = evaluation?.partEvaluations || [];
-  const expressions = evaluation?.recommendedExpressions || [];
+  const scores = evaluation ? [
+    ["流利度与连贯性", evaluation.fluencyCoherenceScore],
+    ["词汇资源", evaluation.lexicalResourceScore],
+    ["语法多样性与准确性", evaluation.grammaticalRangeAccuracyScore],
+    ["发音", evaluation.pronunciationScore],
+  ] : [];
+  const isFinal = evaluation?.assessmentType === "FINAL";
   return (
     <main className="ielts-page ielts-score-result-page">
       <section className="ielts-score-result-background"><span>IELTS SPEAKING</span><h1>本次练习已结束</h1><p>评分完成后会自动保存到学习资产。</p></section>
@@ -910,10 +1013,8 @@ function AnalysisPending({ evaluation, onHome, onReport }) {
           <p className="eyebrow">{available ? "EVALUATION COMPLETE" : "INSUFFICIENT SPEECH"}</p>
           <h2>{available ? "本次评分已完成" : "有效回答不足，暂时无法评分"}</h2>
           {available ? <>
-            <div className="ielts-score-dialog__overall"><span>{evaluation.assessmentType === "FINAL" ? "完整模考预估" : "本 Part 诊断"}</span><strong>{formatBand(evaluation.overallBandScore)}</strong><small>/ 9</small></div>
-            {partEvaluations.length > 0 && <div className="ielts-score-dialog__parts">{partEvaluations.map((item) => <article key={item.part}><span>{String(item.part).replace("PART_", "Part ")}</span><strong>{formatBand(item.overallBandScore)}</strong></article>)}</div>}
-            <p>{evaluation.summary}</p>
-            {expressions.length > 0 && <div className="ielts-score-dialog__expressions"><span>推荐表达</span><ul>{expressions.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul></div>}
+            {isFinal && <div className="ielts-score-dialog__overall"><span>完整模考预估</span><strong>{formatBand(evaluation.overallBandScore)}</strong><small>/ 9</small></div>}
+            <div className="ielts-score-dialog__dimensions">{scores.map(([label, score]) => <article key={label}><span>{label}</span><strong>{formatBand(score)}<small>/9</small></strong></article>)}</div>
           </> : <p>练习已经正常保存，但需要至少完成一轮有效英文回答才能生成评分报告。</p>}
           <div><button onClick={onHome}>返回训练中心</button>{available && <button onClick={onReport}>查看详细报告</button>}</div>
         </section>
@@ -936,11 +1037,12 @@ function PracticeReport({ part, evaluation, onHome, onRetry, onAssets }) {
       </main>
     );
   }
+  const savedReason = (reason) => reason?.trim() || "该历史记录生成时尚未保存本项的具体评分理由。";
   const scoreRows = [
-    { label: "流利度与连贯性", score: evaluation.fluencyCoherenceScore, note: "结合完整回答的连贯性与已记录的语音流利度证据评估。" },
-    { label: "词汇资源", score: evaluation.lexicalResourceScore, note: "根据本次回答的词汇范围、准确性、搭配与改述能力评估。" },
-    { label: "语法多样性与准确性", score: evaluation.grammaticalRangeAccuracyScore, note: "根据本次回答的句式范围、语法控制和错误影响评估。" },
-    { label: "发音", score: evaluation.pronunciationScore, note: "来自本次原始语音的发音评分，不根据 ASR 文本推测。" },
+    { label: "流利度与连贯性", score: evaluation.fluencyCoherenceScore, note: savedReason(evaluation.fluencyCoherenceReason) },
+    { label: "词汇资源", score: evaluation.lexicalResourceScore, note: savedReason(evaluation.lexicalResourceReason) },
+    { label: "语法多样性与准确性", score: evaluation.grammaticalRangeAccuracyScore, note: savedReason(evaluation.grammaticalRangeAccuracyReason) },
+    { label: "发音", score: evaluation.pronunciationScore, note: savedReason(evaluation.pronunciationReason) },
   ];
   const strengths = evaluation.strengths || [];
   const improvements = evaluation.improvements || [];
@@ -949,11 +1051,11 @@ function PracticeReport({ part, evaluation, onHome, onRetry, onAssets }) {
   return (
     <main className={cx("ielts-page", "ielts-report", !isMock && "ielts-report--single")}>
       <IeltsHeader onBack={onHome} title={reportTitle} subtitle={reportSubtitle} action={<button className="ielts-report-assets" onClick={onAssets}><BookOpenText />查看学习资产</button>} />
-      <section className="ielts-mock-score"><span>{isMock ? "本次预估" : "本次诊断"}</span><strong>{formatBand(evaluation.overallBandScore)}</strong><p>{evaluation.assessmentType === "FINAL" ? "完整模考综合评分" : "单 Part 阶段性诊断分"}</p></section>
-      <section className="ielts-report-summary"><div><span>本次结论</span><h2>{formatBand(evaluation.overallBandScore)} 分</h2><p>{evaluation.summary}</p>{strengths.length > 0 && <><span>表现优势</span><ul>{strengths.map((item) => <li key={item}>{item}</li>)}</ul></>}</div><div><span>优先改进</span>{improvements.length > 0 ? <ol>{improvements.map((item) => <li key={item}>{item}</li>)}</ol> : <p>本次评分没有返回额外改进项。</p>}</div></section>
-      {partEvaluations.length > 0 && <section className="ielts-part-evaluation-list"><h2>各 Part 评分</h2><div>{partEvaluations.map((item) => <article key={item.part}><span>{String(item.part).replace("PART_", "Part ")}</span><strong>{formatBand(item.overallBandScore)}</strong><p>{item.summary}</p></article>)}</div></section>}
-      {expressions.length > 0 && <section className="ielts-recommended-expression-list"><h2>本次推荐表达</h2><ol>{expressions.map((item) => <li key={item}>{item}</li>)}</ol></section>}
+      {isMock && <section className="ielts-mock-score"><span>本次预估</span><strong>{formatBand(evaluation.overallBandScore)}</strong><p>完整模考综合评分</p></section>}
+      {isMock && <section className="ielts-report-summary"><div><span>本次结论</span><p>{evaluation.summary}</p>{strengths.length > 0 && <><span>表现优势</span><ul>{strengths.map((item) => <li key={item}>{item}</li>)}</ul></>}</div><div><span>优先改进</span>{improvements.length > 0 ? <ol>{improvements.map((item) => <li key={item}>{item}</li>)}</ol> : <p>本次评分没有返回额外改进项。</p>}</div></section>}
       <section className="ielts-score-list"><h2>四项能力反馈</h2>{scoreRows.map((row) => <article key={row.label}><strong>{row.label}</strong><span className="ielts-score-value">{formatBand(row.score)}<small>/9</small></span><p>{row.note}</p></article>)}</section>
+      {isMock && partEvaluations.length > 0 && <section className="ielts-part-evaluation-list"><h2>各 Part 四项评分</h2><div>{partEvaluations.map((item) => <article key={item.part}><span>{String(item.part).replace("PART_", "Part ")}</span><div className="ielts-part-evaluation-dimensions"><p><small>流利连贯</small><strong>{formatBand(item.fluencyCoherenceScore)}</strong></p><p><small>词汇</small><strong>{formatBand(item.lexicalResourceScore)}</strong></p><p><small>语法</small><strong>{formatBand(item.grammaticalRangeAccuracyScore)}</strong></p><p><small>发音</small><strong>{formatBand(item.pronunciationScore)}</strong></p></div></article>)}</div></section>}
+      {expressions.length > 0 && <section className="ielts-recommended-expression-list"><h2>本次推荐表达</h2><ol>{expressions.map((item) => <li key={item}>{item}</li>)}</ol></section>}
     </main>
   );
 }
@@ -1125,11 +1227,26 @@ export function IeltsTrainingCenter({ route, onNavigate, onExit, onAssets }) {
 }
 
 function reportType(item) {
-  return item.mode === "MOCK_TEST" ? "模考" : (item.part || "专项").replace("PART_", "Part ");
+  return item.mode === "MOCK_TEST" ? "完整模考" : "专项训练";
 }
 
-function reportTitle(item) {
-  return item.mode === "MOCK_TEST" ? "IELTS Speaking 完整模考" : `${reportType(item)} 专项训练`;
+function reportPartLabel(part) {
+  return part ? String(part).replace("PART_", "Part ") : "Part 未知";
+}
+
+function reportTopicTitle(item, part) {
+  if (item?.topicTitles?.[part]) return item.topicTitles[part];
+  if (part === "PART_1") return "Everyday Topics";
+  if (part === "PART_2") return "Long Turn Topic";
+  if (part === "PART_3") return "Discussion Topic";
+  return "IELTS Speaking";
+}
+
+function ReportTitle({ item, compact = false }) {
+  const parts = item.mode === "MOCK_TEST"
+    ? ["PART_1", "PART_2", "PART_3"]
+    : [item.part];
+  return <span className={cx("ielts-record-title", compact && "is-compact")}>{parts.map((part) => <span className="ielts-record-title__line" key={part}><span className="ielts-record-title__part">{reportPartLabel(part)} ·</span> <span className="ielts-record-title__topic">{reportTopicTitle(item, part)}</span></span>)}</span>;
 }
 
 function reportDate(value) {
@@ -1143,18 +1260,164 @@ function reportDuration(item) {
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function reportCapabilityScore(item) {
+  const values = [
+    item?.fluencyCoherenceScore,
+    item?.lexicalResourceScore,
+    item?.grammaticalRangeAccuracyScore,
+    item?.pronunciationScore,
+  ].filter((value) => value != null && value !== "").map(Number).filter(Number.isFinite);
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function reportScore(item) {
+  const overall = item?.overallBandScore == null || item.overallBandScore === ""
+    ? Number.NaN
+    : Number(item.overallBandScore);
+  return Number.isFinite(overall) ? overall : reportCapabilityScore(item);
+}
+
+function reportPerformanceLabel(item) {
+  const score = reportScore(item);
+  if (!Number.isFinite(score)) return "暂无评分";
+  if (score >= 7) return "表现优秀";
+  if (score >= 6) return "表现稳定";
+  if (score >= 5) return "继续提升";
+  return "重点加强";
+}
+
+function recentSevenDayActivity(reports) {
+  const formatter = new Intl.DateTimeFormat("zh-CN", { weekday: "short" });
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (6 - index));
+    const next = new Date(date);
+    next.setDate(next.getDate() + 1);
+    const minutes = reports.reduce((total, item) => {
+      const endedAt = new Date(item.endedAt);
+      if (endedAt < date || endedAt >= next) return total;
+      const duration = (new Date(item.endedAt) - new Date(item.startedAt)) / 60_000;
+      return total + (Number.isFinite(duration) ? Math.max(0, duration) : 0);
+    }, 0);
+    return { label: formatter.format(date), minutes: Math.round(minutes) };
+  });
+}
+
 function AssetsOverview({ settings, reports, onTab }) {
   const latestMock = reports.find((item) => item.mode === "MOCK_TEST");
   const target = Number(settings?.targetScore);
   const latest = Number(latestMock?.overallBandScore);
   const gap = Number.isFinite(target) && Number.isFinite(latest) ? Math.max(0, target - latest).toFixed(1) : null;
-  return <section className="ielts-overview-dashboard"><section className="ielts-asset-hero"><div><span>最近一次完整模考</span><h2>{latestMock ? `预估 ${formatBand(latestMock.overallBandScore)}` : "暂无完整模考"}</h2><p>AI 训练评估，并非官方考试成绩</p></div><div><span>目标</span><strong>{formatBand(settings?.targetScore)}</strong><small>{gap == null ? "完成模考后显示差距" : gap === "0.0" ? "已达到当前目标" : `还差约 ${gap} 分`}</small></div><TrainingCta className="ielts-asset-gradient-action" onClick={() => onTab("trends")}>查看能力趋势</TrainingCta></section><section className="ielts-weekly-activity"><header><div><span>今日训练</span><h2>{Number(settings?.todayCompletedCount || 0)} <small>/ 5 次</small></h2><p>次数来自 user_ielts 的今日完成记录</p></div><div className="ielts-weekly-stats"><p><strong>{reports.length}</strong><small>已生成报告</small></p><p><strong>{reports.filter((item) => item.mode === "MOCK_TEST").length}</strong><small>完整模考</small></p><p><strong>{reports.filter((item) => item.mode !== "MOCK_TEST").length}</strong><small>专项报告</small></p></div></header></section><section className="ielts-asset-recent"><header><h2>最近训练</h2></header>{reports.length ? reports.slice(0, 3).map((item) => <article key={item.sessionId}><span>{reportType(item)}</span><div><strong>{reportTitle(item)}</strong><small>{reportDate(item.endedAt)} · {reportDuration(item)}</small></div><p>{formatBand(item.overallBandScore)} 分</p></article>) : <div className="ielts-history-empty"><BookOpenText /><h2>暂无评分记录</h2><p>完成一次有效训练后，后端报告会显示在这里。</p></div>}</section></section>;
+  const activity = recentSevenDayActivity(reports);
+  const maxMinutes = Math.max(1, ...activity.map((item) => item.minutes));
+  const activeDays = activity.filter((item) => item.minutes > 0).length;
+  const totalMinutes = activity.reduce((sum, item) => sum + item.minutes, 0);
+  const partCoverage = new Set(reports.flatMap((item) => item.mode === "MOCK_TEST" ? ["PART_1", "PART_2", "PART_3"] : [item.part]).filter(Boolean)).size;
+  return <section className="ielts-overview-dashboard"><section className="ielts-asset-hero"><div><span>最近一次完整模考</span><h2>{latestMock ? `预估 ${formatBand(latestMock.overallBandScore)}` : "暂无完整模考"}</h2><p>AI 训练评估，并非官方考试成绩</p></div><div><span>目标</span><strong>{formatBand(settings?.targetScore)}</strong><small>{gap == null ? "完成模考后显示差距" : gap === "0.0" ? "已达到当前目标" : `还差约 ${gap} 分`}</small></div><TrainingCta className="ielts-asset-gradient-action" onClick={() => onTab("trends")}>查看能力趋势</TrainingCta></section><section className="ielts-weekly-activity"><header><div><span>近七天训练时长</span><h2>{totalMinutes} <small>分钟</small></h2><p>今日已完成 {Number(settings?.todayCompletedCount || 0)} / 5 次 · 连续打卡 {Number(settings?.currentStreakDays || 0)} 天</p></div><div className="ielts-weekly-stats"><p><strong>{activeDays}</strong><small>活跃天数</small></p><p><strong>{activeDays ? Math.round(totalMinutes / activeDays) : 0}</strong><small>日均分钟</small></p><p><strong>{partCoverage}</strong><small>专项覆盖</small></p></div></header><div className="ielts-weekly-bars">{activity.map((item) => <span key={item.label}><i className={item.minutes ? "" : "is-empty"} style={{ height: `${Math.max(item.minutes ? 10 : 4, (item.minutes / maxMinutes) * 100)}%` }} /><strong>{item.minutes}</strong><small>{item.label}</small></span>)}</div></section><section className="ielts-asset-recent"><header><h2>最近训练</h2></header>{reports.length ? reports.slice(0, 3).map((item) => <article key={item.sessionId}><span>{reportType(item)}</span><div><strong><ReportTitle item={item} compact /></strong><small>{reportDate(item.endedAt)} · {reportDuration(item)}</small></div><p>{reportPerformanceLabel(item)}</p></article>) : <div className="ielts-history-empty"><BookOpenText /><h2>暂无评分记录</h2><p>完成一次有效训练后，后端报告会显示在这里。</p></div>}</section></section>;
 }
 
 function AssetsHistory({ items }) {
   const [selectedId, setSelectedId] = useState(items[0]?.sessionId || null);
+  const [recordingPlaying, setRecordingPlaying] = useState(false);
+  const recordingRef = useRef(null);
+  const recordingObjectUrlRef = useRef(null);
+  const recordingGenerationRef = useRef(0);
   const selected = items.find((item) => item.sessionId === selectedId) || items[0] || null;
-  return <section className="ielts-history-layout"><aside><header><h2>训练记录</h2><span>{items.length} 条</span></header>{items.map((item) => <button key={item.sessionId} className={selected?.sessionId === item.sessionId ? "is-active" : ""} onClick={() => setSelectedId(item.sessionId)}><small>{reportDate(item.endedAt)} · {reportType(item)}</small><strong>{reportTitle(item)}</strong><span>{reportDuration(item)}</span></button>)}</aside>{selected ? <article><header><div><span>{reportType(selected)}</span><h2>{reportTitle(selected)}</h2><p>{reportDate(selected.endedAt)} · 用时 {reportDuration(selected)}</p></div></header><section className="ielts-history-summary"><span>后端总体报告</span><h3>{formatBand(selected.overallBandScore)} 分</h3><p>{selected.summary}</p>{selected.strengths?.length > 0 && <><span>表现优势</span><ul>{selected.strengths.map((item) => <li key={item}>{item}</li>)}</ul></>}</section><section className="ielts-history-scores"><span>数据库已保存评分</span><div><p><small>总体 Band</small><strong>{formatBand(selected.overallBandScore)}<em>/9</em></strong></p><p><small>流利度与连贯性</small><strong>{formatBand(selected.fluencyCoherenceScore)}<em>/9</em></strong></p></div></section><section className="ielts-history-summary"><span>优先改进</span>{selected.improvements?.length > 0 ? <ol>{selected.improvements.map((item) => <li key={item}>{item}</li>)}</ol> : <p>本次报告没有保存额外改进项。</p>}</section></article> : <div className="ielts-history-empty"><BookOpenText /><h2>暂无训练记录</h2><p>完成一次专项训练后，后端报告会保存在这里。</p></div>}</section>;
+  useEffect(() => {
+    setRecordingPlaying(false);
+    return () => {
+      recordingGenerationRef.current += 1;
+      recordingRef.current?.pause();
+      recordingRef.current = null;
+      if (recordingObjectUrlRef.current) {
+        URL.revokeObjectURL(recordingObjectUrlRef.current);
+        recordingObjectUrlRef.current = null;
+      }
+    };
+  }, [selectedId]);
+  const toggleRecording = () => {
+    if (!selected?.recordingUrls?.length) return;
+    if (recordingRef.current && recordingPlaying) {
+      recordingGenerationRef.current += 1;
+      recordingRef.current.pause();
+      setRecordingPlaying(false);
+      return;
+    }
+    const generation = recordingGenerationRef.current + 1;
+    recordingGenerationRef.current = generation;
+    let clipIndex = 0;
+    const releaseObjectUrl = () => {
+      if (!recordingObjectUrlRef.current) return;
+      URL.revokeObjectURL(recordingObjectUrlRef.current);
+      recordingObjectUrlRef.current = null;
+    };
+    const playClip = async () => {
+      try {
+        const blob = await fetchAuthenticatedMedia(selected.recordingUrls[clipIndex]);
+        if (recordingGenerationRef.current !== generation) return;
+        releaseObjectUrl();
+        const objectUrl = URL.createObjectURL(blob);
+        recordingObjectUrlRef.current = objectUrl;
+        const audio = new Audio(objectUrl);
+        recordingRef.current = audio;
+        audio.onended = () => {
+          if (recordingGenerationRef.current !== generation) return;
+          releaseObjectUrl();
+          clipIndex += 1;
+          if (clipIndex < selected.recordingUrls.length) void playClip();
+          else { recordingRef.current = null; setRecordingPlaying(false); }
+        };
+        audio.onerror = () => {
+          releaseObjectUrl();
+          recordingRef.current = null;
+          setRecordingPlaying(false);
+        };
+        await audio.play();
+        setRecordingPlaying(true);
+      } catch {
+        releaseObjectUrl();
+        recordingRef.current = null;
+        setRecordingPlaying(false);
+      }
+    };
+    void playClip();
+  };
+  return (
+    <section className="ielts-history-layout">
+      <aside>
+        <header><h2>训练记录</h2><span>{items.length} 条</span></header>
+        {items.map((item) => <button key={item.sessionId} className={selected?.sessionId === item.sessionId ? "is-active" : ""} onClick={() => setSelectedId(item.sessionId)}><span className="ielts-history-record-meta"><time>{reportDate(item.endedAt)}</time><em>{reportType(item)}</em></span><strong><ReportTitle item={item} compact /></strong><span className="ielts-history-record-duration">{reportDuration(item)}</span></button>)}
+      </aside>
+      {selected ? <article>
+        <header>
+          <div><span className="ielts-history-report-kind">{reportType(selected)} · {selected.topicSelectionMethod === "RANDOM" ? "随机练习" : "选题练习"}</span><h2><ReportTitle item={selected} /></h2><p>{reportDate(selected.endedAt)} · 用时 {reportDuration(selected)}</p></div>
+          <button className="ielts-recording-toggle" type="button" disabled={!selected.recordingUrls?.length} onClick={toggleRecording} title={selected.recordingUrls?.length ? "播放本次训练录音" : "本次训练暂无可播放录音"}>{recordingPlaying ? <Pause /> : <Play />}<span>{selected.recordingUrls?.length ? recordingPlaying ? "暂停录音" : "播放原始录音" : "暂无录音"}</span></button>
+        </header>
+        <section className="ielts-history-overall-report">
+          <h2>总体报告</h2>
+          {selected.overallBandScore != null && <h3>{formatBand(selected.overallBandScore)} 分</h3>}
+          <p>{selected.summary || "本次训练暂未生成文字总结。"}</p>
+        </section>
+        <section className="ielts-history-detail-section">
+          <h3>表达优势</h3>
+          {selected.strengths?.length > 0 ? <ul>{selected.strengths.map((item) => <li key={item}>{item}</li>)}</ul> : <p>本次报告没有保存额外优势说明。</p>}
+        </section>
+        <section className="ielts-history-scores">
+          <div><p><small>流利度与连贯性</small><strong>{formatBand(selected.fluencyCoherenceScore)}<em>/9</em></strong></p><p><small>词汇资源</small><strong>{formatBand(selected.lexicalResourceScore)}<em>/9</em></strong></p><p><small>语法多样性与准确性</small><strong>{formatBand(selected.grammaticalRangeAccuracyScore)}<em>/9</em></strong></p><p><small>发音</small><strong>{formatBand(selected.pronunciationScore)}<em>/9</em></strong></p></div>
+        </section>
+        <section className="ielts-history-detail-section">
+          <h3>优化改进</h3>
+          {selected.improvements?.length > 0 ? <ol>{selected.improvements.map((item) => <li key={item}>{item}</li>)}</ol> : <p>本次报告没有保存额外改进项。</p>}
+        </section>
+        <section className="ielts-history-detail-section">
+          <h3>推荐表达</h3>
+          {selected.recommendedExpressions?.length > 0 ? <ul>{selected.recommendedExpressions.map((item) => <li key={item}>{item}</li>)}</ul> : <p>本次报告没有保存推荐表达。</p>}
+        </section>
+      </article> : <div className="ielts-history-empty"><BookOpenText /><h2>暂无训练记录</h2><p>完成一次专项训练后，后端报告会保存在这里。</p></div>}
+    </section>
+  );
 }
 
 export function TrendLineChart({ values }) {
@@ -1175,12 +1438,18 @@ export function TrendLineChart({ values }) {
       const padding = { top: 16, right: 20, bottom: 24, left: 22 };
       const chartWidth = width - padding.left - padding.right;
       const chartHeight = height - padding.top - padding.bottom;
-      const min = 5;
-      const max = 7;
+      const scoredValues = values.filter((value) => Number.isFinite(value));
+      if (!scoredValues.length) return;
+      const scoreMin = Math.min(...scoredValues);
+      const scoreMax = Math.max(...scoredValues);
+      const min = Math.max(0, Math.floor((scoreMin - .5) * 2) / 2);
+      const max = Math.min(9, Math.max(min + 1, Math.ceil((scoreMax + .5) * 2) / 2));
       const points = values.map((value, index) => ({
         x: padding.left + (chartWidth * index) / (values.length - 1),
-        y: padding.top + ((max - value) / (max - min)) * chartHeight,
+        y: Number.isFinite(value) ? padding.top + ((max - value) / (max - min)) * chartHeight : null,
+        value,
       }));
+      const scoredPoints = points.filter((point) => point.y != null);
 
       context.clearRect(0, 0, width, height);
       context.lineWidth = 1;
@@ -1193,37 +1462,40 @@ export function TrendLineChart({ values }) {
         context.stroke();
       });
 
-      const gradient = context.createLinearGradient(0, padding.top, 0, height);
-      gradient.addColorStop(0, "rgba(77, 77, 73, .24)");
-      gradient.addColorStop(1, "rgba(77, 77, 73, 0)");
-      context.beginPath();
-      context.moveTo(points[0].x, padding.top + chartHeight);
-      points.forEach((point) => context.lineTo(point.x, point.y));
-      context.lineTo(points.at(-1).x, padding.top + chartHeight);
-      context.closePath();
-      context.fillStyle = gradient;
-      context.fill();
-
-      context.beginPath();
-      points.forEach((point, index) => index === 0 ? context.moveTo(point.x, point.y) : context.lineTo(point.x, point.y));
-      context.strokeStyle = "#242423";
-      context.lineWidth = 3;
-      context.lineJoin = "round";
-      context.lineCap = "round";
-      context.stroke();
-
-      points.forEach((point, index) => {
+      if (scoredPoints.length >= 2) {
+        const gradient = context.createLinearGradient(0, padding.top, 0, height);
+        gradient.addColorStop(0, "rgba(77, 77, 73, .24)");
+        gradient.addColorStop(1, "rgba(77, 77, 73, 0)");
         context.beginPath();
-        context.arc(point.x, point.y, 5, 0, Math.PI * 2);
+        context.moveTo(scoredPoints[0].x, padding.top + chartHeight);
+        scoredPoints.forEach((point) => context.lineTo(point.x, point.y));
+        context.lineTo(scoredPoints.at(-1).x, padding.top + chartHeight);
+        context.closePath();
+        context.fillStyle = gradient;
+        context.fill();
+
+        context.beginPath();
+        scoredPoints.forEach((point, index) => index === 0 ? context.moveTo(point.x, point.y) : context.lineTo(point.x, point.y));
+        context.strokeStyle = "#242423";
+        context.lineWidth = 3;
+        context.lineJoin = "round";
+        context.lineCap = "round";
+        context.stroke();
+      }
+
+      points.forEach((point) => {
+        const pointY = point.y ?? padding.top + chartHeight;
+        context.beginPath();
+        context.arc(point.x, pointY, 5, 0, Math.PI * 2);
         context.fillStyle = "#fff";
         context.fill();
-        context.lineWidth = 3;
-        context.strokeStyle = "#242423";
+        context.lineWidth = point.y == null ? 2 : 3;
+        context.strokeStyle = point.y == null ? "#d4d4cf" : "#242423";
         context.stroke();
         context.fillStyle = "#6f6f6a";
         context.font = "600 11px sans-serif";
         context.textAlign = "center";
-        context.fillText(values[index].toFixed(1), point.x, height - 5);
+        context.fillText(point.y == null ? "--" : point.value.toFixed(1), point.x, height - 5);
       });
     };
     draw();
@@ -1235,11 +1507,77 @@ export function TrendLineChart({ values }) {
 }
 
 function AssetsTrends({ settings, reports }) {
-  const mocks = reports.filter((item) => item.mode === "MOCK_TEST").slice().reverse();
-  const values = mocks.map((item) => Number(item.overallBandScore)).filter(Number.isFinite);
-  const latest = values.at(-1);
-  const change = values.length >= 2 ? (latest - values[0]).toFixed(1) : null;
-  return <section className="ielts-trends-dashboard"><section className="ielts-trend-summary"><div><span>模考趋势</span><h2>{formatBand(latest)}</h2><p>{change == null ? "至少完成两次模考后显示趋势" : `当前记录变化 ${Number(change) >= 0 ? "+" : ""}${change} 分`}</p></div>{values.length >= 2 ? <div className="ielts-trend-chart-wrap"><TrendLineChart values={values} /><small>第 1 次</small><small>最近一次</small></div> : <div className="ielts-history-empty"><p>暂无足够的真实模考数据绘制趋势。</p></div>}<div><span>目标进度</span><strong>{formatBand(settings?.targetScore)}</strong><p>目标分来自后端用户设置</p></div></section></section>;
+  const mocks = reports.filter((item) => item.mode === "MOCK_TEST").slice(0, 5).reverse();
+  const actualValues = mocks.map((item) => item.overallBandScore).filter((value) => value != null && value !== "").map(Number).filter(Number.isFinite);
+  const values = [...actualValues, ...Array(Math.max(0, 5 - actualValues.length)).fill(null)].slice(0, 5);
+  const latest = actualValues.at(-1);
+  const change = actualValues.length >= 2 ? (latest - actualValues[0]).toFixed(1) : null;
+  const recent = reports.slice(0, 10);
+  const dimensionValues = [
+    ["流利度与连贯性", "fluencyCoherenceScore"],
+    ["词汇资源", "lexicalResourceScore"],
+    ["语法多样性与准确性", "grammaticalRangeAccuracyScore"],
+    ["发音", "pronunciationScore"],
+  ].map(([label, key]) => {
+    const scores = recent.map((item) => item[key]).filter((value) => value != null && value !== "").map(Number).filter(Number.isFinite);
+    const band = scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null;
+    const percent = band == null ? 0 : Math.round((band / 9) * 100);
+    return { label, percent };
+  });
+  const availablePercents = dimensionValues.map((item) => item.percent).filter((value) => value > 0);
+  const highestPercent = availablePercents.length ? Math.max(...availablePercents) : 0;
+  const lowestPercent = availablePercents.length ? Math.min(...availablePercents) : 0;
+  const averagePercent = availablePercents.length ? availablePercents.reduce((sum, value) => sum + value, 0) / availablePercents.length : 0;
+  const dimensions = dimensionValues.map((item) => ({
+    ...item,
+    status: item.percent === 0 ? "暂无数据"
+      : highestPercent > lowestPercent && item.percent === highestPercent ? "相对优势"
+        : highestPercent > lowestPercent && item.percent === lowestPercent ? "重点提升"
+          : item.percent >= averagePercent ? "表现稳定" : "继续提升",
+  }));
+  const allPartEvaluations = reports.flatMap((item) => Array.isArray(item.partEvaluations) ? item.partEvaluations : []);
+  const adviceCopy = {
+    PART_1: ["回答长度更稳定", "保持完整作答，减少过短回答。"],
+    PART_2: ["内容组织正在改善", "加强要点展开与句间连接。"],
+    PART_3: ["观点深度需要加强", "增加原因、影响与对比结构。"],
+  };
+  const partAdvice = ["PART_1", "PART_2", "PART_3"].map((partName) => {
+    const evaluation = allPartEvaluations.find((item) => item.part === partName);
+    return {
+      part: partName.replace("PART_", "Part "),
+      title: evaluation ? adviceCopy[partName][0] : "暂无专项评分",
+      detail: evaluation ? adviceCopy[partName][1] : "完成有效训练后生成建议。",
+    };
+  });
+  const hasTrainingData = recent.length > 0;
+  return (
+    <section className="ielts-trends-dashboard">
+      <section className="ielts-trend-summary">
+        <div>
+          <span>模考趋势</span>
+          <h2>{formatBand(latest)}</h2>
+          <p>{change == null ? "至少完成两次模考后显示趋势" : `最近 ${actualValues.length} 次变化 ${Number(change) >= 0 ? "+" : ""}${change} 分`}</p>
+        </div>
+        {actualValues.length > 0
+          ? <div className="ielts-trend-chart-wrap"><TrendLineChart values={values} /><small>较早</small><small>较近</small></div>
+          : <div className="ielts-trend-empty-state"><strong>暂无模考趋势</strong><p>完成至少两次完整模考后生成折线图。</p></div>}
+        <div>
+          <span>目标进度</span>
+          <strong>{formatBand(settings?.targetScore)}</strong>
+          <p>连续打卡 {Number(settings?.currentStreakDays || 0)} 天</p>
+        </div>
+      </section>
+      <section className={cx("ielts-dimension-trends", !hasTrainingData && "is-empty")}>
+        <h2>四项能力平均分 · 最近 {recent.length} 次训练</h2>
+        {hasTrainingData
+          ? dimensions.map((item) => <article key={item.label}><span>{item.label}</span><strong className="ielts-dimension-score">{item.percent}<small>/100</small></strong><div><i style={{ width: `${item.percent}%` }} /></div><strong>{item.status}</strong></article>)
+          : <div className="ielts-dimension-empty-state"><strong>暂无能力评分</strong><p>完成一次有效训练后，这里会展示四项能力平均分。</p></div>}
+      </section>
+      <section className="ielts-part-trends">
+        {partAdvice.map((item) => <article key={item.part}><span>{item.part}</span><strong>{item.title}</strong><p>{item.detail}</p></article>)}
+      </section>
+    </section>
+  );
 }
 
 export function IeltsAssets({ route, onNavigate, onBackToAssets, onInterviewAssets, onTraining }) {

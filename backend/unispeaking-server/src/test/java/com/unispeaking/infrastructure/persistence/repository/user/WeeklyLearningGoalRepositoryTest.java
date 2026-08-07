@@ -1,6 +1,7 @@
 package com.unispeaking.infrastructure.persistence.repository.user;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -19,8 +20,10 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import tools.jackson.databind.ObjectMapper;
 
 class WeeklyLearningGoalRepositoryTest {
+	private final ObjectMapper objectMapper = new ObjectMapper();
 
 	@BeforeAll
 	static void initializeMybatisMetadata() {
@@ -32,14 +35,27 @@ class WeeklyLearningGoalRepositoryTest {
 	}
 
 	@Test
+	void excludesJsonBackedGoalsFromGeneratedPreferenceSql() {
+		var mappedColumns = TableInfoHelper.getTableInfo(UserPreferenceEntity.class)
+				.getFieldList()
+				.stream()
+				.map(field -> field.getColumn())
+				.toList();
+
+		assertFalse(mappedColumns.contains("weekly_duration_target_minutes"));
+		assertFalse(mappedColumns.contains("weekly_training_count_target"));
+	}
+
+	@Test
 	void returnsDefaultsForNullableStoredTargets() {
 		UUID userId = UUID.randomUUID();
 		UserPreferenceMapper mapper = mock(UserPreferenceMapper.class);
 		UserPreferenceEntity entity = new UserPreferenceEntity();
 		entity.setUserId(userId);
+		entity.setPreferences("{\"translation_enabled\":true}");
 		when(mapper.selectById(userId)).thenReturn(entity);
 
-		var goals = new WeeklyLearningGoalRepository(mapper)
+		var goals = new WeeklyLearningGoalRepository(mapper, objectMapper)
 				.findByUserId(userId)
 				.orElseThrow();
 
@@ -53,7 +69,7 @@ class WeeklyLearningGoalRepositoryTest {
 		UserPreferenceMapper mapper = mock(UserPreferenceMapper.class);
 		when(mapper.selectById(userId)).thenReturn(null);
 
-		assertTrue(new WeeklyLearningGoalRepository(mapper)
+		assertTrue(new WeeklyLearningGoalRepository(mapper, objectMapper)
 				.findByUserId(userId)
 				.isEmpty());
 	}
@@ -66,7 +82,7 @@ class WeeklyLearningGoalRepositoryTest {
 		when(mapper.insert(any(UserPreferenceEntity.class))).thenReturn(1);
 		WeeklyLearningGoals goals = new WeeklyLearningGoals(180, 6);
 
-		new WeeklyLearningGoalRepository(mapper).save(userId, goals);
+		new WeeklyLearningGoalRepository(mapper, objectMapper).save(userId, goals);
 
 		ArgumentCaptor<UserPreferenceEntity> captor =
 				ArgumentCaptor.forClass(UserPreferenceEntity.class);
@@ -74,6 +90,11 @@ class WeeklyLearningGoalRepositoryTest {
 		assertEquals(userId, captor.getValue().getUserId());
 		assertEquals(180, captor.getValue().getWeeklyDurationTargetMinutes());
 		assertEquals(6, captor.getValue().getWeeklyTrainingCountTarget());
+		assertEquals(
+				180,
+				objectMapper.readTree(captor.getValue().getPreferences())
+						.get("weekly_duration_target_minutes")
+						.intValue());
 	}
 
 	@Test
@@ -82,15 +103,19 @@ class WeeklyLearningGoalRepositoryTest {
 		UserPreferenceMapper mapper = mock(UserPreferenceMapper.class);
 		UserPreferenceEntity entity = new UserPreferenceEntity();
 		entity.setUserId(userId);
+		entity.setPreferences("{\"translation_enabled\":true}");
 		when(mapper.selectById(userId)).thenReturn(entity);
 		when(mapper.updateById(entity)).thenReturn(1);
 		WeeklyLearningGoalRepository repository =
-				new WeeklyLearningGoalRepository(mapper);
+				new WeeklyLearningGoalRepository(mapper, objectMapper);
 
 		repository.save(userId, new WeeklyLearningGoals(240, 8));
 
 		assertEquals(240, entity.getWeeklyDurationTargetMinutes());
 		assertEquals(8, entity.getWeeklyTrainingCountTarget());
+		assertTrue(objectMapper.readTree(entity.getPreferences())
+				.get("translation_enabled")
+				.booleanValue());
 		verify(mapper).updateById(entity);
 
 		when(mapper.selectById(userId))

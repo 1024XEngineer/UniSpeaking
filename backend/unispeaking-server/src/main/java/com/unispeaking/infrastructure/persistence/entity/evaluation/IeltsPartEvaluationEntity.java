@@ -14,13 +14,13 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@TableName(value = "ielts_evaluation", autoResultMap = true)
-public class IeltsEvaluationEntity {
-
-	@TableId(value = "evaluation_id", type = IdType.INPUT)
-	private String evaluationId;
+@TableName(value = "ielts_part_evaluation", autoResultMap = true)
+public class IeltsPartEvaluationEntity {
+	@TableId(value = "part_evaluation_id", type = IdType.INPUT)
+	private String partEvaluationId;
 	private String ieltsId;
-	private BigDecimal overallBandScore;
+	private String sessionId;
+	private String part;
 	private BigDecimal fluencyCoherenceScore;
 	private BigDecimal lexicalResourceScore;
 	private BigDecimal grammaticalRangeAccuracyScore;

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.time.LocalDate;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -21,6 +22,9 @@ public class UserIeltsEntity {
 	private BigDecimal targetScore;
 	private Integer todayCompletedCount;
 	private String preferredVoice;
+	private Integer currentStreakDays;
+	private Integer totalCheckInDays;
+	private LocalDate lastCheckInDate;
 	private OffsetDateTime createdAt;
 	private OffsetDateTime updatedAt;
 }

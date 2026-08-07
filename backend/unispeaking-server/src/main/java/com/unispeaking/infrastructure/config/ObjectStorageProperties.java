@@ -12,6 +12,7 @@ public class ObjectStorageProperties {
 	private String domain = "";
 	private String avatarPrefix = "avatars";
 	private String interviewRecordingPrefix = "interviews/recordings";
+	private String ieltsRecordingPrefix = "ielts/recordings";
 	private Duration signedUrlTtl = Duration.ofHours(1);
 
 	public boolean configured() {
@@ -34,6 +35,10 @@ public class ObjectStorageProperties {
 	public void setInterviewRecordingPrefix(String value) {
 		interviewRecordingPrefix = normalizeObjectPrefix(
 				value, "interviews/recordings");
+	}
+	public String getIeltsRecordingPrefix() { return ieltsRecordingPrefix; }
+	public void setIeltsRecordingPrefix(String value) {
+		ieltsRecordingPrefix = normalizeObjectPrefix(value, "ielts/recordings");
 	}
 	public Duration getSignedUrlTtl() { return signedUrlTtl; }
 	public void setSignedUrlTtl(Duration value) { signedUrlTtl = value; }

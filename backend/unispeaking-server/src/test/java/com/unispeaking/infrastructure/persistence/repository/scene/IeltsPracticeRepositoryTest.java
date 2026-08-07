@@ -44,10 +44,13 @@ class IeltsPracticeRepositoryTest {
 			mock(IeltsPracticeMapper.class);
 	private final UserIeltsMapper userIeltsMapper =
 			mock(UserIeltsMapper.class);
+	private final com.unispeaking.infrastructure.persistence.mapper.evaluation.IeltsPartEvaluationMapper partEvaluationMapper =
+			mock(com.unispeaking.infrastructure.persistence.mapper.evaluation.IeltsPartEvaluationMapper.class);
 	private final IeltsPracticeRepository repository =
 			new IeltsPracticeRepository(
 					practiceMapper,
 					userIeltsMapper,
+					partEvaluationMapper,
 					new ObjectMapper());
 
 	@Test

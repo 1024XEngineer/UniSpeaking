@@ -48,6 +48,7 @@ dist/
 
 ### Runtime logs ###
 logs/
+data/
 
 ### VS Code ###
 .vscode/

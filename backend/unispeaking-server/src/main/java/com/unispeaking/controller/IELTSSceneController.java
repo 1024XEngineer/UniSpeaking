@@ -65,7 +65,10 @@ public class IELTSSceneController {
 				settings.todayCompletedCount(),
 				settings.examinerId(),
 				settings.preferredVoice(),
-				evaluationService.getLatestIeltsEstimatedScore()));
+				evaluationService.getLatestIeltsEstimatedScore(),
+				settings.currentStreakDays(),
+				settings.totalCheckInDays(),
+				settings.lastCheckInDate()));
 	}
 
 	@PutMapping("/settings")
@@ -77,7 +80,10 @@ public class IELTSSceneController {
 				settings.todayCompletedCount(),
 				settings.examinerId(),
 				settings.preferredVoice(),
-				evaluationService.getLatestIeltsEstimatedScore()));
+				evaluationService.getLatestIeltsEstimatedScore(),
+				settings.currentStreakDays(),
+				settings.totalCheckInDays(),
+				settings.lastCheckInDate()));
 	}
 
 	@GetMapping("/topics")
@@ -146,11 +152,13 @@ public class IELTSSceneController {
 	public ApiResponse<IeltsDialogueStateResponse> advanceDialogueState(
 			@PathVariable String ieltsId,
 			@PathVariable String sessionId,
-			@PathVariable int turnNo) {
+			@PathVariable int turnNo,
+			@RequestParam(defaultValue = "false") boolean timedOut) {
 		return ApiResponse.success(ieltsSceneService.advanceSessionState(
 				ieltsId,
 				sessionId,
-				turnNo));
+				turnNo,
+				timedOut));
 	}
 
 	@GetMapping("/{ieltsId}/sessions/{sessionId}/state")

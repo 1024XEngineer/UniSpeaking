@@ -163,11 +163,12 @@ CREATE DATABASE unispeaking;
 
 后端启动时由 Flyway 执行
 [`V1__baseline.sql`](backend/unispeaking-server/src/main/resources/db/migration/V1__baseline.sql)
-创建或补齐当前表结构。新库直接执行 V1；已有数据库会先以版本 0 纳入管理，再执行
-幂等迁移并保留现有数据。运行账号必须具有建表、建索引和管理 Flyway 历史表的权限。
+一次性完成全部建表、索引、注释、历史字段回填和题库初始化。V1 是由原 V1 至 V10
+压缩得到的空库基线，不能直接替换已经记录旧迁移历史的数据库；开发环境升级到该
+基线时应重建数据库。运行账号必须具有建表、建索引、创建 `pg_trgm` 扩展和管理
+Flyway 历史表的权限。
 
-雅思题库的表结构、索引及完整初始化数据统一保存在
-[`V3__ielts_question_bank.sql`](backend/unispeaking-server/src/main/resources/db/migration/V3__ielts_question_bank.sql)。
+雅思题库的表结构、索引及完整初始化数据也统一保存在该 V1 基线中。
 新数据库首次启动时会自动写入 303 个训练主题和 1771 道 Part 1、Part 2、Part 3
 题目，不需要额外运行导入脚本。
 

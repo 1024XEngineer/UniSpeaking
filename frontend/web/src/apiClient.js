@@ -28,6 +28,20 @@ async function request(path, options = {}) {
   return unwrap(response);
 }
 
+export async function fetchAuthenticatedMedia(pathOrUrl) {
+  const absolute = /^https?:\/\//i.test(pathOrUrl);
+  const target = absolute ? pathOrUrl : `${API_BASE}${pathOrUrl}`;
+  const token = getAccessToken();
+  const response = await fetch(target, {
+    headers: {
+      ...(!absolute && token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (response.status === 401 && !absolute) clearAuthSession();
+  if (!response.ok) throw new Error(`录音加载失败（${response.status}）`);
+  return response.blob();
+}
+
 export function getAccessToken() {
   return window.localStorage.getItem(ACCESS_TOKEN_KEY);
 }
@@ -256,9 +270,10 @@ export function advanceIeltsDialogueState(
   ieltsId,
   sessionId,
   turnNo,
+  timedOut = false,
 ) {
   return request(
-    `/api/ielts/${encodeURIComponent(ieltsId)}/sessions/${encodeURIComponent(sessionId)}/turns/${turnNo}/state`,
+    `/api/ielts/${encodeURIComponent(ieltsId)}/sessions/${encodeURIComponent(sessionId)}/turns/${turnNo}/state${timedOut ? "?timedOut=true" : ""}`,
     { method: "POST" },
   );
 }
