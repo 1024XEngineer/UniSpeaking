@@ -1523,6 +1523,121 @@ svg { display: block; }
 .ielts-call-hint { margin: 0; color: #aaa9a4; font-size: 11px; line-height: 1.5; }
 .ielts-call-controls .round-control--end svg { width: 21px; height: 21px; }
 
+.ielts-evaluation-waiting {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  min-height: 0;
+  padding: 32px;
+  background: #fff;
+  color: #111;
+  text-align: center;
+}
+.ielts-evaluation-loader {
+  position: relative;
+  z-index: 1;
+  width: 200px;
+  height: 64px;
+  margin: 4px 0 38px;
+}
+.ielts-evaluation-loader__circle {
+  position: absolute;
+  left: 15%;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #111;
+  transform-origin: 50%;
+  animation: ieltsScoreCircle .5s alternate infinite ease;
+}
+.ielts-evaluation-loader__circle:nth-child(2) {
+  left: 45%;
+  animation-delay: .2s;
+}
+.ielts-evaluation-loader__circle:nth-child(3) {
+  right: 15%;
+  left: auto;
+  animation-delay: .3s;
+}
+.ielts-evaluation-loader__shadow {
+  position: absolute;
+  top: 62px;
+  left: 15%;
+  z-index: -1;
+  width: 20px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 22%);
+  filter: blur(1px);
+  transform-origin: 50%;
+  animation: ieltsScoreShadow .5s alternate infinite ease;
+}
+.ielts-evaluation-loader__shadow:nth-child(5) {
+  left: 45%;
+  animation-delay: .2s;
+}
+.ielts-evaluation-loader__shadow:nth-child(6) {
+  right: 15%;
+  left: auto;
+  animation-delay: .3s;
+}
+.ielts-evaluation-waiting > p {
+  margin: 0;
+  color: #777772;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .2em;
+}
+.ielts-evaluation-waiting > h1 {
+  margin: 13px 0 10px;
+  font-size: clamp(36px, 4.2vw, 60px);
+  line-height: 1;
+  letter-spacing: -.05em;
+}
+.ielts-evaluation-waiting > span {
+  color: #777772;
+  font-size: 15px;
+  line-height: 1.7;
+}
+@keyframes ieltsScoreCircle {
+  0% {
+    top: 60px;
+    height: 5px;
+    border-radius: 50px 50px 25px 25px;
+    transform: scaleX(1.7);
+  }
+  40% {
+    height: 20px;
+    border-radius: 50%;
+    transform: scaleX(1);
+  }
+  100% { top: 0; }
+}
+@keyframes ieltsScoreShadow {
+  0% { transform: scaleX(1.5); }
+  40% {
+    opacity: .7;
+    transform: scaleX(1);
+  }
+  100% {
+    opacity: .4;
+    transform: scaleX(.2);
+  }
+}
+@media (max-width: 640px) {
+  .ielts-evaluation-waiting > span { font-size: 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ielts-evaluation-loader__circle,
+  .ielts-evaluation-loader__shadow {
+    animation: none;
+  }
+  .ielts-evaluation-loader__circle { top: 22px; }
+}
+
 .recording-dot { width: 8px; height: 8px; border-radius: 50%; background: #2e2e2c; animation: recording-pulse 1.2s infinite; }
 @keyframes recording-pulse { 50% { opacity: .35; } }
 .ielts-dialog-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; background: rgba(255,255,255,.76); backdrop-filter: blur(7px); }
@@ -1543,6 +1658,11 @@ svg { display: block; }
 .ielts-score-dialog__overall span { margin-right: auto; color: #777773; font-size: 13px; }
 .ielts-score-dialog__overall strong { font-size: 64px; letter-spacing: -.07em; }
 .ielts-score-dialog__overall small { color: #777773; }
+.ielts-score-dialog__dimensions { margin: 22px 0 !important; display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px !important; }
+.ielts-score-dialog__dimensions article { min-height: 86px; padding: 16px 18px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; border: 1px solid var(--line); border-radius: 12px; }
+.ielts-score-dialog__dimensions article span { color: #777773; font-size: 12px; }
+.ielts-score-dialog__dimensions article strong { display: flex; align-items: baseline; gap: 3px; font-size: 30px; }
+.ielts-score-dialog__dimensions article small { color: #8b8b86; font-size: 12px; font-weight: 600; }
 .ielts-score-dialog__parts { display: grid !important; grid-template-columns: repeat(3, 1fr); gap: 10px !important; margin: 0 0 22px !important; }
 .ielts-score-dialog__parts article { padding: 16px; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-radius: 12px; }
 .ielts-score-dialog__parts article span { color: #777773; font-size: 12px; }
@@ -1555,8 +1675,9 @@ svg { display: block; }
 .ielts-part-evaluation-list > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .ielts-part-evaluation-list article { padding: 20px; border: 1px solid var(--line); border-radius: 14px; }
 .ielts-part-evaluation-list article span { color: #777773; font-size: 12px; }
-.ielts-part-evaluation-list article strong { display: block; margin: 9px 0; font-size: 34px; }
-.ielts-part-evaluation-list article p { margin: 0; color: #70706c; font-size: 13px; line-height: 1.6; }
+.ielts-part-evaluation-dimensions { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.ielts-part-evaluation-dimensions p { margin: 0; padding-top: 10px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-top: 1px solid var(--line); color: #70706c; font-size: 13px; line-height: 1.4; }
+.ielts-part-evaluation-dimensions strong { display: block; margin: 0; color: var(--ink); font-size: 22px; }
 .ielts-recommended-expression-list { padding: 24px 28px; border: 1px solid var(--line); border-radius: 14px; }
 .ielts-recommended-expression-list ol { margin: 14px 0 0; padding-left: 22px; display: grid; gap: 10px; color: #555552; }
 
@@ -1582,6 +1703,7 @@ svg { display: block; }
 .interview-finalizing-unified .ielts-pending-actions button { min-height: 58px; padding-inline: 28px; font-size: 17px; }
 .asset-module-ielts-mark { width: 38px; height: 28px; display: grid; place-items: center; border: 1px solid #d7d7d2; border-radius: 8px; font-size: 8px; font-weight: 780; letter-spacing: -.02em; }
 
+.ielts-report { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif; }
 .ielts-report-assets, .ielts-report-summary button { min-height: 42px; padding: 0 16px; display: flex; align-items: center; gap: 8px; border: 1px solid #d9d9d4; border-radius: 999px; background: #fff; font-weight: 650; }
 .ielts-mock-score { min-height: 150px; margin-top: 28px; padding: 24px 30px; display: grid; grid-template-columns: 1fr auto; align-items: center; border: 1px solid var(--line); border-radius: 16px; }
 .ielts-mock-score span { color: #858580; font-size: 12px; }
@@ -1589,14 +1711,17 @@ svg { display: block; }
 .ielts-mock-score p { margin: 8px 0 0; color: #70706c; font-size: 13px; }
 .ielts-report-summary { margin-top: 28px; padding: 30px; display: grid; grid-template-columns: 1.35fr .65fr; gap: 55px; border: 1px solid var(--line); border-radius: 16px; }
 .ielts-report-summary span, .ielts-answer-review span, .ielts-asset-hero span, .ielts-weakness > span, .ielts-dimension-trends > h2 { color: #858580; font-size: 11px; }
+.ielts-report .ielts-report-summary span { font-size: 14px; font-weight: 650; line-height: 1.5; }
 .ielts-report-summary h2 { margin: 13px 0 10px; font-size: 26px; }
-.ielts-report-summary p { margin: 0; color: #70706c; line-height: 1.65; }
-.ielts-report-summary ol { margin: 13px 0 0; padding-left: 20px; display: grid; gap: 10px; color: #555552; font-size: 13px; }
+.ielts-report-summary p { margin: 14px 0 0; color: #70706c; font-size: 15px; line-height: 1.72; }
+.ielts-report-summary ul, .ielts-report-summary ol { margin: 14px 0 0; padding-left: 22px; display: grid; gap: 9px; color: #555552; font-size: 15px; line-height: 1.65; }
+.ielts-report-summary p + span, .ielts-report-summary ul + span { display: block; margin-top: 22px; }
 .ielts-score-list { margin-top: 24px; }
-.ielts-score-list > h2 { font-size: 17px; }
+.ielts-score-list > h2 { font-size: 20px; }
 .ielts-score-list article { min-height: 76px; display: grid; grid-template-columns: 230px 110px 1fr 20px; gap: 20px; align-items: center; border-top: 1px solid var(--line); }
-.ielts-score-list article span { font-size: 12px; font-weight: 680; }
-.ielts-score-list article p { color: #70706c; font-size: 12px; }
+.ielts-score-list article > strong { font-size: 16px; }
+.ielts-score-list article span { font-size: 14px; font-weight: 680; }
+.ielts-score-list article p { color: #70706c; font-size: 15px; line-height: 1.65; }
 .ielts-answer-review { margin-top: 24px; padding: 28px 30px; border: 1px solid var(--line); border-radius: 16px; }
 .ielts-answer-review header { display: flex; justify-content: space-between; align-items: center; }
 .ielts-answer-review h2 { margin: 9px 0 0; font-size: 20px; }
@@ -1685,6 +1810,7 @@ svg { display: block; }
 .ielts-asset-recent article { min-height: 72px; display: grid; grid-template-columns: 80px 1fr 260px; align-items: center; gap: 18px; border-top: 1px solid var(--line); }
 .ielts-asset-recent article > span { color: #777773; font-size: 12px; }
 .ielts-asset-recent article div { display: grid; gap: 5px; }
+.ielts-asset-recent article strong { line-height: 1.35; }
 .ielts-asset-recent article small { color: #92928d; }
 .ielts-asset-recent article p { color: #666662; font-size: 12px; }
 
@@ -1713,13 +1839,25 @@ svg { display: block; }
 .ielts-history-layout aside { border-right: 1px solid var(--line); }
 .ielts-history-layout aside header { height: 70px; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; }
 .ielts-history-layout aside h2 { font-size: 17px; }
-.ielts-history-layout aside > button { width: 100%; min-height: 94px; padding: 16px 20px; display: grid; gap: 7px; border: 0; border-top: 1px solid var(--line); background: #fff; text-align: left; }
+.ielts-history-layout aside > button { width: 100%; min-height: 104px; padding: 14px 20px; display: grid; align-content: start; gap: 6px; border: 0; border-top: 1px solid var(--line); background: #fff; text-align: left; }
 .ielts-history-layout aside > button.is-active { background: #f4f4f1; box-shadow: inset 2px 0 #1e1e1d; }
-.ielts-history-layout aside button small, .ielts-history-layout aside button span { color: #858580; font-size: 10px; }
+.ielts-history-record-meta { display: grid; justify-items: start; gap: 2px; color: #858580; }
+.ielts-history-record-meta time { font-size: 10px; }
+.ielts-history-record-meta em { color: #6f6f6a; font-size: 13px; font-style: normal; font-weight: 650; }
+.ielts-history-layout aside button strong { min-width: 0; font-size: 12px; line-height: 1.18; }
+.ielts-history-record-duration { color: #92928d; font-size: 10px; }
+.ielts-record-title { display: grid; gap: 3px; }
+.ielts-record-title__line { display: block; }
+.ielts-record-title__part, .ielts-record-title__topic { font: inherit; }
+.ielts-record-title.is-compact { gap: 1px; line-height: 1.16; }
+.ielts-record-title.is-compact .ielts-record-title__topic { font-size: .84em; font-weight: 620; }
 .ielts-history-layout > article { padding: 28px 34px; }
 .ielts-history-layout > article > header { display: flex; justify-content: space-between; }
-.ielts-history-layout > article > header span, .ielts-history-layout > article > header p, .ielts-history-layout > article > section > span { color: #858580; font-size: 11px; }
-.ielts-history-layout > article > header h2 { margin: 8px 0; }
+.ielts-history-layout > article > header > div > span { color: #72726e; }
+.ielts-history-layout > article > header .ielts-history-report-kind { font-size: 16px; font-weight: 680; }
+.ielts-history-layout > article > header p, .ielts-history-layout > article > section > span { color: #858580; font-size: 12px; }
+.ielts-history-layout > article > header h2 { margin: 9px 0; font-size: clamp(25px, 2vw, 33px); line-height: 1.08; letter-spacing: -.035em; }
+.ielts-history-layout > article > header h2 .ielts-record-title { gap: 5px; }
 .ielts-history-media-actions { display: flex; align-items: center; gap: 10px; }
 .ielts-history-media-actions .asset-delete-button { width: 42px; height: 42px; padding-inline: 12px; box-shadow: none; }
 .ielts-history-media-actions .asset-delete-button:hover,
@@ -1754,7 +1892,13 @@ svg { display: block; }
 .ielts-history-layout > article > section { margin-top: 26px; padding-top: 23px; border-top: 1px solid var(--line); }
 .ielts-history-layout > article > section h3 { font-size: 22px; }
 .ielts-history-layout > article > section > p { color: #696965; line-height: 1.65; }
-.ielts-history-scores > div { margin-top: 18px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.ielts-history-overall-report > h2 { margin: 0 0 24px; font-size: clamp(25px, 1.85vw, 31px); letter-spacing: -.025em; }
+.ielts-history-overall-report > h3 { margin: 0 0 22px; font-size: 30px !important; letter-spacing: -.035em; }
+.ielts-history-overall-report > p { margin: 0; font-size: 16px; line-height: 1.85 !important; }
+.ielts-history-detail-section > h3 { margin: 0 0 18px; font-size: 22px !important; letter-spacing: -.015em; }
+.ielts-history-detail-section > ul, .ielts-history-detail-section > ol { margin: 0; padding-left: 24px; color: #444441; font-size: 15px; line-height: 1.75; }
+.ielts-history-detail-section > p { margin: 0; font-size: 14px; }
+.ielts-history-scores > div { margin-top: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
 .ielts-history-scores p { min-height: 92px; margin: 0; padding: 17px 18px; display: grid; align-content: center; gap: 10px; border-left: 1px solid var(--line); }
 .ielts-history-scores p:first-child { border-left: 0; }
 .ielts-history-scores p small { color: #777773; font-size: 11px; }
@@ -1818,7 +1962,11 @@ svg { display: block; }
 .ielts-trend-chart-wrap > small { position: absolute; bottom: 0; color: #92928d; font-size: 9px; }
 .ielts-trend-chart-wrap > small:first-of-type { left: 20px; }
 .ielts-trend-chart-wrap > small:last-of-type { right: 18px; }
+.ielts-trend-empty-state { min-height: 0; display: grid; place-content: center; gap: 7px; color: #858580; text-align: center; }
+.ielts-trend-empty-state strong { color: #555551; font-size: 14px; }
+.ielts-trend-empty-state p { font-size: 11px; }
 .ielts-dimension-trends { min-height: 0; margin: 0; display: grid; grid-template-rows: 30px repeat(4, minmax(44px, 1fr)); overflow: hidden; }
+.ielts-dimension-trends.is-empty { grid-template-rows: 30px minmax(0, 1fr); }
 .ielts-dimension-trends > h2 { margin: 0; align-self: center; color: #686864; font-size: 12px; }
 .ielts-dimension-trends article { min-height: 0; display: grid; grid-template-columns: 210px 78px 1fr 86px; gap: 18px; align-items: center; border-top: 1px solid var(--line); }
 .ielts-dimension-score { font-size: 24px !important; line-height: 1; letter-spacing: -.035em; }
@@ -1826,6 +1974,9 @@ svg { display: block; }
 .ielts-dimension-trends article > div { height: 4px; border-radius: 999px; background: #ededE9; overflow: hidden; }
 .ielts-dimension-trends article i { height: 100%; display: block; background: #2a2a29; }
 .ielts-dimension-trends article strong { font-size: 11px; }
+.ielts-dimension-empty-state { display: grid; place-content: center; justify-items: center; gap: 8px; border-top: 1px solid var(--line); color: #858580; text-align: center; }
+.ielts-dimension-empty-state strong { color: #555551; font-size: 16px; }
+.ielts-dimension-empty-state p { margin: 0; font-size: 11px; }
 .ielts-part-trends { min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 0; }
 .ielts-part-trends article { min-height: 0; padding: 16px 20px; border: 1px solid var(--line); border-radius: 14px; }
 .ielts-part-trends article span { color: #858580; font-size: 9px; }

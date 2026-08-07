@@ -289,6 +289,8 @@ export function createRealtimeClient({
   let turnAudioCapture = null;
   let pendingInstructionUpdate = null;
   let instructionUpdateQueue = Promise.resolve(true);
+  let activeInputItemId = null;
+  let ieltsTimedOutTurn = null;
 
   const emit = (event) => onEvent(event);
 
@@ -658,6 +660,31 @@ export function createRealtimeClient({
     return state;
   }
 
+  async function forceIeltsPart3TurnTimeout() {
+    if (!ieltsSceneId || ieltsActivePart !== "PART_3" || !sessionId) {
+      throw new Error("当前会话不是 IELTS Part 3");
+    }
+    if (ieltsDialogueCompleted || ieltsTimedOutTurn) return null;
+    const turnNo = learnerTurnNo + 1;
+    inputReady = false;
+    muted = true;
+    setTrackEnabled();
+    turnAudioCapture?.stop();
+    const state = await withTimeout(
+      advanceIeltsDialogueState(ieltsSceneId, sessionId, turnNo, true),
+      IELTS_STATE_TIMEOUT_MS,
+      "IELTS Part 3 单题超时推进失败",
+    );
+    learnerTurnNo = turnNo;
+    ieltsTimedOutTurn = { turnNo, itemId: activeInputItemId };
+    ieltsDialogueCompleted = Boolean(state?.completed);
+    emit({ type: "local.ielts_state", state, timedOut: true });
+    requestTurnResponse({ instructions: state?.controlInstruction || "" });
+    muted = false;
+    setTrackEnabled();
+    return state;
+  }
+
   function applyScenarioState(state) {
     if (!state) return;
     emit({ type: "local.scenario_state", state });
@@ -776,6 +803,13 @@ export function createRealtimeClient({
       if (scenarioCompletionPending
         || (ieltsActivePart === "PART_2" && ieltsDialogueCompleted)) return;
       clearIeltsInputRecovery();
+      const startedItemId = event.item_id || event.item?.id || null;
+      if (ieltsTimedOutTurn
+        && !responsePending
+        && (!ieltsTimedOutTurn.itemId || ieltsTimedOutTurn.itemId !== startedItemId)) {
+        ieltsTimedOutTurn = null;
+      }
+      activeInputItemId = startedItemId;
       turnAudioCapture?.start();
       return;
     }
@@ -806,6 +840,14 @@ export function createRealtimeClient({
       }
       const transcript = String(event.transcript || event.text || "").trim();
       if (!transcript) return;
+      const completedInputItemId = event.item_id || event.item?.id || null;
+      const timedOutTurn = ieltsActivePart === "PART_3"
+        && ieltsTimedOutTurn
+        && (!ieltsTimedOutTurn.itemId
+          || !completedInputItemId
+          || ieltsTimedOutTurn.itemId === completedInputItemId)
+          ? ieltsTimedOutTurn
+          : null;
       if (manualTurnResponses) {
         inputReady = false;
         setTrackEnabled();
@@ -819,10 +861,12 @@ export function createRealtimeClient({
       if (customSceneId) {
         requestTurnResponse();
       }
-      const ieltsTurnNo = ieltsSceneId ? learnerTurnNo + 1 : null;
+      const ieltsTurnNo = ieltsSceneId
+        ? timedOutTurn?.turnNo || learnerTurnNo + 1
+        : null;
       const deterministicIeltsPart = ieltsActivePart === "PART_1"
         || ieltsActivePart === "PART_3";
-      const ieltsStateOperation = deterministicIeltsPart
+      const ieltsStateOperation = deterministicIeltsPart && !timedOutTurn
         ? withTimeout(
           advanceIeltsDialogueState(
             ieltsSceneId,
@@ -862,27 +906,22 @@ export function createRealtimeClient({
           }
         } else if (ieltsActivePart === "PART_2") {
           if (!ieltsDialogueCompleted) {
-            try {
-              await transitionIeltsPart2("ANSWER_COMPLETE");
-            } catch (stateError) {
-              emit({
-                type: "local.ielts_state_error",
-                message: stateError instanceof Error
-                  ? stateError.message
-                  : "IELTS Part 2 状态推进失败",
-              });
-            }
+            inputReady = true;
+            setTrackEnabled();
+            emit({ type: "local.ielts_input_ready", source: "part2_continue" });
           }
+        } else if (timedOutTurn) {
+          ieltsTimedOutTurn = null;
         } else {
           await waitForInstructionUpdate();
         }
-        if (ieltsActivePart !== "PART_2") {
+        if (ieltsActivePart !== "PART_2" && !timedOutTurn) {
           requestTurnResponse({ instructions: turnInstructions });
         }
       }
       let ieltsTurnAudio = null;
       if (ieltsSceneId) {
-        learnerTurnNo = ieltsTurnNo;
+        learnerTurnNo = Math.max(learnerTurnNo, ieltsTurnNo);
         ieltsTurnAudio = await turnAudioCapture?.take();
       }
       if (ieltsSceneId && persisted) {
@@ -994,6 +1033,7 @@ export function createRealtimeClient({
         } else {
           inputReady = true;
           setTrackEnabled();
+          emit({ type: "local.ielts_input_ready", source: "response_done" });
         }
       }
     }
@@ -1287,6 +1327,8 @@ export function createRealtimeClient({
       ieltsPreparedQuestions = [];
       ieltsDialogueCompleted = false;
       ieltsInputRecoveryTimer = null;
+      activeInputItemId = null;
+      ieltsTimedOutTurn = null;
       pendingInstructionUpdate = null;
       instructionUpdateQueue = Promise.resolve(true);
       pendingAcks = [];
@@ -1318,6 +1360,7 @@ export function createRealtimeClient({
     interrupt,
     requestResponse,
     transitionIeltsPart2,
+    forceIeltsPart3TurnTimeout,
     updateInstructions,
     waitForEvaluations,
     stop,
