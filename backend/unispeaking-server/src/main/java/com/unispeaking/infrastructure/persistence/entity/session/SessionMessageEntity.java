@@ -23,6 +23,7 @@ public class SessionMessageEntity {
 	private Integer owner;
 	private String content;
 	private String audioUrl;
+	private String audioObjectKey;
 	private OffsetDateTime createdAt;
 	private OffsetDateTime updateAt;
 }

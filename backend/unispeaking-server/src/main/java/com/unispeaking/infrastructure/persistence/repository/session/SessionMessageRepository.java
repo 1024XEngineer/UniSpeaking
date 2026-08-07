@@ -1,6 +1,7 @@
 package com.unispeaking.infrastructure.persistence.repository.session;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.infrastructure.persistence.entity.session.SessionMessageEntity;
@@ -78,6 +79,111 @@ public class SessionMessageRepository {
 					.stream()
 					.findFirst()
 					.map(SessionMessageEntity::getSceneId);
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
+	public void attachLearnerAudioObjectKey(
+			String sessionId,
+			int turnNo,
+			String objectKey) {
+		if (turnNo < 1 || objectKey == null || objectKey.isBlank()) {
+			throw persistenceFailure();
+		}
+		try {
+			List<SessionMessageEntity> learnerMessages = mapper.selectList(
+					new LambdaQueryWrapper<SessionMessageEntity>()
+							.eq(SessionMessageEntity::getSessionId, sessionId)
+							.eq(SessionMessageEntity::getOwner, 1)
+							.orderByAsc(SessionMessageEntity::getMessageNo));
+			if (learnerMessages.size() < turnNo) throw persistenceFailure();
+			SessionMessageEntity message = learnerMessages.get(turnNo - 1);
+			int updated = mapper.update(
+					null,
+					new LambdaUpdateWrapper<SessionMessageEntity>()
+							.eq(SessionMessageEntity::getSessionId, sessionId)
+							.eq(
+									SessionMessageEntity::getMessageNo,
+									message.getMessageNo())
+							.set(
+									SessionMessageEntity::getAudioObjectKey,
+									objectKey));
+			if (updated != 1) throw persistenceFailure();
+		}
+		catch (BusinessException exception) {
+			throw exception;
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
+	public void attachLearnerAudioUrl(
+			String sessionId,
+			int turnNo,
+			String audioUrl) {
+		if (turnNo < 1 || audioUrl == null || audioUrl.isBlank()) {
+			throw persistenceFailure();
+		}
+		try {
+			List<SessionMessageEntity> learnerMessages = mapper.selectList(
+					new LambdaQueryWrapper<SessionMessageEntity>()
+							.eq(SessionMessageEntity::getSessionId, sessionId)
+							.eq(SessionMessageEntity::getOwner, 1)
+							.orderByAsc(SessionMessageEntity::getMessageNo));
+			if (learnerMessages.size() < turnNo) throw persistenceFailure();
+			SessionMessageEntity message = learnerMessages.get(turnNo - 1);
+			SessionMessageEntity updates = new SessionMessageEntity();
+			updates.setAudioUrl(audioUrl);
+			updates.setUpdateAt(OffsetDateTime.now());
+			int updated = mapper.update(
+					updates,
+					new LambdaUpdateWrapper<SessionMessageEntity>()
+							.eq(SessionMessageEntity::getSessionId, sessionId)
+							.eq(
+									SessionMessageEntity::getMessageNo,
+									message.getMessageNo()));
+			if (updated != 1) throw persistenceFailure();
+		}
+		catch (BusinessException exception) {
+			throw exception;
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
+	public List<String> findAudioUrls(String sessionId) {
+		try {
+			return mapper.selectList(
+					new LambdaQueryWrapper<SessionMessageEntity>()
+							.eq(SessionMessageEntity::getSessionId, sessionId)
+							.eq(SessionMessageEntity::getOwner, 1)
+							.isNotNull(SessionMessageEntity::getAudioUrl)
+							.orderByAsc(SessionMessageEntity::getMessageNo))
+					.stream()
+					.map(SessionMessageEntity::getAudioUrl)
+					.filter(url -> url != null && !url.isBlank())
+					.toList();
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
+	public List<String> findAudioObjectKeys(String sessionId) {
+		try {
+			return mapper.selectList(
+					new LambdaQueryWrapper<SessionMessageEntity>()
+							.eq(SessionMessageEntity::getSessionId, sessionId)
+							.eq(SessionMessageEntity::getOwner, 1)
+							.isNotNull(SessionMessageEntity::getAudioObjectKey)
+							.orderByAsc(SessionMessageEntity::getMessageNo))
+					.stream()
+					.map(SessionMessageEntity::getAudioObjectKey)
+					.toList();
 		}
 		catch (RuntimeException exception) {
 			throw persistenceFailure();
