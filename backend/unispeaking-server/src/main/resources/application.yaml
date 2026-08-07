@@ -44,7 +44,6 @@ object-storage:
     bucket: ${QINIU_BUCKET:}
     domain: ${QINIU_DOMAIN:}
     avatar-prefix: ${QINIU_AVATAR_PREFIX:avatars}
-    interview-recording-prefix: ${QINIU_INTERVIEW_RECORDING_PREFIX:interviews/recordings}
     signed-url-ttl: ${QINIU_SIGNED_URL_TTL:1h}
 
 ocr:
