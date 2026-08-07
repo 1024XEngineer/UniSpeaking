@@ -60,7 +60,7 @@ prompt:
     directory: ${PROMPT_TEMPLATE_DIR:}
 
 mybatis-plus:
-  type-handlers-package: com.unispeaking.infrastructure.persistence.typehandler
+  type-handlers-package: com.unispeaking.common.persistence.typehandler
   configuration:
     map-underscore-to-camel-case: true
   global-config:

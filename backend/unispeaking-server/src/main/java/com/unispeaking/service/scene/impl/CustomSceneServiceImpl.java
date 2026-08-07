@@ -2,10 +2,9 @@ package com.unispeaking.service.scene.impl;
 
 import com.unispeaking.common.util.SceneIdGenerator;
 import com.unispeaking.component.scene.CustomSceneGenerator;
-import com.unispeaking.domain.dto.scene.CustomSceneRequest;
 import com.unispeaking.domain.dto.scene.CustomSceneGenerationResponse;
-import com.unispeaking.domain.dto.scene.CustomSceneResult;
 import com.unispeaking.domain.dto.scene.CustomDialogueSceneContext;
+import com.unispeaking.domain.dto.scene.CustomSceneRequest;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.dto.scene.TranslateTextResponse;
 import com.unispeaking.domain.po.profile.UserProfile;
@@ -19,7 +18,7 @@ import com.unispeaking.infrastructure.persistence.repository.scene.SceneReposito
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.profile.ProfileService;
 import com.unispeaking.common.prompt.FiveLayerPromptBuilder;
-import com.unispeaking.service.scene.SceneService;
+import com.unispeaking.service.scene.CustomSceneService;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,8 +27,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
-public class CustomSceneServiceImpl
-		implements SceneService<CustomSceneRequest, CustomSceneResult> {
+public class CustomSceneServiceImpl implements CustomSceneService {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(
 			CustomSceneServiceImpl.class);
@@ -60,17 +58,7 @@ public class CustomSceneServiceImpl
 	}
 
 	@Override
-	public CustomSceneResult generate(CustomSceneRequest request) {
-		CustomSceneGenerationResponse generated = generateResponse(request);
-		return new CustomSceneResult(
-				generated.sceneId(),
-				generated.wordList(),
-				generated.phraseList(),
-				generated.sentenceList(),
-				generated.scenePrompt());
-	}
-
-	public CustomSceneGenerationResponse generateResponse(
+	public CustomSceneGenerationResponse generate(
 			CustomSceneRequest request) {
 		String userId = authService.requireUserId(request.userId());
 		SceneConfig config = sceneRepository.findByType(SceneType.CUSTOM_SCENE)
@@ -103,6 +91,7 @@ public class CustomSceneServiceImpl
 				generated.scenePrompt());
 	}
 
+	@Override
 	public byte[] synthesizeSpeech(String sceneId, String text, String model) {
 		requireOwnedCustomScene(sceneId);
 		if (text == null || text.isBlank()) {
@@ -117,6 +106,7 @@ public class CustomSceneServiceImpl
 		return audio;
 	}
 
+	@Override
 	public TranslateTextResponse translate(String sceneId, String text) {
 		requireOwnedCustomScene(sceneId);
 		String source = requireTranslationText(text);
@@ -139,10 +129,12 @@ public class CustomSceneServiceImpl
 		return new TranslateTextResponse(source, translated.strip(), "zh-CN");
 	}
 
+	@Override
 	public CustomSceneDefinition getOwnedDefinition(String sceneId) {
 		return requireOwnedCustomScene(sceneId);
 	}
 
+	@Override
 	public SceneGenerationResponse getGeneratedScene(String sceneId) {
 		requireOwnedCustomScene(sceneId);
 		return sceneRepository.findGeneratedById(sceneId)
@@ -151,10 +143,12 @@ public class CustomSceneServiceImpl
 						"自定义场景不存在"));
 	}
 
+	@Override
 	public String getDialoguePrompt(String sceneId) {
 		return prepareDialogue(sceneId).prompt();
 	}
 
+	@Override
 	public CustomDialogueSceneContext prepareDialogue(String sceneId) {
 		CustomSceneDefinition definition = requireOwnedCustomScene(sceneId);
 		SceneGenerationResponse generated = sceneRepository

@@ -5,7 +5,7 @@ import com.unispeaking.domain.po.scene.IeltsQuestion;
 import com.unispeaking.domain.po.scene.IeltsTopic;
 import com.unispeaking.domain.vo.scene.IeltsPart;
 import com.unispeaking.domain.vo.scene.IeltsTopicType;
-import com.unispeaking.infrastructure.persistence.codec.scene.IeltsJsonbCodec;
+import com.unispeaking.common.persistence.codec.scene.IeltsJsonbCodec;
 import com.unispeaking.infrastructure.persistence.entity.scene.IeltsQuestionEntity;
 import com.unispeaking.infrastructure.persistence.entity.scene.IeltsTopicEntity;
 import com.unispeaking.infrastructure.persistence.mapper.scene.IeltsQuestionMapper;

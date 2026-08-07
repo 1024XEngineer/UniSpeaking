@@ -10,7 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.domain.dto.scene.LearningContentItem;
-import com.unispeaking.domain.dto.scene.CustomSceneResult;
+import com.unispeaking.domain.dto.scene.CustomSceneGenerationResponse;
 import com.unispeaking.domain.dto.scene.CustomSceneRequest;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.po.profile.UserProfile;
@@ -119,7 +119,7 @@ class SceneServiceImplTest {
 					mock(AiProviderRegistry.class),
 					new ObjectMapper());
 
-		CustomSceneResult response = service.generate(
+		CustomSceneGenerationResponse response = service.generate(
 				new CustomSceneRequest(
 						userId,
 						"偏好",
@@ -133,7 +133,7 @@ class SceneServiceImplTest {
 		assertEquals(5, response.wordList().size());
 		assertEquals(5, response.phraseList().size());
 		assertEquals(3, response.sentenceList().size());
-		assertEquals("layer one\n\nlayer two", response.dialoguePrompt());
+		assertEquals("layer one\n\nlayer two", response.scenePrompt());
 		verify(repository).saveCustomScene(
 				any(CustomSceneDefinition.class),
 				any(SceneGenerationResponse.class));

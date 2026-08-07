@@ -3,7 +3,7 @@ package com.unispeaking.infrastructure.realtime;
 import com.unispeaking.common.logging.RealtimeFlowLog;
 import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.session.RealtimeCredential;
-import com.unispeaking.infrastructure.ai.qwen.RealtimeProperties;
+import com.unispeaking.infrastructure.config.RealtimeProperties;
 import com.unispeaking.common.exception.BusinessException;
 import java.io.IOException;
 import java.net.URI;

@@ -12,6 +12,7 @@ import com.unispeaking.domain.dto.scene.SceneFlowResponse;
 import com.unispeaking.domain.dto.scene.UpdateIeltsSettingsRequest;
 import com.unispeaking.domain.dto.session.StartIeltsDialogueRequest;
 import com.unispeaking.domain.dto.session.StartIeltsSessionResponse;
+import com.unispeaking.domain.dto.session.StartIeltsSessionCommand;
 import com.unispeaking.domain.dto.session.IeltsDialogueStateResponse;
 import com.unispeaking.domain.dto.session.IeltsPart2StateRequest;
 import com.unispeaking.domain.dto.session.IeltsPart2StateResponse;
@@ -20,10 +21,10 @@ import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationResult;
 import com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult;
 import com.unispeaking.domain.dto.evaluation.IeltsEvaluationHistoryItem;
 import com.unispeaking.domain.vo.scene.IeltsPart;
-import com.unispeaking.service.scene.impl.IeltsSceneServiceImpl;
-import com.unispeaking.service.scene.impl.IeltsSceneFlowServiceImpl;
-import com.unispeaking.service.evaluation.impl.IeltsEvaluationServiceImpl;
-import com.unispeaking.service.session.impl.IeltsSessionServiceImpl;
+import com.unispeaking.service.scene.IeltsSceneService;
+import com.unispeaking.service.scene.IeltsSceneFlowService;
+import com.unispeaking.service.evaluation.IeltsEvaluationService;
+import com.unispeaking.service.session.IeltsSessionService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -49,17 +50,17 @@ import java.util.List;
 @Validated
 public class IELTSSceneController {
 
-	private final IeltsSceneServiceImpl ieltsSceneService;
-	private final IeltsSceneFlowServiceImpl sceneFlowService;
-	private final IeltsEvaluationServiceImpl evaluationService;
-	private final IeltsSessionServiceImpl ieltsSessionService;
+	private final IeltsSceneService ieltsSceneService;
+	private final IeltsSceneFlowService sceneFlowService;
+	private final IeltsEvaluationService evaluationService;
+	private final IeltsSessionService ieltsSessionService;
 	private final IeltsRecordingStore recordingStore;
 
 	public IELTSSceneController(
-			IeltsSceneServiceImpl ieltsSceneService,
-			IeltsSceneFlowServiceImpl sceneFlowService,
-			IeltsEvaluationServiceImpl evaluationService,
-			IeltsSessionServiceImpl ieltsSessionService,
+			IeltsSceneService ieltsSceneService,
+			IeltsSceneFlowService sceneFlowService,
+			IeltsEvaluationService evaluationService,
+			IeltsSessionService ieltsSessionService,
 			IeltsRecordingStore recordingStore) {
 		this.ieltsSceneService = ieltsSceneService;
 		this.sceneFlowService = sceneFlowService;
@@ -147,7 +148,8 @@ public class IELTSSceneController {
 	public ApiResponse<StartIeltsSessionResponse> startSession(
 			@PathVariable String ieltsId,
 			@Valid @RequestBody StartIeltsDialogueRequest request) {
-		return ApiResponse.success(ieltsSessionService.startSession(ieltsId, request));
+		return ApiResponse.success(ieltsSessionService.startSession(
+				new StartIeltsSessionCommand(ieltsId, request)));
 	}
 
 	@PostMapping(
@@ -174,7 +176,7 @@ public class IELTSSceneController {
 			@PathVariable String sessionId,
 			@PathVariable int turnNo,
 			@RequestParam(defaultValue = "false") boolean timedOut) {
-		return ApiResponse.success(ieltsSessionService.advanceState(
+		return ApiResponse.success(sceneFlowService.advanceDialogueState(
 				ieltsId,
 				sessionId,
 				turnNo,
@@ -186,7 +188,7 @@ public class IELTSSceneController {
 			@PathVariable String ieltsId,
 			@PathVariable String sessionId) {
 		return ApiResponse.success(
-				ieltsSessionService.getState(ieltsId, sessionId));
+				sceneFlowService.getDialogueState(ieltsId, sessionId));
 	}
 
 	@PostMapping("/{ieltsId}/sessions/{sessionId}/part2/state")
@@ -194,7 +196,7 @@ public class IELTSSceneController {
 			@PathVariable String ieltsId,
 			@PathVariable String sessionId,
 			@Valid @RequestBody IeltsPart2StateRequest request) {
-		return ApiResponse.success(ieltsSessionService.advancePart2State(
+		return ApiResponse.success(sceneFlowService.advancePart2State(
 				ieltsId,
 				sessionId,
 				request.event()));
@@ -205,7 +207,7 @@ public class IELTSSceneController {
 			@PathVariable String ieltsId,
 			@PathVariable String sessionId) {
 		return ApiResponse.success(
-				ieltsSessionService.getPart2State(ieltsId, sessionId));
+				sceneFlowService.getPart2State(ieltsId, sessionId));
 	}
 
 	@PostMapping("/{ieltsId}/sessions/{sessionId}/evaluation")

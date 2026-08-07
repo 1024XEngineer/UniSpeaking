@@ -13,15 +13,14 @@ import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.profile.ProfileService;
-import com.unispeaking.service.scene.SceneService;
+import com.unispeaking.service.scene.FreeChatSceneService;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
-public class FreeChatSceneServiceImpl
-		implements SceneService<FreeChatSceneRequest, FreeChatSceneResult> {
+public class FreeChatSceneServiceImpl implements FreeChatSceneService {
 
 	private final AuthService authService;
 	private final ProfileService profileService;
@@ -47,6 +46,7 @@ public class FreeChatSceneServiceImpl
 		return prepare(request).scene();
 	}
 
+	@Override
 	public FreeChatSceneContext prepare(FreeChatSceneRequest request) {
 		String userId = authService.requireUserId(null);
 		UserProfile profile = profileService.getProfile(userId);
@@ -72,6 +72,7 @@ public class FreeChatSceneServiceImpl
 						prompt));
 	}
 
+	@Override
 	public TranslateTextResponse translate(String text) {
 		authService.requireUserId(null);
 		if (text == null || text.isBlank()) {

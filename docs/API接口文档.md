@@ -349,6 +349,9 @@
 
 `IeltsPart2StateResponse`：`sceneId`、`sessionId`、`phase`、`completed`、`controlInstruction`。
 
+以上状态接口由 `IeltsSceneFlowService` 处理。`IeltsSessionService` 只负责启动会话、
+保存消息和结束会话，不负责题目推进或 Part 2 阶段转换。
+
 ### 7.3 IELTS 评分、历史和录音
 
 | 方法 | 路径 | 请求 | 响应 |
@@ -447,12 +450,11 @@ public interface SessionService {
     StartSessionResponse startSession(StartSessionCommand command);
     void addMessage(String sessionId, Message message);
     void endSession(String sessionId);
-    SessionDetail getSession(String sessionId);
-    List<SessionDetail> getBySceneId(String sceneId);
 }
 ```
 
 Session 只管理已准备场景的会话生命周期和消息，不调用认证服务生成场景，也不重复场景模块的准备逻辑。
+会话详情和按场景查询是内部协作能力，由 `SessionLifecycleManager` 提供，不属于公共接口。
 
 ### 10.3 Evaluation
 
@@ -496,4 +498,3 @@ IELTS 专项训练/模考：
 5. 根据 Part 状态机提交轮次、音频和状态事件
 6. 每阶段后台评分；最后调用 evaluation 获取汇总
 7. `/evaluations` 用于学习资产列表、报告、趋势和录音链接
-

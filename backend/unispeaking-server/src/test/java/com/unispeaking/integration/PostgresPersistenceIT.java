@@ -77,7 +77,7 @@ class PostgresPersistenceIT {
 		registry.add("spring.sql.init.mode", () -> "never");
 		registry.add(
 				"mybatis-plus.type-handlers-package",
-				() -> "com.unispeaking.infrastructure.persistence.typehandler");
+				() -> "com.unispeaking.common.persistence.typehandler");
 	}
 
 	@Autowired

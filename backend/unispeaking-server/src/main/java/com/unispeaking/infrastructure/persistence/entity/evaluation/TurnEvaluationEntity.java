@@ -2,7 +2,7 @@ package com.unispeaking.infrastructure.persistence.entity.evaluation;
 
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.unispeaking.infrastructure.persistence.typehandler.PostgresJsonbStringTypeHandler;
+import com.unispeaking.common.persistence.typehandler.PostgresJsonbStringTypeHandler;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import lombok.Getter;

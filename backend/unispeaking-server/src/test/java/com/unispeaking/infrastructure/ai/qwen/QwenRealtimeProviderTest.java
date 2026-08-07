@@ -1,5 +1,6 @@
 package com.unispeaking.infrastructure.ai.qwen;
 
+import com.unispeaking.infrastructure.config.RealtimeProperties;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

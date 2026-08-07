@@ -3,71 +3,56 @@ package com.unispeaking.service.session.impl;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.component.session.RealtimeSessionCoordinator;
 import com.unispeaking.component.session.SessionLifecycleManager;
-import com.unispeaking.component.statemachine.IeltsPart2StateMachine;
-import com.unispeaking.component.statemachine.IeltsQuestionStateMachine;
 import com.unispeaking.domain.dto.scene.IeltsDialogueSceneContext;
-import com.unispeaking.domain.dto.session.IeltsDialogueStateResponse;
-import com.unispeaking.domain.dto.session.IeltsPart2StateResponse;
 import com.unispeaking.domain.dto.session.Message;
-import com.unispeaking.domain.dto.session.SessionDetail;
 import com.unispeaking.domain.dto.session.StartIeltsDialogueRequest;
 import com.unispeaking.domain.dto.session.StartIeltsSessionResponse;
+import com.unispeaking.domain.dto.session.StartIeltsSessionCommand;
 import com.unispeaking.domain.dto.session.StartSessionCommand;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
-import com.unispeaking.domain.po.scene.IeltsPracticeRecord;
-import com.unispeaking.domain.vo.scene.IeltsPart;
-import com.unispeaking.domain.vo.scene.IeltsPart2Event;
 import com.unispeaking.domain.vo.scene.SceneType;
-import com.unispeaking.service.scene.impl.IeltsSceneServiceImpl;
-import com.unispeaking.service.session.SessionService;
-import java.util.List;
+import com.unispeaking.service.scene.IeltsSceneFlowService;
+import com.unispeaking.service.scene.IeltsSceneService;
+import com.unispeaking.service.session.IeltsSessionService;
 import org.springframework.stereotype.Service;
 
 @Service
-public class IeltsSessionServiceImpl implements SessionService {
+public class IeltsSessionServiceImpl implements IeltsSessionService {
 
-	private final IeltsSceneServiceImpl sceneService;
+	private final IeltsSceneService sceneService;
+	private final IeltsSceneFlowService flowService;
 	private final SessionLifecycleManager sessionLifecycle;
 	private final RealtimeSessionCoordinator sessionCoordinator;
-	private final IeltsQuestionStateMachine questionStateMachine;
-	private final IeltsPart2StateMachine part2StateMachine;
 
 	public IeltsSessionServiceImpl(
-			IeltsSceneServiceImpl sceneService,
+			IeltsSceneService sceneService,
+			IeltsSceneFlowService flowService,
 			SessionLifecycleManager sessionLifecycle,
-			RealtimeSessionCoordinator sessionCoordinator,
-			IeltsQuestionStateMachine questionStateMachine,
-			IeltsPart2StateMachine part2StateMachine) {
+			RealtimeSessionCoordinator sessionCoordinator) {
 		this.sceneService = sceneService;
+		this.flowService = flowService;
 		this.sessionLifecycle = sessionLifecycle;
 		this.sessionCoordinator = sessionCoordinator;
-		this.questionStateMachine = questionStateMachine;
-		this.part2StateMachine = part2StateMachine;
 	}
 
-	public StartIeltsSessionResponse startSession(
-			String ieltsId,
-			StartIeltsDialogueRequest request) {
+	@Override
+	public StartIeltsSessionResponse startSession(StartIeltsSessionCommand command) {
+		String ieltsId = command.ieltsId();
+		StartIeltsDialogueRequest request = command.request();
 		IeltsDialogueSceneContext prepared = sceneService.prepareDialogue(
 				ieltsId,
 				request.voiceId());
-		StartSessionResponse started = startSession(
+		StartSessionResponse started = sessionLifecycle.startSession(
 				new StartSessionCommand(
 						prepared.userId(),
 						prepared.ieltsId(),
 						SceneType.IELTS_SCENE,
 						prepared.activePart().name().replace("PART_", "PART"),
 						prepared.prompt()));
-		if (prepared.activePart() == IeltsPart.PART_2) {
-			part2StateMachine.start(ieltsId, started.sessionId());
-		}
-		else {
-			questionStateMachine.start(
-					ieltsId,
-					started.sessionId(),
-					prepared.activePart(),
-					prepared.content().questionsFor(prepared.activePart()));
-		}
+		flowService.startSessionState(
+				ieltsId,
+				started.sessionId(),
+				prepared.activePart());
 		try {
 			return sessionCoordinator.connectIelts(
 					prepared.content(),
@@ -85,16 +70,9 @@ public class IeltsSessionServiceImpl implements SessionService {
 					request.translationEnabled());
 		}
 		catch (RuntimeException exception) {
-			questionStateMachine.remove(started.sessionId());
-			part2StateMachine.remove(started.sessionId());
+			flowService.clearSessionState(started.sessionId());
 			throw exception;
 		}
-	}
-
-	@Override
-	public StartSessionResponse startSession(StartSessionCommand command) {
-		requireSceneType(command, SceneType.IELTS_SCENE);
-		return sessionLifecycle.startSession(command);
 	}
 
 	@Override
@@ -102,16 +80,9 @@ public class IeltsSessionServiceImpl implements SessionService {
 		sessionLifecycle.addMessage(sessionId, message);
 	}
 
-	public void addMessage(String userId, String sessionId, Message message) {
-		sessionLifecycle.addMessage(userId, sessionId, message);
-	}
-
 	@Override
-	public void endSession(String sessionId) {
-		endSession(sessionLifecycle.requireOwnerId(sessionId), sessionId, null);
-	}
-
-	public void endSession(String userId, String sessionId, String stopTime) {
+	public Void endSession(String sessionId) {
+		String userId = sessionLifecycle.requireOwnerId(sessionId);
 		if (sessionLifecycle.requireSceneType(userId, sessionId)
 				!= SceneType.IELTS_SCENE) {
 			throw new BusinessException(
@@ -121,72 +92,14 @@ public class IeltsSessionServiceImpl implements SessionService {
 		String ieltsId = sessionCoordinator
 				.requireOwnedSession(userId, sessionId)
 				.getSceneId();
-		sessionLifecycle.endSession(userId, sessionId, stopTime);
-		sceneService.completeDialogue(ieltsId, userId);
-	}
-
-	@Override
-	public SessionDetail getSession(String sessionId) {
-		return sessionLifecycle.getSession(sessionId);
-	}
-
-	@Override
-	public List<SessionDetail> getBySceneId(String sceneId) {
-		return sessionLifecycle.getBySceneId(sceneId);
-	}
-
-	private void requireSceneType(StartSessionCommand command, SceneType expected) {
-		if (command == null || command.sceneType() != expected) {
-			throw new BusinessException(
-					"SESSION_SCENE_TYPE_MISMATCH",
-					"session command does not belong to " + expected);
+		try {
+			sessionLifecycle.endSession(sessionId);
+			sceneService.completeDialogue(ieltsId, userId);
 		}
-	}
-
-	public IeltsDialogueStateResponse advanceState(
-			String ieltsId,
-			String sessionId,
-			int turnNo,
-			boolean timedOut) {
-		requireOwnedSession(ieltsId, sessionId);
-		return questionStateMachine.advance(
-				ieltsId,
-				sessionId,
-				turnNo,
-				timedOut);
-	}
-
-	public IeltsDialogueStateResponse getState(
-			String ieltsId,
-			String sessionId) {
-		requireOwnedSession(ieltsId, sessionId);
-		return questionStateMachine.get(ieltsId, sessionId);
-	}
-
-	public IeltsPart2StateResponse advancePart2State(
-			String ieltsId,
-			String sessionId,
-			IeltsPart2Event event) {
-		requireOwnedSession(ieltsId, sessionId);
-		return part2StateMachine.advance(ieltsId, sessionId, event);
-	}
-
-	public IeltsPart2StateResponse getPart2State(
-			String ieltsId,
-			String sessionId) {
-		requireOwnedSession(ieltsId, sessionId);
-		return part2StateMachine.get(ieltsId, sessionId);
-	}
-
-	private void requireOwnedSession(String ieltsId, String sessionId) {
-		IeltsPracticeRecord practice = sceneService.requireOwnedPractice(ieltsId);
-		String userId = practice.userId().toString();
-		var session = sessionCoordinator.requireOwnedSession(userId, sessionId);
-		if (session.getSceneType() != SceneType.IELTS_SCENE
-				|| !ieltsId.equals(session.getSceneId())) {
-			throw new BusinessException(
-					"IELTS_SESSION_MISMATCH",
-					"IELTS 会话与练习不匹配");
+		finally {
+			flowService.clearSessionState(sessionId);
 		}
+		return null;
 	}
+
 }

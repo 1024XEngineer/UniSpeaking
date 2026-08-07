@@ -44,8 +44,9 @@ public interface SceneService<REQUEST, RESPONSE> {
 - 把场景准备工作推给 `SessionService`。
 - 为不同场景增加 `SceneService` 公共方法。
 
-场景的额外查询、搜索、偏好或资产方法可直接定义在对应具体实现类中，但不能污染
-`SceneService` 接口。
+每个场景必须声明专用接口继承 `SceneService`，例如 `CustomSceneService extends
+SceneService<CustomSceneRequest, CustomSceneResult>`。场景的额外查询、搜索、偏好或资产
+方法定义在专用接口中；实现类只实现专用接口，不能污染公共 `SceneService`。
 
 ### 2.2 `SceneFlowService`
 
@@ -60,10 +61,15 @@ public interface SceneFlowService<S> {
 }
 ```
 
-职责：只管理有阶段场景的流程状态。FreeChat 无阶段，不实现此接口。
+职责：管理有阶段场景的全部流程状态。FreeChat 无阶段，不实现此接口。
 
-它负责“当前处于哪个阶段”，不负责生成内容、启动会话、保存消息或评分。真实流程状态
-必须可以从数据库恢复；进程内状态机只负责运行时判断和转换。
+有阶段的场景通过专用接口继承它，例如 `CustomSceneFlowService extends
+SceneFlowService<CustomStage>`；Impl 不直接实现公共接口。
+
+它既负责场景级阶段（例如 IELTS 的 Part 1/2/3），也负责场景专属的会话内子流程
+（例如题目推进、Part 2 准备/作答、自定义对话目标）。这些子流程方法只声明在对应的
+场景专用 Flow 接口中，不得放入 Session 接口。Flow 不负责生成内容、创建会话、保存
+消息或评分。真实流程状态必须可以从数据库恢复；进程内状态机只负责运行时判断和转换。
 
 ### 2.3 `SessionService`
 
@@ -74,8 +80,6 @@ public interface SessionService {
     StartSessionResponse startSession(StartSessionCommand command);
     void addMessage(String sessionId, Message message);
     void endSession(String sessionId);
-    SessionDetail getSession(String sessionId);
-    List<SessionDetail> getBySceneId(String sceneId);
 }
 ```
 
@@ -85,7 +89,9 @@ public interface SessionService {
 - 创建 Realtime 会话、维护会话生命周期。
 - 接收、验证并持久化消息。
 - 结束会话和释放临时资源。
-- 查询会话及其与场景的关联。
+
+会话查询属于模块内部协作能力，由 `SessionLifecycleManager` 提供，不进入公共
+`SessionService` 或场景专用 Session 接口。
 
 边界：
 
@@ -94,6 +100,8 @@ public interface SessionService {
 - 不生成场景、不拼 Prompt、不选择题目、不推进业务阶段、不生成评分。
 - `SessionService` 是公共契约，但 FreeChat、Custom、IELTS 分别实现；不得创建通用
   `SessionServiceImpl`。
+- 每个场景声明 `FreeChatSessionService`、`CustomSessionService`、`IeltsSessionService`
+  等专用接口继承公共契约，并由对应 Impl 实现。
 
 ### 2.4 `EvaluationService`
 
@@ -112,6 +120,9 @@ public interface EvaluationService<R, D> {
 
 FreeChat 当前不评分，因此不实现。Custom 与 IELTS 分别实现；不得创建通用
 `EvaluationServiceImpl`。
+
+支持评分的场景必须声明专用 Evaluation 接口继承公共契约，额外的历史、详情或专项评分
+方法放在专用接口中。
 
 ### 2.5 `AiProvider`
 
@@ -134,9 +145,9 @@ Doubao、DeepSeek、MiniMax、讯飞等供应商差异全部留在 `infrastructu
 
 | 场景 | Scene | Flow | Session | Evaluation |
 |---|---|---|---|---|
-| FreeChat | `FreeChatSceneServiceImpl` | 无 | `FreeChatSessionServiceImpl` | 无 |
-| Custom | `CustomSceneServiceImpl` | `CustomSceneFlowServiceImpl` | `CustomSessionServiceImpl` | `CustomEvaluationServiceImpl` |
-| IELTS | `IeltsSceneServiceImpl` | `IeltsSceneFlowServiceImpl` | `IeltsSessionServiceImpl` | `IeltsEvaluationServiceImpl` |
+| FreeChat | `FreeChatSceneService → Impl` | 无 | `FreeChatSessionService → Impl` | 无 |
+| Custom | `CustomSceneService → Impl` | `CustomSceneFlowService → Impl` | `CustomSessionService → Impl` | `CustomEvaluationService → Impl` |
+| IELTS | `IeltsSceneService → Impl` | `IeltsSceneFlowService → Impl` | `IeltsSessionService → Impl` | `IeltsEvaluationService → Impl` |
 
 所有实现类必须位于对应模块的 `impl` 包并以 `Impl` 结尾。以下类不允许存在：
 
@@ -155,7 +166,7 @@ EvaluationServiceImpl
 Controller / WebSocket
         │
         ▼
-Service 接口与具体场景实现
+场景专用 Service 接口与实现
         │
         ├── Component / Domain
         ├── Provider
@@ -187,12 +198,16 @@ src/main/java/com/unispeaking
 │   ├── scene
 │   │   ├── SceneService.java
 │   │   ├── SceneFlowService.java
+│   │   ├── {Scene}SceneService.java
+│   │   ├── {Scene}SceneFlowService.java
 │   │   └── impl
 │   ├── session
 │   │   ├── SessionService.java
+│   │   ├── {Scene}SessionService.java
 │   │   └── impl
 │   ├── evaluation
 │   │   ├── EvaluationService.java
+│   │   ├── {Scene}EvaluationService.java
 │   │   └── impl
 │   ├── auth
 │   ├── profile
@@ -218,6 +233,7 @@ src/main/java/com/unispeaking
 │   ├── persistence
 │   └── config
 └── common
+    └── persistence/{codec,typehandler}
 ```
 
 ### 5.1 `controller`
@@ -235,12 +251,13 @@ src/main/java/com/unispeaking
 `IELTSSceneController` 的 `/api/ielts/recordings/...`，不单独创建
 `IeltsRecordingController`。
 
-Controller 可以注入具体场景实现类，因为实现类允许暴露该场景特有的查询、搜索等方法；
-但通用流程仍必须遵守五个稳定接口。
+Controller 注入场景专用接口，不直接依赖 Impl。专用接口负责暴露场景特有的查询、搜索等
+方法，继承链仍必须遵守五个稳定公共接口。
 
 ### 5.2 `service`
 
-`scene`、`session`、`evaluation` 包的根目录只放稳定接口，具体场景实现全部放 `impl`。
+`scene`、`session`、`evaluation` 包的根目录放公共接口和场景专用接口，具体场景实现全部放
+`impl`。结构固定为“公共接口 → 场景专用接口 → 场景 Impl”。
 
 其他横向业务（如 auth、profile、asset、achievement）仍采用：
 
@@ -317,11 +334,15 @@ Calculator、Policy 和通用工具。
 ```text
 controller/DebateSceneController.java
 
+service/scene/DebateSceneService.java
+  extends SceneService<DebateSceneRequest, DebateSceneResult>
 service/scene/impl/DebateSceneServiceImpl.java
-  implements SceneService<DebateSceneRequest, DebateSceneResult>
+  implements DebateSceneService
 
+service/session/DebateSessionService.java
+  extends SessionService
 service/session/impl/DebateSessionServiceImpl.java
-  implements SessionService
+  implements DebateSessionService
 
 domain/dto/scene/DebateSceneRequest.java
 domain/dto/scene/DebateSceneResult.java
@@ -331,8 +352,10 @@ domain/dto/scene/DebateDialogueSceneContext.java
 ### 6.2 有多阶段流程时增加
 
 ```text
+service/scene/DebateSceneFlowService.java
+  extends SceneFlowService<DebateStage>
 service/scene/impl/DebateSceneFlowServiceImpl.java
-  implements SceneFlowService<DebateStage>
+  implements DebateSceneFlowService
 
 domain/vo/scene/DebateStage.java
 component/statemachine/DebateStateMachine.java
@@ -343,8 +366,10 @@ component/statemachine/DebateStateMachine.java
 ### 6.3 支持评分时增加
 
 ```text
+service/evaluation/DebateEvaluationService.java
+  extends EvaluationService<DebateEvaluationReport, DebateEvaluationDetail>
 service/evaluation/impl/DebateEvaluationServiceImpl.java
-  implements EvaluationService<DebateEvaluationReport, DebateEvaluationDetail>
+  implements DebateEvaluationService
 
 domain/dto/evaluation/DebateEvaluationReport.java
 domain/dto/evaluation/DebateEvaluationDetail.java
@@ -359,7 +384,7 @@ domain/dto/evaluation/DebateEvaluationDetail.java
 infrastructure/persistence/entity/scene/DebateEntity.java
 infrastructure/persistence/mapper/scene/DebateMapper.java
 infrastructure/persistence/repository/scene/DebateRepository.java
-infrastructure/persistence/codec/scene/DebateJsonbCodec.java   // 仅需要 JSONB 时
+common/persistence/codec/scene/DebateJsonbCodec.java   // 仅需要 JSONB 时
 ```
 
 同时：
@@ -374,13 +399,11 @@ infrastructure/persistence/codec/scene/DebateJsonbCodec.java   // 仅需要 JSON
 ```text
 service/debate/...                       // 不新增平行场景模块
 domain/dto/debate/...                    // DTO 按职责分包
-service/scene/DebateSceneService.java    // 不新增场景专用接口
-service/session/DebateSessionService.java
 service/*/impl/SceneServiceImpl.java     // 不恢复通用实现
+service/scene/impl/DebateSceneServiceImpl.java
+  implements SceneService               // Impl 不越过场景专用接口
 controller/DebateRecordingController.java // 附属接口并入场景 Controller
 ```
-
-场景独有的公开方法可以写在 `DebateSceneServiceImpl`，例如主题检索；这不构成新增接口的理由。
 
 ## 7. 场景调用顺序
 
@@ -442,6 +465,8 @@ IeltsSceneServiceImpl.generate
 
 - 只有存在明确状态、事件、转换和终止条件时才创建状态机。
 - 状态枚举放 `domain/vo/scene`，执行器放 `component/statemachine`。
+- 状态机由对应的 `{Scene}SceneFlowServiceImpl` 持有；Session 只能通知 Flow 初始化或
+  清理 session 绑定状态，不能直接推进或查询业务状态机。
 - 状态转换不得只依赖前端按钮；后端保存可恢复状态。
 - 状态机不得直接调用 Controller 或厂商 SDK。
 - 定时、静默、最大回答时长等规则应有单元测试，覆盖最后一题、提前结束和超时边界。
@@ -454,7 +479,9 @@ IeltsSceneServiceImpl.generate
 infrastructure/persistence
 ├── entity/{module}
 ├── mapper/{module}
-├── repository/{module}
+└── repository/{module}
+
+common/persistence
 ├── codec/{module}
 └── typehandler
 ```
@@ -563,6 +590,7 @@ npm run check:realtime-events
 提交前逐项确认：
 
 - [ ] 未修改五个稳定接口的方法签名。
+- [ ] 已建立“公共接口 → 场景专用接口 → Impl”的继承链。
 - [ ] 场景实现位于 `service/*/impl` 且以 `Impl` 结尾。
 - [ ] 未创建通用 `Scene/Flow/Session/EvaluationServiceImpl`。
 - [ ] Scene 已完成认证、配额、Prompt、内容和落库，未启动 Session。
@@ -580,6 +608,7 @@ npm run check:realtime-events
 ## 17. 禁止事项汇总
 
 - 修改公共接口来迁就某个场景。
+- Impl 跳过场景专用接口而直接实现公共接口。
 - 恢复通用 Scene/Flow/Session/Evaluation 实现。
 - 在场景 Service 中启动 Session，或在 Session 中生成场景。
 - 把录音、状态机、Parser、Prompt Builder 包装成独立 Service。
