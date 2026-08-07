@@ -12,6 +12,7 @@ export default function ScenarioTrainingRoute() {
       initialStage={stage === 'speak' ? 'speak' : undefined}
       onBack={() => router.replace(routes.tabs.scenes)}
       onFinish={() => router.replace(routes.tabs.scenes)}
+      onViewDetails={(recordId) => router.replace(routes.learning.sceneDetail(recordId))}
     />
   );
 }

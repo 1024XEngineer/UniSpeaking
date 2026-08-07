@@ -1,8 +1,17 @@
+import type { SceneCategory } from './sceneCategories';
+
 export const recommendations = [
-  { id: 'coffee', title: '咖啡店点单', tag: '日常', duration: '8–10 分钟', level: '初级', goal: '流利点单，清晰表达需求' },
-  { id: 'hotel', title: '酒店入住', tag: '旅行', duration: '10–12 分钟', level: '中级', goal: '礼貌沟通，确认入住细节' },
-  { id: 'pharmacy', title: '药店咨询', tag: '生活', duration: '8–10 分钟', level: '中级', goal: '描述症状，确认用法与注意事项' },
-] as const;
+  { id: 'coffee', title: '咖啡店点单', category: 'food', duration: '8–10 分钟', level: '初级', goal: '流利点单，清晰表达需求' },
+  { id: 'hotel', title: '酒店入住', category: 'accommodation', duration: '10–12 分钟', level: '中级', goal: '礼貌沟通，确认入住细节' },
+  { id: 'pharmacy', title: '药店咨询', category: 'health', duration: '8–10 分钟', level: '中级', goal: '描述症状，确认用法与注意事项' },
+] as const satisfies readonly {
+  id: string;
+  title: string;
+  category: SceneCategory;
+  duration: string;
+  level: string;
+  goal: string;
+}[];
 
 export type ScenePromptExample = {
   id: string;
@@ -44,6 +53,11 @@ export const ieltsTopics = {
     { title: 'Home & Accommodation', category: '必考题', state: '建议复练' },
     { title: 'Work or Studies', category: '必考题', state: '已练习' },
     { title: 'Food', category: '事物', state: '未练习' },
+    { title: 'Advertisement', category: '事物', state: '建议复练' },
+    { title: 'Age', category: '人物', state: '已练习' },
+    { title: 'Air Travel', category: '事件', state: '未练习' },
+    { title: 'Animals and Birds', category: '地点', state: '未练习' },
+    { title: 'Art', category: '事物', state: '未练习' },
   ],
   p2: [
     { title: '想见的名人', category: '人物', state: '建议复练' },

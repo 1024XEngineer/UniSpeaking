@@ -1,16 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PanResponder, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, Image, PanResponder, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
-import { BookOpenTextIcon } from 'phosphor-react-native/src/icons/BookOpenText';
-import { CaretDownIcon } from 'phosphor-react-native/src/icons/CaretDown';
+import { LinearGradient } from 'expo-linear-gradient';
+import Reanimated, {
+  cancelAnimation,
+  Easing as ReanimatedEasing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 import Svg, { Circle, Line, Polygon, Text as SvgText } from 'react-native-svg';
 
 import {
   AppIcon,
   AppScreen,
-  PageHeader,
-  uiStyles,
+  MainModuleHeader,
 } from '@/components/ui';
+import { SceneCategoryTag } from '@/components/SceneCategoryTag';
 import {
   getDailyScenePromptExample,
   learningItems,
@@ -39,15 +46,17 @@ import { speedCodeForLabel } from '@/features/auth/preferenceMappings';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
 import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
 import { ApiClient } from '@/infrastructure/http/ApiClient';
+import type { SceneCategory } from '@/data/sceneCategories';
 import { useAppModel } from '@/model/AppModel';
 import { colors } from '@/theme/tokens';
 import { CallExperience, selectCallCaption } from './ConversationScreen';
-import { IeltsFlow } from './SpecialtyFlows';
+import { IeltsFlow, InterviewFlow } from './SpecialtyFlows';
 
 export type SceneRoute =
   | { name: 'home' }
   | { name: 'training'; scene: GeneratedScene }
-  | { name: 'ielts' };
+  | { name: 'ielts' }
+  | { name: 'interview' };
 
 const stages = [
   { key: 'learn', label: '学', note: '积累表达' },
@@ -70,7 +79,7 @@ function StageProgressRail({
 }) {
   const [railWidth, setRailWidth] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
-  const collapseProgress = useRef(new Animated.Value(0)).current;
+  const [collapseProgress] = useState(() => new Animated.Value(0));
   const activeIndex = stages.findIndex((item) => item.key === stage);
 
   useEffect(() => {
@@ -287,7 +296,7 @@ export function SceneCallStage({
   );
 }
 
-export function Training({ id, scene, trainingController: injectedTrainingController, wavRecorder: injectedWavRecorder, ttsPlayer: injectedTtsPlayer, initialStage = 'learn', onBack, onFinish }: { id?: string; scene?: GeneratedScene; trainingController?: SceneTrainingController; wavRecorder?: Pick<WavRecorder, 'start' | 'stop' | 'cancel'>; ttsPlayer?: Pick<TtsPlayer, 'play' | 'stop'>; initialStage?: TrainingStage; onBack: () => void; onFinish: () => void }) {
+export function Training({ id, scene, trainingController: injectedTrainingController, wavRecorder: injectedWavRecorder, ttsPlayer: injectedTtsPlayer, initialStage = 'learn', onBack, onFinish, onViewDetails }: { id?: string; scene?: GeneratedScene; trainingController?: SceneTrainingController; wavRecorder?: Pick<WavRecorder, 'start' | 'stop' | 'cancel'>; ttsPlayer?: Pick<TtsPlayer, 'play' | 'stop'>; initialStage?: TrainingStage; onBack: () => void; onFinish: () => void; onViewDetails?: (id: string) => void }) {
   const sceneId = scene?.sceneId ?? id ?? recommendations[0].id;
   const scenario = scene
     ? { id: scene.sceneId, title: scene.title }
@@ -472,9 +481,17 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
       setRecording(true);
     }
   };
-  const finishTraining = () => {
+  const closeCompletion = () => {
     setCompletionOpen(false);
+  };
+  const finishTraining = () => {
+    closeCompletion();
     onFinish();
+  };
+  const viewTrainingDetails = () => {
+    closeCompletion();
+    if (onViewDetails) requestAnimationFrame(() => onViewDetails(sceneId));
+    else onFinish();
   };
 
   return (
@@ -663,10 +680,15 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
               ))}
             </View>
           </View>
-          <Pressable accessibilityRole="button" onPress={finishTraining} style={styles.completionDoneButton}>
-            <Text style={styles.completionDoneText}>返回场景广场</Text>
-            <AppIcon name="arrow-right" size={18} color={colors.white} />
-          </Pressable>
+          <View style={styles.completionActions}>
+            <Pressable accessibilityRole="button" onPress={finishTraining} style={[styles.completionActionButton, styles.completionBackButton]}>
+              <Text style={styles.completionBackText}>返回场景广场</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={viewTrainingDetails} style={[styles.completionActionButton, styles.completionDetailsButton]}>
+              <Text style={styles.completionDetailsText}>查看详情</Text>
+              <AppIcon name="arrow-right" size={18} color={colors.white} />
+            </Pressable>
+          </View>
         </View>
       </View>
     ) : null}
@@ -694,6 +716,76 @@ function createDefaultTtsPlayer() {
   });
 }
 
+function inferSceneCategory(scene: GeneratedScene): SceneCategory {
+  return recommendations.find((item) => item.title === scene.title)?.category ?? 'other';
+}
+
+function ScenePromptInput({
+  value,
+  onChangeText,
+  placeholder,
+  placeholderTextColor,
+}: {
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  placeholderTextColor: string;
+}) {
+  const [focused, setFocused] = useState(false);
+  const hasInput = value.length > 0;
+  const active = focused || hasInput;
+  const rotation = useSharedValue(0);
+
+  useEffect(() => {
+    cancelAnimation(rotation);
+    if (active) {
+      rotation.value = 0;
+      return;
+    }
+    rotation.value = withRepeat(
+      withTiming(360, {
+        duration: 8500,
+        easing: ReanimatedEasing.linear,
+      }),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(rotation);
+  }, [active, rotation]);
+
+  const gradientStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
+
+  return (
+    <View style={[styles.builderInputFrame, active && styles.builderInputFrameFocused]}>
+      {!active ? (
+        <Reanimated.View pointerEvents="none" style={[styles.builderInputGradientLayer, gradientStyle]}>
+          <LinearGradient
+            colors={['#DCE3ED', '#BFD9F8', '#EAE4F8', '#C8E0FA', '#DCE3ED']}
+            end={{ x: 1, y: 1 }}
+            start={{ x: 0, y: 0 }}
+            style={styles.builderInputGradient}
+          />
+        </Reanimated.View>
+      ) : null}
+      <TextInput
+        accessibilityLabel="描述想练习的场景"
+        multiline
+        maxLength={200}
+        onBlur={() => setFocused(false)}
+        onChangeText={onChangeText}
+        onFocus={() => setFocused(true)}
+        placeholder={placeholder}
+        placeholderTextColor={placeholderTextColor}
+        style={styles.builderInput}
+        textAlignVertical="top"
+        value={value}
+      />
+    </View>
+  );
+}
+
 export function ScenesHome({
   onOpen,
   promptExample = getDailyScenePromptExample(),
@@ -707,7 +799,6 @@ export function ScenesHome({
     () => injectedSceneService ?? createDefaultSceneService(),
   );
   const [prompt, setPrompt] = useState('');
-  const [specialtyOpen, setSpecialtyOpen] = useState(false);
   const [preview, setPreview] = useState<GeneratedScene | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
@@ -729,64 +820,30 @@ export function ScenesHome({
 
   return (
     <View style={[styles.sceneHomeRoot, preview && styles.sceneHomeRootModal]}>
-      <AppScreen scrollEnabled={false} contentStyle={styles.sceneHomeContent}>
-        <View style={styles.sceneHeading}>
-          <PageHeader
-            eyebrow="SCENARIO MARKETPLACE"
-            title="场景广场"
-            subtitle="把真实生活中的需求，变成高质量的口语练习。"
-          />
-        </View>
+      <AppScreen
+        contentStyle={styles.sceneHomeContent}
+        fixedHeader={<MainModuleHeader englishTitle="SCENARIO MARKETPLACE" title="场景广场" />}
+      >
+        <Text style={styles.sceneHeadingSubtitle}>把真实生活中的需求，变成高质量的口语练习。</Text>
 
         <View style={styles.customBuilder}>
+          <LinearGradient
+            colors={['#F4F8FF', '#FBF9FF']}
+            end={{ x: 1, y: 0 }}
+            pointerEvents="none"
+            start={{ x: 0, y: 0 }}
+            style={styles.customBuilderTint}
+          />
           <View style={styles.builderTopRow}>
             <View style={styles.builderHeadingCopy}>
-              <Text style={styles.builderEyebrow}>CREATE YOUR OWN</Text>
+              <Text style={[styles.builderEyebrow, styles.customBuilderEyebrow]}>CREATE YOUR OWN</Text>
               <Text style={styles.builderTitle}>创建专属场景</Text>
             </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="打开专项训练"
-              onPress={() => setSpecialtyOpen((current) => !current)}
-              style={({ pressed }) => [styles.specialtyTrigger, pressed && styles.compactPressed]}
-            >
-              <Text style={styles.specialtyTriggerText}>专项训练</Text>
-              <CaretDownIcon
-                color={colors.muted}
-                size={13}
-                style={specialtyOpen ? styles.specialtyTriggerIconOpen : undefined}
-                weight="bold"
-              />
-            </Pressable>
           </View>
-          <Text numberOfLines={1} style={styles.builderDescription}>说一句你想练习的真实情境，AI 会整理角色、目标和表达任务。</Text>
-
-          {specialtyOpen ? (
-            <View style={styles.specialtyMenu}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => onOpen({ name: 'ielts' })}
-                style={({ pressed }) => [styles.specialtyMenuRow, pressed && styles.compactPressed]}
-              >
-                <View style={styles.specialtyMenuIcon}><BookOpenTextIcon color={colors.ink} size={18} /></View>
-                <View style={uiStyles.flex}>
-                  <Text style={styles.specialtyMenuTitle}>IELTS 口语</Text>
-                  <Text style={styles.specialtyMenuNote}>全流程模拟与评分</Text>
-                </View>
-                <ArrowRightIcon color={colors.subtle} size={14} />
-              </Pressable>
-            </View>
-          ) : null}
-
-          <TextInput
-            accessibilityLabel="描述想练习的场景"
-            multiline
-            maxLength={200}
+          <ScenePromptInput
             onChangeText={setPrompt}
             placeholder={`你今天想练习什么？例如：${promptExample.prompt}`}
             placeholderTextColor="#8D8D88"
-            style={styles.builderInput}
-            textAlignVertical="top"
             value={prompt}
           />
           <View style={styles.builderFooter}>
@@ -794,16 +851,57 @@ export function ScenesHome({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="生成练习场景"
-            disabled={!prompt.trim()}
+              disabled={!prompt.trim() || generating}
               onPress={() => void generatePreview(prompt)}
               style={({ pressed }) => [
                 styles.generateButton,
-                !prompt.trim() && styles.generateButtonDisabled,
-                pressed && prompt.trim() && styles.compactPressed,
+                prompt.trim() && !generating ? styles.generateButtonReady : styles.generateButtonDisabled,
+                pressed && prompt.trim() && !generating && styles.generateButtonPressed,
               ]}
             >
-              <Text style={[styles.generateButtonText, !prompt.trim() && styles.generateButtonTextDisabled]}>{generating ? '正在生成…' : '生成练习场景'}</Text>
-              <AppIcon name="arrow-right" size={18} color={colors.white} />
+              <Text style={[styles.generateButtonText, prompt.trim() && !generating ? styles.generateButtonTextActive : styles.generateButtonTextDisabled]}>{generating ? '正在生成…' : '生成练习场景'}</Text>
+              <AppIcon name="arrow-right" size={18} color={prompt.trim() && !generating ? colors.white : '#7896B8'} />
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.specialtySection}>
+          <View style={styles.specialtySectionHeader}>
+            <Text style={styles.builderEyebrow}>SPECIALTY TRAINING</Text>
+            <Text style={styles.recommendationHeading}>专项训练</Text>
+          </View>
+          <View style={styles.specialtyOptions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="进入雅思口语"
+              onPress={() => onOpen({ name: 'ielts' })}
+              style={({ pressed }) => [
+                styles.specialtyOption,
+                styles.specialtyIeltsOption,
+                pressed && styles.specialtyIeltsOptionPressed,
+              ]}
+            >
+              <Image source={require('../../assets/images/specialty/ielts.png')} style={[styles.specialtyOptionIcon, styles.specialtyIeltsIcon]} />
+              <View style={styles.specialtyOptionCopy}>
+                <Text style={[styles.specialtyOptionTitle, styles.specialtyIeltsTitle]}>雅思口语</Text>
+                <Text numberOfLines={1} style={[styles.specialtyOptionNote, styles.specialtyIeltsNote]}>模考与评分</Text>
+              </View>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="进入英文面试"
+              onPress={() => onOpen({ name: 'interview' })}
+              style={({ pressed }) => [
+                styles.specialtyOption,
+                styles.specialtyInterviewOption,
+                pressed && styles.specialtyInterviewOptionPressed,
+              ]}
+            >
+              <Image source={require('../../assets/images/specialty/interview.png')} style={[styles.specialtyOptionIcon, styles.specialtyInterviewIcon]} />
+              <View style={styles.specialtyOptionCopy}>
+                <Text style={[styles.specialtyOptionTitle, styles.specialtyInterviewTitle]}>英文面试</Text>
+                <Text numberOfLines={1} style={[styles.specialtyOptionNote, styles.specialtyInterviewNote]}>岗位模拟追问</Text>
+              </View>
             </Pressable>
           </View>
           {generationError ? <Text style={styles.generationError}>{generationError}</Text> : null}
@@ -816,23 +914,22 @@ export function ScenesHome({
           </View>
         </View>
         <View style={styles.recommendationList}>
-          {recommendations.map((item, index) => (
+          {recommendations.map((item) => (
             <Pressable
               accessibilityRole="button"
               key={item.id}
               onPress={() => void generatePreview(`${item.title}：${item.goal}`)}
               style={({ pressed }) => [styles.recommendation, pressed && styles.compactPressed]}
             >
-              <Text style={styles.number}>0{index + 1}</Text>
               <View style={styles.recommendationCopy}>
                 <View style={styles.recommendationTitleRow}>
                   <Text style={styles.recommendationTitle}>{item.title}</Text>
-                  <Text style={styles.recommendationTag}>{item.tag}</Text>
+                  <SceneCategoryTag category={item.category} subtle />
                 </View>
                 <Text numberOfLines={1} style={styles.recommendationMeta}>{item.goal} · {item.duration}</Text>
               </View>
               <View style={styles.recommendationArrow}>
-                <AppIcon name="arrow-right" size={17} color={colors.ink} />
+              <AppIcon name="arrow-right" size={17} color={colors.white} />
               </View>
             </Pressable>
           ))}
@@ -846,7 +943,10 @@ export function ScenesHome({
               <AppIcon name="close" size={21} />
             </Pressable>
             <Text style={styles.previewEyebrow}>场景已准备好</Text>
-            <Text style={styles.previewTitle}>{preview.title}</Text>
+            <View style={styles.previewTitleRow}>
+              <Text style={styles.previewTitle}>{preview.title}</Text>
+              <SceneCategoryTag category={inferSceneCategory(preview)} />
+            </View>
             <Text style={styles.previewLead}>确认场景信息，然后开始学习。</Text>
             <View style={styles.previewSummary}>
               {[
@@ -888,90 +988,87 @@ export function ScenesScreen() {
     return <Training scene={route.scene} onBack={() => setRoute({ name: 'home' })} onFinish={() => setRoute({ name: 'home' })} />;
   }
   if (route.name === 'ielts') return <IeltsFlow onExit={() => setRoute({ name: 'home' })} />;
+  if (route.name === 'interview') return <InterviewFlow onExit={() => setRoute({ name: 'home' })} />;
   return <ScenesHome onOpen={setRoute} />;
 }
 
 const styles = StyleSheet.create({
   sceneHomeRoot: { flex: 1, backgroundColor: colors.canvas },
   sceneHomeRootModal: { position: 'relative', zIndex: 100, elevation: 100 },
-  sceneHomeContent: { paddingHorizontal: 18, paddingTop: 18, paddingBottom: 82, gap: 0 },
-  sceneHeading: { marginBottom: 14 },
+  sceneHomeContent: { paddingHorizontal: 18, paddingBottom: 82, gap: 0 },
+  sceneHeadingSubtitle: { marginTop: 8, marginBottom: 14, color: colors.muted, fontSize: 15, lineHeight: 23, fontWeight: '300' },
   customBuilder: {
     zIndex: 2,
-    height: 286,
+    height: 254,
     padding: 15,
     borderWidth: 1,
-    borderColor: '#E1E1DC',
+    borderColor: '#DDE7F7',
     borderRadius: 22,
     backgroundColor: colors.white,
-    shadowColor: '#1A1A18',
+    shadowColor: '#5B8DEF',
     shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.045,
-    shadowRadius: 15,
-    elevation: 2,
-    boxShadow: '0px 5px 18px rgba(21, 21, 20, 0.045)',
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    elevation: 3,
+    boxShadow: '0px 7px 22px rgba(91, 141, 239, 0.1)',
+  },
+  customBuilderTint: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    left: 0,
+    height: 82,
+    borderTopLeftRadius: 21,
+    borderTopRightRadius: 21,
   },
   builderTopRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
   builderHeadingCopy: { flex: 1, gap: 2 },
   builderEyebrow: { color: colors.subtle, fontSize: 10, fontWeight: '600', letterSpacing: 1.6 },
+  customBuilderEyebrow: { color: '#5B8DEF' },
   builderTitle: { color: colors.ink, fontSize: 23, lineHeight: 29, fontWeight: '600', letterSpacing: -0.7 },
-  builderDescription: {
-    marginTop: 6,
-    flexShrink: 1,
-    color: colors.muted,
-    fontSize: 9,
-    lineHeight: 14,
-    fontWeight: '300',
-    letterSpacing: -0.2,
-  },
-  specialtyTrigger: {
-    height: 32,
-    paddingHorizontal: 11,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 17,
-    backgroundColor: colors.white,
-  },
-  specialtyTriggerText: { color: colors.ink, fontSize: 11, fontWeight: '500' },
-  specialtyTriggerIconOpen: { transform: [{ rotate: '180deg' }] },
-  specialtyMenu: {
-    position: 'absolute',
-    zIndex: 20,
-    top: 53,
-    right: 14,
-    width: 202,
-    padding: 7,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 15,
-    backgroundColor: colors.white,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    elevation: 8,
-  },
-  specialtyMenuRow: { minHeight: 54, padding: 7, flexDirection: 'row', alignItems: 'center', gap: 9, borderRadius: 10 },
-  specialtyMenuIcon: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: colors.soft },
-  specialtyMenuTitle: { color: colors.ink, fontSize: 12, fontWeight: '600' },
-  specialtyMenuNote: { marginTop: 2, color: colors.subtle, fontSize: 9, fontWeight: '300' },
   builderInput: {
-    height: 120,
-    marginTop: 11,
+    flex: 1,
+    margin: 2,
+    position: 'relative',
+    zIndex: 1,
     paddingHorizontal: 13,
     paddingVertical: 11,
     color: colors.ink,
     fontSize: 15,
     lineHeight: 22,
     fontWeight: '300',
-    borderWidth: 1,
-    borderColor: colors.line,
+    outlineWidth: 0,
     borderRadius: 14,
     backgroundColor: colors.white,
   },
+  builderInputFrame: {
+    height: 120,
+    marginTop: 11,
+    position: 'relative',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#DCE3ED',
+    borderRadius: 15,
+    backgroundColor: colors.white,
+  },
+  builderInputFrameFocused: {
+    borderColor: '#6EA8FF',
+    shadowColor: '#5B8DEF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    elevation: 3,
+    boxShadow: '0px 0px 12px rgba(91, 141, 239, 0.14)',
+  },
+  builderInputGradientLayer: {
+    position: 'absolute',
+    zIndex: 0,
+    top: '-42%',
+    right: '-42%',
+    bottom: '-42%',
+    left: '-42%',
+  },
+  builderInputGradient: { flex: 1 },
   builderFooter: { marginTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   characterCount: { color: colors.subtle, fontSize: 12, fontWeight: '300' },
   generateButton: {
@@ -981,15 +1078,56 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 7,
-    borderRadius: 20,
-    backgroundColor: colors.ink,
+    borderRadius: 22,
+    backgroundColor: '#DCEBFA',
   },
-  generateButtonDisabled: { backgroundColor: '#A7A7A2' },
-  generateButtonText: { color: colors.white, fontSize: 14, fontWeight: '600' },
-  generateButtonTextDisabled: { color: colors.white },
+  generateButtonDisabled: { backgroundColor: '#DCEBFA' },
+  generateButtonReady: { backgroundColor: '#5B8DEF' },
+  generateButtonPressed: { backgroundColor: '#356FD6', transform: [{ scale: 0.98 }] },
+  generateButtonText: { fontSize: 14, fontWeight: '600' },
+  generateButtonTextActive: { color: colors.white },
+  generateButtonTextDisabled: { color: '#7896B8' },
   generationError: { marginTop: 6, color: '#B94D44', fontSize: 11, lineHeight: 16 },
   compactPressed: { opacity: 0.72, transform: [{ scale: 0.98 }] },
-  recommendationHeader: { marginTop: 28, marginBottom: 9, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  specialtySection: {
+    marginTop: 22,
+  },
+  specialtySectionHeader: { marginBottom: 12, paddingHorizontal: 15 },
+  specialtyOptions: { flexDirection: 'row', gap: 9 },
+  specialtyOption: {
+    minWidth: 0,
+    minHeight: 88,
+    paddingHorizontal: 10,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 15,
+    backgroundColor: colors.white,
+    shadowColor: '#1A1A18',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 11,
+    elevation: 2,
+    boxShadow: '0px 4px 13px rgba(21, 21, 20, 0.04)',
+  },
+  specialtyIeltsOption: { borderColor: '#E5DCF9', backgroundColor: '#FBF9FF' },
+  specialtyIeltsOptionPressed: { borderColor: '#8B6FE8' },
+  specialtyInterviewOption: { borderColor: '#D9E8FA', backgroundColor: '#F7FBFF' },
+  specialtyInterviewOptionPressed: { borderColor: '#5B8DEF' },
+  specialtyOptionIcon: { width: 58, height: 58, flexShrink: 0, borderRadius: 13, opacity: 0.88 },
+  specialtyIeltsIcon: { backgroundColor: '#E8DEFF' },
+  specialtyInterviewIcon: { backgroundColor: '#DCEEFF' },
+  specialtyOptionCopy: { minWidth: 0, flex: 1 },
+  specialtyOptionTitle: { color: colors.ink, fontSize: 19, lineHeight: 24, fontWeight: '600' },
+  specialtyOptionNote: { marginTop: 4, color: colors.subtle, fontSize: 12, lineHeight: 17, fontWeight: '300' },
+  specialtyIeltsTitle: { color: '#292331' },
+  specialtyIeltsNote: { color: '#8C8498' },
+  specialtyInterviewTitle: { color: '#202833' },
+  specialtyInterviewNote: { color: '#83909E' },
+  recommendationHeader: { marginTop: 22, marginBottom: 9, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   recommendationHeading: { marginTop: 3, color: colors.ink, fontSize: 23, fontWeight: '600', letterSpacing: -0.7 },
   recommendationList: { gap: 8 },
   recommendation: {
@@ -1010,13 +1148,11 @@ const styles = StyleSheet.create({
     elevation: 2,
     boxShadow: '0px 4px 13px rgba(21, 21, 20, 0.04)',
   },
-  number: { width: 30, color: '#B2B2AD', fontSize: 20, fontWeight: '300' },
   recommendationCopy: { flex: 1, gap: 4 },
   recommendationTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   recommendationTitle: { color: colors.ink, fontSize: 17, fontWeight: '600' },
-  recommendationTag: { paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden', color: colors.muted, fontSize: 9, fontWeight: '300', borderRadius: 10, backgroundColor: colors.soft },
   recommendationMeta: { color: colors.muted, fontSize: 12, fontWeight: '300' },
-  recommendationArrow: { width: 35, height: 35, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: colors.soft },
+  recommendationArrow: { width: 35, height: 35, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: '#151514' },
   previewBackdrop: {
     position: 'absolute',
     zIndex: 100,
@@ -1045,7 +1181,8 @@ const styles = StyleSheet.create({
   },
   previewClose: { position: 'absolute', zIndex: 2, top: 14, right: 14, width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: colors.soft },
   previewEyebrow: { paddingRight: 44, color: colors.subtle, fontSize: 10, fontWeight: '600', letterSpacing: 1.5 },
-  previewTitle: { marginTop: 12, paddingRight: 44, color: colors.ink, fontSize: 28, lineHeight: 35, fontWeight: '600', letterSpacing: -0.9 },
+  previewTitleRow: { marginTop: 12, paddingRight: 44, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  previewTitle: { flexShrink: 1, color: colors.ink, fontSize: 28, lineHeight: 35, fontWeight: '600', letterSpacing: -0.9 },
   previewLead: { marginTop: 12, color: colors.muted, fontSize: 14, lineHeight: 21, fontWeight: '300' },
   previewSummary: { marginTop: 20, borderTopWidth: 1, borderTopColor: colors.line },
   previewSummaryRow: { minHeight: 56, paddingVertical: 12, flexDirection: 'row', alignItems: 'flex-start', gap: 16, borderBottomWidth: 1, borderBottomColor: colors.line },
@@ -1058,7 +1195,7 @@ const styles = StyleSheet.create({
   previewButtonSecondaryText: { color: colors.ink, fontSize: 13, fontWeight: '600' },
   previewButtonPrimaryText: { color: colors.white, fontSize: 13, fontWeight: '600' },
   trainingRoot: { flex: 1, position: 'relative', backgroundColor: colors.white },
-  trainingScreen: { paddingHorizontal: 18, paddingTop: 28, paddingBottom: 22, gap: 15 },
+  trainingScreen: { paddingHorizontal: 18, paddingTop: 56, paddingBottom: 22, gap: 15 },
   trainingHeader: { minHeight: 48, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 13 },
   trainingHeaderCopy: { flex: 1 },
   trainingEyebrow: { color: colors.subtle, fontSize: 9, fontWeight: '600', letterSpacing: 1.5 },
@@ -1142,6 +1279,10 @@ const styles = StyleSheet.create({
   completionMetricRow: { minHeight: 35, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: colors.line },
   completionMetricLabel: { color: colors.muted, fontSize: 12, fontWeight: '300' },
   completionMetricValue: { color: colors.ink, fontSize: 15, fontWeight: '600' },
-  completionDoneButton: { height: 48, paddingHorizontal: 20, alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 24, backgroundColor: colors.ink },
-  completionDoneText: { color: colors.white, fontSize: 14, fontWeight: '600' },
+  completionActions: { flexDirection: 'row', gap: 10 },
+  completionActionButton: { minWidth: 0, height: 48, paddingHorizontal: 14, flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, borderRadius: 24 },
+  completionBackButton: { borderColor: colors.line, backgroundColor: colors.white },
+  completionDetailsButton: { borderColor: colors.ink, backgroundColor: colors.ink },
+  completionBackText: { color: colors.ink, fontSize: 13, fontWeight: '600' },
+  completionDetailsText: { color: colors.white, fontSize: 13, fontWeight: '600' },
 });
