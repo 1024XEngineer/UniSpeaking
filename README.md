@@ -3,23 +3,94 @@
 [![后端测试](https://github.com/1024XEngineer/UniSpeaking/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/1024XEngineer/UniSpeaking/actions/workflows/coverage.yml)
 [![后端覆盖率](https://codecov.io/gh/1024XEngineer/UniSpeaking/branch/main/graph/badge.svg?flag=backend)](https://codecov.io/gh/1024XEngineer/UniSpeaking)
 
-覆盖率目前统计后端 Java 代码，合并单元测试及 PostgreSQL、Redis 集成测试结果；
-前端尚未接入自动化测试覆盖率。
+UniSpeaking 是一个面向英语口语训练的 AI 实时陪练系统。仓库包含 Spring Boot 后端、
+React Web 客户端、React Native 移动端、PostgreSQL 数据模型以及 Docker/Nginx 部署配置。
 
-UniSpeaking 是一个面向英语口语学习的 AI 实时陪练系统。当前仓库包含 React 前端、
-Spring Boot 后端、PostgreSQL 数据模型以及 Nginx/Docker 部署配置。
+## 已实现能力
 
-当前已经打通的核心链路：
+- 账号与用户：邮箱注册、登录、JWT 鉴权、用户资料、偏好和学习目标。
+- 自由对话：场景准备、Realtime 凭证、WebRTC SDP 交换、实时音频与字幕。
+- 自定义场景：按用户输入生成单词、词组、句子和对话 Prompt，支持“学 → 读 → 说”、
+  流程状态、逐轮评分、整场报告和复练。
+- IELTS 口语：Part 1、Part 2、Part 3 专项训练与完整模考，支持题库检索、状态机、
+  分阶段会话、四项能力评分、模考总评、学习资产、趋势统计和本地录音回放。
+- 学习资产：训练记录、详细报告、推荐表达、能力趋势和训练音频。
+- 个人中心：账户资料、偏好、学习洞察、目标进度和成就。
 
-- 邮箱账号注册、登录、JWT 鉴权和用户偏好保存。
-- 自由对话：WebRTC SDP 交换、Qwen Realtime 音频连接、字幕和翻译。
-- 自定义场景生成：根据用户输入和偏好生成场景、单词、词组、句子及完整 Prompt。
-- “学 → 读 → 说”流程：TTS 示范、句子朗读评分和场景对话。
-- 自定义场景状态机、逐轮评分、五维会话报告和学习资产查询。
-- 复练场景：复用已有学习内容，保存最新明细并保留历次会话总评。
+## 核心架构
 
-IELTS、英文面试、个人主页统计和会员页面目前主要完成了前端界面，尚未形成完整后端
-业务链路。
+场景运行时只定义五个稳定契约：
+
+```text
+SceneService<REQUEST, RESPONSE>       生成并准备场景
+SceneFlowService<STAGE>               推进多阶段场景
+SessionService                        管理会话生命周期和消息
+EvaluationService<REPORT, DETAIL>     逐轮评分与报告
+AiProvider                            提供厂商无关的 AI 能力
+```
+
+请求的主要依赖方向为：
+
+```text
+Controller / WebSocket
+        │
+        ▼
+五个稳定契约及场景实现
+        │
+        ├── Component / State Machine
+        ├── Domain DTO / PO / VO
+        ├── Provider
+        └── Repository
+                 │
+                 ▼
+Infrastructure（AI、Realtime、数据库、存储和配置）
+```
+
+场景实现关系：
+
+| 能力 | FreeChat | Custom | IELTS |
+|---|---:|---:|---:|
+| `SceneService` | ✓ | ✓ | ✓ |
+| `SceneFlowService` | — | ✓ | ✓ |
+| `SessionService` | ✓ | ✓ | ✓ |
+| `EvaluationService` | — | ✓ | ✓ |
+| `AiProvider` | 共享 | 共享 | 共享 |
+
+`SessionService` 是稳定公共契约，但由各场景分别实现；项目中不设置通用
+`SessionServiceImpl`。完整职责边界和新场景落位规范见 [CLAUDE.md](CLAUDE.md)。
+
+## 仓库结构
+
+```text
+.
+├── backend/unispeaking-server    Spring Boot 后端
+├── frontend/web                  React + Vite Web 客户端
+├── frontend/mobile               React Native + Expo 移动端
+├── deploy                        Compose、Nginx 和环境变量示例
+├── docs                          架构、API、CI 与部署文档
+├── README.md                     项目说明与启动指南
+└── CLAUDE.md                     后端架构和扩展规范
+```
+
+后端核心代码位于
+`backend/unispeaking-server/src/main/java/com/unispeaking`：
+
+```text
+├── controller                    HTTP 协议入口
+├── websocket                     WebSocket 协议入口
+├── service
+│   ├── scene                     SceneService、SceneFlowService
+│   │   └── impl                  各场景的生成与流程实现
+│   ├── session                   SessionService
+│   │   └── impl                  各场景的会话实现
+│   └── evaluation                EvaluationService
+│       └── impl                  支持评分的场景实现
+├── component                     状态机、协调器、录音等进程内组件
+├── domain                        DTO、PO、VO
+├── provider                      厂商无关能力接口与 Registry
+├── infrastructure               AI、Realtime、持久化、存储和配置实现
+└── common                        异常、响应、Prompt 和纯工具逻辑
+```
 
 ## 技术栈
 
@@ -28,164 +99,96 @@ IELTS、英文面试、个人主页统计和会员页面目前主要完成了前
 - Java 21
 - Spring Boot 4.0.7
 - Spring Web MVC / WebSocket / Security
-- JWT
+- JWT Resource Server
+- PostgreSQL + Flyway
 - MyBatis-Plus 3.5.17
-- Docker Desktop（本地 Compose 会启动 PostgreSQL）
-- JUnit 5 / Mockito
+- JUnit 5 / Mockito / Testcontainers
 
-### 前端
+### 客户端
 
-- Web：React 19、Vite 6、JavaScript + JSX、WebRTC / WebSocket
-- Mobile：React Native、Expo SDK 57、TypeScript、Expo Router
+- Web：React 19、Vite 6、WebRTC、WebSocket
+- Mobile：React Native 0.86、Expo SDK 57、TypeScript、Expo Router
 
-### AI Provider
+### AI 与语音
 
-- Qwen Realtime：实时语音对话和 WebRTC SDP 交换
-- Qwen LLM：场景、提示词和文本内容生成
-- DeepSeek：LLM 后备路由
-- Qwen ASR / Doubao ASR：语音识别路由
-- Qwen3-TTS / CosyVoice / MiniMax：语音合成路由
-- 科大讯飞：英语发音评分
+- Qwen Realtime / LLM / ASR / TTS
+- DeepSeek LLM
+- Doubao ASR
+- MiniMax / CosyVoice TTS
+- 科大讯飞发音评分
 
-## 仓库结构
-
-```text
-.
-├── backend
-│   └── unispeaking-server       Spring Boot 后端
-├── frontend
-│   ├── web                      React + Vite Web 前端
-│   └── mobile                   React Native + Expo 移动端
-├── deploy
-│   ├── docker-compose.yml
-│   ├── env
-│   └── nginx
-├── docs                        架构、接口和部署文档
-└── CLAUDE.md                   后端架构与开发规范
-```
-
-后端主要分层：
-
-```text
-Controller / WebSocket
-        |
-        v
-Service（业务模块与业务编排）
-        |
-        +--> Domain
-        +--> Provider
-        +--> Repository
-                    ^
-                    |
-Infrastructure（AI、Realtime、数据库和配置实现）
-```
-
-详细目录职责、命名规则和禁止事项见
-[后端架构与开发规范](CLAUDE.md)。
+业务代码只依赖 Provider 接口，模型与供应商选择由 Registry 和配置完成。
 
 ## 本地启动
 
 ### 1. 环境要求
 
 - JDK 21
-- Node.js 20 或更高版本
+- Node.js 20+
 - PostgreSQL
 - npm
 
-Redis 和消息队列当前没有启用，不是本地启动的必要条件。
+Docker 仅在容器部署或 Testcontainers 集成测试时需要。Redis 不是当前应用运行的必要依赖。
 
-### 2. 创建运行配置
+### 2. 创建环境配置
 
 ```bash
 cp deploy/env/.env.example deploy/env/.env
 ```
 
-至少配置数据库和 JWT：
+本地直接启动后端时，至少配置：
 
 ```properties
-POSTGRES_DB=unispeaking
-POSTGRES_USER=unispeaking
-POSTGRES_PASSWORD=your-local-postgres-password
-
-DATABASE_URL=jdbc:postgresql://postgres:5432/unispeaking
-DATABASE_USERNAME=unispeaking
-DATABASE_PASSWORD=your-local-postgres-password
+DATABASE_URL=jdbc:postgresql://localhost:5432/unispeaking
+DATABASE_USERNAME=postgres
+DATABASE_PASSWORD=your-local-password
 
 JWT_SECRET=replace-with-at-least-32-random-bytes-in-base64
 JWT_ISSUER=unispeaking
 JWT_ACCESS_TOKEN_TTL=2h
 ```
 
-可以用下面的命令生成 JWT Secret：
+可通过以下命令生成 JWT Secret：
 
 ```bash
 openssl rand -base64 32
 ```
 
-需要运行实时对话、场景生成和 TTS 时配置：
+使用场景生成、Realtime、TTS、ASR 或评分能力时，还需在 `.env` 中配置对应厂商凭证。
+完整变量及安全默认值见 [`deploy/env/.env.example`](deploy/env/.env.example)。
 
-```properties
-DASHSCOPE_API_KEY=your-dashscope-api-key
-BAILIAN_WORKSPACE_ID=your-bailian-workspace-id
-BAILIAN_REGION=cn-beijing
-BAILIAN_MODEL=qwen3.5-omni-flash-realtime
-QWEN_TTS_VOICE=Aiden
-```
+注意：
 
-Qwen Realtime 的 signaling URL 由后端根据 Workspace、Region 和 Model 自动生成，
-不需要手工配置。
+- 不要提交真实 `.env`。
+- 不要把密钥放入任何 `VITE_` 变量；此类变量会进入浏览器构建产物。
+- 后端默认读取 `../../deploy/env/.env`，也可使用 `UNISPEAKING_ENV_FILE` 指定绝对路径。
 
-需要运行句子朗读和对话发音评分时配置：
+### 3. 初始化数据库
 
-```properties
-XFYUN_APP_ID=your-xfyun-app-id
-XFYUN_API_KEY=your-xfyun-api-key
-XFYUN_API_SECRET=your-xfyun-api-secret
-```
-
-完整 Provider 路由、超时和大小限制见
-[`deploy/env/.env.example`](deploy/env/.env.example)。不要提交真实 `.env`，也不要把
-任何密钥放进 `VITE_` 变量。
-
-### 3. 创建数据库
-
-先创建名为 `unispeaking` 的 PostgreSQL 数据库：
+创建 PostgreSQL 数据库：
 
 ```bash
 createdb -U postgres unispeaking
 ```
 
-也可以使用 `psql`：
+启动后端时，Flyway 自动执行：
 
-```sql
-CREATE DATABASE unispeaking;
-```
-
-后端启动时由 Flyway 执行
 [`V1__baseline.sql`](backend/unispeaking-server/src/main/resources/db/migration/V1__baseline.sql)
-一次性完成全部建表、索引、注释、历史字段回填和题库初始化。V1 是由原 V1 至 V10
-压缩得到的空库基线，不能直接替换已经记录旧迁移历史的数据库；开发环境升级到该
-基线时应重建数据库。运行账号必须具有建表、建索引、创建 `pg_trgm` 扩展和管理
-Flyway 历史表的权限。
 
-雅思题库的表结构、索引及完整初始化数据也统一保存在该 V1 基线中。
-新数据库首次启动时会自动写入 303 个训练主题和 1771 道 Part 1、Part 2、Part 3
-题目，不需要额外运行导入脚本。
+V1 是空库完整基线，包含业务表、索引、约束和 IELTS 题库种子数据；后续结构调整通过
+V2 及更高版本迁移增量执行。已存在旧版 Flyway 历史的开发数据库不能直接套用该基线，
+应先备份数据再重建。任何版本一旦进入共享环境，后续只能新增更高版本迁移，不能继续
+改写已执行文件。
 
-当前主要数据表：
+主要表按领域分为：
 
-- `user`
-- `user_preference`
-- `scene`
-- `word`
-- `phrase`
-- `sentence`
-- `sentence_evaluation`
-- `session_message`
-- `turn_evaluation`
-- `session_evaluation`
-- `ielts_topic`
-- `ielts_question`
+- 用户：`user`、`user_preference`、`user_ielts`。
+- 场景：`scene`、`word`、`phrase`、`sentence`、`ielts`、`ielts_topic`、
+  `ielts_question`。
+- 会话：`practice_session`、`session_message`。
+- 评分：`sentence_evaluation`、`turn_evaluation`、`session_evaluation`、
+  `ielts_part_evaluation`、`ielts_evaluation`。
+- 成就与反馈：`user_achievement_state`、`user_achievement_unlock`、`user_feedback`。
 
 ### 4. 启动后端
 
@@ -194,51 +197,20 @@ cd backend/unispeaking-server
 ./mvnw spring-boot:run
 ```
 
-默认地址：
+默认地址：`http://localhost:8080`。
 
-```text
-http://localhost:8080
-```
-
-从该目录启动时，Spring 默认读取：
-
-```text
-../../deploy/env/.env
-```
-
-也可以指定其他配置文件：
-
-```bash
-UNISPEAKING_ENV_FILE=/absolute/path/to/runtime.env ./mvnw spring-boot:run
-```
-
-### 5. 启动 Web 前端
-
-打开另一个终端：
+### 5. 启动 Web 客户端
 
 ```bash
 cd frontend/web
 npm install
-VITE_BACKEND_URL=http://localhost:8080 VITE_FEEDBACK_URL= npm run dev
+VITE_BACKEND_URL=http://localhost:8080 npm run dev
 ```
 
-默认访问：
-
-```text
-http://localhost:5173
-```
-
-本地开发必须让 `VITE_BACKEND_URL` 指向后端；如果留空，请求会发送给 Vite 自己，
-REST 和 WebSocket 都无法正常联调。
-
-`VITE_FEEDBACK_URL` 是公开的外部腾讯问卷地址。留空时反馈入口不可点击；配置后由
-问卷页面独立完成收集和存储，UniSpeaking 后端不接收或查询产品反馈。
-
-浏览器麦克风只能在 `localhost` 或 HTTPS 安全上下文中使用，并需要用户授权。
+默认地址：`http://localhost:5173`。浏览器录音需要在 `localhost` 或 HTTPS 安全上下文中
+运行，并授权麦克风。
 
 ### 6. 启动移动端
-
-浏览器预览：
 
 ```bash
 cd frontend/mobile
@@ -246,137 +218,38 @@ npm install
 npm run web
 ```
 
-Android 开发客户端：
+原生开发客户端：
 
 ```bash
-npx expo prebuild --platform android
+npm run ios
 npm run android
 ```
 
-移动端当前只有自由对话、场景广场和学习资产三个模块完成前端定稿。IELTS、英文面试
-和个人主页仍需继续开发与定稿；已有页面仅代表阶段性原型，不能视为最终版本。移动端
-尚未完整接入仓库中的后端接口，具体边界和开发方式见
+移动端当前仍处于持续联调阶段，页面完成度和 Web 端不完全一致。开发前请阅读
 [`frontend/mobile/HANDOFF.md`](frontend/mobile/HANDOFF.md)。
 
-## Docker Compose
+## 测试与质量检查
 
-当前 Compose 包含：
-
-- `postgres`
-- `backend`
-- `frontend`
-- `nginx`
-
-启动：
-
-```bash
-cd deploy
-docker compose --env-file env/.env up --build
-```
-
-访问：
-
-```text
-http://localhost
-```
-
-Nginx 将 `/backend/` 同时代理给后端 REST 和 WebSocket，前端生产构建使用
-`VITE_BACKEND_URL=/backend`。
-
-开发 Compose 会创建独立的 PostgreSQL 容器，后端通过 Docker 服务名 `postgres`
-连接数据库。第一次启动空数据库时，Spring Boot 会自动执行 V1-V8 Flyway
-迁移。开发数据库卷名为 `unispeaking_dev_postgres_data`，与生产数据库隔离。
-
-如果直接在宿主机运行 Maven，而不是通过 Compose 运行后端，再把
-`DATABASE_URL` 改为 `jdbc:postgresql://localhost:5432/unispeaking`。
-
-## 认证与统一响应
-
-注册、登录以外的 HTTP 接口都需要：
-
-```http
-Authorization: Bearer <access-token>
-```
-
-成功响应统一为：
-
-```json
-{
-  "success": true,
-  "code": "OK",
-  "message": "success",
-  "data": {}
-}
-```
-
-WebSocket 地址：
-
-```text
-/ws/session-messages?access_token=<access-token>
-```
-
-WebSocket 会校验 JWT 和会话所有权，不能只凭 `sessionId` 追加或结束其他用户的
-会话。
-
-## 主要接口
-
-| 模块 | 接口 |
-| --- | --- |
-| 注册 | `POST /api/auth/register` |
-| 登录 | `POST /api/auth/login` |
-| 当前用户 | `GET /api/auth/me` |
-| 获取用户偏好 | `GET /api/user-preferences` |
-| 保存用户偏好 | `PUT /api/user-preferences` |
-| 开始自由对话 | `POST /api/scene-sessions` |
-| 结束自由对话 | `POST /api/scene-sessions/{sessionId}/end` |
-| 生成自定义场景 | `POST /api/custom-scenes/generate` |
-| 创建/推进场景流程 | `POST /api/custom-scenes/flows`、`POST /api/custom-scenes/flows/advance` |
-| 开始场景对话 | `POST /api/custom-scenes/{sceneId}/sessions` |
-| 单轮评分 | `POST /api/custom-scenes/{sceneId}/sessions/{sessionId}/turns/{turnNo}/evaluation` |
-| 推进对话状态机 | `POST /api/custom-scenes/{sceneId}/sessions/{sessionId}/turns/{turnNo}/state` |
-| 完成场景对话 | `POST /api/custom-scenes/{sceneId}/sessions/{sessionId}/complete` |
-| 查询五维评分 | `GET /api/custom-scenes/{sceneId}/sessions/{sessionId}/evaluation` |
-| 句子朗读评分 | `POST /api/custom-scenes/{sceneId}/sentences/{sentenceId}/evaluation` |
-| TTS | `POST /api/custom-scenes/{sceneId}/speech` |
-| 学习资产列表 | `GET /api/custom-scenes/assets` |
-| 场景学习资产 | `GET /api/custom-scenes/{sceneId}/assets` |
-
-完整请求字段、响应字段和 WebSocket 消息格式见
-[前后端接口文档](docs/frontend-backend-interface-contract.md)。
-
-## 实时会话流程
-
-```text
-Browser -- Offer SDP + scene data --> Spring Boot
-Spring Boot -- permanent API key --> DashScope temporary token
-Spring Boot -- temporary token + Offer SDP --> Qwen Realtime
-Spring Boot <-- Answer SDP ----------------- Qwen Realtime
-Browser <-- Answer SDP --------------------- Spring Boot
-Browser <========= WebRTC audio/DataChannel =========> Qwen Realtime
-Browser <========= authenticated WebSocket ==========> Spring Boot
-```
-
-- 永久 API Key 只保存在后端。
-- 临时 Token 默认有效期为 300 秒。
-- 浏览器不接收永久 API Key。
-- 自由对话不保存长期消息历史。
-- 自定义场景按完整轮次保存消息和评分，不保存流式 delta。
-
-## 测试与检查
-
-后端：
+后端单元测试：
 
 ```bash
 cd backend/unispeaking-server
-./mvnw --batch-mode --no-transfer-progress clean verify
-./mvnw --batch-mode --no-transfer-progress \
-  -Pci-integration -DskipUnitTests verify
+./mvnw test
 ```
 
-当前测试基线：186 项单元测试、7 项 PostgreSQL/Redis 容器集成测试通过，合并后的
-JaCoCo 全局行覆盖率为 73.80%。
+PostgreSQL/Redis Testcontainers 集成测试（需要可用的 Docker）：
 
-Web 前端：
+```bash
+./mvnw -Pci-integration -DskipUnitTests verify
+```
+
+生成合并覆盖率：
+
+```bash
+./mvnw -Pci-integration,coverage-aggregate clean verify
+```
+
+Web 构建和静态约束检查：
 
 ```bash
 cd frontend/web
@@ -385,28 +258,30 @@ npm run check:routes
 npm run check:realtime-events
 ```
 
-移动端：
+移动端检查：
 
 ```bash
 cd frontend/mobile
-npx tsc --noEmit
-EXPO_OFFLINE=1 npx expo export --platform web
+npm run lint
+npm run test:ci
 ```
 
 ## 文档
 
-- [后端架构与开发规范](CLAUDE.md)
-- [完整业务架构](docs/UniSpeaking架构设计（完整版）.md)
-- [前后端接口文档](docs/frontend-backend-interface-contract.md)
-- [部署与配置](docs/deployment.md)
-- [持续集成与分支保护](docs/ci.md)
-- [用户、场景与会话标识](docs/用户会话标识与用量归属流程.md)
+- [后端架构与扩展规范](CLAUDE.md)
+- [完整 API 文档](docs/API接口文档.md)
+- [五模块精简架构](<docs/UniSpeaking架构设计_精简版 (1).md>)
+- [前后端接口契约](docs/frontend-backend-interface-contract.md)
+- [CI 说明](docs/ci.md)
+- [本地与通用部署](docs/deployment.md)
+- [生产部署](docs/deployment-production.md)
 
-## 当前边界
+## 开发原则
 
-- PostgreSQL 是持久化真相来源；运行时代码只允许使用 MyBatis-Plus。
-- Redis 仅用于 CI 容器烟测，生产运行时和消息队列尚未启用。
-- 自由聊天内容不进入长期存储。
-- 自定义场景、学习内容、逐轮评分和会话报告写入 PostgreSQL。
-- IELTS、面试、个人统计和会员功能尚需继续开发后端接口。
-- 移动端仅自由对话、场景广场和学习资产已定稿；IELTS、英文面试和个人主页仍在开发。
+- 场景特有需求通过场景实现类和组件扩展，不修改五个稳定接口。
+- 场景准备、鉴权、次数限制、Prompt 和内容落库归 `SceneService` 实现负责。
+- `SessionService` 只管理已准备场景的会话，不重复生成场景，也不承担评分。
+- 状态机、录音、生成器和协调器属于 `component`，不能包装成伪 Service。
+- Controller 只做协议适配；同一场景的附属端点归并到同一个场景 Controller。
+- PostgreSQL 是业务真相来源，持久化只能通过 Repository 访问。
+- 接口或数据结构变化时，同步更新后端测试、前端调用和 API 文档。
