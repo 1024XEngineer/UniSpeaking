@@ -5,7 +5,7 @@ import static org.mockito.Mockito.when;
 
 import com.unispeaking.infrastructure.persistence.repository.evaluation.TurnEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
-import com.unispeaking.service.asset.impl.ObsoleteDialogueCleanup;
+import com.unispeaking.component.session.ObsoleteDialogueCleanup;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 

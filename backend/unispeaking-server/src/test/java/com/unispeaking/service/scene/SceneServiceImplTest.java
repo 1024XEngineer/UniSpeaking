@@ -10,7 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.domain.dto.scene.LearningContentItem;
-import com.unispeaking.domain.dto.scene.CustomSceneGenerationResponse;
+import com.unispeaking.domain.dto.scene.CustomSceneResult;
 import com.unispeaking.domain.dto.scene.CustomSceneRequest;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.po.profile.UserProfile;
@@ -20,17 +20,11 @@ import com.unispeaking.domain.vo.scene.SceneConfig;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
 import com.unispeaking.provider.AiProviderRegistry;
-import com.unispeaking.component.session.RealtimeSessionCoordinator;
-import com.unispeaking.component.statemachine.ScenarioDialogueStateMachine;
-import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
-import com.unispeaking.service.asset.impl.ObsoleteDialogueCleanup;
-import com.unispeaking.service.evaluation.EvaluationService;
-import com.unispeaking.service.session.SessionService;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.profile.ProfileService;
 import com.unispeaking.common.prompt.FiveLayerPromptBuilder;
-import com.unispeaking.service.scene.impl.SceneServiceImpl;
-import com.unispeaking.service.scene.impl.CustomSceneGenerator;
+import com.unispeaking.service.scene.impl.CustomSceneServiceImpl;
+import com.unispeaking.component.scene.CustomSceneGenerator;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -116,23 +110,16 @@ class SceneServiceImplTest {
 				.thenAnswer(invocation -> invocation.getArgument(1));
 		when(repository.findCustomDefinitionById(any(String.class)))
 				.thenReturn(Optional.of(definition));
-		var service = new SceneServiceImpl(
+		var service = new CustomSceneServiceImpl(
 				authService,
 				profileService,
 					repository,
 					promptService,
 					generator,
 					mock(AiProviderRegistry.class),
-					new ObjectMapper(),
-					mock(SessionService.class),
-					mock(SceneFlowService.class),
-					mock(RealtimeSessionCoordinator.class),
-					mock(EvaluationService.class),
-					mock(ScenarioDialogueStateMachine.class),
-					mock(SessionMessageRepository.class),
-					mock(ObsoleteDialogueCleanup.class));
+					new ObjectMapper());
 
-		CustomSceneGenerationResponse response = service.generate(
+		CustomSceneResult response = service.generate(
 				new CustomSceneRequest(
 						userId,
 						"偏好",
@@ -146,7 +133,7 @@ class SceneServiceImplTest {
 		assertEquals(5, response.wordList().size());
 		assertEquals(5, response.phraseList().size());
 		assertEquals(3, response.sentenceList().size());
-		assertEquals("layer one\n\nlayer two", response.scenePrompt());
+		assertEquals("layer one\n\nlayer two", response.dialoguePrompt());
 		verify(repository).saveCustomScene(
 				any(CustomSceneDefinition.class),
 				any(SceneGenerationResponse.class));

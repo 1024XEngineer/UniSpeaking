@@ -17,11 +17,18 @@ import org.junit.jupiter.api.Test;
 class AiProviderRegistryTest {
 
 	@Test
-	void exposesVendorNeutralProviderIdentifiers() {
-		assertTrue(
-				List.of(AiProvider.class.getMethods()).stream()
-						.anyMatch(method -> method.getName().equals("providerId")
-								&& method.getReturnType() == String.class));
+	void exposesOnlyTheDocumentedProviderOperations() {
+		assertEquals(
+				Set.of(
+						"exchangeRealtimeSdp",
+						"generateSpeechAudio",
+						"executeLlmTask",
+						"convertAudioToText",
+						"evaluatePronunciation"),
+				List.of(AiProvider.class.getDeclaredMethods()).stream()
+						.filter(method -> !method.isSynthetic())
+						.map(java.lang.reflect.Method::getName)
+						.collect(java.util.stream.Collectors.toSet()));
 		assertTrue(
 				List.of(AiModelDefinition.class.getRecordComponents()).stream()
 						.anyMatch(component -> component.getName().equals("providerId")
@@ -301,7 +308,7 @@ class AiProviderRegistryTest {
 		}
 
 		@Override
-		public String evaluatePronunciation(String text, Byte[] audio, String token) {
+		public String evaluatePronunciation(String text, byte[] audio, String token) {
 			calls++;
 			return "{}";
 		}
@@ -317,7 +324,7 @@ class AiProviderRegistryTest {
 		}
 
 		@Override
-		public String evaluatePronunciation(String text, Byte[] audio, String token) {
+		public String evaluatePronunciation(String text, byte[] audio, String token) {
 			calls++;
 			return "{\"totalScore\":99}";
 		}
@@ -352,7 +359,7 @@ class AiProviderRegistryTest {
 		}
 
 		@Override
-		public String convertAudioToText(Byte[] audio, String token) {
+		public String convertAudioToText(byte[] audio, String token) {
 			return "transcript";
 		}
 	}

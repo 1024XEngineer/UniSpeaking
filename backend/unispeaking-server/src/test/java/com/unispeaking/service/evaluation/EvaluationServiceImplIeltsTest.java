@@ -32,8 +32,8 @@ import com.unispeaking.infrastructure.persistence.repository.scene.SceneReposito
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.service.evaluation.impl.EvaluationServiceImpl;
-import com.unispeaking.service.scene.SceneFlowService;
+import com.unispeaking.component.evaluation.EvaluationProcessor;
+import com.unispeaking.service.scene.impl.IeltsSceneFlowServiceImpl;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -162,7 +162,7 @@ class EvaluationServiceImplIeltsTest {
 						com.unispeaking.domain.vo.scene.IeltsTopicType.PART_2_3_BUNDLE,
 						"ABSTRACT", "XDF", "READY")));
 
-		EvaluationServiceImpl service = new EvaluationServiceImpl(
+		EvaluationProcessor service = new EvaluationProcessor(
 				mock(PronunciationAssessmentClient.class),
 				mock(EvaluationLlmClient.class),
 				mock(ActiveSessionRegistry.class),
@@ -173,14 +173,14 @@ class EvaluationServiceImplIeltsTest {
 				mock(SceneSentenceReadingRepository.class),
 				practiceRepository,
 				topicRepository,
-				mock(SceneFlowService.class),
+				mock(IeltsSceneFlowServiceImpl.class),
 				sessionRepository,
 				evaluationRepository,
 				ieltsLlmClient,
 				authService,
 				mock(com.unispeaking.infrastructure.storage.ObjectStorageProvider.class),
 				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
-				mock(com.unispeaking.service.recording.IeltsRecordingService.class));
+				mock(com.unispeaking.component.recording.IeltsRecordingStore.class));
 
 		var result = service.generateIeltsEvaluation(ieltsId, "session-p3");
 

@@ -6,12 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.prompt.IeltsExaminerPromptBuilder;
-import com.unispeaking.component.session.RealtimeSessionCoordinator;
-import com.unispeaking.component.statemachine.IeltsQuestionStateMachine;
-import com.unispeaking.component.statemachine.IeltsPart2StateMachine;
 import com.unispeaking.common.util.search.TitleRelevanceCalculator;
 import com.unispeaking.domain.dto.scene.IeltsGenerationRequest;
 import com.unispeaking.domain.po.scene.IeltsPracticeRecord;
@@ -19,13 +17,15 @@ import com.unispeaking.domain.po.scene.IeltsQuestion;
 import com.unispeaking.domain.po.scene.IeltsTopic;
 import com.unispeaking.domain.po.scene.IeltsUserSettings;
 import com.unispeaking.domain.vo.scene.IeltsMode;
+import com.unispeaking.domain.vo.scene.IeltsContent;
 import com.unispeaking.domain.vo.scene.IeltsPart;
+import com.unispeaking.domain.vo.scene.IeltsStage;
 import com.unispeaking.domain.vo.scene.IeltsTopicType;
 import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPracticeRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.IeltsRepository;
 import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.service.scene.impl.IELTSSceneServiceImpl;
-import com.unispeaking.service.session.SessionService;
+import com.unispeaking.service.scene.impl.IeltsSceneServiceImpl;
+import com.unispeaking.service.scene.impl.IeltsSceneFlowServiceImpl;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -40,17 +40,15 @@ class IELTSSceneServiceImplTest {
 	private final IeltsPracticeRepository practiceRepository =
 			mock(IeltsPracticeRepository.class);
 	private final AuthService authService = mock(AuthService.class);
-	private final IELTSSceneService service = new IELTSSceneServiceImpl(
+	private final IeltsSceneFlowServiceImpl flowService =
+			mock(IeltsSceneFlowServiceImpl.class);
+	private final IeltsSceneServiceImpl service = new IeltsSceneServiceImpl(
 			repository,
 			new TitleRelevanceCalculator(),
 			practiceRepository,
 			authService,
 			new IeltsExaminerPromptBuilder(),
-			mock(SessionService.class),
-			mock(SceneFlowService.class),
-			mock(RealtimeSessionCoordinator.class),
-			new IeltsQuestionStateMachine(),
-			new IeltsPart2StateMachine());
+			flowService);
 	private final UUID userId = UUID.randomUUID();
 
 	@BeforeEach
@@ -192,6 +190,42 @@ class IELTSSceneServiceImplTest {
 
 		assertEquals(topic.id(), result.topicId());
 		assertEquals(4, result.questions().size());
+	}
+
+	@Test
+	void completedFlowConsumesTheDailyPracticeInSceneModule() {
+		IeltsPracticeRecord practice = mockPractice("ielts_complete");
+		when(practiceRepository.findPractice(practice.ieltsId()))
+				.thenReturn(Optional.of(practice));
+		when(flowService.next(practice.ieltsId()))
+				.thenReturn(IeltsStage.COMPLETED);
+
+		service.completeDialogue(practice.ieltsId(), userId.toString());
+
+		verify(practiceRepository).incrementCompletedCount(userId);
+	}
+
+	@Test
+	void intermediateMockPartDoesNotConsumeTheDailyPractice() {
+		IeltsPracticeRecord practice = mockPractice("ielts_continue");
+		when(practiceRepository.findPractice(practice.ieltsId()))
+				.thenReturn(Optional.of(practice));
+		when(flowService.next(practice.ieltsId()))
+				.thenReturn(IeltsStage.PART2);
+
+		service.completeDialogue(practice.ieltsId(), userId.toString());
+
+		verify(practiceRepository, never()).incrementCompletedCount(userId);
+	}
+
+	private IeltsPracticeRecord mockPractice(String ieltsId) {
+		return new IeltsPracticeRecord(
+				ieltsId,
+				userId,
+				IeltsMode.MOCK_TEST,
+				null,
+				null,
+				new IeltsContent(List.of(), List.of(), List.of()));
 	}
 
 	private IeltsGenerationRequest request(IeltsPart part, String topicId) {

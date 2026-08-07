@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.component.recording.IeltsRecordingStore;
 import com.unispeaking.domain.po.session.PracticeSessionRecord;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
@@ -43,7 +44,7 @@ class IeltsRecordingServiceTest {
 						SessionStatus.COMPLETED,
 						Instant.now(),
 						Instant.now())));
-		IeltsRecordingService service = service(repository, authService);
+		IeltsRecordingStore service = service(repository, authService);
 		byte[] audio = new byte[] {82, 73, 70, 70, 1, 2, 3};
 
 		String url = service.store("ielts_session_1", 1, audio);
@@ -76,7 +77,7 @@ class IeltsRecordingServiceTest {
 						SessionStatus.COMPLETED,
 						Instant.now(),
 						Instant.now())));
-		IeltsRecordingService service = service(repository, authService);
+		IeltsRecordingStore service = service(repository, authService);
 
 		assertThrows(BusinessException.class,
 				() -> service.store("../outside", 1, new byte[] {1}));
@@ -86,11 +87,11 @@ class IeltsRecordingServiceTest {
 				() -> service.loadOwned("ielts_session_1", "turn-1.wav"));
 	}
 
-	private IeltsRecordingService service(
+	private IeltsRecordingStore service(
 			PracticeSessionRepository repository,
 			AuthService authService) {
 		IeltsRecordingProperties properties = new IeltsRecordingProperties();
 		properties.setDirectory(tempDirectory.toString());
-		return new IeltsRecordingService(properties, repository, authService);
+		return new IeltsRecordingStore(properties, repository, authService);
 	}
 }

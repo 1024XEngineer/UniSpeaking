@@ -2,43 +2,37 @@ package com.unispeaking.service.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.never;
 
 import com.unispeaking.component.session.ActiveSessionRegistry;
+import com.unispeaking.component.session.RealtimeSessionCoordinator;
+import com.unispeaking.component.session.SessionLifecycleManager;
+import com.unispeaking.component.statemachine.IeltsPart2StateMachine;
+import com.unispeaking.component.statemachine.IeltsQuestionStateMachine;
+import com.unispeaking.domain.po.session.CustomSceneSession;
 import com.unispeaking.domain.vo.scene.SceneType;
-import com.unispeaking.domain.vo.scene.SceneFlowStage;
-import com.unispeaking.domain.dto.scene.SceneFlowResponse;
-import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPracticeRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
-import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.service.scene.SceneFlowService;
-import com.unispeaking.service.session.impl.SessionServiceImpl;
+import com.unispeaking.service.scene.impl.IeltsSceneServiceImpl;
+import com.unispeaking.service.session.impl.IeltsSessionServiceImpl;
 import org.junit.jupiter.api.Test;
-import java.util.UUID;
 
 class SessionServiceImplRepracticeTest {
 
 	@Test
 	void sessionServiceOnlyCreatesTheGenericSessionLifecycle() {
 		String userId = "f76889ee-7f7c-4dae-bcc2-61b85a63dcec";
-		AuthService authService = mock(AuthService.class);
-		when(authService.requireUserId(isNull())).thenReturn(userId);
 		ActiveSessionRegistry sessions = new ActiveSessionRegistry();
 		PracticeSessionRepository practices = mock(PracticeSessionRepository.class);
-		SessionServiceImpl service = new SessionServiceImpl(
-				authService,
+		SessionLifecycleManager service = new SessionLifecycleManager(
 				sessions,
 				mock(SessionMessageRepository.class),
-				practices,
-				mock(IeltsPracticeRepository.class),
-				mock(SceneFlowService.class));
+				practices);
 
 		var started = service.startSession(
+				userId,
 				SceneType.CUSTOM_SCENE,
 				"custom_repeat123",
 				"session prompt");
@@ -52,62 +46,62 @@ class SessionServiceImplRepracticeTest {
 	@Test
 	void completedIeltsFlowConsumesOneDailyPractice() {
 		String userId = "f76889ee-7f7c-4dae-bcc2-61b85a63dcec";
-		AuthService authService = mock(AuthService.class);
-		when(authService.requireUserId(isNull())).thenReturn(userId);
 		ActiveSessionRegistry sessions = new ActiveSessionRegistry();
-		IeltsPracticeRepository ieltsPractices = mock(IeltsPracticeRepository.class);
-		SceneFlowService flows = mock(SceneFlowService.class);
-		when(flows.advanceStage("ielts_part_1", null)).thenReturn(
-				new SceneFlowResponse(
-						"ielts_part_1",
-						SceneFlowStage.COMPLETED,
-						true));
-		SessionServiceImpl service = new SessionServiceImpl(
-				authService,
-				sessions,
-				mock(SessionMessageRepository.class),
-				mock(PracticeSessionRepository.class),
-				ieltsPractices,
-				flows);
-		var started = service.startSession(
-				SceneType.IELTS_SCENE,
-				"ielts_part_1",
-				"IELTS prompt");
+		IeltsSceneServiceImpl scenes = mock(IeltsSceneServiceImpl.class);
+		SessionLifecycleManager lifecycle = mock(SessionLifecycleManager.class);
+		RealtimeSessionCoordinator coordinator = mock(RealtimeSessionCoordinator.class);
+		CustomSceneSession session = ieltsSession("ielts_session_1", userId, "ielts_part_1");
+		when(lifecycle.requireSceneType(userId, session.getId()))
+				.thenReturn(SceneType.IELTS_SCENE);
+		when(coordinator.requireOwnedSession(userId, session.getId()))
+				.thenReturn(session);
+		IeltsSessionServiceImpl service = ieltsService(scenes, lifecycle, coordinator);
 
-		service.endSession(userId, started.sessionId(), null);
+		service.endSession(userId, session.getId(), null);
 
-		verify(ieltsPractices).incrementCompletedCount(UUID.fromString(userId));
-		verify(flows).completeFlow("ielts_part_1", true);
+		verify(lifecycle).endSession(userId, session.getId(), null);
+		verify(scenes).completeDialogue("ielts_part_1", userId);
 	}
 
 	@Test
 	void intermediateMockPartDoesNotConsumeDailyPractice() {
 		String userId = "f76889ee-7f7c-4dae-bcc2-61b85a63dcec";
-		AuthService authService = mock(AuthService.class);
-		when(authService.requireUserId(isNull())).thenReturn(userId);
 		ActiveSessionRegistry sessions = new ActiveSessionRegistry();
-		IeltsPracticeRepository ieltsPractices = mock(IeltsPracticeRepository.class);
-		SceneFlowService flows = mock(SceneFlowService.class);
-		when(flows.advanceStage("ielts_mock_1", null)).thenReturn(
-				new SceneFlowResponse(
-						"ielts_mock_1",
-						SceneFlowStage.IELTS_PART_2,
-						false));
-		SessionServiceImpl service = new SessionServiceImpl(
-				authService,
-				sessions,
-				mock(SessionMessageRepository.class),
-				mock(PracticeSessionRepository.class),
-				ieltsPractices,
-				flows);
-		var started = service.startSession(
-				SceneType.IELTS_SCENE,
-				"ielts_mock_1",
-				"IELTS prompt");
+		IeltsSceneServiceImpl scenes = mock(IeltsSceneServiceImpl.class);
+		SessionLifecycleManager lifecycle = mock(SessionLifecycleManager.class);
+		RealtimeSessionCoordinator coordinator = mock(RealtimeSessionCoordinator.class);
+		CustomSceneSession session = ieltsSession("ielts_session_2", userId, "ielts_mock_1");
+		when(lifecycle.requireSceneType(userId, session.getId()))
+				.thenReturn(SceneType.IELTS_SCENE);
+		when(coordinator.requireOwnedSession(userId, session.getId()))
+				.thenReturn(session);
+		IeltsSessionServiceImpl service = ieltsService(scenes, lifecycle, coordinator);
 
-		service.endSession(userId, started.sessionId(), null);
+		service.endSession(userId, session.getId(), null);
 
-		verify(ieltsPractices, never()).incrementCompletedCount(UUID.fromString(userId));
-		verify(flows, never()).completeFlow("ielts_mock_1", true);
+		verify(lifecycle).endSession(userId, session.getId(), null);
+		verify(scenes).completeDialogue("ielts_mock_1", userId);
+	}
+
+	private IeltsSessionServiceImpl ieltsService(
+			IeltsSceneServiceImpl scenes,
+			SessionLifecycleManager lifecycle,
+			RealtimeSessionCoordinator coordinator) {
+		return new IeltsSessionServiceImpl(
+				scenes,
+				lifecycle,
+				coordinator,
+				new IeltsQuestionStateMachine(),
+				new IeltsPart2StateMachine());
+	}
+
+	private CustomSceneSession ieltsSession(
+			String sessionId,
+			String userId,
+			String sceneId) {
+		CustomSceneSession session = new CustomSceneSession(sessionId, userId);
+		session.setSceneType(SceneType.IELTS_SCENE);
+		session.setSceneId(sceneId);
+		return session;
 	}
 }

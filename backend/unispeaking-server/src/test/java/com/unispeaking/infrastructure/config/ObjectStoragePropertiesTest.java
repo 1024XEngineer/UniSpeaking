@@ -8,29 +8,21 @@ import org.junit.jupiter.api.Test;
 class ObjectStoragePropertiesTest {
 
 	@Test
-	void normalizesAvatarAndInterviewRecordingPrefixes() {
+	void normalizesAvatarPrefix() {
 		ObjectStorageProperties properties = new ObjectStorageProperties();
 
 		properties.setAvatarPrefix("/profile-avatars/");
-		properties.setInterviewRecordingPrefix("/interviews/recordings/");
 
 		assertEquals("profile-avatars", properties.getAvatarPrefix());
-		assertEquals(
-				"interviews/recordings",
-				properties.getInterviewRecordingPrefix());
 	}
 
 	@Test
-	void keepsStableDefaultsWhenPrefixIsNull() {
+	void keepsStableAvatarDefaultWhenPrefixIsNull() {
 		ObjectStorageProperties properties = new ObjectStorageProperties();
 
 		properties.setAvatarPrefix(null);
-		properties.setInterviewRecordingPrefix(null);
 
 		assertEquals("avatars", properties.getAvatarPrefix());
-		assertEquals(
-				"interviews/recordings",
-				properties.getInterviewRecordingPrefix());
 	}
 
 	@Test
@@ -40,11 +32,5 @@ class ObjectStoragePropertiesTest {
 		assertThrows(
 				IllegalArgumentException.class,
 				() -> properties.setAvatarPrefix("///"));
-		assertThrows(
-				IllegalArgumentException.class,
-				() -> properties.setInterviewRecordingPrefix("interviews/../recordings"));
-		assertThrows(
-				IllegalArgumentException.class,
-				() -> properties.setInterviewRecordingPrefix("interviews\\recordings"));
 	}
 }

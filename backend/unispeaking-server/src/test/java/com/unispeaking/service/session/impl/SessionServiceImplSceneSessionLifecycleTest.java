@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -19,6 +18,7 @@ import static org.mockito.Mockito.when;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.prompt.FiveLayerPromptBuilder;
 import com.unispeaking.component.session.ActiveSessionRegistry;
+import com.unispeaking.component.session.SessionLifecycleManager;
 import com.unispeaking.component.statemachine.ScenarioDialogueStateMachine;
 import com.unispeaking.domain.po.session.AbstractSceneSession;
 import com.unispeaking.domain.po.session.CustomSceneSession;
@@ -33,12 +33,8 @@ import com.unispeaking.infrastructure.persistence.repository.session.PracticeSes
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.infrastructure.realtime.RealtimeSdpExchange;
 import com.unispeaking.provider.AiProviderRegistry;
-import com.unispeaking.service.asset.impl.ObsoleteDialogueCleanup;
-import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.service.evaluation.EvaluationService;
 import com.unispeaking.service.profile.ProfileService;
-import com.unispeaking.service.scene.SceneFlowService;
-import com.unispeaking.service.scene.SceneService;
+import com.unispeaking.service.scene.impl.IeltsSceneFlowServiceImpl;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -50,36 +46,31 @@ class SessionServiceImplSceneSessionLifecycleTest {
 
 	private static final String USER_ID = "f76889ee-7f7c-4dae-bcc2-61b85a63dcec";
 	private static final String OTHER_USER_ID = "3d9e2f86-c0c7-4e6c-bf15-c246ba63db7e";
-	private static final String SCENE_ID = "interview_scene_1";
+	private static final String SCENE_ID = "custom_scene_1";
 
-	private AuthService authService;
 	private ActiveSessionRegistry sessions;
 	private PracticeSessionRepository practiceSessions;
 	private SessionMessageRepository sessionMessages;
 	private RealtimeSdpExchange realtimeSdpExchange;
 	private AiProviderRegistry providerRegistry;
-	private SessionServiceImpl service;
+	private SessionLifecycleManager service;
 
 	@BeforeEach
 	void setUp() {
-		authService = mock(AuthService.class);
 		sessions = new ActiveSessionRegistry();
 		practiceSessions = mock(PracticeSessionRepository.class);
 		sessionMessages = mock(SessionMessageRepository.class);
 		realtimeSdpExchange = mock(RealtimeSdpExchange.class);
 		providerRegistry = mock(AiProviderRegistry.class);
-		service = new SessionServiceImpl(
-				authService,
+		service = new SessionLifecycleManager(
 				sessions,
 				sessionMessages,
-				practiceSessions,
-				mock(IeltsPracticeRepository.class),
-				mock(SceneFlowService.class));
+				practiceSessions);
 	}
 
 	@Test
 	void registersACompleteSceneBindingWithoutEnteringRealtime() {
-		CustomSceneSession session = interviewSession("interview_session_1", USER_ID);
+		CustomSceneSession session = customSession("custom_session_1", USER_ID);
 		session.markConnecting();
 		ArgumentCaptor<PracticeSessionRecord> recordCaptor =
 				ArgumentCaptor.forClass(PracticeSessionRecord.class);
@@ -92,7 +83,7 @@ class SessionServiceImplSceneSessionLifecycleTest {
 				() -> assertEquals(session.getId(), record.sessionId()),
 				() -> assertEquals(UUID.fromString(USER_ID), record.userId()),
 				() -> assertEquals(SCENE_ID, record.sceneId()),
-				() -> assertEquals(SceneType.INTERVIEW_SCENE, record.sceneType()),
+				() -> assertEquals(SceneType.CUSTOM_SCENE, record.sceneType()),
 				() -> assertEquals(SessionStatus.CONNECTING, record.status()),
 				() -> assertEquals(session.getCreatedAt(), record.startedAt()),
 				() -> assertEquals(session.getEndedAt(), record.endedAt()),
@@ -102,8 +93,8 @@ class SessionServiceImplSceneSessionLifecycleTest {
 
 	@Test
 	void rejectsDuplicateRegistrationWithoutOverwritingTheOriginal() {
-		CustomSceneSession original = interviewSession("interview_session_1", USER_ID);
-		CustomSceneSession duplicate = interviewSession("interview_session_1", USER_ID);
+		CustomSceneSession original = customSession("custom_session_1", USER_ID);
+		CustomSceneSession duplicate = customSession("custom_session_1", USER_ID);
 		service.registerSceneSession(original);
 
 		BusinessException exception = assertThrows(
@@ -118,11 +109,11 @@ class SessionServiceImplSceneSessionLifecycleTest {
 	@Test
 	void rejectsMissingBindingsAndNonUuidUsersBeforeChangingState() {
 		CustomSceneSession missingScene = new CustomSceneSession(
-				"interview_session_1",
+				"custom_session_1",
 				USER_ID);
-		missingScene.setSceneType(SceneType.INTERVIEW_SCENE);
-		CustomSceneSession invalidUser = interviewSession(
-				"interview_session_2",
+		missingScene.setSceneType(SceneType.CUSTOM_SCENE);
+		CustomSceneSession invalidUser = customSession(
+				"custom_session_2",
 				"not-a-uuid");
 
 		BusinessException missingBinding = assertThrows(
@@ -141,7 +132,7 @@ class SessionServiceImplSceneSessionLifecycleTest {
 
 	@Test
 	void removesOnlyItsRuntimeRegistrationWhenPersistenceFails() {
-		CustomSceneSession session = interviewSession("interview_session_1", USER_ID);
+		CustomSceneSession session = customSession("custom_session_1", USER_ID);
 		BusinessException failure = new BusinessException(
 				"PRACTICE_SESSION_PERSISTENCE_FAILED",
 				"failed");
@@ -158,7 +149,7 @@ class SessionServiceImplSceneSessionLifecycleTest {
 
 	@Test
 	void completesPersistedSessionBeforeChangingRuntimeState() {
-		CustomSceneSession session = registeredSession("interview_session_1");
+		CustomSceneSession session = registeredSession("custom_session_1");
 		Instant endedAt = Instant.parse("2026-08-04T04:05:06Z");
 
 		service.terminateSceneSession(
@@ -178,7 +169,7 @@ class SessionServiceImplSceneSessionLifecycleTest {
 
 	@Test
 	void failsPersistedSessionAtTheRequestedInstantWithoutRemovingIt() {
-		CustomSceneSession session = registeredSession("interview_session_1");
+		CustomSceneSession session = registeredSession("custom_session_1");
 		Instant endedAt = Instant.parse("2026-08-04T04:05:06Z");
 
 		service.terminateSceneSession(
@@ -199,7 +190,7 @@ class SessionServiceImplSceneSessionLifecycleTest {
 
 	@Test
 	void rejectsIllegalTerminalStatusAndMissingEndTime() {
-		CustomSceneSession session = registeredSession("interview_session_1");
+		CustomSceneSession session = registeredSession("custom_session_1");
 		Instant endedAt = Instant.parse("2026-08-04T04:05:06Z");
 
 		BusinessException invalidStatus = assertThrows(
@@ -232,7 +223,7 @@ class SessionServiceImplSceneSessionLifecycleTest {
 
 	@Test
 	void rejectsAValidButDifferentOwner() {
-		CustomSceneSession session = registeredSession("interview_session_1");
+		CustomSceneSession session = registeredSession("custom_session_1");
 
 		BusinessException exception = assertThrows(
 				BusinessException.class,
@@ -256,7 +247,7 @@ class SessionServiceImplSceneSessionLifecycleTest {
 				BusinessException.class,
 				() -> service.terminateSceneSession(
 						USER_ID,
-						"interview_missing",
+						"custom_missing",
 						SessionStatus.COMPLETED,
 						Instant.parse("2026-08-04T04:05:06Z")));
 
@@ -269,7 +260,7 @@ class SessionServiceImplSceneSessionLifecycleTest {
 
 	@Test
 	void preservesTheFirstTerminalStateAndRejectsAConflictingTerminalState() {
-		CustomSceneSession session = registeredSession("interview_session_1");
+		CustomSceneSession session = registeredSession("custom_session_1");
 		Instant firstEnd = Instant.parse("2026-08-04T04:05:06Z");
 		Instant laterEnd = Instant.parse("2026-08-04T04:06:07Z");
 		service.terminateSceneSession(
@@ -306,7 +297,7 @@ class SessionServiceImplSceneSessionLifecycleTest {
 
 	@Test
 	void leavesRuntimeStateUnchangedWhenTerminalPersistenceFails() {
-		CustomSceneSession session = registeredSession("interview_session_1");
+		CustomSceneSession session = registeredSession("custom_session_1");
 		Instant endedAt = Instant.parse("2026-08-04T04:05:06Z");
 		BusinessException failure = new BusinessException(
 				"PRACTICE_SESSION_PERSISTENCE_FAILED",
@@ -331,15 +322,16 @@ class SessionServiceImplSceneSessionLifecycleTest {
 
 	@Test
 	void existingStartSessionStillCreatesFreeChatAndCustomRuntimeTypes() {
-		when(authService.requireUserId(isNull())).thenReturn(USER_ID);
 		ArgumentCaptor<PracticeSessionRecord> records =
 				ArgumentCaptor.forClass(PracticeSessionRecord.class);
 
 		var freeChat = service.startSession(
+				USER_ID,
 				SceneType.FREE_CHAT,
 				"freechat_scene_1",
 				"free prompt");
 		var custom = service.startSession(
+				USER_ID,
 				SceneType.CUSTOM_SCENE,
 				"custom_scene_1",
 				"custom prompt");
@@ -361,8 +353,8 @@ class SessionServiceImplSceneSessionLifecycleTest {
 	}
 
 	@Test
-	void interviewMessagesPersistBeforeEnteringRuntimeHistory() {
-		CustomSceneSession session = registeredSession("interview_session_1");
+	void customMessagesPersistBeforeEnteringRuntimeHistory() {
+		CustomSceneSession session = registeredSession("custom_session_1");
 		Message message = new Message(1, "  I led the launch.  ", new byte[] {1});
 
 		service.addMessage(USER_ID, session.getId(), message);
@@ -379,8 +371,8 @@ class SessionServiceImplSceneSessionLifecycleTest {
 	}
 
 	@Test
-	void endingInterviewPersistsCompletionAndRetainsRuntimeForFinalization() {
-		CustomSceneSession session = registeredSession("interview_session_1");
+	void endingCustomPersistsCompletionAndRetainsRuntimeForFinalization() {
+		CustomSceneSession session = registeredSession("custom_session_1");
 
 		service.endSession(USER_ID, session.getId(), "client-time-is-ignored");
 
@@ -419,15 +411,15 @@ class SessionServiceImplSceneSessionLifecycleTest {
 		assertTrue(sessions.findById(session.getId()).isEmpty());
 	}
 
-	private CustomSceneSession interviewSession(String sessionId, String userId) {
+	private CustomSceneSession customSession(String sessionId, String userId) {
 		CustomSceneSession session = new CustomSceneSession(sessionId, userId);
 		session.setSceneId(SCENE_ID);
-		session.setSceneType(SceneType.INTERVIEW_SCENE);
+		session.setSceneType(SceneType.CUSTOM_SCENE);
 		return session;
 	}
 
 	private CustomSceneSession registeredSession(String sessionId) {
-		CustomSceneSession session = interviewSession(sessionId, USER_ID);
+		CustomSceneSession session = customSession(sessionId, USER_ID);
 		assertTrue(sessions.registerIfAbsent(session));
 		return session;
 	}

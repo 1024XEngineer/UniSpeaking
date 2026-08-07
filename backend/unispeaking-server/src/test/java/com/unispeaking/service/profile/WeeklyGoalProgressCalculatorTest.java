@@ -1,5 +1,7 @@
 package com.unispeaking.service.profile;
 
+import com.unispeaking.component.profile.WeeklyGoalProgressCalculator;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -108,7 +110,7 @@ class WeeklyGoalProgressCalculatorTest {
 	void returnsEmptyDistributionWhenNoSessionContributesDuration() {
 		var progress = calculator.calculate(
 				List.of(record(
-						SceneType.INTERVIEW_SCENE,
+						SceneType.IELTS_SCENE,
 						SessionStatus.COMPLETED,
 						"2026-08-04T01:00:00Z",
 						"2026-08-04T01:05:00Z")),

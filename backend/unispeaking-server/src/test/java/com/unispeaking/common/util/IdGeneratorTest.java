@@ -13,8 +13,8 @@ class IdGeneratorTest {
 				.startsWith("freechat_"));
 		assertTrue(SceneIdGenerator.generate(SceneType.CUSTOM_SCENE)
 				.startsWith("custom_"));
-		assertTrue(SceneIdGenerator.generate(SceneType.INTERVIEW_SCENE)
-				.startsWith("interview_"));
+		assertTrue(SceneIdGenerator.generate(SceneType.CUSTOM_SCENE)
+				.startsWith("custom_"));
 		assertTrue(SceneIdGenerator.generate(SceneType.IELTS_SCENE)
 				.startsWith("ielts_"));
 	}

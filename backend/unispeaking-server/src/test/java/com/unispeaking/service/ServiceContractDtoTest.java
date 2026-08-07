@@ -80,7 +80,7 @@ class ServiceContractDtoTest {
 	void sceneTypeIsEncodedInTheSceneIdPrefix() {
 		assertSceneType("freechat_a1", SceneType.FREE_CHAT);
 		assertSceneType("custom_b2", SceneType.CUSTOM_SCENE);
-		assertSceneType("interview_c3", SceneType.INTERVIEW_SCENE);
+		assertSceneType("custom_c3", SceneType.CUSTOM_SCENE);
 		assertSceneType("ielts_d4", SceneType.IELTS_SCENE);
 		assertTrue(SceneType.fromSceneId("scene_legacy").isEmpty());
 	}

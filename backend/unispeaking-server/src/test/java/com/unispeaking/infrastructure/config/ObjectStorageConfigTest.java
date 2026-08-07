@@ -19,7 +19,7 @@ class ObjectStorageConfigTest {
 		BusinessException exception = assertThrows(
 				BusinessException.class,
 				() -> provider.signGetUrl(
-						"interviews/recordings/audio.mp3",
+						"customs/recordings/audio.mp3",
 						Duration.ofMinutes(5)));
 		assertEquals("OBJECT_STORAGE_UNAVAILABLE", exception.code());
 	}

@@ -132,10 +132,10 @@ class MybatisSceneRepositoryTest {
 		deleted.setDeletedAt(OffsetDateTime.now());
 		when(sceneMapper.selectById("deleted")).thenReturn(deleted);
 
-		var config = repository.findByType(SceneType.INTERVIEW_SCENE)
+		var config = repository.findByType(SceneType.CUSTOM_SCENE)
 				.orElseThrow();
 
-		assertEquals(SceneType.INTERVIEW_SCENE, config.type());
+		assertEquals(SceneType.CUSTOM_SCENE, config.type());
 		assertEquals(ProviderType.QWEN, config.providerType());
 		assertTrue(repository.findCustomDefinitionById("deleted").isEmpty());
 	}

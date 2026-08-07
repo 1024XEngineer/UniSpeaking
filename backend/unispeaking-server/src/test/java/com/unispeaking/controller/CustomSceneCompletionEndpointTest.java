@@ -10,11 +10,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
 import com.unispeaking.domain.dto.session.CompleteCustomSceneDialogueResponse;
-import com.unispeaking.service.evaluation.EvaluationService;
 import com.unispeaking.service.asset.LearningAssetService;
-import com.unispeaking.service.scene.SceneFlowService;
-import com.unispeaking.service.scene.CustomSceneService;
-import com.unispeaking.service.session.SessionService;
+import com.unispeaking.service.evaluation.impl.CustomEvaluationServiceImpl;
+import com.unispeaking.service.scene.impl.CustomSceneFlowServiceImpl;
+import com.unispeaking.service.scene.impl.CustomSceneServiceImpl;
+import com.unispeaking.service.session.impl.CustomSessionServiceImpl;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -26,7 +26,8 @@ class CustomSceneCompletionEndpointTest {
 
 	@Test
 	void activeHangupReturnsPersistedFiveDimensionReport() throws Exception {
-		CustomSceneService customSceneService = mock(CustomSceneService.class);
+		CustomSceneServiceImpl customSceneService = mock(CustomSceneServiceImpl.class);
+		CustomSessionServiceImpl customSessionService = mock(CustomSessionServiceImpl.class);
 		DialogueReportResult report = new DialogueReportResult(
 				new BigDecimal("84.0"),
 				new BigDecimal("81.0"),
@@ -37,7 +38,7 @@ class CustomSceneCompletionEndpointTest {
 				"本次场景练习已完成。",
 				List.of("表达清楚"),
 				List.of("增加词汇变化"));
-		when(customSceneService.completeSession(
+		when(customSessionService.completeSession(
 				eq("custom_2001"),
 				eq("scene_5001"),
 				eq("2026-07-30T10:42:00Z")))
@@ -49,8 +50,9 @@ class CustomSceneCompletionEndpointTest {
 						null));
 		CustomSceneController controller = new CustomSceneController(
 				customSceneService,
-				mock(SceneFlowService.class),
-				mock(EvaluationService.class),
+				mock(CustomSceneFlowServiceImpl.class),
+				mock(CustomEvaluationServiceImpl.class),
+				customSessionService,
 				mock(LearningAssetService.class));
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
@@ -70,7 +72,7 @@ class CustomSceneCompletionEndpointTest {
 				.andExpect(jsonPath("$.data.evaluation.naturalnessScore").value(83.0))
 				.andExpect(jsonPath("$.data.evaluation.finalScore").value(83.0));
 
-		verify(customSceneService).completeSession(
+		verify(customSessionService).completeSession(
 				"custom_2001",
 				"scene_5001",
 				"2026-07-30T10:42:00Z");
