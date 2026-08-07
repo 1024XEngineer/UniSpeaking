@@ -1,8 +1,7 @@
-import { useRouter } from 'expo-router';
+import { Redirect } from 'expo-router';
 
-import { IeltsFlow } from '@/screens/SpecialtyFlows';
+import { routes } from '@/navigation/routes';
 
 export default function IeltsRoute() {
-  const router = useRouter();
-  return <IeltsFlow onExit={() => router.back()} />;
+  return <Redirect href={routes.specialty.ielts} />;
 }
