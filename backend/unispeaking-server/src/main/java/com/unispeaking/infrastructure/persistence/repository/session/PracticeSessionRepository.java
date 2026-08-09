@@ -9,6 +9,7 @@ import com.unispeaking.domain.vo.session.SessionStatus;
 import com.unispeaking.infrastructure.persistence.entity.session.PracticeSessionEntity;
 import com.unispeaking.infrastructure.persistence.mapper.session.PracticeSessionMapper;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -153,6 +154,38 @@ public class PracticeSessionRepository {
 					.stream()
 					.map(this::toDomain)
 					.toList();
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
+	/**
+	 * 按 UTC 日统计指定场景类型当日 COMPLETED 会话数（配额派生计数）。
+	 * 条件方向复用 {@code idx_practice_session_user_completed_at} 部分索引
+	 * （user_id, ended_at DESC WHERE status='COMPLETED' AND ended_at IS NOT NULL）。
+	 */
+	public long countCompletedOnDate(
+			UUID userId,
+			SceneType sceneType,
+			LocalDate date) {
+		OffsetDateTime dayStart = date.atStartOfDay(ZoneOffset.UTC).toOffsetDateTime();
+		OffsetDateTime nextDayStart = date.plusDays(1)
+				.atStartOfDay(ZoneOffset.UTC)
+				.toOffsetDateTime();
+		try {
+			return mapper.selectCount(
+					new LambdaQueryWrapper<PracticeSessionEntity>()
+							.eq(PracticeSessionEntity::getUserId, userId)
+							.eq(
+									PracticeSessionEntity::getSceneType,
+									sceneType.name())
+							.eq(
+									PracticeSessionEntity::getStatus,
+									SessionStatus.COMPLETED.name())
+							.isNotNull(PracticeSessionEntity::getEndedAt)
+							.ge(PracticeSessionEntity::getEndedAt, dayStart)
+							.lt(PracticeSessionEntity::getEndedAt, nextDayStart));
 		}
 		catch (RuntimeException exception) {
 			throw persistenceFailure();

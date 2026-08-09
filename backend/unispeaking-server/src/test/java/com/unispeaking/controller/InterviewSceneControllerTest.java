@@ -4,14 +4,18 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
 import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
+import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
 import com.unispeaking.service.scene.impl.InterviewSceneServiceImpl;
+import com.unispeaking.service.session.InterviewSessionService;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -36,7 +40,9 @@ class InterviewSceneControllerTest {
 		when(service.prepareMaterials(any()))
 				.thenReturn(new InterviewMaterialDraft(material));
 		MockMvc mvc = MockMvcBuilders
-				.standaloneSetup(new InterviewSceneController(service))
+				.standaloneSetup(new InterviewSceneController(
+						service,
+						mock(InterviewSessionService.class)))
 				.build();
 
 		mvc.perform(multipart("/api/interview-scenes/prepare-materials")
@@ -71,7 +77,9 @@ class InterviewSceneControllerTest {
 						List.of(),
 						"最终文本")));
 		MockMvc mvc = MockMvcBuilders
-				.standaloneSetup(new InterviewSceneController(service))
+				.standaloneSetup(new InterviewSceneController(
+						service,
+						mock(InterviewSessionService.class)))
 				.build();
 
 		mvc.perform(multipart("/api/interview-scenes/prepare-materials")
@@ -83,5 +91,44 @@ class InterviewSceneControllerTest {
 								"%PDF-1.4 fake pdf".getBytes())))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.material.finalText").value("最终文本"));
+	}
+
+	@Test
+	void startSessionRoutesSceneIdAndDialogueRequest() throws Exception {
+		InterviewSessionService sessions = mock(InterviewSessionService.class);
+		when(sessions.startSession(any(), any()))
+				.thenReturn(new StartSceneSessionResponse(
+						"interview_1",
+						"模拟面试",
+						com.unispeaking.domain.vo.scene.SceneType.INTERVIEW_SCENE,
+						List.of(),
+						List.of(),
+						List.of(),
+						com.unispeaking.domain.vo.scene.SceneFlowStage.DIALOGUE,
+						true,
+						"session-1",
+						"provider-session",
+						"answer-sdp",
+						null,
+						"Katerina",
+						com.unispeaking.domain.vo.session.SessionStatus.WAITING_CLIENT,
+						"2026-08-09T00:00:00Z",
+						"system-prompt"));
+		MockMvc mvc = MockMvcBuilders
+				.standaloneSetup(new InterviewSceneController(
+						mock(InterviewSceneServiceImpl.class),
+						sessions))
+				.build();
+
+		mvc.perform(post("/api/interview-scenes/interview_1/sessions")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"offerSdp":"sdp","provider":"QWEN","model":"qwen3.5-plus","voice":"Katerina","translationEnabled":true}
+								"""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.success").value(true))
+				.andExpect(jsonPath("$.data.sceneId").value("interview_1"))
+				.andExpect(jsonPath("$.data.sessionId").value("session-1"))
+				.andExpect(jsonPath("$.data.scoringEnabled").value(true));
 	}
 }

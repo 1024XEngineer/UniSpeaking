@@ -19,7 +19,9 @@ import com.unispeaking.common.exception.InterviewErrorCode;
 import com.unispeaking.common.prompt.interview.InterviewPromptBuilder;
 import com.unispeaking.component.document.MaterialDesensitizer;
 import com.unispeaking.component.document.MaterialTextExtraction;
+import com.unispeaking.component.policy.DailyQuotaPolicy;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
+import com.unispeaking.domain.dto.scene.InterviewDialogueSceneContext;
 import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
 import com.unispeaking.domain.dto.scene.InterviewMaterialPreparationInput;
 import com.unispeaking.domain.dto.scene.InterviewSceneRequest;
@@ -32,7 +34,10 @@ import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.AiProviderRegistry.RoutedResult;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.scene.impl.InterviewSceneServiceImpl;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.JsonNode;
@@ -50,6 +55,7 @@ class InterviewSceneServiceImplTest {
 			mock(MaterialTextExtraction.class);
 	private final MaterialDesensitizer materialDesensitizer =
 			mock(MaterialDesensitizer.class);
+	private final DailyQuotaPolicy dailyQuotaPolicy = mock(DailyQuotaPolicy.class);
 	private final InterviewSceneServiceImpl service = new InterviewSceneServiceImpl(
 			authService,
 			repository,
@@ -57,6 +63,7 @@ class InterviewSceneServiceImplTest {
 			providerRegistry,
 			materialTextExtraction,
 			materialDesensitizer,
+			dailyQuotaPolicy,
 			objectMapper);
 
 	@Test
@@ -240,10 +247,73 @@ class InterviewSceneServiceImplTest {
 		verify(providerRegistry, times(2)).executeLlmTaskRouted(anyString(), isNull());
 	}
 
+	@Test
+	void prepareDialogueReturnsOwnedSceneContext() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		InterviewSceneDefinition definition = definition("interview_1", "user-1");
+		when(repository.findById("interview_1")).thenReturn(Optional.of(definition));
+		when(repository.findOwnedById("interview_1", "user-1"))
+				.thenReturn(Optional.of(definition));
+
+		InterviewDialogueSceneContext context =
+				service.prepareDialogue("interview_1");
+
+		assertEquals("user-1", context.userId());
+		assertEquals("interview_1", context.sceneId());
+		assertEquals("面试系统提示词", context.scenePrompt());
+		assertEquals(InterviewDifficulty.HARD, context.difficulty());
+	}
+
+	@Test
+	void prepareDialogueRejectsMissingScene() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		when(repository.findById("interview_1")).thenReturn(Optional.empty());
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> service.prepareDialogue("interview_1"));
+
+		assertEquals(
+				InterviewErrorCode.INTERVIEW_SCENE_NOT_FOUND,
+				exception.code());
+	}
+
+	@Test
+	void prepareDialogueRejectsSceneOwnedByAnotherUser() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		InterviewSceneDefinition definition = definition("interview_1", "user-2");
+		when(repository.findById("interview_1")).thenReturn(Optional.of(definition));
+		when(repository.findOwnedById("interview_1", "user-1"))
+				.thenReturn(Optional.empty());
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> service.prepareDialogue("interview_1"));
+
+		assertEquals(
+				InterviewErrorCode.INTERVIEW_SCENE_ACCESS_DENIED,
+				exception.code());
+	}
+
 	private InterviewSceneRequest request(
 			InterviewMaterial material,
 			InterviewDifficulty difficulty) {
 		return new InterviewSceneRequest(material, difficulty);
+	}
+
+	private InterviewSceneDefinition definition(String sceneId, String userId) {
+		OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+		return new InterviewSceneDefinition(
+				sceneId,
+				userId,
+				"{}",
+				"final text",
+				"{}",
+				InterviewDifficulty.HARD,
+				"面试系统提示词",
+				now,
+				now,
+				null);
 	}
 
 	private InterviewMaterial material() {
