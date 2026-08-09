@@ -1,6 +1,7 @@
 package com.unispeaking.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -134,5 +135,34 @@ class InterviewSceneControllerTest {
 				.andExpect(jsonPath("$.data.sceneId").value("interview_1"))
 				.andExpect(jsonPath("$.data.sessionId").value("session-1"))
 				.andExpect(jsonPath("$.data.scoringEnabled").value(true));
+	}
+
+	@Test
+	void submitTurnBindsMultipartWithAudio() throws Exception {
+		InterviewSessionService sessions = mock(InterviewSessionService.class);
+		when(sessions.submitTurn(any(), any(), anyInt(), any(), any()))
+				.thenReturn(new com.unispeaking.domain.dto.session.InterviewTurnResult(
+						new com.unispeaking.domain.dto.session.InterviewTurnStateResponse(
+								false, 1, "自我介绍"),
+						null));
+		MockMvc mvc = MockMvcBuilders
+				.standaloneSetup(new InterviewSceneController(
+						mock(InterviewSceneServiceImpl.class),
+						sessions,
+						mock(RecordingStore.class)))
+				.build();
+		byte[] wav = new byte[] {
+				(byte) 0x52, (byte) 0x49, (byte) 0x46, (byte) 0x46,
+				0x00, 0x00, 0x00, 0x00, (byte) 0x57, (byte) 0x41, (byte) 0x56, (byte) 0x45};
+
+		mvc.perform(multipart(
+						"/api/interview-scenes/interview_1/sessions/session-1/turns/1")
+						.param("transcript", "recorded transcript")
+						.file(new MockMultipartFile(
+								"audio", "interview-turn-1.wav", "audio/wav", wav)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.success").value(true))
+				.andExpect(jsonPath("$.data.state.currentTopic").value("自我介绍"))
+				.andExpect(jsonPath("$.data.state.completedTopicCount").value(1));
 	}
 }

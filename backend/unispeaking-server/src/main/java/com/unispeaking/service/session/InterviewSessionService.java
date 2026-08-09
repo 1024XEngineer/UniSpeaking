@@ -2,7 +2,6 @@ package com.unispeaking.service.session;
 
 import com.unispeaking.domain.dto.evaluation.InterviewEndResponse;
 import com.unispeaking.domain.dto.evaluation.InterviewReportResponse;
-import com.unispeaking.domain.dto.session.InterviewTurnRequest;
 import com.unispeaking.domain.dto.session.InterviewTurnResult;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
@@ -25,7 +24,7 @@ public interface InterviewSessionService {
 	void addMessage(String sessionId, Message message);
 
 	/**
-	 * 逐轮提交（multipart：{@link InterviewTurnRequest}）：在 {@code synchronized(session)}
+	 * 逐轮提交（multipart：transcript + audio）：在 {@code synchronized(session)}
 	 * 临界区内完成幂等锚定（owner=1 消息数 + content 比对）+ 存录音并 attach，临界区外做
 	 * LLM 主题识别并推进主题状态机；{@code shouldEnd=true} 时进入幂等结束编排。
 	 */
