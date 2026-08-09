@@ -262,6 +262,88 @@ class InterviewTopicStateMachineTest {
 		assertNull(stateMachine.current("session-1"));
 	}
 
+	@Test
+	void singleAnswerOnFifthTopicDoesNotEndInterview() {
+		List<String> topics = topics(
+				"自我介绍", "项目经历", "技术栈", "团队协作", "高并发问题解决");
+		stateMachine.start("session-1", topics, InterviewDifficulty.STANDARD);
+
+		stateMachine.advance(
+				"session-1",
+				1,
+				new InterviewTopicEvent("自我介绍", true));
+		InterviewTopicState state = stateMachine.advance(
+				"session-1",
+				2,
+				new InterviewTopicEvent("高并发问题解决", true));
+
+		assertFalse(state.shouldEnd());
+		assertEquals(2, state.coveredTopicCount());
+	}
+
+	@Test
+	void fifthTopicForcesEndOnlyAfterMostTopicsCovered() {
+		List<String> topics = topics(
+				"自我介绍", "项目经历", "技术栈", "团队协作", "高并发问题解决");
+		stateMachine.start("session-1", topics, InterviewDifficulty.STANDARD);
+
+		for (int turnNo = 1; turnNo <= 4; turnNo++) {
+			InterviewTopicState state = stateMachine.advance(
+					"session-1",
+					turnNo,
+					new InterviewTopicEvent(topics.get(turnNo - 1), true));
+			assertFalse(state.shouldEnd());
+		}
+		InterviewTopicState fifth = stateMachine.advance(
+				"session-1",
+				5,
+				new InterviewTopicEvent("高并发问题解决", true));
+
+		assertTrue(fifth.shouldEnd());
+		assertEquals(5, fifth.completedTopicCount());
+	}
+
+	@Test
+	void topicSwitchDoesNotImplicitlyCompletePreviousTopic() {
+		stateMachine.start(
+				"session-1",
+				topics("自我介绍", "项目经历"),
+				InterviewDifficulty.STANDARD);
+
+		stateMachine.advance(
+				"session-1",
+				1,
+				new InterviewTopicEvent("自我介绍", false));
+		InterviewTopicState state = stateMachine.advance(
+				"session-1",
+				2,
+				new InterviewTopicEvent("项目经历", false));
+
+		assertEquals(0, state.completedTopicCount());
+		assertEquals(2, state.coveredTopicCount());
+		assertEquals("项目经历", state.currentTopic());
+		assertFalse(state.shouldEnd());
+	}
+
+	@Test
+	void blankTranscriptIsNoOpNotUnknown() {
+		stateMachine.start(
+				"session-1",
+				topics("自我介绍", "项目经历"),
+				InterviewDifficulty.STANDARD);
+
+		stateMachine.advance("session-1", 1, InterviewTopicEvent.ignored());
+		stateMachine.advance("session-1", 2, InterviewTopicEvent.ignored());
+		InterviewTopicState state = stateMachine.advance(
+				"session-1",
+				3,
+				InterviewTopicEvent.ignored());
+
+		assertEquals(0, state.unknownStreak());
+		assertFalse(state.shouldEnd());
+		assertNull(state.currentTopic());
+	}
+
 	private List<String> topics(String... values) {
 		return List.of(values);
 	}

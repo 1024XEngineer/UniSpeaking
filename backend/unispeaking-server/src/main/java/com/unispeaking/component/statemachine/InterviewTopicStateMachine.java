@@ -21,8 +21,11 @@ import org.springframework.stereotype.Component;
  * 状态只存在于内存态，进程重启会话即死，无恢复对象。
  * 不实现 {@code SceneFlowService}（无场景级阶段）。</p>
  *
- * <p>终止规则（优先级高→低）：① 连续 3 次 UNKNOWN → 结束；② 当前为第 5 主题且已
- * 完成 → 强制结束；③ 完成主题 ≥4 ∧ 两必选已完成 ∧ 当前主题完成 → 结束；④ 否则继续。</p>
+ * <p>终止规则（优先级高→低）：① 连续 3 次 UNKNOWN → 结束；② 第 5 主题硬顶：已覆盖
+ * ≥N-1 个不同主题 ∧ 当前为最后一个主题且已判完成 → 强制结束；③ 自然结束：全部主题已
+ * 覆盖 ∧ 两必选已覆盖 ∧ 当前主题完成 → 结束；④ 否则继续。切题不隐式完成上一主题，
+ * 只有 LLM 明确 {@code topicCompleted=true} 才计入已完成；空/空白转录 no-op（不计
+ * UNKNOWN、不切题）。</p>
  *
  * <p>生成主题数为硬顶（来自 {@code InterviewContext.interviewTopics}），状态机不自行增长；
  * 识别到列表外的主题视为 UNKNOWN，防 LLM 幻觉越界。难度只约束每主题追问次数上限。</p>
@@ -92,7 +95,9 @@ public class InterviewTopicStateMachine {
 		private final int maxFollowUps;
 		private final Set<Integer> processedTurns = new LinkedHashSet<>();
 		private final Set<String> completedTopics = new HashSet<>();
+		private final Set<String> coveredTopics = new HashSet<>();
 		private final Set<String> completedMandatoryTopics = new HashSet<>();
+		private final Set<String> coveredMandatoryTopics = new HashSet<>();
 		private String currentTopic;
 		private int unknownStreak;
 		private int followUpCount;
@@ -130,6 +135,7 @@ public class InterviewTopicStateMachine {
 			return new InterviewTopicState(
 					currentTopic,
 					completedTopics.size(),
+					coveredTopics.size(),
 					unknownStreak,
 					followUpCount,
 					completedMandatoryTopics.size() >= 2,
@@ -142,6 +148,9 @@ public class InterviewTopicStateMachine {
 				return;
 			}
 			String topic = normalize(event.topic());
+			if (isIgnored(topic)) {
+				return;
+			}
 			if (isUnknown(topic)) {
 				recordUnknown();
 				return;
@@ -152,6 +161,7 @@ public class InterviewTopicStateMachine {
 				return;
 			}
 			unknownStreak = 0;
+			recordCovered(matched);
 			if (matched.equals(currentTopic)) {
 				followUpCount = Math.min(followUpCount + 1, maxFollowUps);
 				if (event.topicCompleted()) {
@@ -159,7 +169,7 @@ public class InterviewTopicStateMachine {
 				}
 			}
 			else {
-				completeCurrentTopic();
+				// 关键修复：切题不再隐式完成上一主题
 				currentTopic = matched;
 				currentTopicCompleted = false;
 				followUpCount = 0;
@@ -168,6 +178,17 @@ public class InterviewTopicStateMachine {
 				}
 			}
 			checkTermination();
+		}
+
+		private void recordCovered(String topic) {
+			coveredTopics.add(topic);
+			if (isMandatoryTopic(topic)) {
+				coveredMandatoryTopics.add(topic);
+			}
+		}
+
+		private boolean isIgnored(String topic) {
+			return topic == null || topic.isBlank();
 		}
 
 		private void recordUnknown() {
@@ -192,14 +213,17 @@ public class InterviewTopicStateMachine {
 			if (shouldEnd) {
 				return;
 			}
+			// ② 第 5 主题硬顶：须已覆盖 ≥N-1 个不同主题才允许强制结束
 			if (topics.size() >= 5
-					&& topics.indexOf(currentTopic) == 4
+					&& coveredTopics.size() >= topics.size() - 1
+					&& topics.indexOf(currentTopic) == topics.size() - 1
 					&& currentTopicCompleted) {
 				shouldEnd = true;
 				return;
 			}
-			if (completedTopics.size() >= 4
-					&& completedMandatoryTopics.size() >= 2
+			// ③ 自然结束：全部主题已覆盖 ∧ 两必选已覆盖 ∧ 当前主题完成
+			if (coveredTopics.size() >= topics.size()
+					&& coveredMandatoryTopics.size() >= 2
 					&& currentTopicCompleted) {
 				shouldEnd = true;
 			}

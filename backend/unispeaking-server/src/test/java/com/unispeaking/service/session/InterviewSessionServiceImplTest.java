@@ -305,7 +305,7 @@ class InterviewSessionServiceImplTest {
 		when(scenes.advanceTopicState(
 				eq(sceneId), eq("session-1"), eq(1), any(InterviewTopicEvent.class)))
 				.thenReturn(new InterviewTopicState(
-						"自我介绍", 0, 0, 0, false, false));
+						"自我介绍", 0, 0, 0, 0, false, false));
 
 		InterviewTurnResult result =
 				service.submitTurn(sceneId, "session-1", 1, "recorded transcript", null);

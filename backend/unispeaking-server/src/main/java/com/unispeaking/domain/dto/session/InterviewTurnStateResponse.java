@@ -6,5 +6,6 @@ package com.unispeaking.domain.dto.session;
 public record InterviewTurnStateResponse(
 		boolean shouldEnd,
 		int completedTopicCount,
+		int coveredTopicCount,
 		String currentTopic) {
 }

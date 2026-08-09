@@ -14,4 +14,9 @@ public record InterviewTopicEvent(
 	public static InterviewTopicEvent unknown() {
 		return new InterviewTopicEvent("UNKNOWN", false);
 	}
+
+	/** 空/空白转录事件：推进轮次但不计 UNKNOWN、不切题（no-op）。 */
+	public static InterviewTopicEvent ignored() {
+		return new InterviewTopicEvent("", false);
+	}
 }

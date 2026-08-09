@@ -1079,7 +1079,7 @@ export function createRealtimeClient({
           } else {
             requestTurnResponse({
               instructions: state?.currentTopic
-                ? `Current interview topic: ${state.currentTopic}. Continue the interview naturally — ask a focused follow-up within this topic, or transition to the next topic when this one is covered.`
+                ? `Current interview topic: ${state.currentTopic}. Continue the interview naturally — ask a focused follow-up within this topic, or transition to the NEXT topic in the interview flow when this one is covered. Do not skip topics.`
                 : "",
             });
           }
@@ -1138,6 +1138,9 @@ export function createRealtimeClient({
     voice = DEFAULT_VOICE,
     model = DEFAULT_MODEL,
     speechSpeed = DEFAULT_SPEECH_SPEED,
+    silenceDurationMs = null,
+    turnDetectionType = null,
+    interruptResponse = null,
   } = {}) {
     if (peer) return { sessionId };
     emit({ type: "local.connecting" });
@@ -1207,9 +1210,10 @@ export function createRealtimeClient({
         model,
         speechSpeed,
         automaticTurnResponses: !manualTurnResponses,
-        silenceDurationMs: ieltsSceneId ? 3_000 : 600,
-        turnDetectionType: isDeterministicIeltsPart() ? "server_vad" : null,
-        interruptResponse: ieltsActivePart !== "PART_2",
+        // 场景覆盖：Interview 由调用方显式传 1500；IELTS 保持确定性 3000；其余回落 600
+        silenceDurationMs: silenceDurationMs ?? (ieltsSceneId ? 3_000 : 600),
+        turnDetectionType: turnDetectionType ?? (isDeterministicIeltsPart() ? "server_vad" : null),
+        interruptResponse: interruptResponse ?? (ieltsActivePart !== "PART_2"),
       });
       baseSessionInstructions = sessionConfig.instructions;
 
