@@ -503,6 +503,8 @@ Interview（英文面试，第 4 场景，逐步实现中）：
 2. `POST /api/interview-scenes` — 生成面试场景（body：`{material, difficulty}` → `{sceneId, scenePrompt}`）
    - `material` 需含非空 `responsibilities`/`qualificationRequirements`；`difficulty` ∈ EASY/STANDARD/HARD。
    - 失败码：`INTERVIEW_MATERIAL_INVALID`→400、`INTERVIEW_REQUEST_INVALID`→400、`INTERVIEW_SCENE_ACCESS_DENIED`→403、`INTERVIEW_SCENE_NOT_FOUND`→404、`INTERVIEW_SCENE_PERSISTENCE_FAILED`→500、`INTERVIEW_CONTEXT_LLM_RESPONSE_INVALID`→400。
-3. （规划中）`POST /api/interview-scenes/{sceneId}/sessions` — 启动实时会话
+3. `POST /api/interview-scenes/{sceneId}/sessions` — 启动实时会话（body 复用 `StartCustomSceneDialogueRequest`：offerSdp/provider/model/voice/translationEnabled）
+   - 首面/复练统一入口（body 无 material/difficulty，结构上禁改材料/难度）；复练计入门槛（当日 COMPLETED 5 次，独立计数）。
+   - 失败码：`INTERVIEW_SCENE_NOT_FOUND`→404、`INTERVIEW_SCENE_ACCESS_DENIED`→403、`INTERVIEW_DAILY_LIMIT_REACHED`→429。
 4. （规划中）`POST .../turns/{turnNo}`、`POST .../end`、`GET .../report`、`POST .../report/retry`
 5. （规划中）`GET /api/interview-scenes/assets`、`DELETE /api/interview-scenes/{sceneId}`、`GET .../recording`、`POST .../ai-audio`

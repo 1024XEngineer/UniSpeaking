@@ -6,7 +6,9 @@ import com.unispeaking.common.prompt.interview.InterviewPromptBuilder;
 import com.unispeaking.common.util.SceneIdGenerator;
 import com.unispeaking.component.document.MaterialDesensitizer;
 import com.unispeaking.component.document.MaterialTextExtraction;
+import com.unispeaking.component.policy.DailyQuotaPolicy;
 import com.unispeaking.domain.dto.scene.InterviewContext;
+import com.unispeaking.domain.dto.scene.InterviewDialogueSceneContext;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
 import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
 import com.unispeaking.domain.dto.scene.InterviewMaterialPreparationInput;
@@ -41,6 +43,7 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 	private static final Logger LOGGER = LoggerFactory.getLogger(
 			InterviewSceneServiceImpl.class);
 	private static final int MAX_GENERATION_ATTEMPTS = 2;
+	private static final int DAILY_PRACTICE_LIMIT = 5;
 	private static final int MIN_TOPICS = 4;
 	private static final int MAX_TOPICS = 5;
 	private static final int TOPIC_MAX_LENGTH = 100;
@@ -53,6 +56,7 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 	private final AiProviderRegistry providerRegistry;
 	private final MaterialTextExtraction materialTextExtraction;
 	private final MaterialDesensitizer materialDesensitizer;
+	private final DailyQuotaPolicy dailyQuotaPolicy;
 	private final ObjectMapper objectMapper;
 	private final ObjectReader strictReader;
 
@@ -63,6 +67,7 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 			AiProviderRegistry providerRegistry,
 			MaterialTextExtraction materialTextExtraction,
 			MaterialDesensitizer materialDesensitizer,
+			DailyQuotaPolicy dailyQuotaPolicy,
 			ObjectMapper objectMapper) {
 		this.authService = authService;
 		this.interviewSceneRepository = interviewSceneRepository;
@@ -70,6 +75,7 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 		this.providerRegistry = providerRegistry;
 		this.materialTextExtraction = materialTextExtraction;
 		this.materialDesensitizer = materialDesensitizer;
+		this.dailyQuotaPolicy = dailyQuotaPolicy;
 		this.objectMapper = objectMapper;
 		this.strictReader = objectMapper.reader()
 				.with(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
@@ -80,6 +86,10 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 	@Override
 	public InterviewSceneResult generate(InterviewSceneRequest request) {
 		String userId = authService.requireUserId(null);
+		dailyQuotaPolicy.assertWithinQuota(
+				userId,
+				SceneType.INTERVIEW_SCENE,
+				DAILY_PRACTICE_LIMIT);
 		InterviewMaterial material = requireMaterial(request == null
 				? null
 				: request.material());
@@ -135,6 +145,31 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 				userId,
 				extracted.resumeAbsent());
 		return new InterviewMaterialDraft(material);
+	}
+
+	@Override
+	public InterviewDialogueSceneContext prepareDialogue(String sceneId) {
+		String userId = authService.requireUserId(null);
+		InterviewSceneDefinition definition = requireOwnedScene(sceneId, userId);
+		return new InterviewDialogueSceneContext(
+				userId,
+				definition.sceneId(),
+				definition.scenePrompt(),
+				definition.difficulty());
+	}
+
+	private InterviewSceneDefinition requireOwnedScene(
+			String sceneId,
+			String userId) {
+		if (interviewSceneRepository.findById(sceneId).isEmpty()) {
+			throw new BusinessException(
+					InterviewErrorCode.INTERVIEW_SCENE_NOT_FOUND,
+					"面试场景不存在");
+		}
+		return interviewSceneRepository.findOwnedById(sceneId, userId)
+				.orElseThrow(() -> new BusinessException(
+						InterviewErrorCode.INTERVIEW_SCENE_ACCESS_DENIED,
+						"当前用户无权访问该面试场景"));
 	}
 
 	private InterviewMaterial generateMaterial(

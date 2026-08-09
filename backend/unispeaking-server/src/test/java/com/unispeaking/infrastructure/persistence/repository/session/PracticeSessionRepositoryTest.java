@@ -21,6 +21,7 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.unispeaking.infrastructure.persistence.entity.session.PracticeSessionEntity;
 import com.unispeaking.infrastructure.persistence.mapper.session.PracticeSessionMapper;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -272,6 +273,47 @@ class PracticeSessionRepositoryTest {
 		assertEquals(1, records.size());
 		assertEquals("freechat_session_1", records.getFirst().sessionId());
 		assertEquals(SessionStatus.COMPLETED, records.getFirst().status());
+	}
+
+	@Test
+	void countsCompletedSessionsOnDateForSceneType() {
+		PracticeSessionMapper mapper = mock(PracticeSessionMapper.class);
+		when(mapper.selectCount(any(Wrapper.class))).thenReturn(3L);
+		PracticeSessionRepository repository = new PracticeSessionRepository(mapper);
+		UUID userId = UUID.randomUUID();
+
+		long count = repository.countCompletedOnDate(
+				userId,
+				SceneType.INTERVIEW_SCENE,
+				LocalDate.parse("2026-08-09"));
+
+		assertEquals(3L, count);
+		@SuppressWarnings("unchecked")
+		ArgumentCaptor<Wrapper<PracticeSessionEntity>> captor =
+				ArgumentCaptor.forClass(Wrapper.class);
+		verify(mapper).selectCount(captor.capture());
+		String sql = captor.getValue().getSqlSegment()
+				.toLowerCase(java.util.Locale.ROOT);
+		assertTrue(sql.contains("user_id ="), sql);
+		assertTrue(sql.contains("scene_type ="), sql);
+		assertTrue(sql.contains("status ="), sql);
+		assertTrue(sql.contains("ended_at"), sql);
+	}
+
+	@Test
+	void countOnDateTranslatesDatabaseFailures() {
+		PracticeSessionMapper mapper = mock(PracticeSessionMapper.class);
+		when(mapper.selectCount(any(Wrapper.class)))
+				.thenThrow(new IllegalStateException("count"));
+		PracticeSessionRepository repository = new PracticeSessionRepository(mapper);
+
+		assertEquals(
+				"PRACTICE_SESSION_PERSISTENCE_FAILED",
+				assertThrows(BusinessException.class,
+						() -> repository.countCompletedOnDate(
+								UUID.randomUUID(),
+								SceneType.INTERVIEW_SCENE,
+								LocalDate.now())).code());
 	}
 
 	private PracticeSessionEntity completedEntity() {
