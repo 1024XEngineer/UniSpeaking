@@ -10,7 +10,6 @@ import com.unispeaking.domain.dto.scene.InterviewMaterialPreparationInput;
 import com.unispeaking.domain.dto.scene.InterviewResumeFile;
 import com.unispeaking.domain.dto.scene.InterviewSceneRequest;
 import com.unispeaking.domain.dto.scene.InterviewSceneResult;
-import com.unispeaking.domain.dto.session.InterviewTurnRequest;
 import com.unispeaking.domain.dto.session.InterviewTurnResult;
 import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
 import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
@@ -25,7 +24,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -93,15 +91,16 @@ public class InterviewSceneController {
 			@PathVariable String sceneId,
 			@PathVariable String sessionId,
 			@PathVariable int turnNo,
-			@ModelAttribute InterviewTurnRequest request)
+			@RequestParam String transcript,
+			@RequestParam(required = false) MultipartFile audio)
 			throws IOException {
 		return ApiResponse.success(
 				interviewSessionService.submitTurn(
 						sceneId,
 						sessionId,
 						turnNo,
-						request.transcript(),
-						request.audio()));
+						transcript,
+						audio == null ? null : audio.getBytes()));
 	}
 
 	@PostMapping("/{sceneId}/sessions/{sessionId}/end")
