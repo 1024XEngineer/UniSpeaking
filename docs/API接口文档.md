@@ -494,3 +494,13 @@ IELTS 专项训练/模考：
 5. 根据 Part 状态机提交轮次、音频和状态事件
 6. 每阶段后台评分；最后调用 evaluation 获取汇总
 7. `/evaluations` 用于学习资产列表、报告、趋势和录音链接
+
+Interview（英文面试，第 4 场景，逐步实现中）：
+
+1. `POST /api/interview-scenes` — 生成面试场景（body：`{material, difficulty}` → `{sceneId, scenePrompt}`）
+   - `material` 需含非空 `responsibilities`/`qualificationRequirements`；`difficulty` ∈ EASY/STANDARD/HARD。
+   - 失败码：`INTERVIEW_MATERIAL_INVALID`→400、`INTERVIEW_REQUEST_INVALID`→400、`INTERVIEW_SCENE_ACCESS_DENIED`→403、`INTERVIEW_SCENE_NOT_FOUND`→404、`INTERVIEW_SCENE_PERSISTENCE_FAILED`→500、`INTERVIEW_CONTEXT_LLM_RESPONSE_INVALID`→400。
+2. （规划中）`POST /api/interview-scenes/prepare-materials` — 解析 JD/简历 + OCR → 材料草稿
+3. （规划中）`POST /api/interview-scenes/{sceneId}/sessions` — 启动实时会话
+4. （规划中）`POST .../turns/{turnNo}`、`POST .../end`、`GET .../report`、`POST .../report/retry`
+5. （规划中）`GET /api/interview-scenes/assets`、`DELETE /api/interview-scenes/{sceneId}`、`GET .../recording`、`POST .../ai-audio`
