@@ -506,5 +506,8 @@ Interview（英文面试，第 4 场景，逐步实现中）：
 3. `POST /api/interview-scenes/{sceneId}/sessions` — 启动实时会话（body 复用 `StartCustomSceneDialogueRequest`：offerSdp/provider/model/voice/translationEnabled）
    - 首面/复练统一入口（body 无 material/difficulty，结构上禁改材料/难度）；复练计入门槛（当日 COMPLETED 5 次，独立计数）。
    - 失败码：`INTERVIEW_SCENE_NOT_FOUND`→404、`INTERVIEW_SCENE_ACCESS_DENIED`→403、`INTERVIEW_DAILY_LIMIT_REACHED`→429。
-4. （规划中）`POST .../turns/{turnNo}`、`POST .../end`、`GET .../report`、`POST .../report/retry`
-5. （规划中）`GET /api/interview-scenes/assets`、`DELETE /api/interview-scenes/{sceneId}`、`GET .../recording`、`POST .../ai-audio`
+4. `POST /api/interview-scenes/{sceneId}/sessions/{sessionId}/turns/{turnNo}` — 逐轮提交（multipart：`transcript` 必填 + `audio` 可空）
+   - 幂等粒度 `(sessionId, turnNo)`：重复请求返回已记录状态；同轮内容不一致 → 409 `INTERVIEW_TURN_CONTENT_MISMATCH`；WS 消息在途 → 409 `INTERVIEW_TURN_MESSAGE_PENDING`（可重试）；轮次空洞 → 400 `INTERVIEW_TURN_OUT_OF_ORDER`；会话已结束 → 409 `INTERVIEW_SESSION_ENDED`。
+   - 返回 `{state: {shouldEnd, completedTopicCount, currentTopic}, reportStatus}`；`shouldEnd=true` 时前端停录音关连接，`reportStatus=PROCESSING`。
+5. （规划中）`POST .../end`、`GET .../report`、`POST .../report/retry`
+6. （规划中）`GET /api/interview-scenes/assets`、`DELETE /api/interview-scenes/{sceneId}`、`GET .../recording`、`POST .../ai-audio`

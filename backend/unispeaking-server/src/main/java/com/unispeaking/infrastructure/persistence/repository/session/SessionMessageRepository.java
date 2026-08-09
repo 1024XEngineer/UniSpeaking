@@ -64,6 +64,28 @@ public class SessionMessageRepository {
 		}
 	}
 
+	/**
+	 * 按 messageNo 升序返回 owner=1（用户）消息，作为 Interview 轮次幂等锚点
+	 * （第 N 条 owner=1 消息即第 N 轮）。
+	 */
+	public List<Message> findLearnerMessages(String sessionId) {
+		try {
+			return mapper.selectList(new LambdaQueryWrapper<SessionMessageEntity>()
+							.eq(SessionMessageEntity::getSessionId, sessionId)
+							.eq(SessionMessageEntity::getOwner, 1)
+							.orderByAsc(SessionMessageEntity::getMessageNo))
+					.stream()
+					.map(entity -> new Message(
+							entity.getOwner(),
+							entity.getContent(),
+							null))
+					.toList();
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
 	public Optional<String> findSceneId(String sessionId) {
 		if (sessionId == null || sessionId.isBlank()) {
 			return Optional.empty();

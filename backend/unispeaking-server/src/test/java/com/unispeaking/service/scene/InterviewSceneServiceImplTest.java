@@ -20,6 +20,7 @@ import com.unispeaking.common.prompt.interview.InterviewPromptBuilder;
 import com.unispeaking.component.document.MaterialDesensitizer;
 import com.unispeaking.component.document.MaterialTextExtraction;
 import com.unispeaking.component.policy.DailyQuotaPolicy;
+import com.unispeaking.component.statemachine.InterviewTopicStateMachine;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
 import com.unispeaking.domain.dto.scene.InterviewDialogueSceneContext;
 import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
@@ -56,6 +57,8 @@ class InterviewSceneServiceImplTest {
 	private final MaterialDesensitizer materialDesensitizer =
 			mock(MaterialDesensitizer.class);
 	private final DailyQuotaPolicy dailyQuotaPolicy = mock(DailyQuotaPolicy.class);
+	private final InterviewTopicStateMachine stateMachine =
+			mock(InterviewTopicStateMachine.class);
 	private final InterviewSceneServiceImpl service = new InterviewSceneServiceImpl(
 			authService,
 			repository,
@@ -64,6 +67,7 @@ class InterviewSceneServiceImplTest {
 			materialTextExtraction,
 			materialDesensitizer,
 			dailyQuotaPolicy,
+			stateMachine,
 			objectMapper);
 
 	@Test

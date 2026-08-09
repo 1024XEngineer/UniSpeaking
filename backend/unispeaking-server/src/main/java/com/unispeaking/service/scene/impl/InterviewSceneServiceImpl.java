@@ -7,6 +7,7 @@ import com.unispeaking.common.util.SceneIdGenerator;
 import com.unispeaking.component.document.MaterialDesensitizer;
 import com.unispeaking.component.document.MaterialTextExtraction;
 import com.unispeaking.component.policy.DailyQuotaPolicy;
+import com.unispeaking.component.statemachine.InterviewTopicStateMachine;
 import com.unispeaking.domain.dto.scene.InterviewContext;
 import com.unispeaking.domain.dto.scene.InterviewDialogueSceneContext;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
@@ -16,6 +17,8 @@ import com.unispeaking.domain.dto.scene.InterviewSceneRequest;
 import com.unispeaking.domain.dto.scene.InterviewSceneResult;
 import com.unispeaking.domain.po.scene.InterviewSceneDefinition;
 import com.unispeaking.domain.vo.scene.InterviewDifficulty;
+import com.unispeaking.domain.vo.scene.InterviewTopicEvent;
+import com.unispeaking.domain.vo.scene.InterviewTopicState;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.infrastructure.persistence.repository.scene.InterviewSceneRepository;
 import com.unispeaking.provider.AiProviderRegistry;
@@ -57,6 +60,7 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 	private final MaterialTextExtraction materialTextExtraction;
 	private final MaterialDesensitizer materialDesensitizer;
 	private final DailyQuotaPolicy dailyQuotaPolicy;
+	private final InterviewTopicStateMachine stateMachine;
 	private final ObjectMapper objectMapper;
 	private final ObjectReader strictReader;
 
@@ -68,6 +72,7 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 			MaterialTextExtraction materialTextExtraction,
 			MaterialDesensitizer materialDesensitizer,
 			DailyQuotaPolicy dailyQuotaPolicy,
+			InterviewTopicStateMachine stateMachine,
 			ObjectMapper objectMapper) {
 		this.authService = authService;
 		this.interviewSceneRepository = interviewSceneRepository;
@@ -76,6 +81,7 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 		this.materialTextExtraction = materialTextExtraction;
 		this.materialDesensitizer = materialDesensitizer;
 		this.dailyQuotaPolicy = dailyQuotaPolicy;
+		this.stateMachine = stateMachine;
 		this.objectMapper = objectMapper;
 		this.strictReader = objectMapper.reader()
 				.with(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
@@ -156,6 +162,33 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 				definition.sceneId(),
 				definition.scenePrompt(),
 				definition.difficulty());
+	}
+
+	@Override
+	public InterviewTopicState advanceTopicState(
+			String sceneId,
+			String sessionId,
+			int turnNo,
+			InterviewTopicEvent event) {
+		if (stateMachine.current(sessionId) == null) {
+			InterviewSceneDefinition definition = interviewSceneRepository
+					.findById(sceneId)
+					.orElseThrow(() -> new BusinessException(
+							InterviewErrorCode.INTERVIEW_SCENE_NOT_FOUND,
+							"面试场景不存在"));
+			stateMachine.start(
+					sessionId,
+					parseStoredTopics(definition.interviewContextJson()),
+					definition.difficulty());
+		}
+		return stateMachine.advance(sessionId, turnNo, event);
+	}
+
+	@Override
+	public List<String> interviewTopics(String sceneId) {
+		String userId = authService.requireUserId(null);
+		InterviewSceneDefinition definition = requireOwnedScene(sceneId, userId);
+		return parseStoredTopics(definition.interviewContextJson());
 	}
 
 	private InterviewSceneDefinition requireOwnedScene(
@@ -451,6 +484,38 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 			throw invalidContextResponse();
 		}
 		return List.copyOf(topics);
+	}
+
+	private List<String> parseStoredTopics(String interviewContextJson) {
+		try {
+			JsonNode root = objectMapper.readTree(interviewContextJson);
+			JsonNode topics = root.path("interviewTopics");
+			List<String> values = new ArrayList<>();
+			if (topics.isArray()) {
+				for (JsonNode topic : topics) {
+					if (topic.isString()) {
+						String value = topic.asString("").strip();
+						if (!value.isBlank()) {
+							values.add(value);
+						}
+					}
+				}
+			}
+			if (values.isEmpty()) {
+				throw new BusinessException(
+						InterviewErrorCode.INTERVIEW_REQUEST_INVALID,
+						"面试上下文缺少主题");
+			}
+			return List.copyOf(values);
+		}
+		catch (RuntimeException exception) {
+			if (exception instanceof BusinessException businessException) {
+				throw businessException;
+			}
+			throw new BusinessException(
+					InterviewErrorCode.INTERVIEW_REQUEST_INVALID,
+					"面试上下文解析失败");
+		}
 	}
 
 	private boolean isSelfIntroductionTopic(String topic) {
