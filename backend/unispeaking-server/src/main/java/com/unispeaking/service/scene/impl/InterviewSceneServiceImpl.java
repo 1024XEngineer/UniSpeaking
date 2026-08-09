@@ -7,6 +7,7 @@ import com.unispeaking.common.util.SceneIdGenerator;
 import com.unispeaking.component.document.MaterialDesensitizer;
 import com.unispeaking.component.document.MaterialTextExtraction;
 import com.unispeaking.component.policy.DailyQuotaPolicy;
+import com.unispeaking.component.recording.RecordingStore;
 import com.unispeaking.component.statemachine.InterviewTopicStateMachine;
 import com.unispeaking.domain.dto.scene.InterviewContext;
 import com.unispeaking.domain.dto.scene.InterviewDialogueSceneContext;
@@ -16,11 +17,13 @@ import com.unispeaking.domain.dto.scene.InterviewMaterialPreparationInput;
 import com.unispeaking.domain.dto.scene.InterviewSceneRequest;
 import com.unispeaking.domain.dto.scene.InterviewSceneResult;
 import com.unispeaking.domain.po.scene.InterviewSceneDefinition;
+import com.unispeaking.domain.po.session.PracticeSessionRecord;
 import com.unispeaking.domain.vo.scene.InterviewDifficulty;
 import com.unispeaking.domain.vo.scene.InterviewTopicEvent;
 import com.unispeaking.domain.vo.scene.InterviewTopicState;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.infrastructure.persistence.repository.scene.InterviewSceneRepository;
+import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.scene.InterviewSceneService;
@@ -61,6 +64,8 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 	private final MaterialDesensitizer materialDesensitizer;
 	private final DailyQuotaPolicy dailyQuotaPolicy;
 	private final InterviewTopicStateMachine stateMachine;
+	private final PracticeSessionRepository practiceSessionRepository;
+	private final RecordingStore interviewRecordingStore;
 	private final ObjectMapper objectMapper;
 	private final ObjectReader strictReader;
 
@@ -73,6 +78,9 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 			MaterialDesensitizer materialDesensitizer,
 			DailyQuotaPolicy dailyQuotaPolicy,
 			InterviewTopicStateMachine stateMachine,
+			PracticeSessionRepository practiceSessionRepository,
+			@org.springframework.beans.factory.annotation.Qualifier("interviewRecordingStore")
+			RecordingStore interviewRecordingStore,
 			ObjectMapper objectMapper) {
 		this.authService = authService;
 		this.interviewSceneRepository = interviewSceneRepository;
@@ -82,6 +90,8 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 		this.materialDesensitizer = materialDesensitizer;
 		this.dailyQuotaPolicy = dailyQuotaPolicy;
 		this.stateMachine = stateMachine;
+		this.practiceSessionRepository = practiceSessionRepository;
+		this.interviewRecordingStore = interviewRecordingStore;
 		this.objectMapper = objectMapper;
 		this.strictReader = objectMapper.reader()
 				.with(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
@@ -189,6 +199,21 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 		String userId = authService.requireUserId(null);
 		InterviewSceneDefinition definition = requireOwnedScene(sceneId, userId);
 		return parseStoredTopics(definition.interviewContextJson());
+	}
+
+	@Override
+	public void deleteScene(String sceneId) {
+		String userId = authService.requireUserId(null);
+		requireOwnedScene(sceneId, userId);
+		interviewSceneRepository.softDelete(sceneId, userId);
+		practiceSessionRepository.findBySceneId(sceneId)
+				.stream()
+				.map(PracticeSessionRecord::sessionId)
+				.forEach(interviewRecordingStore::deleteSessionAudio);
+		LOGGER.info(
+				"interview scene deleted sceneId={} userId={}",
+				sceneId,
+				userId);
 	}
 
 	private InterviewSceneDefinition requireOwnedScene(

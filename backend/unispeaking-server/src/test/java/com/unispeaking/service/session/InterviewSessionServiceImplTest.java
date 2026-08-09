@@ -18,18 +18,25 @@ import static org.mockito.Mockito.when;
 
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.exception.InterviewErrorCode;
+import com.unispeaking.common.exception.SessionNotFoundException;
 import com.unispeaking.component.policy.DailyQuotaPolicy;
+import com.unispeaking.component.recording.RecordingStore;
+import com.unispeaking.component.report.InterviewReportCoordinator;
 import com.unispeaking.component.session.RealtimeSessionCoordinator;
 import com.unispeaking.component.session.SessionLifecycleManager;
+import com.unispeaking.domain.dto.evaluation.InterviewEndResponse;
+import com.unispeaking.domain.dto.evaluation.InterviewReportResponse;
 import com.unispeaking.domain.dto.scene.InterviewDialogueSceneContext;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.dto.session.InterviewTurnResult;
+import com.unispeaking.domain.po.evaluation.InterviewReportRecord;
 import com.unispeaking.domain.po.session.AbstractSceneSession;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
 import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
 import com.unispeaking.domain.dto.session.StartSessionCommand;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
+import com.unispeaking.domain.vo.evaluation.ReportStatus;
 import com.unispeaking.domain.vo.provider.AiCapability;
 import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.scene.InterviewDifficulty;
@@ -38,12 +45,14 @@ import com.unispeaking.domain.vo.scene.InterviewTopicState;
 import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
+import com.unispeaking.infrastructure.persistence.repository.evaluation.InterviewReportRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.scene.InterviewSceneService;
 import com.unispeaking.service.session.impl.InterviewSessionServiceImpl;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -58,6 +67,12 @@ class InterviewSessionServiceImplTest {
 	private final AuthService authService = mock(AuthService.class);
 	private final SessionMessageRepository sessionMessageRepository =
 			mock(SessionMessageRepository.class);
+	private final InterviewReportRepository interviewReportRepository =
+			mock(InterviewReportRepository.class);
+	private final InterviewReportCoordinator reportCoordinator =
+			mock(InterviewReportCoordinator.class);
+	private final RecordingStore interviewRecordingStore =
+			mock(RecordingStore.class);
 	private final AiProviderRegistry providerRegistry =
 			mock(AiProviderRegistry.class);
 	private final InterviewSessionServiceImpl service =
@@ -68,6 +83,9 @@ class InterviewSessionServiceImplTest {
 					coordinator,
 					authService,
 					sessionMessageRepository,
+					interviewReportRepository,
+					reportCoordinator,
+					interviewRecordingStore,
 					providerRegistry,
 					new tools.jackson.databind.ObjectMapper());
 
@@ -304,6 +322,151 @@ class InterviewSessionServiceImplTest {
 		when(session.getSceneId()).thenReturn(sceneId);
 		when(session.getStatus()).thenReturn(status);
 		return session;
+	}
+
+	@Test
+	void endInterviewOrchestratesTerminateCreateAndSubmit() {
+		AbstractSceneSession session = interviewSession(SessionStatus.ACTIVE);
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(coordinator.requireOwnedSession(userId, "session-1"))
+				.thenReturn(session);
+		when(interviewReportRepository.createIfAbsent("session-1", sceneId, userId))
+				.thenReturn(true);
+		when(interviewReportRepository.findById("session-1"))
+				.thenReturn(Optional.of(record(ReportStatus.PROCESSING)));
+
+		InterviewEndResponse response = service.endInterview(sceneId, "session-1");
+
+		assertEquals("session-1", response.sessionId());
+		assertEquals(ReportStatus.PROCESSING, response.reportStatus());
+		verify(lifecycle).terminateSceneSession(
+				eq(userId),
+				eq("session-1"),
+				eq(SessionStatus.COMPLETED),
+				any());
+		verify(reportCoordinator).submit("session-1", sceneId, userId);
+		verify(coordinator).remove("session-1");
+	}
+
+	@Test
+	void endInterviewDoesNotResubmitWhenReportRowAlreadyExists() {
+		AbstractSceneSession session = interviewSession(SessionStatus.COMPLETED);
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(coordinator.requireOwnedSession(userId, "session-1"))
+				.thenReturn(session);
+		when(interviewReportRepository.createIfAbsent("session-1", sceneId, userId))
+				.thenReturn(false);
+		when(interviewReportRepository.findById("session-1"))
+				.thenReturn(Optional.of(record(ReportStatus.COMPLETED)));
+
+		InterviewEndResponse response = service.endInterview(sceneId, "session-1");
+
+		assertEquals(ReportStatus.COMPLETED, response.reportStatus());
+		verify(reportCoordinator, never()).submit(anyString(), anyString(), anyString());
+		verify(coordinator).remove("session-1");
+	}
+
+	@Test
+	void endInterviewIsIdempotentWhenSessionAlreadyRemoved() {
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(coordinator.requireOwnedSession(userId, "session-1"))
+				.thenThrow(new SessionNotFoundException("session-1"));
+		when(interviewReportRepository.findById("session-1"))
+				.thenReturn(Optional.of(record(ReportStatus.FAILED)));
+
+		InterviewEndResponse response = service.endInterview(sceneId, "session-1");
+
+		assertEquals(ReportStatus.FAILED, response.reportStatus());
+		verify(reportCoordinator, never()).submit(anyString(), anyString(), anyString());
+	}
+
+	@Test
+	void getReportReturnsReadModelWithoutRedispatchForFreshRow() {
+		InterviewReportRecord record = record(ReportStatus.COMPLETED);
+		InterviewReportResponse response = new InterviewReportResponse(
+				"session-1",
+				sceneId,
+				ReportStatus.COMPLETED,
+				null,
+				null);
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(interviewReportRepository.findById("session-1"))
+				.thenReturn(Optional.of(record));
+		when(reportCoordinator.toResponse(record)).thenReturn(response);
+
+		InterviewReportResponse actual = service.getReport(sceneId, "session-1");
+
+		assertSame(response, actual);
+		verify(reportCoordinator, never()).redispatchIfStale(
+				anyString(), anyString(), anyString());
+	}
+
+	@Test
+	void getReportThrowsNotFoundForMissingRow() {
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(interviewReportRepository.findById("session-1"))
+				.thenReturn(Optional.empty());
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> service.getReport(sceneId, "session-1"));
+
+		assertEquals(
+				InterviewErrorCode.INTERVIEW_REPORT_NOT_FOUND,
+				exception.code());
+	}
+
+	@Test
+	void retryReportCasFailedToProcessingAndSubmits() {
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(interviewReportRepository.findById("session-1"))
+				.thenReturn(
+						Optional.of(record(ReportStatus.FAILED)),
+						Optional.of(record(ReportStatus.PROCESSING)));
+		when(interviewReportRepository.casFailedToProcessing("session-1"))
+				.thenReturn(true);
+		when(reportCoordinator.toResponse(any()))
+				.thenReturn(new InterviewReportResponse(
+						"session-1",
+						sceneId,
+						ReportStatus.PROCESSING,
+						null,
+						null));
+
+		InterviewReportResponse response =
+				service.retryReport(sceneId, "session-1");
+
+		assertEquals(ReportStatus.PROCESSING, response.status());
+		verify(reportCoordinator).submit("session-1", sceneId, userId);
+	}
+
+	private InterviewReportRecord record(ReportStatus status) {
+		return new InterviewReportRecord(
+				"session-1",
+				sceneId,
+				userId,
+				status,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				0,
+				status == ReportStatus.FAILED ? "PROVIDER_RETRYABLE" : null,
+				null,
+				null);
 	}
 
 	private AiProviderRegistry.RoutedResult completed(String response) {

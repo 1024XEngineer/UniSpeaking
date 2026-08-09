@@ -507,7 +507,13 @@ Interview（英文面试，第 4 场景，逐步实现中）：
    - 首面/复练统一入口（body 无 material/difficulty，结构上禁改材料/难度）；复练计入门槛（当日 COMPLETED 5 次，独立计数）。
    - 失败码：`INTERVIEW_SCENE_NOT_FOUND`→404、`INTERVIEW_SCENE_ACCESS_DENIED`→403、`INTERVIEW_DAILY_LIMIT_REACHED`→429。
 4. `POST /api/interview-scenes/{sceneId}/sessions/{sessionId}/turns/{turnNo}` — 逐轮提交（multipart：`transcript` 必填 + `audio` 可空）
-   - 幂等粒度 `(sessionId, turnNo)`：重复请求返回已记录状态；同轮内容不一致 → 409 `INTERVIEW_TURN_CONTENT_MISMATCH`；WS 消息在途 → 409 `INTERVIEW_TURN_MESSAGE_PENDING`（可重试）；轮次空洞 → 400 `INTERVIEW_TURN_OUT_OF_ORDER`；会话已结束 → 409 `INTERVIEW_SESSION_ENDED`。
+   - 幂等粒度 `(sessionId, turnNo)`：重复请求返回已记录状态；同轮内容不一致 → 409 `INTERVIEW_TURN_CONTENT_MISMATCH`；WS 消息在途 → 409 `INTERVIEW_TURN_MESSAGE_PENDING`（可重试）；轮次空洞/非正 → 400 `INTERVIEW_TURN_OUT_OF_ORDER`；会话已结束 → 409 `INTERVIEW_SESSION_ENDED`。
    - 返回 `{state: {shouldEnd, completedTopicCount, currentTopic}, reportStatus}`；`shouldEnd=true` 时前端停录音关连接，`reportStatus=PROCESSING`。
-5. （规划中）`POST .../end`、`GET .../report`、`POST .../report/retry`
-6. （规划中）`GET /api/interview-scenes/assets`、`DELETE /api/interview-scenes/{sceneId}`、`GET .../recording`、`POST .../ai-audio`
+5. `POST /api/interview-scenes/{sceneId}/sessions/{sessionId}/end` — 用户主动结束（幂等结束编排，自动/手动只允许一次 end + 一次报告任务）→ `{sessionId, reportStatus}`。
+6. `GET /api/interview-scenes/{sceneId}/sessions/{sessionId}/report` — 轮询报告：`{sessionId, sceneId, status: PROCESSING/COMPLETED/FAILED, report, failureReason}`（PROCESSING 时 report 为空）。
+7. `POST /api/interview-scenes/{sceneId}/sessions/{sessionId}/report/retry` — FAILED→PROCESSING 重试（CAS 幂等；瞬时失败自动重试 1 次后留手动）。
+8. `POST /api/interview-scenes/{sceneId}/sessions/{sessionId}/ai-audio` — AI「实际播放的」音频上报（`RecordingStore` 落盘，TTL 清扫）。
+9. `GET /api/interview-scenes/{sceneId}/sessions/{sessionId}/recording` — 总音频回放（`audio/wav`，`Cache-Control: private, no-store`，归属校验；V1 为按轮序拼接的用户录音段）。
+10. `GET /api/interview-scenes/{sceneId}/sessions/{sessionId}/recordings/{fileName:.+}` — 分段录音读取（内部/调试，私有缓存）。
+11. `DELETE /api/interview-scenes/{sceneId}` — 后端删除：软删 `interview_scene` + 物理清该 scene 音频；practice_session/session_message/interview_report 保留（审计 + 学习日历），下游访问经软删过滤 404/403。
+12. 失败码补充：`INTERVIEW_REPORT_NOT_FOUND`→404、`INTERVIEW_RECORDING_NOT_FOUND`→404、`INTERVIEW_REPORT_PERSISTENCE_FAILED`→500、`INTERVIEW_AUDIO_INVALID`→400、`INTERVIEW_SESSION_ENDED`→409。

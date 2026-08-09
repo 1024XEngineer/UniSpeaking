@@ -1,6 +1,9 @@
 package com.unispeaking.controller;
 
 import com.unispeaking.common.response.ApiResponse;
+import com.unispeaking.component.recording.RecordingStore;
+import com.unispeaking.domain.dto.evaluation.InterviewEndResponse;
+import com.unispeaking.domain.dto.evaluation.InterviewReportResponse;
 import com.unispeaking.domain.dto.ocr.OcrImage;
 import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
 import com.unispeaking.domain.dto.scene.InterviewMaterialPreparationInput;
@@ -15,7 +18,13 @@ import com.unispeaking.service.scene.InterviewSceneService;
 import com.unispeaking.service.session.InterviewSessionService;
 import jakarta.validation.Valid;
 import java.io.IOException;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.io.Resource;
+import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,19 +34,22 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-/** Interview 场景端点：generate + prepare-materials + 会话启动。 */
+/** Interview 场景端点：generate + prepare-materials + 会话启动 + 结束/报告/录音。 */
 @RestController
 @RequestMapping("/api/interview-scenes")
 public class InterviewSceneController {
 
 	private final InterviewSceneService interviewSceneService;
 	private final InterviewSessionService interviewSessionService;
+	private final RecordingStore interviewRecordingStore;
 
 	public InterviewSceneController(
 			InterviewSceneService interviewSceneService,
-			InterviewSessionService interviewSessionService) {
+			InterviewSessionService interviewSessionService,
+			@Qualifier("interviewRecordingStore") RecordingStore interviewRecordingStore) {
 		this.interviewSceneService = interviewSceneService;
 		this.interviewSessionService = interviewSessionService;
+		this.interviewRecordingStore = interviewRecordingStore;
 	}
 
 	@PostMapping
@@ -90,6 +102,81 @@ public class InterviewSceneController {
 						turnNo,
 						request.transcript(),
 						request.audio()));
+	}
+
+	@PostMapping("/{sceneId}/sessions/{sessionId}/end")
+	public ApiResponse<InterviewEndResponse> endInterview(
+			@PathVariable String sceneId,
+			@PathVariable String sessionId) {
+		return ApiResponse.success(
+				interviewSessionService.endInterview(sceneId, sessionId));
+	}
+
+	@GetMapping("/{sceneId}/sessions/{sessionId}/report")
+	public ApiResponse<InterviewReportResponse> getReport(
+			@PathVariable String sceneId,
+			@PathVariable String sessionId) {
+		return ApiResponse.success(
+				interviewSessionService.getReport(sceneId, sessionId));
+	}
+
+	@PostMapping("/{sceneId}/sessions/{sessionId}/report/retry")
+	public ApiResponse<InterviewReportResponse> retryReport(
+			@PathVariable String sceneId,
+			@PathVariable String sessionId) {
+		return ApiResponse.success(
+				interviewSessionService.retryReport(sceneId, sessionId));
+	}
+
+	@PostMapping(
+			value = "/{sceneId}/sessions/{sessionId}/ai-audio",
+			consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ApiResponse<String> uploadAiAudio(
+			@PathVariable String sceneId,
+			@PathVariable String sessionId,
+			@RequestParam("audio") MultipartFile audio)
+			throws IOException {
+		return ApiResponse.success(
+				interviewSessionService.uploadAiAudio(
+						sceneId,
+						sessionId,
+						audio.getBytes()));
+	}
+
+	@GetMapping(
+			value = "/{sceneId}/sessions/{sessionId}/recording",
+			produces = "audio/wav")
+	public ResponseEntity<Resource> getRecording(
+			@PathVariable String sceneId,
+			@PathVariable String sessionId) {
+		return ResponseEntity.ok()
+				.contentType(MediaType.parseMediaType("audio/wav"))
+				.cacheControl(CacheControl.noStore().cachePrivate())
+				.body(interviewRecordingStore.loadSessionRecording(
+						sceneId,
+						sessionId));
+	}
+
+	@GetMapping(
+			value = "/{sceneId}/sessions/{sessionId}/recordings/{fileName:.+}",
+			produces = "audio/wav")
+	public ResponseEntity<Resource> getSegmentRecording(
+			@PathVariable String sceneId,
+			@PathVariable String sessionId,
+			@PathVariable String fileName) {
+		return ResponseEntity.ok()
+				.contentType(MediaType.parseMediaType("audio/wav"))
+				.cacheControl(CacheControl.noStore().cachePrivate())
+				.body(interviewRecordingStore.loadOwned(
+						sceneId,
+						sessionId,
+						fileName));
+	}
+
+	@DeleteMapping("/{sceneId}")
+	public ApiResponse<Void> deleteScene(@PathVariable String sceneId) {
+		interviewSceneService.deleteScene(sceneId);
+		return ApiResponse.success(null);
 	}
 
 	private static InterviewResumeFile toResumeFile(MultipartFile file)

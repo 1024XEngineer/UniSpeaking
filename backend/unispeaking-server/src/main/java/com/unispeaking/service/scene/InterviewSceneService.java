@@ -36,4 +36,10 @@ public interface InterviewSceneService {
 
 	/** 当前用户拥有的面试场景的候选主题列表（主题识别 LLM prompt 用）。 */
 	java.util.List<String> interviewTopics(String sceneId);
+
+	/**
+	 * 后端删除：软删 {@code interview_scene}（deleted_at）+ 清该 scene 全部会话音频；
+	 * practice_session/session_message/interview_report 保留（审计 + 学习日历）。
+	 */
+	void deleteScene(String sceneId);
 }
