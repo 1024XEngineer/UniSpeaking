@@ -19,6 +19,11 @@ import org.springframework.stereotype.Component;
 
 /**
  * 安全提取文本型 PDF 与 DOCX 的统一入口。
+ *
+ * <p>类型判定以「扩展名 + 魔数」为安全判据：{@code .pdf} 要求 {@code %PDF-} 魔数、
+ * {@code .docx} 要求 ZIP 本地文件签名（{@code PK\x03\x04}），两者必须一致。MIME 为次要信息，
+ * 可缺失或为 {@code application/octet-stream}，不参与类型判定；安全性由魔数 + 后续
+ * {@link PdfTextParser}/{@link DocxTextParser#validateZipSafety} 保证。</p>
  */
 @Component
 public final class DocumentTextExtractor {
@@ -30,9 +35,6 @@ public final class DocumentTextExtractor {
 	static final int MAX_ZIP_ENTRY_BYTES = MAX_FILE_BYTES;
 	static final int MAX_ZIP_UNCOMPRESSED_BYTES = MAX_FILE_BYTES;
 
-	private static final String PDF_MIME_TYPE = "application/pdf";
-	private static final String DOCX_MIME_TYPE =
-			"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 	private static final byte[] PDF_SIGNATURE = new byte[] {'%', 'P', 'D', 'F', '-'};
 	private static final byte[] ZIP_LOCAL_FILE_SIGNATURE = new byte[] {'P', 'K', 3, 4};
 
@@ -66,7 +68,7 @@ public final class DocumentTextExtractor {
 	}
 
 	private static void validateInput(String filename, String mimeType, byte[] content) {
-		if (isBlank(filename) || isBlank(mimeType) || content == null || content.length == 0) {
+		if (isBlank(filename) || content == null || content.length == 0) {
 			throw new DocumentException(DocumentErrorCode.INPUT_REQUIRED);
 		}
 		if (content.length > MAX_FILE_BYTES) {
@@ -76,24 +78,15 @@ public final class DocumentTextExtractor {
 
 	private static DocumentType detectType(String filename, String mimeType, byte[] content) {
 		String normalizedName = filename.trim().toLowerCase(Locale.ROOT);
-		String normalizedMimeType = normalizeMimeType(mimeType);
 		if (normalizedName.endsWith(".pdf")
-				&& PDF_MIME_TYPE.equals(normalizedMimeType)
 				&& startsWith(content, PDF_SIGNATURE)) {
 			return DocumentType.PDF;
 		}
 		if (normalizedName.endsWith(".docx")
-				&& DOCX_MIME_TYPE.equals(normalizedMimeType)
 				&& startsWith(content, ZIP_LOCAL_FILE_SIGNATURE)) {
 			return DocumentType.DOCX;
 		}
 		throw new DocumentException(DocumentErrorCode.FORMAT_UNSUPPORTED);
-	}
-
-	private static String normalizeMimeType(String mimeType) {
-		int parametersStart = mimeType.indexOf(';');
-		String value = parametersStart >= 0 ? mimeType.substring(0, parametersStart) : mimeType;
-		return value.trim().toLowerCase(Locale.ROOT);
 	}
 
 	private static boolean startsWith(byte[] content, byte[] prefix) {

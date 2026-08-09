@@ -84,10 +84,11 @@ import { createPcmWavRecorder } from "../infrastructure/audio/audioRecorder.js";
 import { useAchievementNotifications } from "../component/achievement/AchievementNotifications.jsx";
 import { createRealtimeClient } from "../websocket/realtimeClient.js";
 import { IeltsAssets, IeltsTrainingCenter } from "../component/ielts/IeltsModule.jsx";
-import { InterviewModule } from "../component/interview/InterviewModule.jsx";
+import { InterviewAssets, InterviewModule } from "../component/interview/InterviewModule.jsx";
 import { HelpCenter } from "../component/help/HelpCenter.jsx";
 import { HelpLayout } from "../component/help/HelpLayout.jsx";
 import { NewtonsCradle } from "../component/common/NewtonsCradle.jsx";
+import { Modal } from "../component/common/Modal.jsx";
 import { LearningInsights } from "../component/profile/LearningInsights.jsx";
 import { AccountSecurity } from "../component/profile/AccountSecurity.jsx";
 import { AboutProduct } from "../component/profile/AboutProduct.jsx";
@@ -702,7 +703,7 @@ function AppShell({ page, setPage, teacher, avatarUrl, children }) {
     { id: "scenes", label: "场景广场", icon: SquaresFour },
     { id: "assets", label: "学习资产", icon: BookOpenText },
   ];
-  const activePage = page === "ielts" || page === "interview" ? "scenes" : page === "ielts-assets" ? "assets" : page;
+  const activePage = page === "ielts" || page === "interview" ? "scenes" : page === "ielts-assets" || page === "interview-assets" ? "assets" : page;
   return (
     <div className={cx("app-shell", sidebarOpen && "is-sidebar-open")}>
       <aside className={cx("sidebar", sidebarOpen && "is-open")} onMouseEnter={() => setSidebarOpen(true)} onMouseLeave={() => setSidebarOpen(false)}>
@@ -998,6 +999,12 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       onSessionEnded?.();
       return;
     }
+    if (event.type === "local.mic_error") {
+      setCallState("error");
+      setCallError(event.message || "无法访问麦克风");
+      setCallStatus("麦克风不可用，请检查权限");
+      return;
+    }
     if (event.type === "error" || event.type === "local.error") {
       setCallState("error");
       setCallError(event.message || event.error?.message || "实时会话发生错误");
@@ -1212,10 +1219,6 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
       {preview && <Modal onClose={() => { previewSceneIdRef.current = ""; setPreview(null); setPreviewDisplay(null); }}><p className="eyebrow">场景已准备好</p><h2>{previewDisplay?.title || (chineseCharacterPattern.test(preview.title || "") ? compactSceneText(preview.title, 18) : "正在整理场景…")}</h2><p className="modal-lead">确认场景信息，然后开始学习。</p><dl className="scene-summary"><div><dt>场景简介</dt><dd>{previewDisplay?.background || (chineseCharacterPattern.test(preview.background || "") ? compactSceneText(preview.background, 58) : "正在整理中文摘要…" )}</dd></div><div><dt>AI 扮演</dt><dd>{previewDisplay?.aiRole || (chineseCharacterPattern.test(preview.aiRole || "") ? compactSceneText(preview.aiRole, 22) : "正在整理…" )}</dd></div><div><dt>你将扮演</dt><dd>{previewDisplay?.userRole || (chineseCharacterPattern.test(preview.userRole || "") ? compactSceneText(preview.userRole, 22) : "正在整理…" )}</dd></div><div><dt>练习重点</dt><dd>{previewDisplay?.learningGoal || (chineseCharacterPattern.test(preview.learningGoal || "") ? compactSceneText(preview.learningGoal, 42) : "正在整理中文摘要…" )}</dd></div><div><dt>预计用时</dt><dd>{preview.estimatedMinutes} 分钟</dd></div></dl><div className="modal-actions"><Button variant="secondary" disabled={startingTraining} onClick={() => { previewSceneIdRef.current = ""; setPreview(null); setPreviewDisplay(null); }}>返回修改</Button><Button disabled={startingTraining} onClick={() => void startGeneratedTraining()} icon={<ArrowRight />}>{startingTraining ? "正在进入" : "确认进入"}</Button></div></Modal>}
     </main>
   );
-}
-
-function Modal({ children, onClose, wide = false, dismissible = true, className }) {
-  return <div className="modal-backdrop" onMouseDown={dismissible ? onClose : undefined}><div className={cx("modal", wide && "modal--wide", className)} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>{dismissible && <button className="modal__close" aria-label="关闭" onClick={onClose}><X /></button>}{children}</div></div>;
 }
 
 function RadarChart({ metrics }) {
@@ -1444,6 +1447,9 @@ function CustomSceneConversation({
       setStatus("本轮状态同步失败，已继续对话");
     } else if (event.type === "local.turn_evaluation_error") {
       setError(event.message);
+    } else if (event.type === "local.mic_error") {
+      setError(event.message || "无法访问麦克风");
+      setStatus("麦克风不可用，请检查权限");
     } else if (event.type === "error" || event.type === "local.error") {
       setError(event.message || event.error?.message || "实时会话发生错误");
       setStatus("连接异常");
@@ -1912,7 +1918,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   );
 }
 
-function AssetModuleMenu({ onIelts }) {
+function AssetModuleMenu({ onIelts, onInterview }) {
   return (
     <div className="asset-module-menu">
       <button className="asset-module-menu__trigger" type="button" aria-label="切换学习资产模块" aria-haspopup="menu">
@@ -1922,6 +1928,7 @@ function AssetModuleMenu({ onIelts }) {
       </button>
       <div className="asset-module-menu__popover" role="menu">
         <button type="button" role="menuitem" onClick={onIelts}><span className="asset-module-ielts-mark">IELTS</span><span><strong>IELTS 学习资产</strong><small>评分、建议与今日复习</small></span><CaretRight /></button>
+        <button type="button" role="menuitem" onClick={onInterview}><Briefcase /><span><strong>面试学习资产</strong><small>面试报告与同岗位复练</small></span><CaretRight /></button>
       </div>
     </div>
   );
@@ -2010,7 +2017,7 @@ function AssetModulePlaceholder({ module, onBack }) {
   );
 }
 
-function Assets({ sceneId, onPractice, onRestart, onIelts, onOpenRecord, onCloseRecord, initialView = "home", initialRecordTitle }) {
+function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRecord, onCloseRecord, initialView = "home", initialRecordTitle }) {
   const [records, setRecords] = useState([]);
   const [selectedId, setSelectedId] = useState(sceneId || "");
   const [detail, setDetail] = useState(null);
@@ -2091,7 +2098,7 @@ function Assets({ sceneId, onPractice, onRestart, onIelts, onOpenRecord, onClose
 
   return (
     <main className="page assets-page">
-      <PageHeader title="学习资产" subtitle="把场景练习中真正用过的表达，留在这里继续复习。" action={<AssetModuleMenu onIelts={onIelts} />} />
+      <PageHeader title="学习资产" subtitle="把场景练习中真正用过的表达，留在这里继续复习。" action={<AssetModuleMenu onIelts={onIelts} onInterview={onInterview} />} />
       {assetError && <p className="call-error" role="alert">{assetError}</p>}
       <section className="asset-layout">
         <aside className="asset-list asset-list--history" aria-label="场景训练历史">
@@ -2868,10 +2875,11 @@ export function App() {
   if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={showResult} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
   else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={() => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); void synchronizeAchievements({ revealNotifications: true }); }} />;
   else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={() => setMainPage("ielts")} onInterview={() => setMainPage("interview")} />;
-  else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => setMainPage("ielts-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(scene) => startTraining(scene, "learn", { returnPage: "assets" })} />;
+  else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => setMainPage("ielts-assets")} onInterview={() => setMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(scene) => startTraining(scene, "learn", { returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
   else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBackToAssets={() => setMainPage("assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
   else if (page === "interview") content = <InterviewModule route={interviewRoute} teacher={teacher} speed={conversationSpeed} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} />;
+  else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToIelts={() => setMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} onPractice={(sceneId) => navigateInterview(paths.interview.session(sceneId))} />;
   else content = <Profile section={page} setSection={setMainPage} helpRoute={helpRoute} aboutRoute={aboutRoute} onHelpNavigate={navigateHelp} onAboutNavigate={navigateAbout} user={user} profile={profileOverview} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onMonthChange={loadProfileMonth} onNicknameChange={updateNickname} onAvatarChange={updateAvatar} onPasswordChange={updatePassword} onAssets={() => setMainPage("assets")} onLogout={logout} />;
   return <AppShell page={page} setPage={setMainPage} teacher={teacher} avatarUrl={profileOverview?.account?.avatarUrl}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}</AppShell>;
 }

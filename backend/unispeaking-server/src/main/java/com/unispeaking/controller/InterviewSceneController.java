@@ -2,8 +2,10 @@ package com.unispeaking.controller;
 
 import com.unispeaking.common.response.ApiResponse;
 import com.unispeaking.component.recording.RecordingStore;
+import com.unispeaking.domain.dto.asset.InterviewAssetItem;
 import com.unispeaking.domain.dto.evaluation.InterviewEndResponse;
 import com.unispeaking.domain.dto.evaluation.InterviewReportResponse;
+import com.unispeaking.domain.dto.ocr.OcrAvailabilityResponse;
 import com.unispeaking.domain.dto.ocr.OcrImage;
 import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
 import com.unispeaking.domain.dto.scene.InterviewMaterialPreparationInput;
@@ -17,6 +19,7 @@ import com.unispeaking.service.scene.InterviewSceneService;
 import com.unispeaking.service.session.InterviewSessionService;
 import jakarta.validation.Valid;
 import java.io.IOException;
+import java.util.List;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.io.Resource;
 import org.springframework.http.CacheControl;
@@ -74,6 +77,18 @@ public class InterviewSceneController {
 								jobDescriptionImage == null
 										? null
 										: new OcrImage(jobDescriptionImage.getBytes()))));
+	}
+
+	@GetMapping("/assets")
+	public ApiResponse<List<InterviewAssetItem>> listAssets() {
+		return ApiResponse.success(interviewSceneService.listOwnedScenes());
+	}
+
+	@GetMapping("/ocr/availability")
+	public ApiResponse<OcrAvailabilityResponse> ocrAvailability() {
+		return ApiResponse.success(
+				new OcrAvailabilityResponse(
+						interviewSceneService.isOcrAvailable()));
 	}
 
 	@PostMapping("/{sceneId}/sessions")

@@ -167,6 +167,59 @@ class DocumentTextExtractorTest {
 	}
 
 	@Test
+	void acceptsDocxWithOctetStreamOrMissingMimeWhenMagicMatches() {
+		byte[] docx = docxWithParagraphs("hello docx");
+
+		assertAll(
+				() -> assertEquals(
+						"hello docx",
+						extractor.extractText(
+								"resume.docx",
+								"application/octet-stream",
+								docx)),
+				() -> assertEquals(
+						"hello docx",
+						extractor.extractText("resume.docx", null, docx)),
+				() -> assertEquals(
+						"hello docx",
+						extractor.extractText("resume.docx", "", docx)));
+	}
+
+	@Test
+	void acceptsPdfWithOctetStreamOrMissingMimeWhenMagicMatches() {
+		byte[] pdf = pdfWithText("hello pdf");
+
+		assertAll(
+				() -> assertEquals(
+						"hello pdf",
+						extractor.extractText(
+								"resume.pdf",
+								"application/octet-stream",
+								pdf)),
+				() -> assertEquals(
+						"hello pdf",
+						extractor.extractText("resume.pdf", null, pdf)));
+	}
+
+	@Test
+	void rejectsMislabeledExtensionEvenWithMatchingMime() {
+		byte[] pdf = pdfWithText("hello");
+		byte[] docx = docxWithParagraphs("hello");
+
+		assertAll(
+				() -> assertError(
+						"resume.pdf",
+						"application/pdf",
+						docx,
+						DocumentErrorCode.FORMAT_UNSUPPORTED),
+				() -> assertError(
+						"resume.docx",
+						DOCX_MIME_TYPE,
+						pdf,
+						DocumentErrorCode.FORMAT_UNSUPPORTED));
+	}
+
+	@Test
 	void rejectsUnsupportedExtensionMimeAndSignatureCombinations() {
 		byte[] pdf = pdfWithText("hello");
 		byte[] docx = docxWithParagraphs("hello");
@@ -196,11 +249,6 @@ class DocumentTextExtractorTest {
 						image,
 						DocumentErrorCode.FORMAT_UNSUPPORTED),
 				() -> assertError(
-						"resume.pdf",
-						DOCX_MIME_TYPE,
-						pdf,
-						DocumentErrorCode.FORMAT_UNSUPPORTED),
-				() -> assertError(
 						"resume.docx",
 						DOCX_MIME_TYPE,
 						pdf,
@@ -228,11 +276,6 @@ class DocumentTextExtractorTest {
 						DocumentErrorCode.INPUT_REQUIRED),
 				() -> assertError(
 						"resume.docx",
-						null,
-						new byte[] {1},
-						DocumentErrorCode.INPUT_REQUIRED),
-				() -> assertError(
-						"resume.docx",
 						DOCX_MIME_TYPE,
 						null,
 						DocumentErrorCode.INPUT_REQUIRED),
@@ -240,7 +283,13 @@ class DocumentTextExtractorTest {
 						"resume.docx",
 						DOCX_MIME_TYPE,
 						new byte[0],
-						DocumentErrorCode.INPUT_REQUIRED));
+						DocumentErrorCode.INPUT_REQUIRED),
+				// MIME 可缺失，但魔数与扩展名不符仍拒绝。
+				() -> assertError(
+						"resume.docx",
+						null,
+						new byte[] {1},
+						DocumentErrorCode.FORMAT_UNSUPPORTED));
 	}
 
 	private void assertError(

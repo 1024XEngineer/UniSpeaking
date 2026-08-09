@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -111,6 +112,30 @@ class MybatisInterviewReportRepositoryTest {
 		assertEquals(1, stuck.size());
 		assertEquals("session-1", stuck.getFirst().sessionId());
 		verify(mapper).selectList(any());
+	}
+
+	@Test
+	void findBySceneIdQueriesBySceneOrderedByCreatedAtDesc() {
+		InterviewReportMapper mapper = mock(InterviewReportMapper.class);
+		InterviewReportRepository repository = new MybatisInterviewReportRepository(mapper);
+		when(mapper.selectList(any())).thenReturn(List.of(entity(), entity()));
+
+		List<InterviewReportRecord> records = repository.findBySceneId("interview_1");
+
+		assertEquals(2, records.size());
+		assertEquals("session-1", records.getFirst().sessionId());
+		assertEquals("interview_1", records.getFirst().sceneId());
+		verify(mapper).selectList(any());
+	}
+
+	@Test
+	void findBySceneIdReturnsEmptyForBlankSceneId() {
+		InterviewReportMapper mapper = mock(InterviewReportMapper.class);
+		InterviewReportRepository repository = new MybatisInterviewReportRepository(mapper);
+
+		assertTrue(repository.findBySceneId(null).isEmpty());
+		assertTrue(repository.findBySceneId("  ").isEmpty());
+		verify(mapper, never()).selectList(any());
 	}
 
 	private InterviewReportEntity entity() {

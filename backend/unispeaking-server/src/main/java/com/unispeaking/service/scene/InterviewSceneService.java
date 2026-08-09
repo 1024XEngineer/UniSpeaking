@@ -1,5 +1,6 @@
 package com.unispeaking.service.scene;
 
+import com.unispeaking.domain.dto.asset.InterviewAssetItem;
 import com.unispeaking.domain.dto.scene.InterviewDialogueSceneContext;
 import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
 import com.unispeaking.domain.dto.scene.InterviewMaterialPreparationInput;
@@ -10,8 +11,8 @@ import com.unispeaking.domain.vo.scene.InterviewTopicState;
 
 /**
  * 面试场景服务（独立接口，不 extends 任何已删除的 SceneService 基类）。
- * <p>本刀提供 {@link #generate}、{@link #prepareMaterials} 与 {@link #advanceTopicState}；
- * {@code listOwnedScenes}/{@code deleteScene} 留待后续。
+ * <p>本刀提供 {@link #generate}、{@link #prepareMaterials}、{@link #advanceTopicState}、
+ * {@link #listOwnedScenes}、{@link #isOcrAvailable} 与 {@link #deleteScene}。</p>
  */
 public interface InterviewSceneService {
 
@@ -36,6 +37,12 @@ public interface InterviewSceneService {
 
 	/** 当前用户拥有的面试场景的候选主题列表（主题识别 LLM prompt 用）。 */
 	java.util.List<String> interviewTopics(String sceneId);
+
+	/** 当前用户拥有的面试场景资产摘要（场景快照 + 最近报告 + 复练次数），按更新时间倒序。 */
+	java.util.List<InterviewAssetItem> listOwnedScenes();
+
+	/** OCR 能力探测：委派当前装配的 {@code OcrProvider}。 */
+	boolean isOcrAvailable();
 
 	/**
 	 * 后端删除：软删 {@code interview_scene}（deleted_at）+ 清该 scene 全部会话音频；

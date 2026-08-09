@@ -2641,12 +2641,72 @@ svg { display: block; }
 .interview-report-pending__actions { display: flex; justify-content: center; gap: 10px; }
 .interview-report-pending .button { margin-top: 6px; }
 
+/* 面试材料整理弹窗：弹窗内编辑器去掉外框，标题由弹窗提供 */
+.interview-material-modal .interview-editor {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  margin: 20px 0 0;
+}
+.interview-material-modal .modal-actions { margin-top: 22px; }
+
+/* OCR 未启用时禁用 JD 图片入口 */
+.interview-source-toggle button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* 返回场景广场链在面试各页的间距微调 */
+.interview-call-top .ielts-back { margin: 0; }
+.interview-report .ielts-back,
+.interview-report-pending .ielts-back { margin: 0 0 18px; }
+.interview-assets-page > .ielts-back { margin: -20px 0 20px; }
+
+/* 面试学习资产页（排版复用 .ielts-history-layout） */
+.interview-assets-page .page-header h1 { font-size: 40px; }
+.interview-assets-list aside > button strong { white-space: normal; }
+.interview-assets-detail__actions { display: flex; align-items: center; gap: 10px; }
+.interview-assets-report {
+  margin-top: 26px;
+  padding: 22px 24px;
+  border: 1px solid #deded9;
+  border-radius: 18px;
+  background: #f8f8f5;
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+.interview-assets-report__score { display: flex; align-items: baseline; gap: 8px; }
+.interview-assets-report__score span { font-size: 12px; color: var(--muted); }
+.interview-assets-report__score strong { font-size: 52px; line-height: 1; letter-spacing: -.05em; color: var(--ink); }
+.interview-assets-report__score small { color: var(--muted); }
+.interview-assets-report__summary p:last-child { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.interview-assets-dimensions { margin-top: 24px; }
+.interview-assets-dimensions > h3 { font-size: 20px; letter-spacing: -.02em; margin: 0 0 12px; }
+.interview-assets-dimension-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.interview-assets-dimension {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+.interview-assets-dimension header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+.interview-assets-dimension header span { display: grid; gap: 2px; font-size: 15px; font-weight: 700; color: var(--ink); }
+.interview-assets-dimension header small { font-size: 11px; font-weight: 400; color: var(--muted); }
+.interview-assets-dimension header strong { font-size: 26px; letter-spacing: -.03em; color: var(--ink); }
+.interview-assets-dimension header strong.is-low { color: var(--danger); }
+.interview-assets-dimension > p { margin: 0; color: #5f5f5b; font-size: 13px; line-height: 1.6; }
+.interview-assets-empty { grid-column: 1 / -1; color: var(--muted); font-size: 14px; }
+.interview-assets-state { gap: 10px; }
+.interview-assets-state .button { margin-top: 8px; }
+
 @media (max-width: 900px) {
   .interview-difficulty { grid-template-columns: 1fr; }
   .interview-editor__grid { grid-template-columns: 1fr; }
   .interview-report__summary { grid-template-columns: 1fr; }
   .interview-report__score { border-right: 0; padding-right: 0; border-bottom: 1px solid #e4e4df; padding-bottom: 18px; }
   .interview-report__dimension-grid { grid-template-columns: 1fr; }
+  .interview-assets-report { grid-template-columns: 1fr; }
+  .interview-assets-dimension-grid { grid-template-columns: 1fr; }
   .page--interview .page-header h1 { font-size: 40px; }
 }
 

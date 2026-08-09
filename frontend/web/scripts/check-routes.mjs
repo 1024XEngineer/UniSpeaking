@@ -27,6 +27,7 @@ const cases = [
   [paths.about.privacyPolicy, "about"],
   [paths.about.aiService, "about"],
   [paths.interview.root, "interview"],
+  [paths.interview.assets, "interview-assets"],
   [paths.interview.session("interview_1"), "interview"],
   [paths.interview.report("interview_1", "session_1"), "interview"],
 ];
@@ -63,6 +64,8 @@ assert.equal(route(paths.about.aiService).aboutRoute.documentId, "ai-service");
 assert.equal(route("/about/unknown").canonicalPath, paths.about.root);
 assert.equal(route(paths.about.root).publicAccess, false);
 assert.equal(route(paths.interview.root).interviewRoute.screen, "home");
+assert.equal(route(paths.interview.assets).page, "interview-assets");
+assert.equal(route(paths.interview.assets).interviewRoute.area, "assets");
 assert.equal(route(paths.interview.session("interview scene/1")).interviewRoute.sceneId, "interview scene/1");
 assert.equal(route(paths.interview.session("interview_1")).interviewRoute.screen, "session");
 assert.equal(route(paths.interview.report("interview_1", "session/1")).interviewRoute.sessionId, "session/1");

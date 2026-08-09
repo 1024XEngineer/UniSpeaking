@@ -401,6 +401,10 @@ export function retryInterviewReport(sceneId, sessionId) {
   );
 }
 
+export function getInterviewAssets() {
+  return request("/api/interview-scenes/assets");
+}
+
 export function getLearningAssets() {
   return request("/api/custom-scenes/assets");
 }

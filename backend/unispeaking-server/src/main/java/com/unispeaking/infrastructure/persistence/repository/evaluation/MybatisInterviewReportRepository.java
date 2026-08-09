@@ -186,6 +186,24 @@ public class MybatisInterviewReportRepository implements InterviewReportReposito
 		}
 	}
 
+	@Override
+	public List<InterviewReportRecord> findBySceneId(String sceneId) {
+		if (sceneId == null || sceneId.isBlank()) {
+			return List.of();
+		}
+		try {
+			return mapper.selectList(new LambdaQueryWrapper<InterviewReportEntity>()
+							.eq(InterviewReportEntity::getSceneId, sceneId)
+							.orderByDesc(InterviewReportEntity::getCreatedAt))
+					.stream()
+					.map(this::toRecord)
+					.toList();
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure(exception);
+		}
+	}
+
 	private InterviewReportEntity toEntity(InterviewReportRecord record) {
 		InterviewReportEntity entity = new InterviewReportEntity();
 		entity.setSessionId(record.sessionId());

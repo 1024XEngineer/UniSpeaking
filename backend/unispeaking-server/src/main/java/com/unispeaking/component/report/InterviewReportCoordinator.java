@@ -68,6 +68,10 @@ import tools.jackson.databind.ObjectReader;
  * <p>失败分类 + 自动重试 1 次：{@code PROVIDER_RETRYABLE} 瞬时失败可自动重试
  * （{@code retry_count<1} 时 CAS 递增 + 重提交）；其余留 FAILED 供手动 {@code retryReport}。</p>
  *
+ * <p>音频维度失败降级：全部有录音轮次 Provider 失败时，先按行级 {@code retry_count} 预算
+ * （{@code retry_count<1}）自动重试 1 次；重试后仍失败则降级 COMPLETED——发音/流利置 NULL，
+ * summary 追加覆盖注记（无录音/服务不可用/有效语音不足/部分轮次）。仅 LLM 文本维度失败才 FAILED。</p>
+ *
  * <p>V1 降级：总音频 {@code session.wav} 只拼接用户录音段（16kHz mono 16-bit PCM），
  * 不含 AI 段；AI 段格式与轮次关联留待后续。</p>
  */
@@ -215,8 +219,7 @@ public class InterviewReportCoordinator {
 			List<LearnerMessageRecord> turns =
 					sessionMessageRepository.findMessagesWithAudioObjectKeys(sessionId);
 			AudioScoring audio = scoreAudioDimensions(sessionId, turns);
-			if (audio.turnsWithAudio() > 0
-					&& audio.providerFailedTurns() == audio.turnsWithAudio()) {
+			if (shouldRetryAudioBeforeDegrade(sessionId, audio)) {
 				throw new ReportTaskException(FailureReason.PROVIDER_RETRYABLE);
 			}
 			List<String> topics = readTopics(sceneId);
@@ -307,6 +310,24 @@ public class InterviewReportCoordinator {
 		}
 	}
 
+	/**
+	 * 音频维度全失败时的重试预算判断：读取行级 {@code retry_count} 作重试预算，
+	 * 与 {@code autoRetry} 的 {@code retry_count<1} 语义一致。预算内抛
+	 * {@code PROVIDER_RETRYABLE} 触发自动重试；预算耗尽则返回 {@code false} 走降级 COMPLETED。
+	 */
+	private boolean shouldRetryAudioBeforeDegrade(
+			String sessionId,
+			AudioScoring audio) {
+		if (audio.turnsWithAudio() == 0
+				|| audio.providerFailedTurns() != audio.turnsWithAudio()) {
+			return false;
+		}
+		int retryCount = interviewReportRepository.findById(sessionId)
+				.map(InterviewReportRecord::retryCount)
+				.orElse(0);
+		return retryCount < 1;
+	}
+
 	private AudioScoring scoreAudioDimensions(
 			String sessionId,
 			List<LearnerMessageRecord> turns) {
@@ -328,8 +349,10 @@ public class InterviewReportCoordinator {
 			futures.add(audioScoringExecutor.submit(
 					() -> scoreTurn(sessionId, task)));
 		}
-		AtomicReference<BigDecimal> fluencySum = new AtomicReference<>();
-		AtomicReference<BigDecimal> pronunciationSum = new AtomicReference<>();
+		AtomicReference<BigDecimal> fluencySum =
+				new AtomicReference<>(BigDecimal.ZERO);
+		AtomicReference<BigDecimal> pronunciationSum =
+				new AtomicReference<>(BigDecimal.ZERO);
 		AtomicInteger scoredTurns = new AtomicInteger();
 		AtomicInteger providerFailedTurns = new AtomicInteger();
 		for (Future<TurnScore> future : futures) {
@@ -581,11 +604,18 @@ public class InterviewReportCoordinator {
 			AudioScoring audio,
 			LlmAssessment llm,
 			int totalTurns) {
-		String coverageNote = audio.scoredTurns() == 0
-				? " 有效语音不足，发音与流利度维度未能评分。"
-				: audio.scoredTurns() < totalTurns
-						? " 部分轮次缺少有效语音，发音与流利度基于可用轮次。"
-						: "";
+		String coverageNote;
+		if (audio.turnsWithAudio() == 0) {
+			coverageNote = " 无可用录音，发音与流利度维度未能评分。";
+		} else if (audio.providerFailedTurns() == audio.turnsWithAudio()) {
+			coverageNote = " 发音评分服务暂不可用，发音与流利度维度未能评分。";
+		} else if (audio.scoredTurns() == 0) {
+			coverageNote = " 有效语音不足，发音与流利度维度未能评分。";
+		} else if (audio.scoredTurns() < totalTurns) {
+			coverageNote = " 部分轮次缺少有效语音，发音与流利度基于可用轮次。";
+		} else {
+			coverageNote = "";
+		}
 		String summary = llm.summary() + coverageNote;
 		return new InterviewReportRecord(
 				sessionId,
