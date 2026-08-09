@@ -347,6 +347,60 @@ export function getCustomDialogueState(sceneId, sessionId) {
   );
 }
 
+export function prepareInterviewMaterials(formData) {
+  return request("/api/interview-scenes/prepare-materials", {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export function generateInterviewScene({ material, difficulty }) {
+  return request("/api/interview-scenes", {
+    method: "POST",
+    body: JSON.stringify({ material, difficulty }),
+  });
+}
+
+export function startInterviewSession(sceneId, payload) {
+  return request(
+    `/api/interview-scenes/${encodeURIComponent(sceneId)}/sessions`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function submitInterviewTurn(sceneId, sessionId, turnNo, formData) {
+  return request(
+    `/api/interview-scenes/${encodeURIComponent(sceneId)}/sessions/${encodeURIComponent(sessionId)}/turns/${turnNo}`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+}
+
+export function endInterview(sceneId, sessionId) {
+  return request(
+    `/api/interview-scenes/${encodeURIComponent(sceneId)}/sessions/${encodeURIComponent(sessionId)}/end`,
+    { method: "POST" },
+  );
+}
+
+export function getInterviewReport(sceneId, sessionId) {
+  return request(
+    `/api/interview-scenes/${encodeURIComponent(sceneId)}/sessions/${encodeURIComponent(sessionId)}/report`,
+  );
+}
+
+export function retryInterviewReport(sceneId, sessionId) {
+  return request(
+    `/api/interview-scenes/${encodeURIComponent(sceneId)}/sessions/${encodeURIComponent(sessionId)}/report/retry`,
+    { method: "POST" },
+  );
+}
+
 export function getLearningAssets() {
   return request("/api/custom-scenes/assets");
 }
