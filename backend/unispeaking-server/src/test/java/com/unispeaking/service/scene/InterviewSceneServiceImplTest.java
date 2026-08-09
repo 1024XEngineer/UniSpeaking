@@ -1,6 +1,8 @@
 package com.unispeaking.service.scene;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -15,7 +17,11 @@ import static org.mockito.Mockito.when;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.exception.InterviewErrorCode;
 import com.unispeaking.common.prompt.interview.InterviewPromptBuilder;
+import com.unispeaking.component.document.MaterialDesensitizer;
+import com.unispeaking.component.document.MaterialTextExtraction;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
+import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
+import com.unispeaking.domain.dto.scene.InterviewMaterialPreparationInput;
 import com.unispeaking.domain.dto.scene.InterviewSceneRequest;
 import com.unispeaking.domain.dto.scene.InterviewSceneResult;
 import com.unispeaking.domain.po.scene.InterviewSceneDefinition;
@@ -40,11 +46,17 @@ class InterviewSceneServiceImplTest {
 			mock(InterviewSceneRepository.class);
 	private final AiProviderRegistry providerRegistry =
 			mock(AiProviderRegistry.class);
+	private final MaterialTextExtraction materialTextExtraction =
+			mock(MaterialTextExtraction.class);
+	private final MaterialDesensitizer materialDesensitizer =
+			mock(MaterialDesensitizer.class);
 	private final InterviewSceneServiceImpl service = new InterviewSceneServiceImpl(
 			authService,
 			repository,
 			new InterviewPromptBuilder(),
 			providerRegistry,
+			materialTextExtraction,
+			materialDesensitizer,
 			objectMapper);
 
 	@Test
@@ -138,6 +150,96 @@ class InterviewSceneServiceImplTest {
 		verify(repository, never()).save(any());
 	}
 
+	@Test
+	void prepareMaterialsStructuresDesensitizedTextIntoMaterial() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		when(materialTextExtraction.extract(any()))
+				.thenReturn(new MaterialTextExtraction.MaterialTextResult(
+						"JD 原始文本", "简历原始文本", false));
+		when(materialDesensitizer.desensitize("JD 原始文本"))
+				.thenReturn("脱敏后 JD");
+		when(materialDesensitizer.desensitize("简历原始文本"))
+				.thenReturn("脱敏后简历");
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+				.thenReturn(completed(validMaterial()));
+
+		InterviewMaterialDraft draft = service.prepareMaterials(
+				new InterviewMaterialPreparationInput(
+						"简历原始文本", null, "JD 原始文本", null));
+
+		InterviewMaterial material = draft.material();
+		assertNotNull(material);
+		assertEquals("后端开发工程师", material.jobTitle());
+		assertEquals(List.of("负责支付系统设计"), material.responsibilities());
+		assertEquals(List.of("掌握 Java"), material.qualificationRequirements());
+		ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+		verify(providerRegistry).executeLlmTaskRouted(promptCaptor.capture(), isNull());
+		String prompt = promptCaptor.getValue();
+		assertTrue(prompt.contains("脱敏后 JD"));
+		assertTrue(prompt.contains("脱敏后简历"));
+		assertFalse(prompt.contains("JD 原始文本"));
+		assertFalse(prompt.contains("简历原始文本"));
+	}
+
+	@Test
+	void prepareMaterialsWithoutResumePassesNoResumeToLlm() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		when(materialTextExtraction.extract(any()))
+				.thenReturn(new MaterialTextExtraction.MaterialTextResult(
+						"JD 原始文本", null, true));
+		when(materialDesensitizer.desensitize("JD 原始文本"))
+				.thenReturn("脱敏后 JD");
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+				.thenReturn(completed(validMaterial()));
+
+		service.prepareMaterials(
+				new InterviewMaterialPreparationInput(null, null, "JD 原始文本", null));
+
+		ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+		verify(providerRegistry).executeLlmTaskRouted(promptCaptor.capture(), isNull());
+		assertTrue(promptCaptor.getValue().contains("No resume was provided."));
+	}
+
+	@Test
+	void prepareMaterialsRetriesWhenFirstLlmMaterialResponseIsInvalid() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		when(materialTextExtraction.extract(any()))
+				.thenReturn(new MaterialTextExtraction.MaterialTextResult(
+						"JD 文本", "简历文本", false));
+		when(materialDesensitizer.desensitize(anyString()))
+				.thenAnswer(invocation -> invocation.getArgument(0));
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+				.thenReturn(completed(invalidMaterial()), completed(validMaterial()));
+
+		InterviewMaterialDraft draft = service.prepareMaterials(
+				new InterviewMaterialPreparationInput(null, null, "JD 文本", null));
+
+		assertEquals("后端开发工程师", draft.material().jobTitle());
+		verify(providerRegistry, times(2)).executeLlmTaskRouted(anyString(), isNull());
+	}
+
+	@Test
+	void prepareMaterialsFailsWhenAllLlmMaterialResponsesAreInvalid() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		when(materialTextExtraction.extract(any()))
+				.thenReturn(new MaterialTextExtraction.MaterialTextResult(
+						"JD 文本", "简历文本", false));
+		when(materialDesensitizer.desensitize(anyString()))
+				.thenAnswer(invocation -> invocation.getArgument(0));
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+				.thenReturn(completed(invalidMaterial()), completed(invalidMaterial()));
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> service.prepareMaterials(
+						new InterviewMaterialPreparationInput(null, null, "JD 文本", null)));
+
+		assertEquals(
+				InterviewErrorCode.INTERVIEW_MATERIAL_LLM_RESPONSE_INVALID,
+				exception.code());
+		verify(providerRegistry, times(2)).executeLlmTaskRouted(anyString(), isNull());
+	}
+
 	private InterviewSceneRequest request(
 			InterviewMaterial material,
 			InterviewDifficulty difficulty) {
@@ -188,6 +290,34 @@ class InterviewSceneServiceImplTest {
 				  "candidate_overview": "候选人有三年后端开发经验。",
 				  "role_overview": "负责支付系统。",
 				  "interview_topics": ["自我介绍", "项目经历"]
+				}
+				""";
+	}
+
+	private String validMaterial() {
+		return """
+				{
+				  "jobTitle": "后端开发工程师",
+				  "responsibilities": ["负责支付系统设计"],
+				  "qualificationRequirements": ["掌握 Java"],
+				  "requiredSkills": ["Java", "Spring"],
+				  "otherJobInformation": "团队氛围好",
+				  "education": ["计算机本科"],
+				  "workExperiences": ["某公司后端工程师"],
+				  "projectExperiences": ["支付系统重构项目"],
+				  "skillsAndAbilities": ["团队协作"],
+				  "interviewableExperienceClues": ["候选人提到过支付网关"],
+				  "finalText": "后端开发工程师 · 负责支付系统"
+				}
+				""";
+	}
+
+	private String invalidMaterial() {
+		return """
+				{
+				  "jobTitle": "后端开发工程师",
+				  "qualificationRequirements": ["掌握 Java"],
+				  "finalText": "后端开发工程师"
 				}
 				""";
 	}
