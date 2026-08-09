@@ -3,6 +3,7 @@ package com.unispeaking.service.scene;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -22,21 +23,27 @@ import com.unispeaking.component.document.MaterialTextExtraction;
 import com.unispeaking.component.policy.DailyQuotaPolicy;
 import com.unispeaking.component.recording.RecordingStore;
 import com.unispeaking.component.statemachine.InterviewTopicStateMachine;
+import com.unispeaking.domain.dto.asset.InterviewAssetItem;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
 import com.unispeaking.domain.dto.scene.InterviewDialogueSceneContext;
 import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
 import com.unispeaking.domain.dto.scene.InterviewMaterialPreparationInput;
 import com.unispeaking.domain.dto.scene.InterviewSceneRequest;
 import com.unispeaking.domain.dto.scene.InterviewSceneResult;
+import com.unispeaking.domain.po.evaluation.InterviewReportRecord;
 import com.unispeaking.domain.po.scene.InterviewSceneDefinition;
+import com.unispeaking.domain.vo.evaluation.ReportStatus;
 import com.unispeaking.domain.vo.provider.AiCapability;
 import com.unispeaking.domain.vo.scene.InterviewDifficulty;
+import com.unispeaking.infrastructure.persistence.repository.evaluation.InterviewReportRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.InterviewSceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.AiProviderRegistry.RoutedResult;
+import com.unispeaking.provider.OcrProvider;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.scene.impl.InterviewSceneServiceImpl;
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -64,6 +71,9 @@ class InterviewSceneServiceImplTest {
 	private final PracticeSessionRepository practiceSessionRepository =
 			mock(PracticeSessionRepository.class);
 	private final RecordingStore interviewRecordingStore = mock(RecordingStore.class);
+	private final InterviewReportRepository interviewReportRepository =
+			mock(InterviewReportRepository.class);
+	private final OcrProvider ocrProvider = mock(OcrProvider.class);
 	private final InterviewSceneServiceImpl service = new InterviewSceneServiceImpl(
 			authService,
 			repository,
@@ -75,6 +85,8 @@ class InterviewSceneServiceImplTest {
 			stateMachine,
 			practiceSessionRepository,
 			interviewRecordingStore,
+			interviewReportRepository,
+			ocrProvider,
 			objectMapper);
 
 	@Test
@@ -304,6 +316,89 @@ class InterviewSceneServiceImplTest {
 		assertEquals(
 				InterviewErrorCode.INTERVIEW_SCENE_ACCESS_DENIED,
 				exception.code());
+	}
+
+	@Test
+	void listOwnedScenesBuildsAssetItemsFromScenesAndLatestReport() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+		InterviewSceneDefinition scene = new InterviewSceneDefinition(
+				"interview_1",
+				"user-1",
+				"{\"jobTitle\":\"后端开发工程师\"}",
+				"final text",
+				"{}",
+				InterviewDifficulty.HARD,
+				"prompt",
+				now,
+				now,
+				null);
+		when(repository.findByUserId("user-1")).thenReturn(List.of(scene));
+		when(interviewReportRepository.findBySceneId("interview_1"))
+				.thenReturn(List.of(completedReport("session-1", now)));
+
+		List<InterviewAssetItem> items = service.listOwnedScenes();
+
+		InterviewAssetItem item = items.getFirst();
+		assertEquals("interview_1", item.sceneId());
+		assertEquals("后端开发工程师", item.jobTitle());
+		assertEquals("HARD", item.difficulty());
+		assertEquals("session-1", item.latestSessionId());
+		assertEquals("COMPLETED", item.latestReportStatus());
+		assertEquals(new BigDecimal("85.0"), item.latestOverallScore());
+		assertEquals(now, item.latestPracticedAt());
+		assertEquals(1, item.practiceCount());
+		assertEquals(now, item.createdAt());
+	}
+
+	@Test
+	void listOwnedScenesWithNoReportsYieldsNullLatestFields() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		when(repository.findByUserId("user-1"))
+				.thenReturn(List.of(definition("interview_1", "user-1")));
+		when(interviewReportRepository.findBySceneId("interview_1"))
+				.thenReturn(List.of());
+
+		List<InterviewAssetItem> items = service.listOwnedScenes();
+
+		InterviewAssetItem item = items.getFirst();
+		assertEquals("interview_1", item.sceneId());
+		assertNull(item.jobTitle());
+		assertNull(item.latestSessionId());
+		assertNull(item.latestReportStatus());
+		assertNull(item.latestOverallScore());
+		assertNull(item.latestPracticedAt());
+		assertEquals(0, item.practiceCount());
+	}
+
+	@Test
+	void isOcrAvailableDelegatesToOcrProvider() {
+		when(ocrProvider.available()).thenReturn(true);
+		assertTrue(service.isOcrAvailable());
+
+		when(ocrProvider.available()).thenReturn(false);
+		assertFalse(service.isOcrAvailable());
+	}
+
+	private InterviewReportRecord completedReport(
+			String sessionId,
+			OffsetDateTime now) {
+		return new InterviewReportRecord(
+				sessionId,
+				"interview_1",
+				"user-1",
+				ReportStatus.COMPLETED,
+				new BigDecimal("85.0"),
+				"整体表现良好。",
+				null, null, null,
+				null, null, null,
+				new BigDecimal("80.0"), null, null,
+				new BigDecimal("70.0"), null, null,
+				new BigDecimal("90.0"), null, null,
+				0,
+				null,
+				now,
+				now);
 	}
 
 	private InterviewSceneRequest request(

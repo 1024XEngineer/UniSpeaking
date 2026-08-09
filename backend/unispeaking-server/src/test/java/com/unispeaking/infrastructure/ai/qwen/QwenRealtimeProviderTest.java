@@ -6,13 +6,21 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.domain.vo.provider.ProviderType;
+import com.unispeaking.domain.vo.session.RealtimeCredential;
 import com.unispeaking.infrastructure.ai.aliyun.AliyunTtsProvider;
 import com.unispeaking.infrastructure.ai.deepseek.DeepSeekLlmProvider;
 import com.unispeaking.infrastructure.ai.doubao.DoubaoAsrProvider;
 import com.unispeaking.infrastructure.ai.iflytek.IflytekScoringProvider;
 import com.unispeaking.infrastructure.ai.minimax.MiniMaxTtsProvider;
+import com.unispeaking.infrastructure.realtime.RealtimeCredentialIssuer;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.Authenticator;
@@ -26,6 +34,7 @@ import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -161,7 +170,10 @@ class QwenRealtimeProviderTest {
 				Duration.ofSeconds(20),
 				1_048_576);
 		properties.validate();
-		QwenRealtimeProvider provider = new QwenRealtimeProvider(httpClient, properties);
+		QwenRealtimeProvider provider = new QwenRealtimeProvider(
+				httpClient,
+				properties,
+				mock(RealtimeCredentialIssuer.class));
 		String result = provider.exchangeRealtimeSdp(
 				"qwen3.5-omni-flash-realtime",
 				"offer-sdp",
@@ -177,6 +189,132 @@ class QwenRealtimeProviderTest {
 				request.headers().firstValue("Content-Type").orElseThrow());
 		assertEquals("offer-sdp", readBody(request));
 		assertEquals("answer-sdp", result);
+		assertEquals(1, httpClient.requests.size());
+	}
+
+	@Test
+	void retriesTransientServerErrorOnceWithAFreshTemporaryKey()
+			throws IOException, InterruptedException {
+		RecordingHttpClient httpClient = new RecordingHttpClient(
+				new QueuedResponse(503, "unavailable"),
+				new QueuedResponse(200, "answer-sdp"));
+		RealtimeCredentialIssuer issuer = mock(RealtimeCredentialIssuer.class);
+		when(issuer.issue(any())).thenReturn(freshCredential("fresh-token"));
+		QwenRealtimeProvider provider = provider(httpClient, issuer);
+
+		String result = provider.exchangeRealtimeSdp(
+				"qwen3.5-omni-flash-realtime",
+				"offer-sdp",
+				"temporary-token");
+
+		assertEquals("answer-sdp", result);
+		assertEquals(2, httpClient.requests.size());
+		assertEquals("Bearer temporary-token",
+				httpClient.requests.get(0).headers().firstValue("Authorization").orElseThrow());
+		assertEquals("Bearer fresh-token",
+				httpClient.requests.get(1).headers().firstValue("Authorization").orElseThrow());
+		verify(issuer).issue(ProviderType.QWEN);
+	}
+
+	@Test
+	void retriesRateLimitOnceWithAFreshTemporaryKey()
+			throws IOException, InterruptedException {
+		RecordingHttpClient httpClient = new RecordingHttpClient(
+				new QueuedResponse(429, "rate limited"),
+				new QueuedResponse(200, "answer-sdp"));
+		RealtimeCredentialIssuer issuer = mock(RealtimeCredentialIssuer.class);
+		when(issuer.issue(any())).thenReturn(freshCredential("fresh-token"));
+		QwenRealtimeProvider provider = provider(httpClient, issuer);
+
+		String result = provider.exchangeRealtimeSdp(
+				"qwen3.5-omni-flash-realtime",
+				"offer-sdp",
+				"temporary-token");
+
+		assertEquals("answer-sdp", result);
+		assertEquals(2, httpClient.requests.size());
+		verify(issuer).issue(ProviderType.QWEN);
+	}
+
+	@Test
+	void retriesIoErrorOnceWithAFreshTemporaryKey()
+			throws IOException, InterruptedException {
+		RecordingHttpClient httpClient = new RecordingHttpClient(
+				QueuedResponse.ioError(),
+				new QueuedResponse(200, "answer-sdp"));
+		RealtimeCredentialIssuer issuer = mock(RealtimeCredentialIssuer.class);
+		when(issuer.issue(any())).thenReturn(freshCredential("fresh-token"));
+		QwenRealtimeProvider provider = provider(httpClient, issuer);
+
+		String result = provider.exchangeRealtimeSdp(
+				"qwen3.5-omni-flash-realtime",
+				"offer-sdp",
+				"temporary-token");
+
+		assertEquals("answer-sdp", result);
+		assertEquals(2, httpClient.requests.size());
+		verify(issuer).issue(ProviderType.QWEN);
+	}
+
+	@Test
+	void doesNotRetryClientErrorStatus() {
+		RecordingHttpClient httpClient = new RecordingHttpClient(
+				new QueuedResponse(400, "bad offer"));
+		RealtimeCredentialIssuer issuer = mock(RealtimeCredentialIssuer.class);
+		QwenRealtimeProvider provider = provider(httpClient, issuer);
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> provider.exchangeRealtimeSdp(
+						"qwen3.5-omni-flash-realtime",
+						"offer-sdp",
+						"temporary-token"));
+
+		assertEquals("QWEN_SIGNALING_FAILED", exception.code());
+		assertEquals(1, httpClient.requests.size());
+		verify(issuer, never()).issue(any());
+	}
+
+	@Test
+	void throwsAfterRetryWhenTransientFailurePersists() {
+		RecordingHttpClient httpClient = new RecordingHttpClient(
+				new QueuedResponse(503, "unavailable"),
+				new QueuedResponse(502, "bad gateway"));
+		RealtimeCredentialIssuer issuer = mock(RealtimeCredentialIssuer.class);
+		when(issuer.issue(any())).thenReturn(freshCredential("fresh-token"));
+		QwenRealtimeProvider provider = provider(httpClient, issuer);
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> provider.exchangeRealtimeSdp(
+						"qwen3.5-omni-flash-realtime",
+						"offer-sdp",
+						"temporary-token"));
+
+		assertEquals("QWEN_SIGNALING_FAILED", exception.code());
+		assertEquals(2, httpClient.requests.size());
+		verify(issuer).issue(ProviderType.QWEN);
+	}
+
+	private QwenRealtimeProvider provider(
+			RecordingHttpClient httpClient,
+			RealtimeCredentialIssuer issuer) {
+		RealtimeProperties properties = new RealtimeProperties(
+				"",
+				"workspace-123",
+				"qwen3.5-omni-flash-realtime",
+				"cn-beijing",
+				"https://dashscope.aliyuncs.com/api/v1/tokens",
+				300,
+				Duration.ofSeconds(10),
+				Duration.ofSeconds(20),
+				1_048_576);
+		properties.validate();
+		return new QwenRealtimeProvider(httpClient, properties, issuer);
+	}
+
+	private RealtimeCredential freshCredential(String token) {
+		return new RealtimeCredential(token, Instant.now().plusSeconds(300));
 	}
 
 	@Test
@@ -845,9 +983,13 @@ class QwenRealtimeProviderTest {
 		@SuppressWarnings("unchecked")
 		public <T> HttpResponse<T> send(
 				HttpRequest request,
-				HttpResponse.BodyHandler<T> responseBodyHandler) {
+				HttpResponse.BodyHandler<T> responseBodyHandler)
+				throws IOException {
 			requests.add(request);
 			QueuedResponse response = responses.removeFirst();
+			if (response.failWithIoError()) {
+				throw new IOException("simulated network failure");
+			}
 			byte[] rawBody = response.body() instanceof byte[] bytes
 					? bytes
 					: response.body().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -881,7 +1023,12 @@ class QwenRealtimeProviderTest {
 		public <T> CompletableFuture<HttpResponse<T>> sendAsync(
 				HttpRequest request,
 				HttpResponse.BodyHandler<T> responseBodyHandler) {
-			return CompletableFuture.completedFuture(send(request, responseBodyHandler));
+			try {
+				return CompletableFuture.completedFuture(send(request, responseBodyHandler));
+			}
+			catch (IOException exception) {
+				return CompletableFuture.failedFuture(exception);
+			}
 		}
 
 		@Override
@@ -889,7 +1036,12 @@ class QwenRealtimeProviderTest {
 				HttpRequest request,
 				HttpResponse.BodyHandler<T> responseBodyHandler,
 				HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
-			return CompletableFuture.completedFuture(send(request, responseBodyHandler));
+			try {
+				return CompletableFuture.completedFuture(send(request, responseBodyHandler));
+			}
+			catch (IOException exception) {
+				return CompletableFuture.failedFuture(exception);
+			}
 		}
 
 		@Override public Optional<CookieHandler> cookieHandler() { return Optional.empty(); }
@@ -906,10 +1058,19 @@ class QwenRealtimeProviderTest {
 	private record QueuedResponse(
 			int statusCode,
 			Object body,
-			Map<String, List<String>> headers) {
+			Map<String, List<String>> headers,
+			boolean failWithIoError) {
 
 		private QueuedResponse(int statusCode, Object body) {
-			this(statusCode, body, Map.of());
+			this(statusCode, body, Map.of(), false);
+		}
+
+		private QueuedResponse(int statusCode, Object body, Map<String, List<String>> headers) {
+			this(statusCode, body, headers, false);
+		}
+
+		private static QueuedResponse ioError() {
+			return new QueuedResponse(0, null, Map.of(), true);
 		}
 	}
 

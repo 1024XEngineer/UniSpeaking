@@ -9,6 +9,7 @@ import com.unispeaking.component.document.MaterialTextExtraction;
 import com.unispeaking.component.policy.DailyQuotaPolicy;
 import com.unispeaking.component.recording.RecordingStore;
 import com.unispeaking.component.statemachine.InterviewTopicStateMachine;
+import com.unispeaking.domain.dto.asset.InterviewAssetItem;
 import com.unispeaking.domain.dto.scene.InterviewContext;
 import com.unispeaking.domain.dto.scene.InterviewDialogueSceneContext;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
@@ -16,15 +17,18 @@ import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
 import com.unispeaking.domain.dto.scene.InterviewMaterialPreparationInput;
 import com.unispeaking.domain.dto.scene.InterviewSceneRequest;
 import com.unispeaking.domain.dto.scene.InterviewSceneResult;
+import com.unispeaking.domain.po.evaluation.InterviewReportRecord;
 import com.unispeaking.domain.po.scene.InterviewSceneDefinition;
 import com.unispeaking.domain.po.session.PracticeSessionRecord;
 import com.unispeaking.domain.vo.scene.InterviewDifficulty;
 import com.unispeaking.domain.vo.scene.InterviewTopicEvent;
 import com.unispeaking.domain.vo.scene.InterviewTopicState;
 import com.unispeaking.domain.vo.scene.SceneType;
+import com.unispeaking.infrastructure.persistence.repository.evaluation.InterviewReportRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.InterviewSceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.provider.AiProviderRegistry;
+import com.unispeaking.provider.OcrProvider;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.scene.InterviewSceneService;
 import java.time.OffsetDateTime;
@@ -66,6 +70,8 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 	private final InterviewTopicStateMachine stateMachine;
 	private final PracticeSessionRepository practiceSessionRepository;
 	private final RecordingStore interviewRecordingStore;
+	private final InterviewReportRepository interviewReportRepository;
+	private final OcrProvider ocrProvider;
 	private final ObjectMapper objectMapper;
 	private final ObjectReader strictReader;
 
@@ -81,6 +87,8 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 			PracticeSessionRepository practiceSessionRepository,
 			@org.springframework.beans.factory.annotation.Qualifier("interviewRecordingStore")
 			RecordingStore interviewRecordingStore,
+			InterviewReportRepository interviewReportRepository,
+			OcrProvider ocrProvider,
 			ObjectMapper objectMapper) {
 		this.authService = authService;
 		this.interviewSceneRepository = interviewSceneRepository;
@@ -92,6 +100,8 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 		this.stateMachine = stateMachine;
 		this.practiceSessionRepository = practiceSessionRepository;
 		this.interviewRecordingStore = interviewRecordingStore;
+		this.interviewReportRepository = interviewReportRepository;
+		this.ocrProvider = ocrProvider;
 		this.objectMapper = objectMapper;
 		this.strictReader = objectMapper.reader()
 				.with(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
@@ -214,6 +224,59 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 				"interview scene deleted sceneId={} userId={}",
 				sceneId,
 				userId);
+	}
+
+	@Override
+	public List<InterviewAssetItem> listOwnedScenes() {
+		String userId = authService.requireUserId(null);
+		return interviewSceneRepository.findByUserId(userId)
+				.stream()
+				.map(definition -> toAssetItem(
+						definition,
+						interviewReportRepository.findBySceneId(
+								definition.sceneId())))
+				.toList();
+	}
+
+	@Override
+	public boolean isOcrAvailable() {
+		return ocrProvider.available();
+	}
+
+	private InterviewAssetItem toAssetItem(
+			InterviewSceneDefinition definition,
+			List<InterviewReportRecord> reports) {
+		InterviewReportRecord latest = reports.isEmpty() ? null : reports.getFirst();
+		return new InterviewAssetItem(
+				definition.sceneId(),
+				parseJobTitle(definition.confirmedMaterialJson()),
+				definition.difficulty() == null
+						? null
+						: definition.difficulty().name(),
+				latest == null ? null : latest.sessionId(),
+				latest == null || latest.status() == null
+						? null
+						: latest.status().name(),
+				latest == null ? null : latest.overallScore(),
+				latest == null
+						? null
+						: latest.createdAt(),
+				reports.size(),
+				definition.createdAt());
+	}
+
+	/** 从 LLM-1 确认材料 JSON 提取 jobTitle；非字符串或解析失败返 null。 */
+	private String parseJobTitle(String confirmedMaterialJson) {
+		try {
+			JsonNode root = objectMapper.readTree(confirmedMaterialJson);
+			JsonNode jobTitle = root.path("jobTitle");
+			return jobTitle.isTextual() && !jobTitle.asString("").isBlank()
+					? jobTitle.asString("").strip()
+					: null;
+		}
+		catch (RuntimeException exception) {
+			return null;
+		}
 	}
 
 	private InterviewSceneDefinition requireOwnedScene(

@@ -1,8 +1,11 @@
 package com.unispeaking.infrastructure.ai.qwen;
 
 import com.unispeaking.infrastructure.config.RealtimeProperties;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.logging.RealtimeFlowLog;
 import com.unispeaking.domain.vo.provider.ProviderType;
+import com.unispeaking.domain.vo.session.RealtimeCredential;
+import com.unispeaking.infrastructure.realtime.RealtimeCredentialIssuer;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.RealtimeProvider;
 import java.io.IOException;
@@ -18,8 +21,12 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 
 	private final HttpClient httpClient;
 	private final RealtimeProperties properties;
+	private final RealtimeCredentialIssuer credentialIssuer;
 
-	public QwenRealtimeProvider(HttpClient realtimeHttpClient, RealtimeProperties properties) {
+	public QwenRealtimeProvider(
+			HttpClient realtimeHttpClient,
+			RealtimeProperties properties,
+			RealtimeCredentialIssuer credentialIssuer) {
 		super(
 				ProviderType.QWEN,
 				Set.of(
@@ -27,6 +34,7 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 						AiProviderRegistry.QWEN_REALTIME_PLUS));
 		this.httpClient = realtimeHttpClient;
 		this.properties = properties;
+		this.credentialIssuer = credentialIssuer;
 	}
 
 	@Override
@@ -52,36 +60,91 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 					"Set BAILIAN_WORKSPACE_ID before starting a Qwen realtime session");
 		}
 		try {
-			RealtimeFlowLog.info("flow.3.sdp.request provider={} url={} model={} temporaryToken={} offerSdp={}",
-					type(), sdpExchangeUrl, model,
-					RealtimeFlowLog.maskSecret(token),
-					RealtimeFlowLog.sdpSummary(offerSdp));
-			HttpRequest httpRequest = HttpRequest.newBuilder()
-					.uri(URI.create(sdpExchangeUrl))
-					.timeout(properties.getReadTimeout())
-					.header("Authorization", "Bearer " + token)
-					.header("Content-Type", "application/sdp")
-					.POST(HttpRequest.BodyPublishers.ofString(offerSdp))
-					.build();
-			HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
-			if (response.statusCode() < 200 || response.statusCode() >= 300) {
-				throw retryableFailure("QWEN_SIGNALING_FAILED",
-						"Qwen signaling returned " + response.statusCode());
+			return attemptExchange(model, sdpExchangeUrl, offerSdp, token);
+		}
+		catch (TransientSignalingFailure transientFailure) {
+			// 瞬时失败（IOException/429/5xx）用新的临时 key 重试一次后再抛；4xx 不重试。
+			RealtimeCredential freshCredential = credentialIssuer.issue(ProviderType.QWEN);
+			try {
+				return attemptExchange(
+						model,
+						sdpExchangeUrl,
+						offerSdp,
+						freshCredential.bearerToken());
 			}
-			if (response.body().length() > properties.getMaxAnswerBytes()) {
-				throw retryableFailure("QWEN_ANSWER_TOO_LARGE", "Qwen answer SDP exceeds the configured limit");
+			catch (TransientSignalingFailure retryFailure) {
+				throw retryFailure.failure();
 			}
-			RealtimeFlowLog.info("flow.3.sdp.response status={} answerSdp={}",
-					response.statusCode(),
-					RealtimeFlowLog.sdpSummary(response.body()));
-			return response.body();
+		}
+	}
+
+	private String attemptExchange(
+			String model,
+			String sdpExchangeUrl,
+			String offerSdp,
+			String token) {
+		RealtimeFlowLog.info("flow.3.sdp.request provider={} url={} model={} temporaryToken={} offerSdp={}",
+				type(), sdpExchangeUrl, model,
+				RealtimeFlowLog.maskSecret(token),
+				RealtimeFlowLog.sdpSummary(offerSdp));
+		HttpRequest httpRequest = HttpRequest.newBuilder()
+				.uri(URI.create(sdpExchangeUrl))
+				.timeout(properties.getReadTimeout())
+				.header("Authorization", "Bearer " + token)
+				.header("Content-Type", "application/sdp")
+				.POST(HttpRequest.BodyPublishers.ofString(offerSdp))
+				.build();
+		HttpResponse<String> response;
+		try {
+			response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
 		}
 		catch (IOException exception) {
-			throw retryableFailure("QWEN_SIGNALING_IO_ERROR", "Failed to call Qwen signaling");
+			throw new TransientSignalingFailure(
+					retryableFailure("QWEN_SIGNALING_IO_ERROR", "Failed to call Qwen signaling"));
 		}
 		catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
 			throw nonRetryableFailure("QWEN_SIGNALING_INTERRUPTED", "Qwen signaling call was interrupted");
+		}
+		int statusCode = response.statusCode();
+		if (statusCode == 429 || statusCode >= 500) {
+			// 429/5xx：瞬时失败，用新的临时 key 重试。
+			throw new TransientSignalingFailure(
+					retryableFailure("QWEN_SIGNALING_FAILED",
+							"Qwen signaling returned " + statusCode));
+		}
+		if (statusCode >= 400) {
+			// 其余 4xx：offer 被拒，属于确定性失败，不重试。
+			throw nonRetryableFailure("QWEN_SIGNALING_FAILED",
+					"Qwen signaling returned " + statusCode);
+		}
+		if (statusCode < 200 || statusCode >= 300) {
+			// 罕见 3xx：瞬时失败，可重试。
+			throw new TransientSignalingFailure(
+					retryableFailure("QWEN_SIGNALING_FAILED",
+							"Qwen signaling returned " + statusCode));
+		}
+		if (response.body().length() > properties.getMaxAnswerBytes()) {
+			throw retryableFailure("QWEN_ANSWER_TOO_LARGE", "Qwen answer SDP exceeds the configured limit");
+		}
+		RealtimeFlowLog.info("flow.3.sdp.response status={} answerSdp={}",
+				statusCode,
+				RealtimeFlowLog.sdpSummary(response.body()));
+		return response.body();
+	}
+
+	/** 瞬时信令失败载体：携带重试后需抛出的业务异常（避免二次重试吞掉原始失败）。 */
+	private static final class TransientSignalingFailure extends RuntimeException {
+
+		private final BusinessException failure;
+
+		private TransientSignalingFailure(BusinessException failure) {
+			super(failure.getMessage());
+			this.failure = failure;
+		}
+
+		private BusinessException failure() {
+			return failure;
 		}
 	}
 

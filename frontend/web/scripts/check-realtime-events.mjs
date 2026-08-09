@@ -5,6 +5,8 @@ import {
   createTurnAudioCaptureController,
   extractCompletedAssistantMessage,
   isActiveResponseConflict,
+  isMicFailure,
+  micFailureMessage,
   normalizeBaseUrl,
   websocketUrl,
 } from "../src/websocket/realtimeClient.js";
@@ -151,5 +153,22 @@ assert.equal(turnAudioCapture.start(), true);
 assert.equal(segmentStartCount, 2);
 assert.equal(await turnAudioCapture.take(), expectedAudio);
 assert.equal(segmentStopCount, 2);
+
+assert.equal(isMicFailure({ name: "NotAllowedError" }), true);
+assert.equal(isMicFailure({ name: "SecurityError" }), true);
+assert.equal(isMicFailure({ name: "NotFoundError" }), true);
+assert.equal(isMicFailure({ name: "DevicesNotFoundError" }), true);
+assert.equal(isMicFailure({ name: "NotReadableError" }), true);
+assert.equal(isMicFailure({ name: "AudioCaptureError" }), true);
+assert.equal(isMicFailure({ name: "OverconstrainedError" }), true);
+assert.equal(isMicFailure({ name: "AbortError" }), false);
+assert.equal(isMicFailure(null), false);
+assert.equal(isMicFailure({}), false);
+assert.match(micFailureMessage({ name: "NotAllowedError" }), /麦克风权限被拒绝/);
+assert.match(micFailureMessage({ name: "NotFoundError" }), /未检测到麦克风设备/);
+assert.match(micFailureMessage({ name: "NotReadableError" }), /占用/);
+assert.match(micFailureMessage({ name: "OverconstrainedError" }), /不满足采集要求/);
+assert.equal(micFailureMessage({ name: "UnknownError" }), null);
+assert.equal(micFailureMessage(null), null);
 
 console.log("Realtime event normalization checks passed.");

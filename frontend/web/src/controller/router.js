@@ -25,6 +25,7 @@ export const APP_PAGES = [
   "ielts",
   "ielts-assets",
   "interview",
+  "interview-assets",
   "profile",
   "insights",
   "membership",
@@ -48,6 +49,7 @@ export const PAGE_PATHS = {
   ielts: "/ielts",
   "ielts-assets": "/ielts/assets",
   interview: "/interview",
+  "interview-assets": "/interview/assets",
 };
 
 export const paths = {
@@ -92,6 +94,7 @@ export const paths = {
   },
   interview: {
     root: "/interview",
+    assets: "/interview/assets",
     session: (sceneId) => `/interview/scenes/${encodeURIComponent(sceneId)}/session`,
     report: (sceneId, sessionId) => `/interview/scenes/${encodeURIComponent(sceneId)}/session/${encodeURIComponent(sessionId)}/report`,
   },
@@ -269,6 +272,12 @@ export function parseInterviewRoute(pathname) {
   if (segments[0] !== "interview") return null;
   if (segments.length === 1) {
     return appRoute("interview", { interviewRoute: { screen: "home" } });
+  }
+  if (segments[1] === "assets") {
+    return appRoute("interview-assets", {
+      interviewRoute: { area: "assets" },
+      canonicalPath: paths.interview.assets,
+    });
   }
   if (segments[1] === "scenes" && segments.length >= 3) {
     const sceneId = safeDecode(segments[2]);

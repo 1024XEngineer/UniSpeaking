@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  BookOpenText,
+  CaretDown,
+  CaretRight,
   Check,
   FileText,
   Image,
@@ -10,11 +13,14 @@ import {
   PhoneDisconnect,
   ShieldCheck,
   Sparkle,
+  SquaresFour,
   X,
 } from "@phosphor-icons/react";
 import { NewtonsCradle } from "../common/NewtonsCradle.jsx";
+import { Modal } from "../common/Modal.jsx";
 import {
   generateInterviewScene,
+  getInterviewAssets,
   getInterviewReport,
   prepareInterviewMaterials,
   retryInterviewReport,
@@ -23,6 +29,9 @@ import { createRealtimeClient } from "../../websocket/realtimeClient.js";
 import { paths } from "../../controller/router.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
+
+const JD_IMAGE_OCR_ENABLED = import.meta.env.VITE_OCR_ENABLED === "true";
+const DIFFICULTY_LABELS = { EASY: "简单", STANDARD: "标准", HARD: "困难" };
 
 const speedCodeByLabel = {
   "慢一些": "SLOWER",
@@ -98,14 +107,16 @@ function InterviewTranscript({ lines, status, transcriptRef }) {
   );
 }
 
-function MaterialEditor({ material, onChange }) {
+function MaterialEditor({ material, onChange, compact = false }) {
   const updateScalar = (key, value) => onChange({ ...material, [key]: value });
   const updateList = (key, value) => onChange({ ...material, [key]: linesToList(value) });
   return (
     <section className="interview-editor">
-      <div className="interview-editor__heading">
-        <div><p className="eyebrow">MATERIAL REVIEW</p><h2>整理后的面试材料</h2><p>AI 已从 JD 与简历中整理出岗位与经历要点，你可以直接修改，然后生成面试。</p></div>
-      </div>
+      {!compact && (
+        <div className="interview-editor__heading">
+          <div><p className="eyebrow">MATERIAL REVIEW</p><h2>整理后的面试材料</h2><p>AI 已从 JD 与简历中整理出岗位与经历要点，你可以直接修改，然后生成面试。</p></div>
+        </div>
+      )}
       <div className="interview-editor__grid">
         {interviewScalarFields.map((field) => (
           <label key={field.key} className="interview-editor__field interview-editor__field--wide">
@@ -149,13 +160,19 @@ function InterviewHome({ onNavigate, onBack }) {
   const [difficulty, setDifficulty] = useState("STANDARD");
   const [preparing, setPreparing] = useState(false);
   const [draft, setDraft] = useState(null);
+  const [draftOpen, setDraftOpen] = useState(false);
   const [formError, setFormError] = useState("");
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
+  const jdImageUnavailable = !JD_IMAGE_OCR_ENABLED;
 
   const prepareMaterials = async () => {
     if (preparing) return;
     setFormError("");
+    if (jdMode === "image" && jdImageUnavailable) {
+      setFormError("OCR 暂不可用，请使用粘贴文本方式上传 JD");
+      return;
+    }
     const formData = new FormData();
     if (jdMode === "text") {
       if (!jdText.trim()) {
@@ -187,6 +204,7 @@ function InterviewHome({ onNavigate, onBack }) {
         throw new Error("材料整理响应缺少结构化内容");
       }
       setDraft(material);
+      setDraftOpen(true);
       setGenerateError("");
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "材料整理失败，请稍后重试");
@@ -240,6 +258,7 @@ function InterviewHome({ onNavigate, onBack }) {
   return (
     <main className="page page--interview">
       <div className="interview-home">
+        <button className="ielts-back" onClick={onBack}><ArrowLeft />返回场景广场</button>
         <PageHeader
           eyebrow="JOB INTERVIEW"
           title="模拟面试"
@@ -256,11 +275,13 @@ function InterviewHome({ onNavigate, onBack }) {
               <legend>岗位描述（JD）</legend>
               <div className="interview-source-toggle">
                 <button type="button" className={jdMode === "text" ? "is-active" : ""} onClick={() => setJdMode("text")}>粘贴文本</button>
-                <button type="button" className={jdMode === "image" ? "is-active" : ""} onClick={() => setJdMode("image")}>上传图片</button>
+                <button type="button" className={jdMode === "image" ? "is-active" : ""} disabled={jdImageUnavailable} title={jdImageUnavailable ? "OCR 暂不可用，请粘贴 JD 文本" : "上传岗位描述图片，由 OCR 识别文字"} onClick={() => setJdMode("image")}>上传图片</button>
               </div>
               {jdMode === "text"
                 ? <textarea className="interview-form__textarea" value={jdText} maxLength={20000} onChange={(event) => setJdText(event.target.value)} placeholder="粘贴招聘 JD 的职责与任职要求文本…" />
-                : <FilePicker accept="image/*" hint="支持单张图片，将由 OCR 识别文字" file={jdImage} onFile={setJdImage} icon={<Image weight="bold" />} />}
+                : jdImageUnavailable
+                  ? <p className="call-error" role="alert">OCR 暂不可用，请使用“粘贴文本”方式上传 JD。</p>
+                  : <FilePicker accept="image/*" hint="支持单张图片，将由 OCR 识别文字" file={jdImage} onFile={setJdImage} icon={<Image weight="bold" />} />}
             </fieldset>
 
             <fieldset className="interview-form__group">
@@ -289,14 +310,23 @@ function InterviewHome({ onNavigate, onBack }) {
 
             <div className="interview-form__actions">
               <button className="button button--secondary" onClick={onBack}>返回场景广场</button>
-              {!draft
-                ? <ExpandingCta disabled={preparing} onClick={() => void prepareMaterials()}>{preparing ? "正在整理材料" : "整理材料"}</ExpandingCta>
-                : <ExpandingCta disabled={generating} onClick={() => void confirmAndGenerate()}>{generating ? "正在生成面试" : "确认并生成面试"}</ExpandingCta>}
+              <ExpandingCta disabled={preparing} onClick={() => (draft ? setDraftOpen(true) : void prepareMaterials())}>{preparing ? "正在整理材料" : draft ? "查看整理结果" : "整理材料"}</ExpandingCta>
             </div>
           </div>
         </section>
 
-        {draft && <MaterialEditor material={draft} onChange={setDraft} />}
+        {draftOpen && draft && (
+          <Modal onClose={() => setDraftOpen(false)} wide className="interview-material-modal">
+            <p className="eyebrow">MATERIAL REVIEW</p>
+            <h2>整理后的面试材料</h2>
+            <p className="modal-lead">AI 已从 JD 与简历中整理出岗位与经历要点，你可以直接修改，然后生成面试。</p>
+            <MaterialEditor material={draft} onChange={setDraft} compact />
+            <div className="modal-actions">
+              <button className="button button--secondary" disabled={preparing} onClick={() => void prepareMaterials()}>重新整理</button>
+              <ExpandingCta disabled={generating} onClick={() => void confirmAndGenerate()}>{generating ? "正在生成面试" : "确认并生成面试"}</ExpandingCta>
+            </div>
+          </Modal>
+        )}
       </div>
     </main>
   );
@@ -416,6 +446,9 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       setError(event.message || "面试自动结束失败");
     } else if (event.type === "local.backend_warning") {
       setError(event.message || "会话记录保存失败，请稍后重试");
+    } else if (event.type === "local.mic_error") {
+      setError(event.message || "无法访问麦克风");
+      setStatus("麦克风不可用，请检查权限");
     } else if (event.type === "error" || event.type === "local.error") {
       setError(event.message || event.error?.message || "实时会话发生错误");
       setStatus("连接异常");
@@ -498,7 +531,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     <main className="conversation call call--subtitles interview-call">
       <audio ref={remoteAudioRef} autoPlay />
       <div className="conversation__top interview-call-top">
-        <div><strong>模拟面试</strong><span>{ending ? "面试计时已停止，正在生成报告" : currentTopic ? `当前主题：${currentTopic}` : status}</span></div>
+        <div><button className="ielts-back" onClick={() => setExitOpen(true)}><ArrowLeft />返回场景广场</button><strong>模拟面试</strong><span>{ending ? "面试计时已停止，正在生成报告" : currentTopic ? `当前主题：${currentTopic}` : status}</span></div>
         <div className="interview-call-progress"><span>已覆盖 {completedTopicCount} 个主题</span><button className="round-control interview-call-exit" disabled={ending} onClick={() => setExitOpen(true)} aria-label="退出面试"><X /></button></div>
       </div>
       <section className="call__stage">
@@ -588,6 +621,7 @@ function InterviewReport({ sceneId, sessionId, onHome, onBack }) {
     return (
       <main className="page page--interview interview-report-page">
         <div className="interview-report-pending">
+          <button className="ielts-back" onClick={onBack}><ArrowLeft />返回场景广场</button>
           <NewtonsCradle label="报告生成中" />
           <p className="eyebrow">REPORT GENERATING</p>
           <h1>正在生成面试报告</h1>
@@ -603,6 +637,7 @@ function InterviewReport({ sceneId, sessionId, onHome, onBack }) {
     return (
       <main className="page page--interview interview-report-page">
         <div className="interview-report-pending">
+          <button className="ielts-back" onClick={onBack}><ArrowLeft />返回场景广场</button>
           <p className="eyebrow">REPORT FAILED</p>
           <h1>报告生成失败</h1>
           <p>{failureReason || "报告生成过程中发生异常，请重新生成一次。"}</p>
@@ -624,6 +659,7 @@ function InterviewReport({ sceneId, sessionId, onHome, onBack }) {
   return (
     <main className="page page--interview interview-report-page">
       <div className="interview-report">
+        <button className="ielts-back" onClick={onBack}><ArrowLeft />返回场景广场</button>
         <PageHeader
           eyebrow="INTERVIEW REPORT"
           title="面试表现报告"
@@ -664,6 +700,171 @@ function InterviewReport({ sceneId, sessionId, onHome, onBack }) {
           <button className="button button--secondary" onClick={onBack}>返回场景广场</button>
         </div>
       </div>
+    </main>
+  );
+}
+
+export function InterviewAssets({ route, onNavigate, onBack, onBackToAssets, onBackToIelts, onTraining, onPractice }) {
+  const [items, setItems] = useState([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [report, setReport] = useState(null);
+  const [reportStatus, setReportStatus] = useState("");
+  const [reportLoading, setReportLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getInterviewAssets()
+      .then((data) => {
+        if (cancelled) return;
+        const next = Array.isArray(data) ? data : [];
+        setItems(next);
+        setSelectedId((current) => current || next[0]?.sceneId || "");
+        setLoadError("");
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : "面试学习资产加载失败");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const selected = items.find((item) => item.sceneId === selectedId) || null;
+
+  useEffect(() => {
+    if (!selected?.latestSessionId) {
+      setReport(null);
+      setReportStatus("");
+      setReportLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setReportLoading(true);
+    getInterviewReport(selected.sceneId, selected.latestSessionId)
+      .then((data) => {
+        if (cancelled) return;
+        setReport(data?.report || null);
+        setReportStatus(data?.status || "");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setReport(null);
+          setReportStatus("");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setReportLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [selected?.sceneId, selected?.latestSessionId]);
+
+  const statusLabel = (item) => {
+    if (item.latestReportStatus === "COMPLETED") {
+      const score = Number(item.latestOverallScore);
+      return Number.isFinite(score) ? `${Math.round(score)} 分` : "已出报告";
+    }
+    if (item.latestReportStatus === "PROCESSING") return "报告生成中";
+    if (item.latestReportStatus === "FAILED") return "报告生成失败";
+    return "待练习";
+  };
+
+  const otherAssetsMenu = (
+    <div className="asset-module-menu interview-other-assets">
+      <button className="asset-module-menu__trigger" type="button" aria-label="切换学习资产模块" aria-haspopup="menu"><SquaresFour weight="bold" /><span>其他资产</span><CaretDown weight="bold" /></button>
+      <div className="asset-module-menu__popover" role="menu">
+        <button type="button" role="menuitem" onClick={onBackToAssets}><BookOpenText /><span><strong>场景训练学习资产</strong><small>对话记录、纠错与场景复练</small></span><CaretRight /></button>
+        <button type="button" role="menuitem" onClick={onBackToIelts}><span className="asset-module-ielts-mark">IELTS</span><span><strong>IELTS 学习资产</strong><small>评分、建议与今日复习</small></span><CaretRight /></button>
+      </div>
+    </div>
+  );
+
+  const dimensions = Array.isArray(report?.dimensions) ? report.dimensions : [];
+  const hasOverall = report?.overallScore != null && Number.isFinite(Number(report.overallScore));
+
+  return (
+    <main className="page page--interview interview-assets-page">
+      <button className="ielts-back" onClick={onBack}><ArrowLeft />返回场景广场</button>
+      <PageHeader
+        title="面试学习资产"
+        subtitle="回看最近一次面试的五维报告，针对弱项直接复练同岗位面试。"
+        action={<div className="ielts-assets-actions">{otherAssetsMenu}<button className="button button--secondary ielts-assets-header-cta" onClick={onTraining}>返回面试首页</button></div>}
+      />
+      {loadError && <p className="call-error" role="alert">{loadError}</p>}
+      <section className="ielts-history-layout interview-assets-layout">
+        <aside className="interview-assets-list" aria-label="面试训练记录">
+          <header><h2>面试记录</h2><span>{items.length} 条</span></header>
+          {items.map((item) => (
+            <button key={item.sceneId} className={selected?.sceneId === item.sceneId ? "is-active" : ""} onClick={() => setSelectedId(item.sceneId)}>
+              <div className="ielts-history-record-meta">
+                <time>{item.latestPracticedAt ? new Date(item.latestPracticedAt).toLocaleDateString("zh-CN") : "尚未练习"}</time>
+                <em>{DIFFICULTY_LABELS[item.difficulty] || item.difficulty || "标准"} · {statusLabel(item)}</em>
+              </div>
+              <strong>{item.jobTitle || "未命名岗位"}</strong>
+            </button>
+          ))}
+          {!items.length && <div className="ielts-history-empty">{loading ? "正在加载面试学习资产" : "暂无面试学习资产"}</div>}
+        </aside>
+        <article className="interview-assets-detail">
+          {selected && selected.latestSessionId && reportStatus === "COMPLETED" && report && (
+            <>
+              <header>
+                <div><p className="eyebrow">INTERVIEW ASSET</p><h2>{selected.jobTitle || "未命名岗位"}</h2><p>{selected.latestPracticedAt ? `${new Date(selected.latestPracticedAt).toLocaleDateString("zh-CN")} · ${DIFFICULTY_LABELS[selected.difficulty] || "标准"} 难度` : "最近一次面试"}</p></div>
+                <div className="interview-assets-detail__actions"><button className="button button--secondary" onClick={() => onPractice(selected.sceneId)}>复练本岗位</button></div>
+              </header>
+              <section className="interview-assets-report">
+                <div className="interview-assets-report__score">
+                  <span>综合评分</span>
+                  <strong>{hasOverall ? Math.round(Number(report.overallScore)) : "—"}</strong>
+                  <small>/ 100</small>
+                </div>
+                <div className="interview-assets-report__summary">
+                  <p className="eyebrow">SUMMARY</p>
+                  <p>{report.summary || "本次面试已结束，暂无文字总结。"}</p>
+                </div>
+              </section>
+              <section className="interview-assets-dimensions">
+                <h3>五维能力反馈</h3>
+                <div className="interview-assets-dimension-grid">
+                  {dimensions.map((item) => {
+                    const meta = reportDimensionMeta[item.dimension] || { label: item.dimension, hint: "" };
+                    const score = item.score == null ? null : Number(item.score);
+                    const hasScore = score != null && Number.isFinite(score);
+                    return (
+                      <article key={item.dimension} className="interview-assets-dimension">
+                        <header><span>{meta.label}<small>{meta.hint}</small></span><strong className={hasScore && score < 60 ? "is-low" : ""}>{hasScore ? Math.round(score) : "—"}</strong></header>
+                        <p>{item.evaluation || "该维度暂无可用的评分说明。"}</p>
+                      </article>
+                    );
+                  })}
+                  {!dimensions.length && <p className="interview-assets-empty">报告暂未包含分维度评分。</p>}
+                </div>
+              </section>
+            </>
+          )}
+          {selected && selected.latestSessionId && reportLoading && (
+            <div className="ielts-history-empty interview-assets-state"><NewtonsCradle label="正在读取面试报告" /></div>
+          )}
+          {selected && selected.latestSessionId && !reportLoading && reportStatus !== "COMPLETED" && (
+            <div className="ielts-history-empty interview-assets-state">
+              <h2>{reportStatus === "PROCESSING" ? "报告生成中" : "报告生成失败"}</h2>
+              <p>{reportStatus === "FAILED" ? "上一次报告生成失败，可直接复练本岗位重新面试。" : "报告仍在生成，稍后回到这里即可查看五维反馈。"}</p>
+              <button className="button button--primary" onClick={() => onPractice(selected.sceneId)}>复练本岗位</button>
+            </div>
+          )}
+          {selected && !selected.latestSessionId && (
+            <div className="ielts-history-empty interview-assets-state">
+              <h2>尚未开始面试</h2>
+              <p>该岗位已生成场景，开始一次面试后将在这里展示五维报告。</p>
+              <button className="button button--primary" onClick={() => onPractice(selected.sceneId)}>开始面试</button>
+            </div>
+          )}
+          {!selected && !loading && <div className="ielts-history-empty">选择一个面试记录查看报告</div>}
+        </article>
+      </section>
     </main>
   );
 }

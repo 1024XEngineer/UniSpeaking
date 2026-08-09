@@ -31,4 +31,10 @@ public interface InterviewReportRepository {
 
 	/** 清扫用：查询 updated_at 早于 cutoff 的滞留 PROCESSING 行。 */
 	List<InterviewReportRecord> findStuckProcessingBefore(OffsetDateTime cutoff);
+
+	/**
+	 * 按场景查询全部报告，{@code created_at} 倒序（最近在前，首条即最近报告）；
+	 * 空 sceneId 返回空列表。
+	 */
+	List<InterviewReportRecord> findBySceneId(String sceneId);
 }

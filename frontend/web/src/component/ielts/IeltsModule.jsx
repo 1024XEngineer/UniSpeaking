@@ -791,6 +791,9 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
           setError(event.message || "IELTS 题目状态推进失败");
         } else if (event.type === "local.backend_warning") {
           setError("会话记录保存失败，请稍后重试");
+        } else if (event.type === "local.mic_error") {
+          setError(event.message || "无法访问麦克风");
+          setStatus("麦克风不可用，请检查权限");
         } else if (event.type === "error" || event.type === "local.error") {
           setError(event.message || event.error?.message || "实时会话发生错误");
           setStatus("连接异常");

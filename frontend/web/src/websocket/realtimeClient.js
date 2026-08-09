@@ -32,6 +32,42 @@ const SPEECH_SPEED_INSTRUCTIONS = {
 
 const eventId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+export function micFailureMessage(error) {
+  const name = error?.name || "";
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "麦克风权限被拒绝，请在浏览器地址栏允许访问麦克风后重试";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "未检测到麦克风设备，请连接麦克风后重试";
+  }
+  if (name === "NotReadableError" || name === "AudioCaptureError") {
+    return "麦克风正被其他应用占用，请关闭后重试";
+  }
+  if (name === "OverconstrainedError") {
+    return "当前麦克风不满足采集要求，请更换设备后重试";
+  }
+  return null;
+}
+
+export function isMicFailure(error) {
+  return ["NotAllowedError", "SecurityError", "NotFoundError",
+    "DevicesNotFoundError", "NotReadableError", "AudioCaptureError", "OverconstrainedError"]
+    .includes(error?.name);
+}
+
+export function defaultIceServers() {
+  const configured = import.meta.env?.VITE_ICE_SERVERS;
+  if (configured) {
+    try {
+      const parsed = JSON.parse(configured);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      /* ignore malformed env value */
+    }
+  }
+  return [{ urls: "stun:stun.l.google.com:19302" }];
+}
+
 export function buildResponseCreateEvent({ id, instructions = "" } = {}) {
   const turnInstructions = String(instructions || "").trim();
   return {
@@ -1107,7 +1143,7 @@ export function createRealtimeClient({
     emit({ type: "local.connecting" });
 
     try {
-      peer = new RTCPeerConnection();
+      peer = new RTCPeerConnection({ iceServers: defaultIceServers() });
       peer.ontrack = (event) => {
         const stream = event.streams?.[0];
         if (stream) onRemoteStream(stream);
@@ -1120,8 +1156,15 @@ export function createRealtimeClient({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
       if (customSceneId || ieltsSceneId || interviewSceneId) {
-        segmentRecorder = await createPcmWavSegmentRecorder(localStream);
-        turnAudioCapture = createTurnAudioCaptureController(segmentRecorder);
+        try {
+          segmentRecorder = await withTimeout(
+            createPcmWavSegmentRecorder(localStream), 3_000, "录音器初始化超时");
+          turnAudioCapture = createTurnAudioCaptureController(segmentRecorder);
+        } catch (recorderError) {
+          segmentRecorder = null;
+          turnAudioCapture = null;
+          emit({ type: "local.provider_warning", message: "逐轮录音不可用，本轮评分将仅基于文本" });
+        }
       }
       const audioTrack = localStream.getAudioTracks()[0];
       audioTrack.enabled = false;
@@ -1177,7 +1220,13 @@ export function createRealtimeClient({
       return { sessionId, backend };
     } catch (error) {
       await stop({ notifyBackend: false, reason: "start_failed", emitEnded: false });
-      emit({ type: "local.error", message: error instanceof Error ? error.message : "无法开始实时对话" });
+      const mic = isMicFailure(error);
+      emit({
+        type: mic ? "local.mic_error" : "local.error",
+        message: mic
+          ? micFailureMessage(error) || "无法访问麦克风"
+          : error instanceof Error ? error.message : "无法开始实时对话",
+      });
       throw error;
     }
   }

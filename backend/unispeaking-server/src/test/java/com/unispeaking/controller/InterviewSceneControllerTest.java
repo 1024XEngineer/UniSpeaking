@@ -4,17 +4,21 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.unispeaking.component.recording.RecordingStore;
+import com.unispeaking.domain.dto.asset.InterviewAssetItem;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
 import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
 import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
 import com.unispeaking.service.scene.impl.InterviewSceneServiceImpl;
 import com.unispeaking.service.session.InterviewSessionService;
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -95,6 +99,55 @@ class InterviewSceneControllerTest {
 								"%PDF-1.4 fake pdf".getBytes())))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.material.finalText").value("最终文本"));
+	}
+
+	@Test
+	void listAssetsReturnsOwnedInterviewAssetItems() throws Exception {
+		InterviewSceneServiceImpl service = mock(InterviewSceneServiceImpl.class);
+		OffsetDateTime now = OffsetDateTime.parse("2026-08-09T00:00:00Z");
+		when(service.listOwnedScenes()).thenReturn(List.of(new InterviewAssetItem(
+				"interview_1",
+				"后端开发工程师",
+				"HARD",
+				"session-1",
+				"COMPLETED",
+				new BigDecimal("85.0"),
+				now,
+				2,
+				now)));
+		MockMvc mvc = MockMvcBuilders
+				.standaloneSetup(new InterviewSceneController(
+						service,
+						mock(InterviewSessionService.class),
+						mock(RecordingStore.class)))
+				.build();
+
+		mvc.perform(get("/api/interview-scenes/assets"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.success").value(true))
+				.andExpect(jsonPath("$.data[0].sceneId").value("interview_1"))
+				.andExpect(jsonPath("$.data[0].jobTitle").value("后端开发工程师"))
+				.andExpect(jsonPath("$.data[0].difficulty").value("HARD"))
+				.andExpect(jsonPath("$.data[0].latestReportStatus").value("COMPLETED"))
+				.andExpect(jsonPath("$.data[0].latestOverallScore").value(85.0))
+				.andExpect(jsonPath("$.data[0].practiceCount").value(2));
+	}
+
+	@Test
+	void ocrAvailabilityDelegatesToService() throws Exception {
+		InterviewSceneServiceImpl service = mock(InterviewSceneServiceImpl.class);
+		when(service.isOcrAvailable()).thenReturn(false);
+		MockMvc mvc = MockMvcBuilders
+				.standaloneSetup(new InterviewSceneController(
+						service,
+						mock(InterviewSessionService.class),
+						mock(RecordingStore.class)))
+				.build();
+
+		mvc.perform(get("/api/interview-scenes/ocr/availability"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.success").value(true))
+				.andExpect(jsonPath("$.data.available").value(false));
 	}
 
 	@Test
