@@ -15,10 +15,12 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.springframework.stereotype.Component;
 
 /**
  * 安全提取文本型 PDF 与 DOCX 的统一入口。
  */
+@Component
 public final class DocumentTextExtractor {
 
 	static final int MAX_FILE_BYTES = 10 * 1024 * 1024;

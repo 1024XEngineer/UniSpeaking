@@ -1,0 +1,87 @@
+package com.unispeaking.controller;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.unispeaking.domain.dto.scene.InterviewMaterial;
+import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
+import com.unispeaking.service.scene.impl.InterviewSceneServiceImpl;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+class InterviewSceneControllerTest {
+
+	@Test
+	void prepareMaterialsBindsMultipartAndReturnsDraft() throws Exception {
+		InterviewSceneServiceImpl service = mock(InterviewSceneServiceImpl.class);
+		InterviewMaterial material = new InterviewMaterial(
+				"Java 工程师",
+				List.of("负责后端服务开发"),
+				List.of("熟悉 Java 21"),
+				List.of("Spring"),
+				"",
+				List.of(),
+				List.of(),
+				List.of(),
+				List.of(),
+				List.of(),
+				"Java 工程师岗位职责与任职要求");
+		when(service.prepareMaterials(any()))
+				.thenReturn(new InterviewMaterialDraft(material));
+		MockMvc mvc = MockMvcBuilders
+				.standaloneSetup(new InterviewSceneController(service))
+				.build();
+
+		mvc.perform(multipart("/api/interview-scenes/prepare-materials")
+						.param("jobDescriptionText", "负责后端服务开发，熟悉 Java 21")
+						.param("resumeText", "三年后端经验")
+						.file(new MockMultipartFile(
+								"unused",
+								"unused.txt",
+								"text/plain",
+								new byte[] {})))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.success").value(true))
+				.andExpect(jsonPath("$.data.material.jobTitle").value("Java 工程师"))
+				.andExpect(jsonPath("$.data.material.responsibilities[0]")
+						.value("负责后端服务开发"));
+	}
+
+	@Test
+	void prepareMaterialsAcceptsResumePdf() throws Exception {
+		InterviewSceneServiceImpl service = mock(InterviewSceneServiceImpl.class);
+		when(service.prepareMaterials(any()))
+				.thenReturn(new InterviewMaterialDraft(new InterviewMaterial(
+						"Java 工程师",
+						List.of("职责"),
+						List.of("要求"),
+						List.of(),
+						"",
+						List.of(),
+						List.of(),
+						List.of(),
+						List.of(),
+						List.of(),
+						"最终文本")));
+		MockMvc mvc = MockMvcBuilders
+				.standaloneSetup(new InterviewSceneController(service))
+				.build();
+
+		mvc.perform(multipart("/api/interview-scenes/prepare-materials")
+						.param("jobDescriptionText", "JD 文本")
+						.file(new MockMultipartFile(
+								"resumeFile",
+								"resume.pdf",
+								"application/pdf",
+								"%PDF-1.4 fake pdf".getBytes())))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.material.finalText").value("最终文本"));
+	}
+}
