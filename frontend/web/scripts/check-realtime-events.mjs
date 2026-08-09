@@ -116,6 +116,12 @@ const partTwoSession = buildRealtimeSessionConfig({
   silenceDurationMs: 3_000,
   interruptResponse: false,
 });
+const interviewSession = buildRealtimeSessionConfig({
+  systemPrompt: "Conduct a job interview.",
+  model: "qwen3.5-omni-flash-realtime",
+  automaticTurnResponses: false,
+  silenceDurationMs: 1_500,
+});
 
 assert.equal(slowerKaterina.voice, "Katerina");
 assert.match(slowerKaterina.instructions, /70 English words per minute/);
@@ -129,6 +135,9 @@ assert.equal(deterministicIeltsPart.turn_detection.silence_duration_ms, 3_000);
 assert.equal(deterministicIeltsPart.turn_detection.create_response, false);
 assert.equal(partTwoSession.turn_detection.create_response, false);
 assert.equal(partTwoSession.turn_detection.interrupt_response, false);
+assert.equal(interviewSession.turn_detection.type, "semantic_vad");
+assert.equal(interviewSession.turn_detection.silence_duration_ms, 1_500);
+assert.equal(interviewSession.turn_detection.interrupt_response, true);
 
 let segmentStartCount = 0;
 let segmentStopCount = 0;

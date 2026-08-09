@@ -196,7 +196,7 @@ class InterviewSceneControllerTest {
 		when(sessions.submitTurn(any(), any(), anyInt(), any(), any()))
 				.thenReturn(new com.unispeaking.domain.dto.session.InterviewTurnResult(
 						new com.unispeaking.domain.dto.session.InterviewTurnStateResponse(
-								false, 1, "自我介绍"),
+								false, 1, 1, "自我介绍"),
 						null));
 		MockMvc mvc = MockMvcBuilders
 				.standaloneSetup(new InterviewSceneController(
@@ -216,6 +216,7 @@ class InterviewSceneControllerTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.success").value(true))
 				.andExpect(jsonPath("$.data.state.currentTopic").value("自我介绍"))
-				.andExpect(jsonPath("$.data.state.completedTopicCount").value(1));
+				.andExpect(jsonPath("$.data.state.completedTopicCount").value(1))
+				.andExpect(jsonPath("$.data.state.coveredTopicCount").value(1));
 	}
 }

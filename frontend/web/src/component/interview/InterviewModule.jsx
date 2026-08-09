@@ -7,6 +7,7 @@ import {
   CaretRight,
   Check,
   FileText,
+  HandSwipeLeft,
   Image,
   Microphone,
   MicrophoneSlash,
@@ -46,20 +47,41 @@ const interviewDifficulties = [
   { id: "HARD", label: "困难", note: "每主题 2 个深层追问" },
 ];
 
-const interviewListFields = [
-  { key: "responsibilities", label: "岗位职责", required: true },
-  { key: "qualificationRequirements", label: "任职要求", required: true },
-  { key: "requiredSkills", label: "必备技能" },
-  { key: "education", label: "教育经历" },
-  { key: "workExperiences", label: "工作经历" },
-  { key: "projectExperiences", label: "项目经历" },
-  { key: "skillsAndAbilities", label: "技能与能力" },
-  { key: "interviewableExperienceClues", label: "可深挖经历线索" },
-];
-
-const interviewScalarFields = [
-  { key: "jobTitle", label: "岗位名称" },
-  { key: "otherJobInformation", label: "其他信息" },
+const interviewEditorGroups = [
+  {
+    id: "job",
+    eyebrow: "JOB PROFILE",
+    title: "JD 岗位信息",
+    hint: "面试官会以此设定提问方向与职位背景。",
+    fields: [
+      { key: "jobTitle", label: "岗位名称", scalar: true },
+      { key: "otherJobInformation", label: "其他信息", scalar: true },
+    ],
+  },
+  {
+    id: "requirements",
+    eyebrow: "ROLE & REQUIREMENTS",
+    title: "职责与要求",
+    hint: "面试官将围绕这些要点逐轮展开追问。",
+    fields: [
+      { key: "responsibilities", label: "岗位职责", required: true },
+      { key: "qualificationRequirements", label: "任职要求", required: true },
+      { key: "requiredSkills", label: "必备技能" },
+    ],
+  },
+  {
+    id: "experience",
+    eyebrow: "EXPERIENCE & SKILLS",
+    title: "经历与技能",
+    hint: "用于深挖你的个人经历，可只保留亮点。",
+    fields: [
+      { key: "education", label: "教育经历" },
+      { key: "workExperiences", label: "工作经历" },
+      { key: "projectExperiences", label: "项目经历" },
+      { key: "skillsAndAbilities", label: "技能与能力" },
+      { key: "interviewableExperienceClues", label: "可深挖经历线索" },
+    ],
+  },
 ];
 
 const listToLines = (values) => (Array.isArray(values) ? values : []).join("\n");
@@ -67,6 +89,31 @@ const linesToList = (value) => String(value || "")
   .split("\n")
   .map((line) => line.trim())
   .filter(Boolean);
+
+function AutoGrowTextarea({ value, invalid = false, onChange, ...rest }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      rows={2}
+      value={value}
+      aria-invalid={invalid || undefined}
+      {...rest}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+}
+
+const listHasContent = (material, key) => {
+  const values = Array.isArray(material?.[key]) ? material[key] : [];
+  return values.some((item) => String(item || "").trim());
+};
 
 const isLegacyDocFile = (file) => {
   const name = String(file?.name || "").trim().toLowerCase();
@@ -110,36 +157,76 @@ function InterviewTranscript({ lines, status, transcriptRef }) {
 function MaterialEditor({ material, onChange, compact = false }) {
   const updateScalar = (key, value) => onChange({ ...material, [key]: value });
   const updateList = (key, value) => onChange({ ...material, [key]: linesToList(value) });
+  const missing = interviewEditorGroups.flatMap((group) =>
+    group.fields
+      .filter((field) => field.required && !listHasContent(material, field.key))
+      .map((field) => ({ groupId: group.id, label: field.label })),
+  );
+  const missingCountByGroup = (groupId) => missing.filter((item) => item.groupId === groupId).length;
+
   return (
     <section className="interview-editor">
       {!compact && (
-        <div className="interview-editor__heading">
-          <div><p className="eyebrow">MATERIAL REVIEW</p><h2>整理后的面试材料</h2><p>AI 已从 JD 与简历中整理出岗位与经历要点，你可以直接修改，然后生成面试。</p></div>
-        </div>
+        <header className="interview-editor__heading">
+          <p className="eyebrow">MATERIAL REVIEW</p>
+          <h2>整理后的面试材料</h2>
+          <p>AI 已从 JD 与简历中整理出岗位与经历要点，你可以直接修改，然后生成面试。</p>
+        </header>
       )}
-      <div className="interview-editor__grid">
-        {interviewScalarFields.map((field) => (
-          <label key={field.key} className="interview-editor__field interview-editor__field--wide">
-            <span>{field.label}</span>
-            <input
-              type="text"
-              value={String(material[field.key] ?? "")}
-              onChange={(event) => updateScalar(field.key, event.target.value)}
-            />
-          </label>
-        ))}
-        {interviewListFields.map((field) => (
-          <label key={field.key} className="interview-editor__field interview-editor__field--wide">
-            <span>{field.label}{field.required ? <em>必填</em> : null}<small>每行一条</small></span>
-            <textarea
-              rows={3}
-              value={listToLines(material[field.key])}
-              placeholder={field.required ? `请至少填写一条${field.label}` : "可留空"}
-              onChange={(event) => updateList(field.key, event.target.value)}
-            />
-          </label>
-        ))}
+      <div className="interview-editor__sections">
+        {interviewEditorGroups.map((group) => {
+          const missingCount = missingCountByGroup(group.id);
+          return (
+            <section key={group.id} className="interview-editor__section" aria-labelledby={`interview-editor-${group.id}-title`}>
+              <header className="interview-editor__section-header">
+                <div>
+                  <p className="eyebrow">{group.eyebrow}</p>
+                  <h3 id={`interview-editor-${group.id}-title`}>{group.title}</h3>
+                  <p>{group.hint}</p>
+                </div>
+                {group.fields.some((field) => field.required) && (
+                  <span className={cx("interview-editor__section-required", missingCount > 0 && "is-missing")}>
+                    {missingCount > 0 ? `还有 ${missingCount} 项必填` : "必填项已齐全"}
+                  </span>
+                )}
+              </header>
+              <div className="interview-editor__fields">
+                {group.fields.map((field) => {
+                  const isList = !field.scalar;
+                  const value = isList ? listToLines(material[field.key]) : String(material[field.key] ?? "");
+                  const missingThis = isList && field.required && !value.trim();
+                  return (
+                    <label key={field.key} className={cx("interview-editor__field", isList && "interview-editor__field--list", missingThis && "is-invalid")}>
+                      <span>{field.label}{field.required ? <em>必填</em> : null}{isList ? <small>每行一条</small> : null}</span>
+                      {isList ? (
+                        <AutoGrowTextarea
+                          value={value}
+                          invalid={missingThis}
+                          placeholder={field.required ? `请至少填写一条${field.label}` : "可留空，面试官不会追问"}
+                          onChange={(next) => updateList(field.key, next)}
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={value}
+                          placeholder={field.key === "otherJobInformation" ? "薪资、地点、到岗时间等补充信息" : "如：前端工程师"}
+                          onChange={(event) => updateScalar(field.key, event.target.value)}
+                        />
+                      )}
+                      {missingThis && <span className="interview-editor__field-error">至少填写一条{field.label}后，面试才能生成。</span>}
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
       </div>
+      {missing.length > 0 && (
+        <p className="interview-editor__summary-error" role="alert">
+          还有必填内容未填写：{missing.map((item) => item.label).join("、")}。请补充后点击「确认并生成面试」。
+        </p>
+      )}
       {material.finalText && (
         <details className="interview-editor__final">
           <summary>查看服务端生成的材料原文</summary>
@@ -426,7 +513,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       const state = event.state;
       if (state) {
         setCurrentTopic(state.currentTopic || "");
-        setCompletedTopicCount(state.completedTopicCount ?? 0);
+        setCompletedTopicCount(state.coveredTopicCount ?? state.completedTopicCount ?? 0);
       }
       if (endingRef.current) {
         // Report recovery carries only reportStatus; keep the ending status.
@@ -444,6 +531,8 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       onEndInterviewRef.current?.(sceneId, sessionIdRef.current, event.reportStatus || null);
     } else if (event.type === "local.interview_end_error") {
       setError(event.message || "面试自动结束失败");
+    } else if (event.type === "local.interrupted") {
+      setStatus("已打断面试官，请开始回答");
     } else if (event.type === "local.backend_warning") {
       setError(event.message || "会话记录保存失败，请稍后重试");
     } else if (event.type === "local.mic_error") {
@@ -473,6 +562,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     void client.start({
       voice: teacher?.voiceId || "Katerina",
       speechSpeed: speedCodeByLabel[speed] || "NATURAL",
+      silenceDurationMs: 1_500, // 容忍思考停顿（Custom 600 / IELTS 3000 之间的自然对话档位）
     }).catch((startError) => {
       if (!cancelled) setError(startError instanceof Error ? startError.message : "无法开始面试会话");
     });
@@ -496,6 +586,11 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     setPaused(next);
     if (next) await clientRef.current?.pause();
     else await clientRef.current?.resume();
+  };
+
+  const interruptInterview = () => {
+    if (ending) return;
+    clientRef.current?.interrupt(); // 发 response.cancel，物理打断面试官当前提问
   };
 
   const endConversation = async () => {
@@ -548,6 +643,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       </section>
       <div className="call-controls interview-call-controls">
         <button className={cx("round-control", paused && "is-on")} aria-label={paused ? "恢复会话" : "暂停会话"} disabled={ending} onClick={() => void togglePaused()}>{paused ? <MicrophoneSlash /> : <Microphone />}</button>
+        <button className="round-control" aria-label="打断面试官，开始回答" disabled={ending} onClick={interruptInterview}><HandSwipeLeft /></button>
         <button className="round-control round-control--end" aria-label="结束面试" disabled={ending} onClick={() => void endConversation()}><PhoneDisconnect weight="fill" /></button>
       </div>
       {exitDialog}

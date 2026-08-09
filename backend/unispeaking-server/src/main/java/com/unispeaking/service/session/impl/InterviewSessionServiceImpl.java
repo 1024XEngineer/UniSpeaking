@@ -205,6 +205,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
 					new InterviewTurnStateResponse(
 							true,
 							state.completedTopicCount(),
+							state.coveredTopicCount(),
 							state.currentTopic()),
 					end.reportStatus());
 		}
@@ -393,6 +394,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
 				new InterviewTurnStateResponse(
 						state.shouldEnd(),
 						state.completedTopicCount(),
+						state.coveredTopicCount(),
 						state.currentTopic()),
 				state.shouldEnd() ? ReportStatus.PROCESSING : null);
 	}
@@ -401,7 +403,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
 			String transcript,
 			List<String> candidateTopics) {
 		if (transcript == null || transcript.isBlank()) {
-			return InterviewTopicEvent.unknown();
+			return InterviewTopicEvent.ignored();
 		}
 		String prompt = buildTopicIdentificationPrompt(
 				transcript,
@@ -443,7 +445,9 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
 
 				Rules:
 				- topic MUST be one of the candidate topics verbatim, or "UNKNOWN". Do not invent new topics.
-				- topicCompleted is true only when the candidate has fully addressed and closed that topic.
+				- topicCompleted MUST be false unless the candidate has fully finished and explicitly closed this topic.
+				  It MUST be false for a first or only answer, a short or interrupted answer, or a partial answer on that topic.
+				- Choose UNKNOWN when the answer is too short, ambiguous, cut off, or does not clearly belong to any topic.
 				""".formatted(
 						jsonValue(candidateTopics == null ? List.of() : candidateTopics),
 						jsonValue(transcript));
