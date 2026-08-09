@@ -144,11 +144,6 @@ public class CustomSceneServiceImpl implements CustomSceneService {
 	}
 
 	@Override
-	public String getDialoguePrompt(String sceneId) {
-		return prepareDialogue(sceneId).prompt();
-	}
-
-	@Override
 	public CustomDialogueSceneContext prepareDialogue(String sceneId) {
 		CustomSceneDefinition definition = requireOwnedCustomScene(sceneId);
 		SceneGenerationResponse generated = sceneRepository
