@@ -144,8 +144,7 @@ public class IeltsSceneServiceImpl implements IeltsSceneService {
 		return next;
 	}
 
-	@Override
-	public IeltsPracticeRecord requireOwnedPractice(String ieltsId) {
+	private IeltsPracticeRecord requireOwnedPractice(String ieltsId) {
 		return requirePracticeOwnedBy(
 				ieltsId,
 				authService.requireUserId(null));

@@ -7,12 +7,10 @@ import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.dto.scene.TranslateTextResponse;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 
-/** 自定义场景服务，继承通用场景生成能力并提供自定义场景专属操作。 */
-public interface CustomSceneService
-		extends SceneService<CustomSceneRequest, CustomSceneGenerationResponse> {
+/** 自定义场景服务，提供自定义场景专属操作。 */
+public interface CustomSceneService {
 
-	/** 覆写通用场景生成方法，返回自定义场景生成结果。 */
-	@Override
+	/** 生成并持久化一个自定义场景，返回生成结果。 */
 	CustomSceneGenerationResponse generate(CustomSceneRequest request);
 
 	/** 将指定文本合成为语音，且只允许访问当前用户拥有的场景。 */
@@ -26,9 +24,6 @@ public interface CustomSceneService
 
 	/** 获取自定义场景已经生成并保存的学习内容。 */
 	SceneGenerationResponse getGeneratedScene(String sceneId);
-
-	/** 获取为自定义场景准备好的对话提示词。 */
-	String getDialoguePrompt(String sceneId);
 
 	/** 组装启动自定义场景对话所需的不可变上下文。 */
 	CustomDialogueSceneContext prepareDialogue(String sceneId);

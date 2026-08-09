@@ -426,13 +426,9 @@
 
 这些是后端内部稳定接口，不是 HTTP 路由。具体场景实现可以添加自身业务方法，但不得修改公共接口来迁就单一场景。
 
-### 10.1 Scene
+### 10.1 场景准备职责与 SceneFlowService
 
 ```java
-public interface SceneService<REQUEST, RESPONSE> {
-    RESPONSE generate(REQUEST request);
-}
-
 public interface SceneFlowService<S> {
     S start(String sceneId);
     S current(String sceneId);
@@ -441,20 +437,20 @@ public interface SceneFlowService<S> {
 }
 ```
 
-`SceneService` 负责完成场景准备，包括权限、次数、题目/内容、Prompt 和场景持久化。`SceneFlowService` 只负责阶段状态，不启动会话、不评分。
+`SceneService` 公共基类已删除：场景准备是**职责**（权限、次数、题目/内容、Prompt 和场景持久化），由各场景专用接口自身声明 `generate`（如 `CustomSceneService.generate`）。`SceneFlowService` 只负责阶段状态，不启动会话、不评分。
 
-### 10.2 Session
+### 10.2 会话生命周期形状
 
 ```java
-public interface SessionService {
-    StartSessionResponse startSession(StartSessionCommand command);
+public interface CustomSessionService {
+    StartSceneSessionResponse startSession(StartCustomSessionCommand command);
     void addMessage(String sessionId, Message message);
-    void endSession(String sessionId);
+    CompleteCustomSceneDialogueResponse endSession(EndCustomSessionCommand command);
 }
+// FreeChatSessionService / IeltsSessionService 声明同形 startSession/addMessage/endSession
 ```
 
-Session 只管理已准备场景的会话生命周期和消息，不调用认证服务生成场景，也不重复场景模块的准备逻辑。
-会话详情和按场景查询是内部协作能力，由 `SessionLifecycleManager` 提供，不属于公共接口。
+`SessionService` 公共基类已删除：接受 WS 实时帧的场景会话接口必须各自声明 `startSession/addMessage/endSession` 生命周期形状（`addMessage` 由 `SessionMessageDispatcher` 消费）。会话只管理已准备场景的会话生命周期和消息，不调用认证服务生成场景，也不重复场景模块的准备逻辑。会话详情和按场景查询是内部协作能力，由 `SessionLifecycleManager` 提供，不属于场景会话接口。
 
 ### 10.3 Evaluation
 

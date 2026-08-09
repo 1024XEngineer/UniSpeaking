@@ -15,21 +15,13 @@
 
 禁止在业务代码中引入第二套 ORM、第二套运行时 DDL 或重复的 HTTP/JSON 技术栈。
 
-## 2. 五个稳定契约
+## 2. 场景运行时契约与职责
 
-场景运行时只保留五个公共契约。接口方法不因某个场景的特殊需求而改变。
+场景运行时保留的稳定面为：**两治理契约（`SceneFlowService` / `EvaluationService`）+ 一个 AI 能力族（`AiProvider` 根 + 5 能力接口 + `AiProviderRegistry`）**，外加两个**文档化职责**（场景准备、会话生命周期）。判据：**治理抽象仅当"声明一条逐字节相同、业务同义、有产品驱动预期第二实现、且不被泛型仪式主导的共享形状"时保留；无共享形状可被第二实现继承的抽象为空；行为共享永远在 Component。** `SceneService`/`SessionService` 基类已删除（零多态消费者、零共享签名、或仅 WS 传输约定）。
 
-### 2.1 `SceneService`
+### 2.1 场景准备职责（Scene Preparation）
 
-位置：`service/scene/SceneService.java`
-
-```java
-public interface SceneService<REQUEST, RESPONSE> {
-    RESPONSE generate(REQUEST request);
-}
-```
-
-职责：完成进入会话前的全部场景准备，包括：
+`SceneService` 基类已删除；每个场景的生成方法 `generate` 是场景专用接口的**自身主声明**（如 `CustomSceneService.generate`）。场景准备仍须满足以下职责（由各场景专用接口与 Impl 落实）：
 
 - 校验登录用户、资源归属和业务权限。
 - 校验每日次数、配额或前置条件。
@@ -41,12 +33,9 @@ public interface SceneService<REQUEST, RESPONSE> {
 禁止：
 
 - 在 `generate` 内启动 Session。
-- 把场景准备工作推给 `SessionService`。
-- 为不同场景增加 `SceneService` 公共方法。
+- 把场景准备工作推给会话层。
 
-每个场景必须声明专用接口继承 `SceneService`，例如 `CustomSceneService extends
-SceneService<CustomSceneRequest, CustomSceneResult>`。场景的额外查询、搜索、偏好或资产
-方法定义在专用接口中；实现类只实现专用接口，不能污染公共 `SceneService`。
+归属校验是 Impl 私有或薄 `OwnershipPolicy` 组件（折叠错误 + 身份来源），不进入场景专用接口。
 
 ### 2.2 `SceneFlowService`
 
@@ -71,37 +60,25 @@ SceneFlowService<CustomStage>`；Impl 不直接实现公共接口。
 场景专用 Flow 接口中，不得放入 Session 接口。Flow 不负责生成内容、创建会话、保存
 消息或评分。真实流程状态必须可以从数据库恢复；进程内状态机只负责运行时判断和转换。
 
-### 2.3 `SessionService`
+### 2.3 会话生命周期（由 Component 承载）
 
-位置：`service/session/SessionService.java`
+`SessionService` 基类已删除。会话生命周期由 `component/session/SessionLifecycleManager` 承载，`SessionMessageDispatcher` 按 `SceneType` 将 WS 帧路由到各场景会话接口。接受 WS 实时帧的场景会话接口（`FreeChatSessionService`/`CustomSessionService`/`IeltsSessionService`）必须各自声明 `startSession/addMessage/endSession` 生命周期形状（`addMessage` 由 `SessionMessageDispatcher` 消费）。
 
-```java
-public interface SessionService {
-    StartSessionResponse startSession(StartSessionCommand command);
-    void addMessage(String sessionId, Message message);
-    void endSession(String sessionId);
-}
-```
-
-职责：
+场景会话 Impl 的职责：
 
 - 基于已经准备好的 `sceneId` 启动会话。
 - 创建 Realtime 会话、维护会话生命周期。
 - 接收、验证并持久化消息。
 - 结束会话和释放临时资源。
 
-会话查询属于模块内部协作能力，由 `SessionLifecycleManager` 提供，不进入公共
-`SessionService` 或场景专用 Session 接口。
-
 边界：
 
 - 不调用 `AuthService` 重新完成场景权限或次数校验；这些已由场景生成阶段完成。
 - 仍必须校验当前请求者是否拥有目标 `sceneId/sessionId`，防止越权访问。
 - 不生成场景、不拼 Prompt、不选择题目、不推进业务阶段、不生成评分。
-- `SessionService` 是公共契约，但 FreeChat、Custom、IELTS 分别实现；不得创建通用
-  `SessionServiceImpl`。
-- 每个场景声明 `FreeChatSessionService`、`CustomSessionService`、`IeltsSessionService`
-  等专用接口继承公共契约，并由对应 Impl 实现。
+- 不得创建通用 `SessionServiceImpl`。
+
+会话查询与生命周期实现属于 `SessionLifecycleManager`，不进入场景会话接口。
 
 ### 2.4 `EvaluationService`
 
@@ -143,7 +120,9 @@ Doubao、DeepSeek、MiniMax、讯飞等供应商差异全部留在 `infrastructu
 
 ## 3. 当前实现矩阵
 
-| 场景 | Scene | Flow | Session | Evaluation |
+> "场景准备"与"会话"列是**职责**（由场景专用接口承载），不是可注入的公共契约类型；`SceneService`/`SessionService` 基类已删除。"Flow/Evaluation"是保留的治理契约。
+
+| 场景 | 场景准备 | Flow | 会话 | Evaluation |
 |---|---|---|---|---|
 | FreeChat | `FreeChatSceneService → Impl` | 无 | `FreeChatSessionService → Impl` | 无 |
 | Custom | `CustomSceneService → Impl` | `CustomSceneFlowService → Impl` | `CustomSessionService → Impl` | `CustomEvaluationService → Impl` |
@@ -196,13 +175,11 @@ src/main/java/com/unispeaking
 ├── websocket
 ├── service
 │   ├── scene
-│   │   ├── SceneService.java
 │   │   ├── SceneFlowService.java
 │   │   ├── {Scene}SceneService.java
 │   │   ├── {Scene}SceneFlowService.java
 │   │   └── impl
 │   ├── session
-│   │   ├── SessionService.java
 │   │   ├── {Scene}SessionService.java
 │   │   └── impl
 │   ├── evaluation
@@ -252,12 +229,13 @@ src/main/java/com/unispeaking
 `IeltsRecordingController`。
 
 Controller 注入场景专用接口，不直接依赖 Impl。专用接口负责暴露场景特有的查询、搜索等
-方法，继承链仍必须遵守五个稳定公共接口。
+方法；有阶段/评分的场景按治理契约（`SceneFlowService`/`EvaluationService`）声明专用接口。
+场景接口遵循**接口最小化**：只暴露被 Controller、其他 Service 或 WebSocket Dispatcher
+消费的方法；归属校验与内部读不进接口（下沉 Impl 私有或 `OwnershipPolicy`）。
 
 ### 5.2 `service`
 
-`scene`、`session`、`evaluation` 包的根目录放公共接口和场景专用接口，具体场景实现全部放
-`impl`。结构固定为“公共接口 → 场景专用接口 → 场景 Impl”。
+`scene`、`session`、`evaluation` 包的根目录放治理契约（`SceneFlowService`/`EvaluationService`）和场景专用接口，具体场景实现全部放 `impl`。结构为"治理契约（可选）→ 场景专用接口 → 场景 Impl"；`SceneService`/`SessionService` 基类已删除，场景准备方法（`generate`）与会话生命周期形状（`startSession/addMessage/endSession`）由场景专用接口自身声明。
 
 其他横向业务（如 auth、profile、asset、achievement）仍采用：
 
@@ -335,12 +313,13 @@ Calculator、Policy 和通用工具。
 controller/DebateSceneController.java
 
 service/scene/DebateSceneService.java
-  extends SceneService<DebateSceneRequest, DebateSceneResult>
+  // 场景专用接口，不继承已删除的 SceneService 基类；
+  // generate 为该接口自身主声明
 service/scene/impl/DebateSceneServiceImpl.java
   implements DebateSceneService
 
 service/session/DebateSessionService.java
-  extends SessionService
+  // 声明 startSession/addMessage/endSession 会话生命周期形状
 service/session/impl/DebateSessionServiceImpl.java
   implements DebateSessionService
 
@@ -400,8 +379,9 @@ common/persistence/codec/scene/DebateJsonbCodec.java   // 仅需要 JSONB 时
 service/debate/...                       // 不新增平行场景模块
 domain/dto/debate/...                    // DTO 按职责分包
 service/*/impl/SceneServiceImpl.java     // 不恢复通用实现
+service/*/impl/SessionServiceImpl.java   // 不恢复通用会话实现
 service/scene/impl/DebateSceneServiceImpl.java
-  implements SceneService               // Impl 不越过场景专用接口
+  implements SceneFlowService           // Impl 不越过场景专用接口直接实现治理契约
 controller/DebateRecordingController.java // 附属接口并入场景 Controller
 ```
 
@@ -589,17 +569,17 @@ npm run check:realtime-events
 
 提交前逐项确认：
 
-- [ ] 未修改五个稳定接口的方法签名。
-- [ ] 已建立“公共接口 → 场景专用接口 → Impl”的继承链。
+- [ ] 未修改两治理契约（`SceneFlowService`/`EvaluationService`）的方法签名。
+- [ ] 已建立“场景专用接口 → Impl”落位（有阶段/评分场景按治理契约声明专用接口）。
 - [ ] 场景实现位于 `service/*/impl` 且以 `Impl` 结尾。
-- [ ] 未创建通用 `Scene/Flow/Session/EvaluationServiceImpl`。
-- [ ] Scene 已完成认证、配额、Prompt、内容和落库，未启动 Session。
-- [ ] Session 未重复准备场景，也未承担评分或 Flow。
+- [ ] 未创建通用 Flow/Evaluation 实现，也未伪造已删除的 Scene/Session 基类。
+- [ ] 场景准备已完成认证、配额、Prompt、内容和落库，未启动 Session。
+- [ ] 会话层未重复准备场景，也未承担评分或 Flow。
 - [ ] 状态机、录音、生成器和协调器已放入 Component。
 - [ ] 场景附属端点合并到对应场景 Controller。
 - [ ] Controller 未访问 Mapper、Repository、Entity 或厂商实现。
 - [ ] DTO 按 scene/session/evaluation 职责分包。
-- [ ] 数据库变更使用新 Flyway 版本并包含索引与测试。
+- [ ] 数据库变更使用新 Flyway 版本（生产 baseline=8，新迁移强制 V9+）并包含索引与测试。
 - [ ] 新场景有唯一 ID 前缀和 `SceneType` 映射。
 - [ ] 已覆盖权限、越权、边界状态和外部失败。
 - [ ] 已同步 API 文档和前端调用。
@@ -607,9 +587,9 @@ npm run check:realtime-events
 
 ## 17. 禁止事项汇总
 
-- 修改公共接口来迁就某个场景。
-- Impl 跳过场景专用接口而直接实现公共接口。
-- 恢复通用 Scene/Flow/Session/Evaluation 实现。
+- 修改治理契约（`SceneFlowService`/`EvaluationService`）来迁就某个场景。
+- Impl 跳过场景专用接口而直接实现治理契约。
+- 恢复通用 Flow/Evaluation 实现，或伪造已被删除的 `SceneService`/`SessionService` 基类。
 - 在场景 Service 中启动 Session，或在 Session 中生成场景。
 - 把录音、状态机、Parser、Prompt Builder 包装成独立 Service。
 - 为单个附属端点创建孤立 Controller。
@@ -617,5 +597,5 @@ npm run check:realtime-events
 - Service 直接访问 Mapper、Entity 或拼 SQL。
 - 只依赖前端状态，导致后端流程无法恢复。
 - 复制一套平行目录来隔离新场景。
-- 修改已执行 Flyway 版本。
+- 修改已执行 Flyway 版本；新迁移不得使用 V3-V8 编号（生产 baseline=8 双轨分叉）。
 - 将密钥、JWT、完整 SDP、原始音频写入日志或前端变量。
