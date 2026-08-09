@@ -18,4 +18,7 @@ public interface InterviewSceneRepository {
 
 	/** 归属辅助：查询指定用户拥有的未删除场景。 */
 	Optional<InterviewSceneDefinition> findOwnedById(String sceneId, String userId);
+
+	/** 软删：deleted_at 置当前时间；仅限本人未删除场景，返回是否更新。 */
+	boolean softDelete(String sceneId, String userId);
 }

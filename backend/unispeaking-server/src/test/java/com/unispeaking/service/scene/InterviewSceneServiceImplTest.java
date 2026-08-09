@@ -20,6 +20,7 @@ import com.unispeaking.common.prompt.interview.InterviewPromptBuilder;
 import com.unispeaking.component.document.MaterialDesensitizer;
 import com.unispeaking.component.document.MaterialTextExtraction;
 import com.unispeaking.component.policy.DailyQuotaPolicy;
+import com.unispeaking.component.recording.RecordingStore;
 import com.unispeaking.component.statemachine.InterviewTopicStateMachine;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
 import com.unispeaking.domain.dto.scene.InterviewDialogueSceneContext;
@@ -31,6 +32,7 @@ import com.unispeaking.domain.po.scene.InterviewSceneDefinition;
 import com.unispeaking.domain.vo.provider.AiCapability;
 import com.unispeaking.domain.vo.scene.InterviewDifficulty;
 import com.unispeaking.infrastructure.persistence.repository.scene.InterviewSceneRepository;
+import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.AiProviderRegistry.RoutedResult;
 import com.unispeaking.service.auth.AuthService;
@@ -59,6 +61,9 @@ class InterviewSceneServiceImplTest {
 	private final DailyQuotaPolicy dailyQuotaPolicy = mock(DailyQuotaPolicy.class);
 	private final InterviewTopicStateMachine stateMachine =
 			mock(InterviewTopicStateMachine.class);
+	private final PracticeSessionRepository practiceSessionRepository =
+			mock(PracticeSessionRepository.class);
+	private final RecordingStore interviewRecordingStore = mock(RecordingStore.class);
 	private final InterviewSceneServiceImpl service = new InterviewSceneServiceImpl(
 			authService,
 			repository,
@@ -68,6 +73,8 @@ class InterviewSceneServiceImplTest {
 			materialDesensitizer,
 			dailyQuotaPolicy,
 			stateMachine,
+			practiceSessionRepository,
+			interviewRecordingStore,
 			objectMapper);
 
 	@Test

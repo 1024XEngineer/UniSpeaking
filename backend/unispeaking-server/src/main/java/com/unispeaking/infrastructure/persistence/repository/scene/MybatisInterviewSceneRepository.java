@@ -1,12 +1,14 @@
 package com.unispeaking.infrastructure.persistence.repository.scene;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.exception.InterviewErrorCode;
 import com.unispeaking.domain.po.scene.InterviewSceneDefinition;
 import com.unispeaking.domain.vo.scene.InterviewDifficulty;
 import com.unispeaking.infrastructure.persistence.entity.scene.InterviewSceneEntity;
 import com.unispeaking.infrastructure.persistence.mapper.scene.InterviewSceneMapper;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -89,6 +91,31 @@ public class MybatisInterviewSceneRepository implements InterviewSceneRepository
 			return Optional.empty();
 		}
 		return Optional.of(toDefinition(entity));
+	}
+
+	@Override
+	public boolean softDelete(String sceneId, String userId) {
+		UUID ownerId;
+		try {
+			ownerId = UUID.fromString(userId);
+		}
+		catch (IllegalArgumentException exception) {
+			return false;
+		}
+		try {
+			return sceneMapper.update(
+					null,
+					new LambdaUpdateWrapper<InterviewSceneEntity>()
+							.eq(InterviewSceneEntity::getSceneId, sceneId)
+							.eq(InterviewSceneEntity::getUserId, ownerId)
+							.isNull(InterviewSceneEntity::getDeletedAt)
+							.set(
+									InterviewSceneEntity::getDeletedAt,
+									OffsetDateTime.now())) == 1;
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure(exception);
+		}
 	}
 
 	private InterviewSceneEntity toEntity(InterviewSceneDefinition definition) {

@@ -43,7 +43,7 @@ import com.unispeaking.infrastructure.config.ObjectStorageProperties;
 import com.unispeaking.provider.ObjectStorageProvider;
 import com.unispeaking.component.session.ActiveSessionRegistry;
 import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.component.recording.IeltsRecordingStore;
+import com.unispeaking.component.recording.RecordingStore;
 import com.unispeaking.service.scene.IeltsSceneFlowService;
 import com.unispeaking.common.evaluation.validation.PcmWavValidator;
 import com.unispeaking.common.evaluation.calculation.ConversationScoreCalculation;
@@ -81,6 +81,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -113,7 +114,7 @@ public class EvaluationProcessor {
 	private final AuthService authService;
 	private final ObjectStorageProvider objectStorage;
 	private final ObjectStorageProperties objectStorageProperties;
-	private final IeltsRecordingStore ieltsRecordingStore;
+	private final RecordingStore ieltsRecordingStore;
 	private final Object[] ieltsEvaluationLocks =
 			new Object[IELTS_EVALUATION_LOCK_STRIPES];
 
@@ -135,7 +136,7 @@ public class EvaluationProcessor {
 			AuthService authService,
 			ObjectStorageProvider objectStorage,
 			ObjectStorageProperties objectStorageProperties,
-			IeltsRecordingStore ieltsRecordingStore) {
+			@Qualifier("ieltsRecordingStore") RecordingStore ieltsRecordingStore) {
 		this.pronunciationClient = Objects.requireNonNull(
 				pronunciationClient,
 				"pronunciationClient must not be null");

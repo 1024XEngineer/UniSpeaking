@@ -3,8 +3,12 @@ package com.unispeaking.service.session.impl;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.exception.InterviewErrorCode;
 import com.unispeaking.component.policy.DailyQuotaPolicy;
+import com.unispeaking.component.recording.RecordingStore;
+import com.unispeaking.component.report.InterviewReportCoordinator;
 import com.unispeaking.component.session.RealtimeSessionCoordinator;
 import com.unispeaking.component.session.SessionLifecycleManager;
+import com.unispeaking.domain.dto.evaluation.InterviewEndResponse;
+import com.unispeaking.domain.dto.evaluation.InterviewReportResponse;
 import com.unispeaking.domain.dto.scene.InterviewDialogueSceneContext;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.dto.session.InterviewTurnResult;
@@ -14,6 +18,7 @@ import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
 import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
 import com.unispeaking.domain.dto.session.StartSessionCommand;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
+import com.unispeaking.domain.po.evaluation.InterviewReportRecord;
 import com.unispeaking.domain.po.session.AbstractSceneSession;
 import com.unispeaking.domain.vo.evaluation.ReportStatus;
 import com.unispeaking.domain.vo.scene.InterviewTopicEvent;
@@ -21,14 +26,17 @@ import com.unispeaking.domain.vo.scene.InterviewTopicState;
 import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
+import com.unispeaking.infrastructure.persistence.repository.evaluation.InterviewReportRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.scene.InterviewSceneService;
 import com.unispeaking.service.session.InterviewSessionService;
+import java.time.Instant;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
@@ -41,9 +49,11 @@ import tools.jackson.databind.ObjectReader;
  * prepareDialogue（归属校验 + 读 scenePrompt + userId）→ 配额 → 建会话 → 实时连接 → 响应。
  *
  * <p>{@code submitTurn} 在 {@code synchronized(session)} 临界区内完成幂等锚定（终态守卫 +
- * owner=1 消息计数 + content 比对），临界区外做 LLM 主题识别并经由
- * {@code InterviewSceneService.advanceTopicState} 推进状态机（DI 结构守卫：本类不直接触碰
- * 状态机）。音频落盘/attach 由第五刀补齐，本刀先接收参数。</p>
+ * owner=1 消息计数 + content 比对）+ 存录音并 attach（首个音频为准），临界区外做 LLM 主题
+ * 识别并经由 {@code InterviewSceneService.advanceTopicState} 推进状态机（DI 结构守卫）。
+ * {@code shouldEnd=true} 与用户 {@code endInterview} 共用 {@code orchestrateEnd} 幂等结束编排：
+ * 锚点 = terminateSceneSession 早退 + interview_report 行创建者门禁（INSERT + 捕获 PK 冲突），
+ * 仅真正创建行的请求提交报告任务。</p>
  */
 @Service
 public class InterviewSessionServiceImpl implements InterviewSessionService {
@@ -59,6 +69,9 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
 	private final RealtimeSessionCoordinator sessionCoordinator;
 	private final AuthService authService;
 	private final SessionMessageRepository sessionMessageRepository;
+	private final InterviewReportRepository interviewReportRepository;
+	private final InterviewReportCoordinator reportCoordinator;
+	private final RecordingStore interviewRecordingStore;
 	private final AiProviderRegistry providerRegistry;
 	private final ObjectMapper objectMapper;
 	private final ObjectReader strictReader;
@@ -70,6 +83,9 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
 			RealtimeSessionCoordinator sessionCoordinator,
 			AuthService authService,
 			SessionMessageRepository sessionMessageRepository,
+			InterviewReportRepository interviewReportRepository,
+			InterviewReportCoordinator reportCoordinator,
+			@Qualifier("interviewRecordingStore") RecordingStore interviewRecordingStore,
 			AiProviderRegistry providerRegistry,
 			ObjectMapper objectMapper) {
 		this.interviewSceneService = interviewSceneService;
@@ -78,6 +94,9 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
 		this.sessionCoordinator = sessionCoordinator;
 		this.authService = authService;
 		this.sessionMessageRepository = sessionMessageRepository;
+		this.interviewReportRepository = interviewReportRepository;
+		this.reportCoordinator = reportCoordinator;
+		this.interviewRecordingStore = interviewRecordingStore;
 		this.providerRegistry = providerRegistry;
 		this.objectMapper = objectMapper;
 		this.strictReader = objectMapper.reader()
@@ -170,7 +189,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
 						InterviewErrorCode.INTERVIEW_TURN_CONTENT_MISMATCH,
 						"转写内容与已保存消息不一致");
 			}
-			// 消息已由 WS 持久化；本刀不落音频（第五刀 RecordingStore 泛化后 attach）。
+			persistTurnAudio(sessionId, turnNo, audio);
 		}
 		InterviewTopicEvent event = identifyTopic(
 				transcript,
@@ -180,7 +199,173 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
 				sessionId,
 				turnNo,
 				event);
+		if (state.shouldEnd()) {
+			InterviewEndResponse end = orchestrateEnd(sceneId, sessionId);
+			return new InterviewTurnResult(
+					new InterviewTurnStateResponse(
+							true,
+							state.completedTopicCount(),
+							state.currentTopic()),
+					end.reportStatus());
+		}
 		return toTurnResult(state);
+	}
+
+	@Override
+	public InterviewEndResponse endInterview(
+			String sceneId,
+			String sessionId) {
+		return orchestrateEnd(sceneId, sessionId);
+	}
+
+	@Override
+	public InterviewReportResponse getReport(
+			String sceneId,
+			String sessionId) {
+		String userId = authService.requireUserId(null);
+		InterviewReportRecord record = requireOwnedReport(
+				sessionId,
+				sceneId,
+				userId);
+		if (record == null) {
+			throw new BusinessException(
+					InterviewErrorCode.INTERVIEW_REPORT_NOT_FOUND,
+					"面试报告不存在");
+		}
+		if (record.status() == ReportStatus.PROCESSING) {
+			reportCoordinator.redispatchIfStale(sessionId, sceneId, userId);
+			record = requireOwnedReport(sessionId, sceneId, userId);
+		}
+		return reportCoordinator.toResponse(record);
+	}
+
+	@Override
+	public InterviewReportResponse retryReport(
+			String sceneId,
+			String sessionId) {
+		String userId = authService.requireUserId(null);
+		InterviewReportRecord record = requireOwnedReport(
+				sessionId,
+				sceneId,
+				userId);
+		if (record == null) {
+			throw new BusinessException(
+					InterviewErrorCode.INTERVIEW_REPORT_NOT_FOUND,
+					"面试报告不存在");
+		}
+		if (record.status() == ReportStatus.FAILED
+				&& interviewReportRepository.casFailedToProcessing(sessionId)) {
+			reportCoordinator.submit(sessionId, sceneId, userId);
+		}
+		record = requireOwnedReport(sessionId, sceneId, userId);
+		return reportCoordinator.toResponse(record);
+	}
+
+	@Override
+	public String uploadAiAudio(
+			String sceneId,
+			String sessionId,
+			byte[] audio) {
+		String userId = authService.requireUserId(null);
+		AbstractSceneSession session = requireInterviewSession(sceneId, userId, sessionId);
+		if (audio == null || audio.length == 0) {
+			throw new BusinessException(
+					InterviewErrorCode.INTERVIEW_AUDIO_INVALID,
+					"AI 音频不能为空");
+		}
+		return interviewRecordingStore.storeAiAudio(sessionId, audio);
+	}
+
+	/**
+	 * 幂等结束编排：会话锁内完成终态化 + 报告行创建门禁 + 提交任务 + 清理注册表。
+	 * 会话已从活跃注册表移除（重复/并发 end）时读报告行幂等返回。
+	 */
+	private InterviewEndResponse orchestrateEnd(
+			String sceneId,
+			String sessionId) {
+		String userId = authService.requireUserId(null);
+		AbstractSceneSession session;
+		try {
+			session = requireInterviewSession(sceneId, userId, sessionId);
+		}
+		catch (BusinessException exception) {
+			InterviewReportRecord existing = requireOwnedReport(
+					sessionId,
+					sceneId,
+					userId);
+			if (existing != null) {
+				return new InterviewEndResponse(
+						sessionId,
+						existing.status());
+			}
+			throw exception;
+		}
+		synchronized (session) {
+			sessionLifecycle.terminateSceneSession(
+					userId,
+					sessionId,
+					SessionStatus.COMPLETED,
+					Instant.now());
+			boolean created = interviewReportRepository.createIfAbsent(
+					sessionId,
+					sceneId,
+					userId);
+			ReportStatus status = readReportStatus(sessionId);
+			if (created) {
+				reportCoordinator.submit(sessionId, sceneId, userId);
+			}
+			sessionCoordinator.remove(sessionId);
+			LOGGER.info(
+					"interview session ended sessionId={} reportStatus={} created={}",
+					sessionId,
+					status,
+					created);
+			return new InterviewEndResponse(sessionId, status);
+		}
+	}
+
+	/** 首个音频为准：临界区内先存录音得 key 再 attach（attach 前判 NULL，重试不覆盖证据）。 */
+	private void persistTurnAudio(
+			String sessionId,
+			int turnNo,
+			byte[] audio) {
+		if (audio == null || audio.length == 0) {
+			return;
+		}
+		try {
+			String key = interviewRecordingStore.storeTurn(
+					sessionId,
+					turnNo,
+					audio);
+			sessionMessageRepository.attachLearnerAudioObjectKey(
+					sessionId,
+					turnNo,
+					key);
+		}
+		catch (RuntimeException exception) {
+			LOGGER.warn(
+					"interview turn audio persistence unavailable sessionId={} turnNo={}",
+					sessionId,
+					turnNo);
+		}
+	}
+
+	private InterviewReportRecord requireOwnedReport(
+			String sessionId,
+			String sceneId,
+			String userId) {
+		return interviewReportRepository.findById(sessionId)
+				.filter(record -> record.userId() != null
+						&& record.userId().equals(userId))
+				.filter(record -> record.sceneId() != null
+						&& record.sceneId().equals(sceneId))
+				.orElse(null);
+	}
+
+	private ReportStatus readReportStatus(String sessionId) {
+		return interviewReportRepository.findById(sessionId)
+				.map(InterviewReportRecord::status)
+				.orElse(ReportStatus.PROCESSING);
 	}
 
 	private AbstractSceneSession requireInterviewSession(

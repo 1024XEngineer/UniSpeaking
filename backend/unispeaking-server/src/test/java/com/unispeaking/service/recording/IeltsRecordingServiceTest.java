@@ -8,17 +8,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.common.exception.BusinessException;
-import com.unispeaking.component.recording.IeltsRecordingStore;
+import com.unispeaking.component.recording.RecordingStore;
 import com.unispeaking.domain.po.session.PracticeSessionRecord;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
-import com.unispeaking.infrastructure.config.IeltsRecordingProperties;
+import com.unispeaking.infrastructure.config.RecordingProperties;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.service.auth.AuthService;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -44,7 +45,7 @@ class IeltsRecordingServiceTest {
 						SessionStatus.COMPLETED,
 						Instant.now(),
 						Instant.now())));
-		IeltsRecordingStore service = service(repository, authService);
+		RecordingStore service = service(repository, authService);
 		byte[] audio = new byte[] {82, 73, 70, 70, 1, 2, 3};
 
 		String url = service.store("ielts_session_1", 1, audio);
@@ -77,7 +78,7 @@ class IeltsRecordingServiceTest {
 						SessionStatus.COMPLETED,
 						Instant.now(),
 						Instant.now())));
-		IeltsRecordingStore service = service(repository, authService);
+		RecordingStore service = service(repository, authService);
 
 		assertThrows(BusinessException.class,
 				() -> service.store("../outside", 1, new byte[] {1}));
@@ -87,11 +88,19 @@ class IeltsRecordingServiceTest {
 				() -> service.loadOwned("ielts_session_1", "turn-1.wav"));
 	}
 
-	private IeltsRecordingStore service(
+	private RecordingStore service(
 			PracticeSessionRepository repository,
 			AuthService authService) {
-		IeltsRecordingProperties properties = new IeltsRecordingProperties();
+		RecordingProperties properties = new RecordingProperties();
 		properties.setDirectory(tempDirectory.toString());
-		return new IeltsRecordingStore(properties, repository, authService);
+		return new RecordingStore(
+				properties,
+				repository,
+				authService,
+				Set.of(SceneType.IELTS_SCENE),
+				"/api/ielts/recordings/",
+				RecordingStore.TURN_FILE_NAME,
+				"IELTS_RECORDING_NOT_FOUND",
+				"IELTS_RECORDING_PERSISTENCE_FAILED");
 	}
 }

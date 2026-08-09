@@ -94,7 +94,7 @@ class EvaluationServiceImplSpeechTest {
 				authService,
 				mock(com.unispeaking.provider.ObjectStorageProvider.class),
 				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
-				mock(com.unispeaking.component.recording.IeltsRecordingStore.class));
+				mock(com.unispeaking.component.recording.RecordingStore.class));
 	}
 
 	@AfterEach

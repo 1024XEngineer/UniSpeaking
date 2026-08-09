@@ -1,6 +1,6 @@
 package com.unispeaking.controller;
 
-import com.unispeaking.component.recording.IeltsRecordingStore;
+import com.unispeaking.component.recording.RecordingStore;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -52,7 +52,7 @@ class IELTSSceneControllerTest {
 
 	@Test
 	void recordingEndpointIsExposedByIeltsController() throws Exception {
-		IeltsRecordingStore recordingStore = mock(IeltsRecordingStore.class);
+		RecordingStore recordingStore = mock(RecordingStore.class);
 		when(recordingStore.loadOwned("session_1", "turn-1.wav"))
 				.thenReturn(new ByteArrayResource(new byte[] {1, 2, 3}));
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(
@@ -93,7 +93,7 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationServiceImpl.class),
 						sessionService,
-						mock(IeltsRecordingStore.class))).build();
+						mock(RecordingStore.class))).build();
 
 		mvc.perform(post("/api/ielts/ielts_2/sessions/session_2/part2/state")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -130,7 +130,7 @@ class IELTSSceneControllerTest {
 						flowService,
 						evaluationService,
 						mock(IeltsSessionServiceImpl.class),
-						mock(IeltsRecordingStore.class))).build();
+						mock(RecordingStore.class))).build();
 
 		mvc.perform(get("/api/ielts/settings"))
 				.andExpect(status().isOk())
@@ -181,7 +181,7 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationServiceImpl.class),
 						mock(IeltsSessionServiceImpl.class),
-						mock(IeltsRecordingStore.class))).build();
+						mock(RecordingStore.class))).build();
 
 		mvc.perform(get("/api/ielts/topics")
 						.param("part", "PART_1")
@@ -229,7 +229,7 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationServiceImpl.class),
 						mock(IeltsSessionServiceImpl.class),
-						mock(IeltsRecordingStore.class))).build();
+						mock(RecordingStore.class))).build();
 
 		mvc.perform(post("/api/ielts/generate")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -263,7 +263,7 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationServiceImpl.class),
 						mock(IeltsSessionServiceImpl.class),
-						mock(IeltsRecordingStore.class))).build();
+						mock(RecordingStore.class))).build();
 
 		mvc.perform(post("/api/ielts/flows")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -316,7 +316,7 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationServiceImpl.class),
 						sessionService,
-						mock(IeltsRecordingStore.class))).build();
+						mock(RecordingStore.class))).build();
 
 		mvc.perform(post("/api/ielts/ielts_123/sessions")
 						.contentType(MediaType.APPLICATION_JSON)

@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.unispeaking.component.recording.RecordingStore;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
 import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
 import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
@@ -42,7 +43,8 @@ class InterviewSceneControllerTest {
 		MockMvc mvc = MockMvcBuilders
 				.standaloneSetup(new InterviewSceneController(
 						service,
-						mock(InterviewSessionService.class)))
+						mock(InterviewSessionService.class),
+						mock(RecordingStore.class)))
 				.build();
 
 		mvc.perform(multipart("/api/interview-scenes/prepare-materials")
@@ -79,7 +81,8 @@ class InterviewSceneControllerTest {
 		MockMvc mvc = MockMvcBuilders
 				.standaloneSetup(new InterviewSceneController(
 						service,
-						mock(InterviewSessionService.class)))
+						mock(InterviewSessionService.class),
+						mock(RecordingStore.class)))
 				.build();
 
 		mvc.perform(multipart("/api/interview-scenes/prepare-materials")
@@ -117,7 +120,8 @@ class InterviewSceneControllerTest {
 		MockMvc mvc = MockMvcBuilders
 				.standaloneSetup(new InterviewSceneController(
 						mock(InterviewSceneServiceImpl.class),
-						sessions))
+						sessions,
+						mock(RecordingStore.class)))
 				.build();
 
 		mvc.perform(post("/api/interview-scenes/interview_1/sessions")

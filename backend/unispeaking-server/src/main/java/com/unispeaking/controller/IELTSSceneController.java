@@ -1,7 +1,7 @@
 package com.unispeaking.controller;
 
 import com.unispeaking.common.response.ApiResponse;
-import com.unispeaking.component.recording.IeltsRecordingStore;
+import com.unispeaking.component.recording.RecordingStore;
 import com.unispeaking.domain.dto.scene.CreateSceneFlowRequest;
 import com.unispeaking.domain.dto.scene.IeltsGenerationRequest;
 import com.unispeaking.domain.dto.scene.IeltsGenerationResponse;
@@ -54,14 +54,15 @@ public class IELTSSceneController {
 	private final IeltsSceneFlowService sceneFlowService;
 	private final IeltsEvaluationService evaluationService;
 	private final IeltsSessionService ieltsSessionService;
-	private final IeltsRecordingStore recordingStore;
+	private final RecordingStore recordingStore;
 
 	public IELTSSceneController(
 			IeltsSceneService ieltsSceneService,
 			IeltsSceneFlowService sceneFlowService,
 			IeltsEvaluationService evaluationService,
 			IeltsSessionService ieltsSessionService,
-			IeltsRecordingStore recordingStore) {
+			@org.springframework.beans.factory.annotation.Qualifier("ieltsRecordingStore")
+			RecordingStore recordingStore) {
 		this.ieltsSceneService = ieltsSceneService;
 		this.sceneFlowService = sceneFlowService;
 		this.evaluationService = evaluationService;
