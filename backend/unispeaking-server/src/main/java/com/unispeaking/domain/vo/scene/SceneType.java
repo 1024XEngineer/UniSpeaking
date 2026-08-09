@@ -6,7 +6,8 @@ import java.util.Optional;
 public enum SceneType {
 	FREE_CHAT("freechat"),
 	CUSTOM_SCENE("custom"),
-	IELTS_SCENE("ielts");
+	IELTS_SCENE("ielts"),
+	INTERVIEW_SCENE("interview");
 
 	private final String sceneIdPrefix;
 
