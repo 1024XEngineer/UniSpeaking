@@ -25,7 +25,11 @@ public class GlobalExceptionHandler {
 					InterviewErrorCode.INTERVIEW_SCENE_NOT_FOUND ->
 					HttpStatus.NOT_FOUND;
 			case "USERNAME_ALREADY_EXISTS", "PASSWORD_UPDATE_CONFLICT",
-					"PROFILE_UPDATE_CONFLICT", "FEEDBACK_UPDATE_CONFLICT" -> HttpStatus.CONFLICT;
+					"PROFILE_UPDATE_CONFLICT", "FEEDBACK_UPDATE_CONFLICT",
+					InterviewErrorCode.INTERVIEW_TURN_CONTENT_MISMATCH,
+					InterviewErrorCode.INTERVIEW_TURN_MESSAGE_PENDING,
+					InterviewErrorCode.INTERVIEW_SESSION_ENDED ->
+					HttpStatus.CONFLICT;
 			case InterviewErrorCode.INTERVIEW_DAILY_LIMIT_REACHED ->
 					HttpStatus.TOO_MANY_REQUESTS;
 			case "OBJECT_STORAGE_FAILED" -> HttpStatus.BAD_GATEWAY;
@@ -53,7 +57,8 @@ public class GlobalExceptionHandler {
 			case InterviewErrorCode.INTERVIEW_MATERIAL_INVALID,
 					InterviewErrorCode.INTERVIEW_REQUEST_INVALID,
 					InterviewErrorCode.INTERVIEW_CONTEXT_LLM_RESPONSE_INVALID,
-					InterviewErrorCode.INTERVIEW_MATERIAL_LLM_RESPONSE_INVALID ->
+					InterviewErrorCode.INTERVIEW_MATERIAL_LLM_RESPONSE_INVALID,
+					InterviewErrorCode.INTERVIEW_TURN_OUT_OF_ORDER ->
 					HttpStatus.BAD_REQUEST;
 			default -> HttpStatus.BAD_REQUEST;
 		};

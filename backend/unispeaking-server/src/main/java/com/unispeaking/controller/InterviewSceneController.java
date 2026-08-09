@@ -7,6 +7,8 @@ import com.unispeaking.domain.dto.scene.InterviewMaterialPreparationInput;
 import com.unispeaking.domain.dto.scene.InterviewResumeFile;
 import com.unispeaking.domain.dto.scene.InterviewSceneRequest;
 import com.unispeaking.domain.dto.scene.InterviewSceneResult;
+import com.unispeaking.domain.dto.session.InterviewTurnRequest;
+import com.unispeaking.domain.dto.session.InterviewTurnResult;
 import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
 import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
 import com.unispeaking.service.scene.InterviewSceneService;
@@ -14,6 +16,7 @@ import com.unispeaking.service.session.InterviewSessionService;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -69,6 +72,24 @@ public class InterviewSceneController {
 			@Valid @RequestBody StartCustomSceneDialogueRequest request) {
 		return ApiResponse.success(
 				interviewSessionService.startSession(sceneId, request));
+	}
+
+	@PostMapping(
+			value = "/{sceneId}/sessions/{sessionId}/turns/{turnNo}",
+			consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ApiResponse<InterviewTurnResult> submitTurn(
+			@PathVariable String sceneId,
+			@PathVariable String sessionId,
+			@PathVariable int turnNo,
+			@ModelAttribute InterviewTurnRequest request)
+			throws IOException {
+		return ApiResponse.success(
+				interviewSessionService.submitTurn(
+						sceneId,
+						sessionId,
+						turnNo,
+						request.transcript(),
+						request.audio()));
 	}
 
 	private static InterviewResumeFile toResumeFile(MultipartFile file)

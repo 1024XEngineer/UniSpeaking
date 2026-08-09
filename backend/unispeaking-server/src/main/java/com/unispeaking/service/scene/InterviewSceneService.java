@@ -5,11 +5,13 @@ import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
 import com.unispeaking.domain.dto.scene.InterviewMaterialPreparationInput;
 import com.unispeaking.domain.dto.scene.InterviewSceneRequest;
 import com.unispeaking.domain.dto.scene.InterviewSceneResult;
+import com.unispeaking.domain.vo.scene.InterviewTopicEvent;
+import com.unispeaking.domain.vo.scene.InterviewTopicState;
 
 /**
  * 面试场景服务（独立接口，不 extends 任何已删除的 SceneService 基类）。
- * <p>本刀提供 {@link #generate} 与 {@link #prepareMaterials}；
- * {@code listOwnedScenes}/{@code advanceTopicState}/{@code deleteScene} 留待后续。
+ * <p>本刀提供 {@link #generate}、{@link #prepareMaterials} 与 {@link #advanceTopicState}；
+ * {@code listOwnedScenes}/{@code deleteScene} 留待后续。
  */
 public interface InterviewSceneService {
 
@@ -21,4 +23,17 @@ public interface InterviewSceneService {
 
 	/** 会话启动用：内部完成归属校验并读取 scenePrompt/difficulty，不启动 Session。 */
 	InterviewDialogueSceneContext prepareDialogue(String sceneId);
+
+	/**
+	 * 推进主题状态机（submitTurn 消费）。Impl 持有 {@code InterviewTopicStateMachine}，
+	 * Session 只经本方法触碰状态机（DI 结构守卫）。
+	 */
+	InterviewTopicState advanceTopicState(
+			String sceneId,
+			String sessionId,
+			int turnNo,
+			InterviewTopicEvent event);
+
+	/** 当前用户拥有的面试场景的候选主题列表（主题识别 LLM prompt 用）。 */
+	java.util.List<String> interviewTopics(String sceneId);
 }
