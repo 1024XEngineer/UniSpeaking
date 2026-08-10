@@ -42,6 +42,7 @@ export type IeltsLearningRecord = {
   result: string;
   estimatedBand: number;
   scores: readonly [number, number, number, number];
+  recordingUrls?: readonly string[];
 };
 
 export type InterviewLearningRecord = {

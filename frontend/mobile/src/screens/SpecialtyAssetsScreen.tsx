@@ -1,12 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ArrowLeftIcon } from 'phosphor-react-native/src/icons/ArrowLeft';
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
+import { PauseIcon } from 'phosphor-react-native/src/icons/Pause';
+import { PlayIcon } from 'phosphor-react-native/src/icons/Play';
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { LearningAssetsHeader } from '@/components/LearningAssetsHeader';
 import { AppButton, AppScreen, Card, PageHeader, ProgressBar, SectionTitle } from '@/components/ui';
 import type { IeltsLearningRecord, InterviewLearningRecord } from '@/data/learningAssets';
+import { useIeltsFlowController } from '@/features/ielts/useIeltsFlowController';
+import { useRecordingPlayback } from '@/features/ielts/useRecordingPlayback';
 import { useAppModel } from '@/model/AppModel';
 import { rememberSpecialty } from '@/navigation/specialtyMemory';
 import { colors } from '@/theme/tokens';
@@ -100,17 +104,28 @@ function WeeklyTrainingChart({ kind, palette }: { kind: SpecialtyAssetKind; pale
 
 function IeltsOverview({ palette, onOpenRecord }: { palette: AssetPalette; onOpenRecord: (id: string) => void }) {
   const { ieltsRecords } = useAppModel();
+  const ielts = useIeltsFlowController();
+
+  useEffect(() => {
+    void ielts.refreshHistory();
+  }, [ielts.refreshHistory]);
+
+  const records = ielts.historyRecords.length > 0 ? ielts.historyRecords : ieltsRecords;
+  const latest = records[0];
+  const targetScore = ielts.settings?.targetScore ?? 7.0;
+  const latestBand = latest?.estimatedBand ?? ielts.settings?.latestEstimatedScore;
+
   return (
     <View style={styles.sectionStack}>
       <Card style={[styles.heroCard, themedCard(palette)]}>
         <Text style={[styles.cardLabel, { color: palette.muted }]}>最近一次完整模考</Text>
-        <Text style={[styles.heroScore, { color: palette.accent }]}>6.5</Text>
-        <Text style={[styles.heroCopy, { color: palette.muted }]}>合理波动范围 6.0–6.5 · AI 训练评估，并非官方考试成绩</Text>
-        <View style={[styles.targetRow, { borderTopColor: palette.border }]}><Text style={[styles.targetLabel, { color: palette.muted }]}>目标分数</Text><Text style={[styles.targetValue, { color: palette.accent }]}>7.0</Text><Text style={[styles.targetNote, { color: palette.muted }]}>还差约 0.5 分</Text></View>
+        <Text style={[styles.heroScore, { color: palette.accent }]}>{latestBand != null ? latestBand.toFixed(1) : '—'}</Text>
+        <Text style={[styles.heroCopy, { color: palette.muted }]}>合理波动范围以 AI 训练评估为准，并非官方考试成绩</Text>
+        <View style={[styles.targetRow, { borderTopColor: palette.border }]}><Text style={[styles.targetLabel, { color: palette.muted }]}>目标分数</Text><Text style={[styles.targetValue, { color: palette.accent }]}>{targetScore}</Text><Text style={[styles.targetNote, { color: palette.muted }]}>{latestBand != null ? `当前预估 ${latestBand.toFixed(1)}` : '暂无评估'}</Text></View>
       </Card>
       <WeeklyTrainingChart kind="ielts" palette={palette} />
       <SectionTitle title="最近训练" />
-      <Card style={[styles.listCard, themedCard(palette)]}>{ieltsRecords.slice(0, 3).map((item) => <AssetListRow key={item.id} title={item.title} subtitle={`${item.type} · ${item.date} · ${item.duration}`} meta={item.result} onPress={() => onOpenRecord(item.id)} />)}</Card>
+      <Card style={[styles.listCard, themedCard(palette)]}>{records.slice(0, 3).map((item) => <AssetListRow key={item.id} title={item.title} subtitle={`${item.type} · ${item.date} · ${item.duration}`} meta={item.result} onPress={() => onOpenRecord(item.id)} />)}</Card>
     </View>
   );
 }
@@ -159,13 +174,20 @@ function RecordPagination({ page, pageCount, palette, onPageChange }: { page: nu
 
 function IeltsHistory({ palette, onOpenRecord }: { palette: AssetPalette; onOpenRecord: (id: string) => void }) {
   const { ieltsRecords } = useAppModel();
+  const ielts = useIeltsFlowController();
   const [page, setPage] = useState(0);
-  const pageCount = Math.max(1, Math.ceil(ieltsRecords.length / PAGE_SIZE));
+
+  useEffect(() => {
+    void ielts.refreshHistory();
+  }, [ielts.refreshHistory]);
+
+  const records = ielts.historyRecords.length > 0 ? ielts.historyRecords : ieltsRecords;
+  const pageCount = Math.max(1, Math.ceil(records.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
-  const visibleRecords = ieltsRecords.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const visibleRecords = records.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
   return (
     <View style={styles.sectionStack}>
-      <SectionTitle title="训练记录" action={<Text style={[styles.count, { color: palette.muted }]}>{ieltsRecords.length} 条</Text>} />
+      <SectionTitle title="训练记录" action={<Text style={[styles.count, { color: palette.muted }]}>{records.length} 条</Text>} />
       <Card style={[styles.listCard, themedCard(palette)]}>{visibleRecords.map((item) => <AssetListRow key={item.id} title={item.title} subtitle={`${item.date} · ${item.type} · ${item.duration}`} meta={item.result} onPress={() => onOpenRecord(item.id)} />)}</Card>
       <RecordPagination page={currentPage} pageCount={pageCount} palette={palette} onPageChange={setPage} />
     </View>
@@ -312,6 +334,7 @@ export function SpecialtyAssetsScreen({ kind, tab, onTabChange, onScenes, onIelt
 
 export function IeltsAssetReport({ record, onBack }: { record: IeltsLearningRecord; onBack: () => void }) {
   const palette = assetPalettes.ielts;
+  const playback = useRecordingPlayback(record.recordingUrls ?? []);
   return (
     <AppScreen
       contentStyle={[styles.assetsContent, { backgroundColor: palette.canvas }]}
@@ -325,6 +348,27 @@ export function IeltsAssetReport({ record, onBack }: { record: IeltsLearningReco
         <Text style={[styles.cardLabel, { color: palette.muted }]}>总体报告</Text>
         <Text style={[styles.heroScore, { color: palette.accent }]}>{record.result}</Text>
         <Text style={[styles.heroCopy, { color: palette.muted }]}>本次表达整体清楚，优先改善观点之间的过渡，并在回答中保持稳定、完整的展开。</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={playback.playing ? '暂停录音' : '播放原始录音'}
+          disabled={!playback.canPlay}
+          onPress={playback.toggle}
+          style={[styles.recordingToggle, { borderColor: palette.border, opacity: playback.canPlay ? 1 : 0.45 }]}
+        >
+          {playback.playing ? (
+            <PauseIcon color={palette.accent} size={18} weight="fill" />
+          ) : (
+            <PlayIcon color={palette.accent} size={18} weight="fill" />
+          )}
+          <Text style={[styles.recordingToggleText, { color: palette.text }]}>
+            {playback.canPlay
+              ? playback.playing
+                ? '暂停录音'
+                : '播放原始录音'
+              : '暂无录音'}
+          </Text>
+        </Pressable>
+        {playback.error ? <Text style={[styles.recordingError, { color: palette.muted }]}>{playback.error}</Text> : null}
       </Card>
       <Card style={[styles.reportCard, themedCard(palette)]}>
         <Text style={[styles.reportTitle, { color: palette.text }]}>四项能力评分</Text>
@@ -435,4 +479,16 @@ const styles = StyleSheet.create({
   partLabel: { fontSize: 11, lineHeight: 15, fontWeight: '500' },
   partTitle: { fontSize: 17, lineHeight: 23, fontWeight: '600' },
   partCopy: { fontSize: 12, lineHeight: 18, fontWeight: '300' },
+  recordingToggle: {
+    marginTop: 12,
+    minHeight: 42,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+  },
+  recordingToggleText: { fontSize: 13, fontWeight: '500' },
+  recordingError: { marginTop: 8, fontSize: 12, lineHeight: 18, fontWeight: '300' },
 });

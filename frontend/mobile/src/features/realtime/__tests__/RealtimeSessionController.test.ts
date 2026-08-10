@@ -79,6 +79,7 @@ describe('RealtimeSessionController', () => {
 
     expect(dependencies.sessionApi.start).toHaveBeenCalledWith({
       sceneId: null,
+      ieltsId: null,
       offerSdp: 'offer-sdp',
       provider: 'QWEN',
       model: 'qwen3.5-omni-flash-realtime',
@@ -329,6 +330,185 @@ describe('RealtimeSessionController', () => {
     );
     expect(controller.getSnapshot().sceneState).toEqual(
       expect.objectContaining({ effectiveUserTurns: 1, completed: false }),
+    );
+  });
+
+  it('coordinates each ielts transcript and applies the backend control instruction once', async () => {
+    const dependencies = createDependencies();
+    const ieltsDialogue = {
+      advanceState: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        part: 'PART_1',
+        openingCompleted: true,
+        answeredQuestions: 1,
+        totalQuestions: 4,
+        completed: false,
+        controlInstruction: 'Ask the next Part 1 question exactly as written.',
+      })),
+      evaluateTurn: jest.fn(async () => ({ score: 7 })),
+      advancePart2State: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        phase: 'LONG_TURN',
+        completed: false,
+        controlInstruction: 'Begin the long turn now.',
+      })),
+      getDialogueState: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        part: 'PART_1',
+        openingCompleted: true,
+        answeredQuestions: 0,
+        totalQuestions: 4,
+        completed: false,
+        controlInstruction: 'Ask the first Part 1 question exactly as written.',
+      })),
+      getPart2State: jest.fn(),
+    };
+    dependencies.ieltsDialogue = ieltsDialogue;
+    dependencies.sessionApi.start.mockResolvedValue({
+      sessionId: 'session-1',
+      answerSdp: 'answer-sdp',
+      voiceId: 'Harvey',
+      systemPrompt: 'You are an IELTS examiner.',
+      currentStage: 'PART_1',
+    });
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'ielts',
+      ieltsId: 'ielts-1',
+      ieltsPart: 'PART_1',
+      voice: 'Harvey',
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    await controller.handleProviderMessage(JSON.stringify({ type: 'session.updated' }));
+
+    await controller.handleProviderMessage(
+      JSON.stringify({
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'user-turn-1',
+        transcript: 'I live in Shanghai.',
+      }),
+    );
+
+    expect(ieltsDialogue.advanceState).toHaveBeenCalledWith('session-1', 1, false);
+    expect(ieltsDialogue.evaluateTurn).toHaveBeenCalledWith(
+      'session-1',
+      1,
+      'I live in Shanghai.',
+      null,
+    );
+    expect(dependencies.transport.sendProviderEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'session.update',
+        session: expect.objectContaining({
+          instructions: expect.stringContaining('next Part 1 question'),
+        }),
+      }),
+    );
+    expect(dependencies.transport.sendProviderEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'response.create' }),
+    );
+    expect(controller.getSnapshot().ieltsDialogueState).toEqual(
+      expect.objectContaining({ answeredQuestions: 1, completed: false }),
+    );
+  });
+
+  it('advances part2 state through the public transition API', async () => {
+    const dependencies = createDependencies();
+    const ieltsDialogue = {
+      advanceState: jest.fn(),
+      evaluateTurn: jest.fn(),
+      advancePart2State: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        phase: 'LONG_TURN',
+        completed: false,
+        controlInstruction: 'Please begin speaking now.',
+      })),
+      getDialogueState: jest.fn(),
+      getPart2State: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        phase: 'PREPARATION',
+        completed: false,
+        controlInstruction: 'Prepare for Part 2.',
+      })),
+    };
+    dependencies.ieltsDialogue = ieltsDialogue;
+    dependencies.sessionApi.start.mockResolvedValue({
+      sessionId: 'session-1',
+      answerSdp: 'answer-sdp',
+      voiceId: 'Harvey',
+      systemPrompt: 'You are an IELTS examiner.',
+      currentStage: 'PART_2',
+    });
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'ielts',
+      ieltsId: 'ielts-1',
+      ieltsPart: 'PART_2',
+      voice: 'Harvey',
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+
+    await controller.transitionPart2('PREPARATION_COMPLETE');
+
+    expect(ieltsDialogue.advancePart2State).toHaveBeenCalledWith(
+      'session-1',
+      'PREPARATION_COMPLETE',
+    );
+    expect(controller.getSnapshot().ieltsPart2State).toEqual(
+      expect.objectContaining({ phase: 'LONG_TURN' }),
+    );
+  });
+
+  it('restores ielts dialogue state after session start', async () => {
+    const dependencies = createDependencies();
+    const ieltsDialogue = {
+      advanceState: jest.fn(),
+      evaluateTurn: jest.fn(),
+      advancePart2State: jest.fn(),
+      getDialogueState: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        part: 'PART_3',
+        openingCompleted: true,
+        answeredQuestions: 2,
+        totalQuestions: 5,
+        completed: false,
+        controlInstruction: 'Ask question three exactly as written.',
+      })),
+      getPart2State: jest.fn(),
+    };
+    dependencies.ieltsDialogue = ieltsDialogue;
+    dependencies.sessionApi.start.mockResolvedValue({
+      sessionId: 'session-1',
+      answerSdp: 'answer-sdp',
+      voiceId: 'Harvey',
+      systemPrompt: 'You are an IELTS examiner.',
+      currentStage: 'PART_3',
+    });
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'ielts',
+      ieltsId: 'ielts-1',
+      ieltsPart: 'PART_3',
+      voice: 'Harvey',
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: 'NATURAL',
+    });
+
+    await controller.start();
+
+    expect(ieltsDialogue.getDialogueState).toHaveBeenCalledWith('session-1');
+    expect(controller.getSnapshot()).toEqual(
+      expect.objectContaining({
+        ieltsDialogueState: expect.objectContaining({ answeredQuestions: 2 }),
+        ieltsStateRestored: true,
+      }),
     );
   });
 });

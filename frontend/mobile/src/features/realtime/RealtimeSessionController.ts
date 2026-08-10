@@ -10,6 +10,13 @@ import type {
   DialogueCompletion,
   ScenarioDialogueState,
 } from '@/features/scenes/SceneDialogueApi';
+import type {
+  IeltsDialogueState,
+  IeltsPart,
+  IeltsPart2Event,
+  IeltsPart2State,
+} from '@/features/ielts/types';
+import type { TurnAudioCapturePort } from '@/features/audio/TurnAudioCapture';
 
 export type RealtimeTransportEvent =
   | { type: 'provider.message'; data: string }
@@ -30,6 +37,7 @@ export type RealtimeTransport = {
 
 export type RealtimeSessionStartRequest = {
   sceneId: string | null;
+  ieltsId?: string | null;
   offerSdp: string;
   provider: 'QWEN';
   model: string;
@@ -42,6 +50,7 @@ export type RealtimeSessionStartResponse = {
   answerSdp: string;
   voiceId: string;
   systemPrompt: string;
+  currentStage?: IeltsPart;
 };
 
 export type SessionMessage = {
@@ -77,13 +86,35 @@ export type RealtimeSessionDependencies = {
       stopTime: string,
     ): Promise<DialogueCompletion | null>;
   };
+  ieltsDialogue?: {
+    advanceState(
+      sessionId: string,
+      turnNo: number,
+      timedOut?: boolean,
+    ): Promise<IeltsDialogueState>;
+    evaluateTurn(
+      sessionId: string,
+      turnNo: number,
+      transcript: string,
+      wavUri?: string | null,
+    ): Promise<unknown>;
+    advancePart2State(
+      sessionId: string,
+      event: IeltsPart2Event,
+    ): Promise<IeltsPart2State>;
+    getDialogueState(sessionId: string): Promise<IeltsDialogueState>;
+    getPart2State(sessionId: string): Promise<IeltsPart2State>;
+  };
+  turnAudioCapture?: TurnAudioCapturePort;
   now?: () => Date;
   createEventId?: () => string;
 };
 
 export type RealtimeSessionOptions = {
-  mode: 'free_chat' | 'scene';
+  mode: 'free_chat' | 'scene' | 'ielts';
   sceneId?: string;
+  ieltsId?: string;
+  ieltsPart?: IeltsPart;
   voice: string;
   model: string;
   speechSpeed: 'SLOWER' | 'MODERATE' | 'NATURAL' | 'FASTER';
@@ -98,6 +129,12 @@ export type RealtimeSessionSnapshot = Readonly<{
   error: RealtimeError | null;
   sceneState?: ScenarioDialogueState | null;
   completion?: DialogueCompletion | null;
+  ieltsDialogueState?: IeltsDialogueState | null;
+  ieltsPart2State?: IeltsPart2State | null;
+  ieltsDialogueCompleted?: boolean;
+  ieltsInputReadyTick?: number;
+  ieltsPart2CompletionReady?: boolean;
+  ieltsStateRestored?: boolean;
 }>;
 
 const speechSpeedInstructions = {
@@ -133,14 +170,19 @@ function buildSessionUpdate(
       input_audio_transcription: { model: 'qwen3-asr-flash-realtime' },
       smooth_output: false,
       turn_detection: {
-        type: options.model.startsWith('qwen3.5-omni-')
-          ? 'semantic_vad'
-          : 'server_vad',
+        type:
+          options.mode === 'ielts' &&
+          (options.ieltsPart === 'PART_1' || options.ieltsPart === 'PART_3')
+            ? 'server_vad'
+            : options.model.startsWith('qwen3.5-omni-')
+              ? 'semantic_vad'
+              : 'server_vad',
         threshold: 0.5,
         prefix_padding_ms: 500,
-        silence_duration_ms: 600,
+        silence_duration_ms: options.mode === 'ielts' ? 3_000 : 600,
         create_response: options.mode === 'free_chat',
-        interrupt_response: true,
+        interrupt_response:
+          options.mode === 'ielts' ? options.ieltsPart !== 'PART_2' : true,
       },
     },
   };
@@ -179,6 +221,15 @@ export class RealtimeSessionController {
   private sceneState: ScenarioDialogueState | null = null;
   private completion: DialogueCompletion | null = null;
   private sceneCompletionPending = false;
+  private ieltsActivePart: IeltsPart | null = null;
+  private ieltsDialogueState: IeltsDialogueState | null = null;
+  private ieltsPart2State: IeltsPart2State | null = null;
+  private ieltsDialogueCompleted = false;
+  private ieltsInputReadyTick = 0;
+  private ieltsPart2CompletionReady = false;
+  private ieltsTimedOutTurn: { turnNo: number } | null = null;
+  private ieltsStateRestored = false;
+  private turnAudioWarning = false;
 
   constructor(
     private readonly dependencies: RealtimeSessionDependencies,
@@ -203,6 +254,12 @@ export class RealtimeSessionController {
       error: this.machine.error,
       sceneState: this.sceneState,
       completion: this.completion,
+      ieltsDialogueState: this.ieltsDialogueState,
+      ieltsPart2State: this.ieltsPart2State,
+      ieltsDialogueCompleted: this.ieltsDialogueCompleted,
+      ieltsInputReadyTick: this.ieltsInputReadyTick,
+      ieltsPart2CompletionReady: this.ieltsPart2CompletionReady,
+      ieltsStateRestored: this.ieltsStateRestored,
     };
   }
 
@@ -233,6 +290,7 @@ export class RealtimeSessionController {
       failureCode = 'SDP_EXCHANGE_FAILED';
       const backend = await this.dependencies.sessionApi.start({
         sceneId: this.options.sceneId ?? null,
+        ieltsId: this.options.ieltsId ?? null,
         offerSdp,
         provider: 'QWEN',
         model: this.options.model,
@@ -242,6 +300,10 @@ export class RealtimeSessionController {
       if (!backend.answerSdp?.trim()) throw new Error('后端没有返回 Answer SDP');
       if (!backend.systemPrompt?.trim()) throw new Error('后端没有返回会话提示词');
       this.backendSession = backend;
+      if (this.options.mode === 'ielts') {
+        this.ieltsActivePart =
+          backend.currentStage ?? this.options.ieltsPart ?? null;
+      }
 
       failureCode = 'SESSION_SOCKET_FAILED';
       await this.dependencies.sessionSocket.connect(backend.sessionId);
@@ -252,6 +314,9 @@ export class RealtimeSessionController {
 
       failureCode = 'DATA_CHANNEL_FAILED';
       await this.dependencies.transport.waitForDataChannel();
+      if (this.options.mode === 'ielts') {
+        await this.restoreIeltsState();
+      }
       this.publish();
       return { sessionId: backend.sessionId };
     } catch (error) {
@@ -296,6 +361,106 @@ export class RealtimeSessionController {
       event_id: this.createEventId(),
       type: 'response.cancel',
     });
+  }
+
+  async transitionPart2(event: IeltsPart2Event) {
+    const sessionId = this.backendSession?.sessionId;
+    const ieltsDialogue = this.dependencies.ieltsDialogue;
+    if (
+      !sessionId ||
+      !ieltsDialogue ||
+      this.ieltsActivePart !== 'PART_2'
+    ) {
+      throw new Error('当前会话不是 IELTS Part 2');
+    }
+    const completing =
+      event === 'ANSWER_COMPLETE' || event === 'LONG_TURN_TIME_LIMIT';
+    if (completing) {
+      this.inputEnabled = false;
+      this.muted = true;
+      this.applyAudioEnabled();
+    }
+    const state = await ieltsDialogue.advancePart2State(sessionId, event);
+    this.ieltsPart2State = state;
+    this.ieltsDialogueCompleted = Boolean(state.completed);
+    if (event === 'PREPARATION_COMPLETE') {
+      this.muted = false;
+      this.inputEnabled = false;
+      this.applyAudioEnabled();
+    }
+    this.publish();
+    this.sendIeltsControlInstruction(state.controlInstruction);
+    this.requestIeltsResponse(state.controlInstruction);
+    return state;
+  }
+
+  async forcePart3Timeout() {
+    const sessionId = this.backendSession?.sessionId;
+    const ieltsDialogue = this.dependencies.ieltsDialogue;
+    if (
+      !sessionId ||
+      !ieltsDialogue ||
+      this.ieltsActivePart !== 'PART_3' ||
+      this.ieltsDialogueCompleted
+    ) {
+      return null;
+    }
+    const turnNo = this.learnerTurnNo + 1;
+    this.inputEnabled = false;
+    this.muted = true;
+    this.applyAudioEnabled();
+    this.ieltsTimedOutTurn = { turnNo };
+    const state = await ieltsDialogue.advanceState(sessionId, turnNo, true);
+    this.learnerTurnNo = turnNo;
+    this.ieltsDialogueState = state;
+    this.ieltsDialogueCompleted = Boolean(state.completed);
+    this.publish();
+    this.sendIeltsControlInstruction(state.controlInstruction);
+    this.requestIeltsResponse(state.controlInstruction);
+    this.muted = false;
+    this.applyAudioEnabled();
+    return state;
+  }
+
+  async restoreIeltsState() {
+    const sessionId = this.backendSession?.sessionId;
+    const ieltsDialogue = this.dependencies.ieltsDialogue;
+    if (
+      this.options.mode !== 'ielts' ||
+      !sessionId ||
+      !ieltsDialogue ||
+      this.ieltsStateRestored
+    ) {
+      return null;
+    }
+    try {
+      if (this.ieltsActivePart === 'PART_2') {
+        const state = await ieltsDialogue.getPart2State(sessionId);
+        this.ieltsPart2State = state;
+        this.ieltsDialogueCompleted = Boolean(state.completed);
+        this.applyRestoredInstruction(state.controlInstruction);
+        this.ieltsStateRestored = true;
+        this.publish();
+        return state;
+      }
+      if (this.isDeterministicIeltsPart()) {
+        const state = await ieltsDialogue.getDialogueState(sessionId);
+        this.ieltsDialogueState = state;
+        this.learnerTurnNo = state.answeredQuestions;
+        this.ieltsDialogueCompleted = Boolean(state.completed);
+        this.applyRestoredInstruction(state.controlInstruction);
+        if (state.completed) {
+          this.inputEnabled = false;
+          this.applyAudioEnabled();
+        }
+        this.ieltsStateRestored = true;
+        this.publish();
+        return state;
+      }
+    } catch {
+      return null;
+    }
+    return null;
   }
 
   end() {
@@ -354,7 +519,12 @@ export class RealtimeSessionController {
           });
           this.initialResponseRequested = true;
         }
-        this.inputEnabled = this.options.mode === 'free_chat';
+        this.inputEnabled =
+          this.options.mode === 'free_chat'
+            ? true
+            : this.options.mode === 'ielts'
+              ? false
+              : false;
         this.applyAudioEnabled();
         this.publish();
         return;
@@ -366,11 +536,13 @@ export class RealtimeSessionController {
           this.userTranscript = '';
           this.assistantTranscript = '';
           this.transition({ type: 'USER_SPEECH_STARTED' });
+          this.beginTurnAudioCapture();
         }
         return;
       case 'user.speech.stopped':
         if (this.machine.state === 'user_speaking') {
           this.transition({ type: 'USER_SPEECH_STOPPED' });
+          this.dependencies.turnAudioCapture?.stop();
         }
         return;
       case 'user.transcript.delta':
@@ -384,9 +556,15 @@ export class RealtimeSessionController {
       case 'user.transcript.completed':
         this.userTranscript = event.text;
         this.publish();
-        await this.persistTranscript(1, event.text, event.itemId);
+        try {
+          await this.persistTranscript(1, event.text, event.itemId);
+        } catch (error) {
+          if (this.options.mode !== 'ielts') throw error;
+        }
         if (this.options.mode === 'scene') {
           await this.coordinateSceneTurn(event.text);
+        } else if (this.options.mode === 'ielts') {
+          await this.coordinateIeltsTurn(event.text);
         }
         return;
       case 'assistant.response.started':
@@ -417,6 +595,8 @@ export class RealtimeSessionController {
           if (this.sceneCompletionPending) {
             await this.end();
           }
+        } else if (this.options.mode === 'ielts') {
+          this.handleIeltsAssistantResponseCompleted();
         }
         return;
       case 'provider.error':
@@ -499,6 +679,169 @@ export class RealtimeSessionController {
     );
   }
 
+  private isDeterministicIeltsPart() {
+    return (
+      this.ieltsActivePart === 'PART_1' || this.ieltsActivePart === 'PART_3'
+    );
+  }
+
+  private bumpIeltsInputReady() {
+    this.ieltsInputReadyTick += 1;
+    this.publish();
+  }
+
+  private releaseIeltsInput() {
+    if (
+      !this.isDeterministicIeltsPart() ||
+      this.ieltsDialogueCompleted ||
+      this.muted
+    ) {
+      return;
+    }
+    this.inputEnabled = true;
+    this.applyAudioEnabled();
+    this.bumpIeltsInputReady();
+  }
+
+  private handleIeltsAssistantResponseCompleted() {
+    if (this.ieltsActivePart === 'PART_2' && this.ieltsDialogueCompleted) {
+      this.inputEnabled = false;
+      this.ieltsPart2CompletionReady = true;
+      this.applyAudioEnabled();
+      this.publish();
+      return;
+    }
+    if (this.isDeterministicIeltsPart()) {
+      this.releaseIeltsInput();
+      return;
+    }
+    if (this.ieltsActivePart === 'PART_2' && !this.ieltsDialogueCompleted) {
+      this.inputEnabled = true;
+      this.applyAudioEnabled();
+      this.bumpIeltsInputReady();
+    }
+  }
+
+  private applyRestoredInstruction(controlInstruction?: string | null) {
+    const instruction = controlInstruction?.trim();
+    if (!instruction || !this.backendSession || !this.providerConfigured) return;
+    this.sendIeltsControlInstruction(instruction);
+  }
+
+  private beginTurnAudioCapture() {
+    if (
+      !this.dependencies.turnAudioCapture ||
+      (this.options.mode !== 'ielts' && this.options.mode !== 'scene')
+    ) {
+      return;
+    }
+    void this.dependencies.turnAudioCapture.start().catch(() => {
+      this.turnAudioWarning = true;
+    });
+  }
+
+  private async takeTurnAudioUri() {
+    const capture = this.dependencies.turnAudioCapture;
+    if (!capture) return null;
+    try {
+      return await capture.take();
+    } catch {
+      return null;
+    }
+  }
+
+  private async evaluateIeltsTurn(
+    sessionId: string,
+    turnNo: number,
+    transcript: string,
+  ) {
+    const ieltsDialogue = this.dependencies.ieltsDialogue;
+    if (!ieltsDialogue) return null;
+    const wavUri = await this.takeTurnAudioUri();
+    return ieltsDialogue
+      .evaluateTurn(sessionId, turnNo, transcript, wavUri)
+      .catch(() => null);
+  }
+
+  private sendIeltsControlInstruction(controlInstruction?: string | null) {
+    const instruction = controlInstruction?.trim();
+    if (!instruction || !this.backendSession) return;
+    const update = buildSessionUpdate(
+      this.createEventId(),
+      this.backendSession,
+      {
+        ...this.options,
+        ieltsPart: this.ieltsActivePart ?? this.options.ieltsPart,
+      },
+    );
+    update.session.instructions = [
+      update.session.instructions,
+      instruction,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    this.dependencies.transport.sendProviderEvent(update);
+  }
+
+  private requestIeltsResponse(instructions?: string | null) {
+    const turnInstructions = instructions?.trim() ?? '';
+    this.dependencies.transport.sendProviderEvent({
+      event_id: this.createEventId(),
+      type: 'response.create',
+      ...(turnInstructions
+        ? {
+            response: {
+              instructions: turnInstructions,
+              modalities: ['text', 'audio'],
+            },
+          }
+        : {}),
+    });
+  }
+
+  private async coordinateIeltsTurn(transcript: string) {
+    const sessionId = this.backendSession?.sessionId;
+    const ieltsDialogue = this.dependencies.ieltsDialogue;
+    if (!sessionId || !ieltsDialogue) {
+      throw new Error('IELTS 对话服务尚未配置');
+    }
+    const timedOutTurn =
+      this.ieltsActivePart === 'PART_3' && this.ieltsTimedOutTurn
+        ? this.ieltsTimedOutTurn
+        : null;
+    if (timedOutTurn) {
+      this.ieltsTimedOutTurn = null;
+      void this.evaluateIeltsTurn(sessionId, timedOutTurn.turnNo, transcript);
+      return;
+    }
+    if (this.isDeterministicIeltsPart()) {
+      this.inputEnabled = false;
+      this.applyAudioEnabled();
+      const turnNo = ++this.learnerTurnNo;
+      const evaluation = this.evaluateIeltsTurn(sessionId, turnNo, transcript);
+      let state: IeltsDialogueState | null = null;
+      try {
+        state = await ieltsDialogue.advanceState(sessionId, turnNo, false);
+      } catch {
+        state = null;
+      }
+      await evaluation;
+      if (state) {
+        this.ieltsDialogueState = state;
+        this.ieltsDialogueCompleted = Boolean(state.completed);
+        this.publish();
+        this.sendIeltsControlInstruction(state.controlInstruction);
+        this.requestIeltsResponse(state.controlInstruction);
+      }
+      return;
+    }
+    if (this.ieltsActivePart === 'PART_2' && !this.ieltsDialogueCompleted) {
+      this.inputEnabled = true;
+      this.applyAudioEnabled();
+      this.bumpIeltsInputReady();
+    }
+  }
+
   private async coordinateSceneTurn(transcript: string) {
     const sessionId = this.backendSession?.sessionId;
     const sceneDialogue = this.dependencies.sceneDialogue;
@@ -564,5 +907,15 @@ export class RealtimeSessionController {
     this.sceneState = null;
     this.completion = null;
     this.sceneCompletionPending = false;
+    this.ieltsActivePart =
+      this.options.mode === 'ielts' ? this.options.ieltsPart ?? null : null;
+    this.ieltsDialogueState = null;
+    this.ieltsPart2State = null;
+    this.ieltsDialogueCompleted = false;
+    this.ieltsInputReadyTick = 0;
+    this.ieltsPart2CompletionReady = false;
+    this.ieltsTimedOutTurn = null;
+    this.ieltsStateRestored = false;
+    this.turnAudioWarning = false;
   }
 }
