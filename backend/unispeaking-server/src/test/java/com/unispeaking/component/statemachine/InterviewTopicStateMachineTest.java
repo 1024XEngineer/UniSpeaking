@@ -79,6 +79,25 @@ class InterviewTopicStateMachineTest {
 	}
 
 	@Test
+	void shouldEndReturnsClosingInstruction() {
+		stateMachine.start(
+				"session-1",
+				topics("自我介绍", "项目经历"),
+				InterviewDifficulty.STANDARD);
+
+		stateMachine.advance("session-1", 1, InterviewTopicEvent.unknown());
+		stateMachine.advance("session-1", 2, InterviewTopicEvent.unknown());
+		InterviewTopicState state = stateMachine.advance(
+				"session-1",
+				3,
+				InterviewTopicEvent.unknown());
+
+		assertTrue(state.shouldEnd());
+		assertTrue(state.controlInstruction().contains("The interview is complete"));
+		assertTrue(state.controlInstruction().contains("thank the candidate"));
+	}
+
+	@Test
 	void unknownStreakResetsOnRealTopic() {
 		stateMachine.start(
 				"session-1",
@@ -366,6 +385,8 @@ class InterviewTopicStateMachineTest {
 		assertEquals(10, turnNo - 1);
 		assertTrue(last.shouldEnd());
 		assertEquals(5, last.coveredTopicCount());
+		assertTrue(last.controlInstruction().contains("The interview is complete"));
+		assertTrue(last.controlInstruction().contains("thank the candidate"));
 	}
 
 	@Test
