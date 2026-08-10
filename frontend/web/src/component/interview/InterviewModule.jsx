@@ -518,12 +518,16 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       if (endingRef.current) {
         // Report recovery carries only reportStatus; keep the ending status.
       } else if (state?.shouldEnd) {
-        setStatus("面试已完成，正在生成报告");
+        setStatus("面试已完成，准备收尾…");
       } else if (state?.currentTopic) {
         setStatus(`正在面试 · ${state.currentTopic}`);
       } else {
         setStatus("面试官正在提问");
       }
+    } else if (event.type === "local.interview_closing") {
+      endingRef.current = true;
+      setEnding(true);
+      setStatus("面试官正在做本次面试的收尾…");
     } else if (event.type === "local.interview_end_requested") {
       endingRef.current = true;
       setEnding(true);

@@ -36,6 +36,11 @@ public class InterviewTopicStateMachine {
 
 	private final Map<String, State> states = new ConcurrentHashMap<>();
 
+	/** 面试结束时的收尾指令：让模型自然生成一句致谢收尾，不再追问。 */
+	private static final String CLOSING_INSTRUCTION =
+			"The interview is complete. Give a brief, natural closing and thank the "
+					+ "candidate for their time. Do not ask more questions.";
+
 	/** 初始化一个会话的主题状态。 */
 	public InterviewTopicState start(
 			String sessionId,
@@ -259,16 +264,15 @@ public class InterviewTopicStateMachine {
 
 		/** 下一轮 realtime 指令：开场、推进、收尾或结束，由状态机统一生成。 */
 		private String buildControlInstruction() {
+			if (shouldEnd) {
+				return CLOSING_INSTRUCTION;
+			}
 			if (currentTopic == null) {
 				return "Begin the interview. Open with the first topic: "
 						+ topics.get(0) + ".";
 			}
-			if (shouldEnd) {
-				return "";
-			}
 			if (coveredTopics.size() >= topics.size() && lastTopicSatisfied) {
-				return "The interview is complete. Give a brief, natural closing and thank "
-						+ "the candidate for their time. Do not ask more questions.";
+				return CLOSING_INSTRUCTION;
 			}
 			if (currentTopicSatisfied()
 					&& topics.indexOf(currentTopic) < topics.size() - 1) {

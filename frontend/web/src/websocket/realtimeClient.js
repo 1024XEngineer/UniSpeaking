@@ -23,6 +23,7 @@ const SCENARIO_AUDIO_DRAIN_MS = 1_200;
 const SESSION_UPDATE_TIMEOUT_MS = 5_000;
 const IELTS_STATE_TIMEOUT_MS = 5_000;
 const IELTS_INPUT_RECOVERY_MS = 2_500;
+const DEFAULT_INTERVIEW_CLOSING = "The interview is complete. Give a brief, natural closing and thank the candidate for their time. Do not ask more questions.";
 const SPEECH_SPEED_INSTRUCTIONS = {
   SLOWER: "Voice delivery rule: speak distinctly and very slowly, around 70 English words per minute, with clear pauses between short phrases.",
   MODERATE: "Voice delivery rule: speak at a calm moderate pace, around 120 English words per minute, with clear pauses between ideas.",
@@ -331,6 +332,8 @@ export function createRealtimeClient({
   let instructionUpdateQueue = Promise.resolve(true);
   let activeInputItemId = null;
   let ieltsTimedOutTurn = null;
+  let closingInstructions = "";
+  let pendingInterviewReportStatus = null;
 
   const emit = (event) => onEvent(event);
 
@@ -627,11 +630,16 @@ export function createRealtimeClient({
       scenarioAudioDrainTimer = null;
     }
     scenarioCompletionEmitted = true;
-    emit({ type: "local.scenario_completed" });
+    if (interviewSceneId) {
+      emit({ type: "local.interview_end_requested", reportStatus: pendingInterviewReportStatus });
+    } else {
+      emit({ type: "local.scenario_completed" });
+    }
     void stop({ reason: "state_machine" }).catch((error) => {
       emit({
-        type: "local.scenario_completion_error",
-        message: error instanceof Error ? error.message : "场景自动结束失败",
+        type: interviewSceneId ? "local.interview_end_error" : "local.scenario_completion_error",
+        message: error instanceof Error ? error.message
+          : interviewSceneId ? "面试自动结束失败" : "场景自动结束失败",
       });
     });
   }
@@ -1066,16 +1074,18 @@ export function createRealtimeClient({
             reportStatus,
           });
           if (state?.shouldEnd) {
+            pendingInterviewReportStatus = reportStatus ?? null;
+            closingInstructions = String(state.controlInstruction || "").trim()
+              || DEFAULT_INTERVIEW_CLOSING;
+            scenarioCompletionPending = true;
             inputReady = false;
             setTrackEnabled();
             turnAudioCapture?.stop();
-            emit({ type: "local.interview_end_requested", reportStatus });
-            void stop({ reason: "state_machine" }).catch((error) => {
-              emit({
-                type: "local.interview_end_error",
-                message: error instanceof Error ? error.message : "面试自动结束失败",
-              });
-            });
+            armScenarioCompletionTimeout();
+            emit({ type: "local.interview_closing" });
+            if (!responsePending) {
+              requestTurnResponse({ closing: true, instructions: closingInstructions });
+            }
           } else {
             requestTurnResponse({
               instructions:
@@ -1122,7 +1132,7 @@ export function createRealtimeClient({
           }
           scheduleScenarioCompletionAfterAudioDrain();
         } else {
-          requestTurnResponse({ closing: true });
+          requestTurnResponse({ closing: true, instructions: closingInstructions });
         }
       } else if (manualTurnResponses) {
         if (isDeterministicIeltsPart()) {
@@ -1471,6 +1481,8 @@ export function createRealtimeClient({
       scenarioAudioDrainTimer = null;
       responsePending = false;
       closingResponseRequested = false;
+      closingInstructions = "";
+      pendingInterviewReportStatus = null;
       statePipeline = Promise.resolve();
       ieltsActivePart = null;
       ieltsPreparedQuestions = [];
