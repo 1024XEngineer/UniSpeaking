@@ -206,7 +206,8 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
 							true,
 							state.completedTopicCount(),
 							state.coveredTopicCount(),
-							state.currentTopic()),
+							state.currentTopic(),
+							state.controlInstruction()),
 					end.reportStatus());
 		}
 		return toTurnResult(state);
@@ -395,7 +396,8 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
 						state.shouldEnd(),
 						state.completedTopicCount(),
 						state.coveredTopicCount(),
-						state.currentTopic()),
+						state.currentTopic(),
+						state.controlInstruction()),
 				state.shouldEnd() ? ReportStatus.PROCESSING : null);
 	}
 
@@ -445,8 +447,10 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
 
 				Rules:
 				- topic MUST be one of the candidate topics verbatim, or "UNKNOWN". Do not invent new topics.
-				- topicCompleted MUST be false unless the candidate has fully finished and explicitly closed this topic.
-				  It MUST be false for a first or only answer, a short or interrupted answer, or a partial answer on that topic.
+				- topicCompleted may be true when the candidate gives a comprehensive answer that substantially covers
+				  the whole topic, or explicitly signals they are done with it.
+				- topicCompleted MUST still be false for a first brief answer, a short or interrupted answer,
+				  or a partial answer on that topic.
 				- Choose UNKNOWN when the answer is too short, ambiguous, cut off, or does not clearly belong to any topic.
 				""".formatted(
 						jsonValue(candidateTopics == null ? List.of() : candidateTopics),
