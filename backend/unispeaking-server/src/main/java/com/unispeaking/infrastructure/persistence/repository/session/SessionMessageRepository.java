@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.domain.po.session.LearnerMessageRecord;
 import com.unispeaking.infrastructure.persistence.entity.session.SessionMessageEntity;
 import com.unispeaking.infrastructure.persistence.mapper.session.SessionMessageMapper;
 import java.time.OffsetDateTime;
@@ -64,6 +65,28 @@ public class SessionMessageRepository {
 		}
 	}
 
+	/**
+	 * 按 messageNo 升序返回 owner=1（用户）消息，作为 Interview 轮次幂等锚点
+	 * （第 N 条 owner=1 消息即第 N 轮）。
+	 */
+	public List<Message> findLearnerMessages(String sessionId) {
+		try {
+			return mapper.selectList(new LambdaQueryWrapper<SessionMessageEntity>()
+							.eq(SessionMessageEntity::getSessionId, sessionId)
+							.eq(SessionMessageEntity::getOwner, 1)
+							.orderByAsc(SessionMessageEntity::getMessageNo))
+					.stream()
+					.map(entity -> new Message(
+							entity.getOwner(),
+							entity.getContent(),
+							null))
+					.toList();
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
 	public Optional<String> findSceneId(String sessionId) {
 		if (sessionId == null || sessionId.isBlank()) {
 			return Optional.empty();
@@ -107,10 +130,16 @@ public class SessionMessageRepository {
 							.eq(
 									SessionMessageEntity::getMessageNo,
 									message.getMessageNo())
+							.isNull(SessionMessageEntity::getAudioObjectKey)
 							.set(
 									SessionMessageEntity::getAudioObjectKey,
 									objectKey));
-			if (updated != 1) throw persistenceFailure();
+			// 首个音频为准：已 attach 过（未更新）视为幂等成功，重试不覆盖证据。
+			if (updated != 1
+					&& learnerMessages.stream().noneMatch(item ->
+							objectKey.equals(item.getAudioObjectKey()))) {
+				throw persistenceFailure();
+			}
 		}
 		catch (BusinessException exception) {
 			throw exception;
@@ -183,6 +212,28 @@ public class SessionMessageRepository {
 							.orderByAsc(SessionMessageEntity::getMessageNo))
 					.stream()
 					.map(SessionMessageEntity::getAudioObjectKey)
+					.toList();
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
+	/**
+	 * 返回 owner=1 消息的 {@code (messageNo, content, audioObjectKey)} 元组，
+	 * 供 Interview 报告任务按轮次精确关联音频，禁止按位置 zip 两个脆弱调用。
+	 */
+	public List<LearnerMessageRecord> findMessagesWithAudioObjectKeys(String sessionId) {
+		try {
+			return mapper.selectList(new LambdaQueryWrapper<SessionMessageEntity>()
+							.eq(SessionMessageEntity::getSessionId, sessionId)
+							.eq(SessionMessageEntity::getOwner, 1)
+							.orderByAsc(SessionMessageEntity::getMessageNo))
+					.stream()
+					.map(entity -> new LearnerMessageRecord(
+							entity.getMessageNo(),
+							entity.getContent(),
+							entity.getAudioObjectKey()))
 					.toList();
 		}
 		catch (RuntimeException exception) {

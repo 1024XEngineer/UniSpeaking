@@ -13,7 +13,7 @@ import static org.mockito.Mockito.doThrow;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
-import com.unispeaking.infrastructure.persistence.codec.evaluation.EvaluationJsonbCodec;
+import com.unispeaking.common.persistence.codec.evaluation.EvaluationJsonbCodec;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.CustomTurnEvaluation;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.TurnEvaluationEntity;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.PronunciationDetailsJson;

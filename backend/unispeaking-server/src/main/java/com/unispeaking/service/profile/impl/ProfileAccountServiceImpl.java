@@ -7,7 +7,7 @@ import com.unispeaking.domain.dto.profile.UpdateProfileResponse;
 import com.unispeaking.domain.po.auth.UserAccount;
 import com.unispeaking.infrastructure.config.ObjectStorageProperties;
 import com.unispeaking.infrastructure.persistence.repository.user.UserAccountRepository;
-import com.unispeaking.infrastructure.storage.ObjectStorageProvider;
+import com.unispeaking.provider.ObjectStorageProvider;
 import com.unispeaking.service.profile.ProfileAccountService;
 import com.unispeaking.component.profile.image.AvatarImageProcessor;
 import java.net.URI;

@@ -4,9 +4,12 @@ import {
   advanceIeltsDialogueState,
   advanceIeltsPart2State,
   completeCustomDialogue,
+  endInterview,
   evaluateCustomDialogueTurn,
   evaluateIeltsDialogueTurn,
   getCustomDialogueEvaluation,
+  getInterviewReport,
+  submitInterviewTurn,
 } from "../infrastructure/http/apiClient.js";
 import { createPcmWavSegmentRecorder } from "../infrastructure/audio/audioRecorder.js";
 
@@ -28,6 +31,42 @@ const SPEECH_SPEED_INSTRUCTIONS = {
 };
 
 const eventId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+export function micFailureMessage(error) {
+  const name = error?.name || "";
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "麦克风权限被拒绝，请在浏览器地址栏允许访问麦克风后重试";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "未检测到麦克风设备，请连接麦克风后重试";
+  }
+  if (name === "NotReadableError" || name === "AudioCaptureError") {
+    return "麦克风正被其他应用占用，请关闭后重试";
+  }
+  if (name === "OverconstrainedError") {
+    return "当前麦克风不满足采集要求，请更换设备后重试";
+  }
+  return null;
+}
+
+export function isMicFailure(error) {
+  return ["NotAllowedError", "SecurityError", "NotFoundError",
+    "DevicesNotFoundError", "NotReadableError", "AudioCaptureError", "OverconstrainedError"]
+    .includes(error?.name);
+}
+
+export function defaultIceServers() {
+  const configured = import.meta.env?.VITE_ICE_SERVERS;
+  if (configured) {
+    try {
+      const parsed = JSON.parse(configured);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      /* ignore malformed env value */
+    }
+  }
+  return [{ urls: "stun:stun.l.google.com:19302" }];
+}
 
 export function buildResponseCreateEvent({ id, instructions = "" } = {}) {
   const turnInstructions = String(instructions || "").trim();
@@ -251,7 +290,8 @@ export function createRealtimeClient({
   const base = normalizeBaseUrl(apiBase);
   const customSceneId = sceneType === "custom" ? sceneId : null;
   const ieltsSceneId = sceneType === "ielts" ? sceneId : null;
-  const manualTurnResponses = Boolean(customSceneId || ieltsSceneId);
+  const interviewSceneId = sceneType === "interview" ? sceneId : null;
+  const manualTurnResponses = Boolean(customSceneId || ieltsSceneId || interviewSceneId);
   let peer = null;
   let channel = null;
   let sessionSocket = null;
@@ -298,7 +338,7 @@ export function createRealtimeClient({
     const track = localStream?.getAudioTracks?.()[0];
     const enabled = started && inputReady && !muted && !paused;
     if (track) track.enabled = enabled;
-    if (enabled && (customSceneId || ieltsSceneId)) turnAudioCapture?.start();
+    if (enabled && (customSceneId || ieltsSceneId || interviewSceneId)) turnAudioCapture?.start();
   }
 
   function isDeterministicIeltsPart() {
@@ -714,6 +754,8 @@ export function createRealtimeClient({
       ? `/api/custom-scenes/${encodeURIComponent(customSceneId)}/sessions`
       : ieltsSceneId
         ? `/api/ielts/${encodeURIComponent(ieltsSceneId)}/sessions`
+        : interviewSceneId
+          ? `/api/interview-scenes/${encodeURIComponent(interviewSceneId)}/sessions`
       : "/api/scene-sessions";
     const response = await fetch(`${base}${path}`, {
       method: "POST",
@@ -998,6 +1040,59 @@ export function createRealtimeClient({
           pendingOperations.delete(stateOperation);
         }
       }
+      if (interviewSceneId && persisted) {
+        const turnNo = ++learnerTurnNo;
+        const wavAudio = await turnAudioCapture?.take();
+        const turnFormData = new FormData();
+        turnFormData.append("transcript", transcript);
+        if (wavAudio) {
+          turnFormData.append("audio", wavAudio, `interview-turn-${turnNo}.wav`);
+        }
+        const turnOperation = submitInterviewTurn(
+          interviewSceneId,
+          sessionId,
+          turnNo,
+          turnFormData,
+        );
+        pendingOperations.add(turnOperation);
+        try {
+          const turnResult = await turnOperation;
+          const state = turnResult?.state || null;
+          const reportStatus = turnResult?.reportStatus || null;
+          emit({
+            type: "local.interview_state",
+            turnNo,
+            state,
+            reportStatus,
+          });
+          if (state?.shouldEnd) {
+            inputReady = false;
+            setTrackEnabled();
+            turnAudioCapture?.stop();
+            emit({ type: "local.interview_end_requested", reportStatus });
+            void stop({ reason: "state_machine" }).catch((error) => {
+              emit({
+                type: "local.interview_end_error",
+                message: error instanceof Error ? error.message : "面试自动结束失败",
+              });
+            });
+          } else {
+            requestTurnResponse({
+              instructions: state?.currentTopic
+                ? `Current interview topic: ${state.currentTopic}. Continue the interview naturally — ask a focused follow-up within this topic, or transition to the NEXT topic in the interview flow when this one is covered. Do not skip topics.`
+                : "",
+            });
+          }
+        } catch (error) {
+          emit({
+            type: "local.turn_evaluation_error",
+            turnNo,
+            message: error instanceof Error ? error.message : "本轮面试提交失败",
+          });
+        } finally {
+          pendingOperations.delete(turnOperation);
+        }
+      }
       return;
     }
 
@@ -1043,12 +1138,15 @@ export function createRealtimeClient({
     voice = DEFAULT_VOICE,
     model = DEFAULT_MODEL,
     speechSpeed = DEFAULT_SPEECH_SPEED,
+    silenceDurationMs = null,
+    turnDetectionType = null,
+    interruptResponse = null,
   } = {}) {
     if (peer) return { sessionId };
     emit({ type: "local.connecting" });
 
     try {
-      peer = new RTCPeerConnection();
+      peer = new RTCPeerConnection({ iceServers: defaultIceServers() });
       peer.ontrack = (event) => {
         const stream = event.streams?.[0];
         if (stream) onRemoteStream(stream);
@@ -1060,9 +1158,16 @@ export function createRealtimeClient({
       localStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
-      if (customSceneId || ieltsSceneId) {
-        segmentRecorder = await createPcmWavSegmentRecorder(localStream);
-        turnAudioCapture = createTurnAudioCaptureController(segmentRecorder);
+      if (customSceneId || ieltsSceneId || interviewSceneId) {
+        try {
+          segmentRecorder = await withTimeout(
+            createPcmWavSegmentRecorder(localStream), 3_000, "录音器初始化超时");
+          turnAudioCapture = createTurnAudioCaptureController(segmentRecorder);
+        } catch (recorderError) {
+          segmentRecorder = null;
+          turnAudioCapture = null;
+          emit({ type: "local.provider_warning", message: "逐轮录音不可用，本轮评分将仅基于文本" });
+        }
       }
       const audioTrack = localStream.getAudioTracks()[0];
       audioTrack.enabled = false;
@@ -1105,9 +1210,10 @@ export function createRealtimeClient({
         model,
         speechSpeed,
         automaticTurnResponses: !manualTurnResponses,
-        silenceDurationMs: ieltsSceneId ? 3_000 : 600,
-        turnDetectionType: isDeterministicIeltsPart() ? "server_vad" : null,
-        interruptResponse: ieltsActivePart !== "PART_2",
+        // 场景覆盖：Interview 由调用方显式传 1500；IELTS 保持确定性 3000；其余回落 600
+        silenceDurationMs: silenceDurationMs ?? (ieltsSceneId ? 3_000 : 600),
+        turnDetectionType: turnDetectionType ?? (isDeterministicIeltsPart() ? "server_vad" : null),
+        interruptResponse: interruptResponse ?? (ieltsActivePart !== "PART_2"),
       });
       baseSessionInstructions = sessionConfig.instructions;
 
@@ -1118,7 +1224,13 @@ export function createRealtimeClient({
       return { sessionId, backend };
     } catch (error) {
       await stop({ notifyBackend: false, reason: "start_failed", emitEnded: false });
-      emit({ type: "local.error", message: error instanceof Error ? error.message : "无法开始实时对话" });
+      const mic = isMicFailure(error);
+      emit({
+        type: mic ? "local.mic_error" : "local.error",
+        message: mic
+          ? micFailureMessage(error) || "无法访问麦克风"
+          : error instanceof Error ? error.message : "无法开始实时对话",
+      });
       throw error;
     }
   }
@@ -1244,7 +1356,9 @@ export function createRealtimeClient({
     const endRequest = notifyBackend && sessionId
       ? customSceneId
         ? completeCustomDialogue(customSceneId, sessionId, stopTime)
-        : sendSessionFrame("end", null, stopTime)
+        : interviewSceneId
+          ? endInterview(interviewSceneId, sessionId)
+          : sendSessionFrame("end", null, stopTime)
       : Promise.resolve(null);
 
     try { channel?.close?.(); } catch { /* already closed */ }
@@ -1289,6 +1403,39 @@ export function createRealtimeClient({
           emit({
             type: "local.session_evaluation",
             evaluation: recoveredEvaluation,
+          });
+        } else {
+          completionError = error;
+        }
+      } else if (interviewSceneId && endingSessionId) {
+        let recoveredReport = null;
+        for (const delay of [0, 400, 1_200]) {
+          if (delay) {
+            await new Promise((resolve) => window.setTimeout(resolve, delay));
+          }
+          try {
+            recoveredReport = await getInterviewReport(
+              interviewSceneId,
+              endingSessionId,
+            );
+            break;
+          } catch {
+            // The end request may have persisted the report just after its
+            // response was interrupted. Retry the idempotent query briefly.
+          }
+        }
+        if (recoveredReport) {
+          completion = {
+            sceneId: interviewSceneId,
+            sessionId: endingSessionId,
+            stopTime,
+            reportStatus: recoveredReport.status || "PROCESSING",
+            report: recoveredReport.report || null,
+          };
+          emit({
+            type: "local.interview_state",
+            state: null,
+            reportStatus: completion.reportStatus,
           });
         } else {
           completionError = error;
@@ -1338,7 +1485,7 @@ export function createRealtimeClient({
       paused = false;
       muted = false;
     }
-    if (completionError && (customSceneId || ieltsSceneId)) throw completionError;
+    if (completionError && (customSceneId || ieltsSceneId || interviewSceneId)) throw completionError;
     if (emitEnded) emit({ type: "local.ended", reason, completion });
     return completion;
   }

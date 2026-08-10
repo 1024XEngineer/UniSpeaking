@@ -178,9 +178,9 @@ class EvaluationServiceImplIeltsTest {
 				evaluationRepository,
 				ieltsLlmClient,
 				authService,
-				mock(com.unispeaking.infrastructure.storage.ObjectStorageProvider.class),
+				mock(com.unispeaking.provider.ObjectStorageProvider.class),
 				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
-				mock(com.unispeaking.component.recording.IeltsRecordingStore.class));
+				mock(com.unispeaking.component.recording.RecordingStore.class));
 
 		var result = service.generateIeltsEvaluation(ieltsId, "session-p3");
 

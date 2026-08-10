@@ -13,7 +13,7 @@ import com.unispeaking.common.evaluation.parser.TurnLanguageFeedbackParser;
 import com.unispeaking.common.prompt.evaluation.ConversationReportEvaluationPromptBuilder;
 import com.unispeaking.common.prompt.evaluation.DialogueTurnEvaluationPromptBuilder;
 import com.unispeaking.common.prompt.evaluation.DialogueTurnEvaluationPromptInput;
-import com.unispeaking.infrastructure.evaluation.provider.EvaluationProviderFailureTranslator;
+import com.unispeaking.common.evaluation.EvaluationProviderFailureTranslator;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;

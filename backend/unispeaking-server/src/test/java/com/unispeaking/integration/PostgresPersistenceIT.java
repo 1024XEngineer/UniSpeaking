@@ -22,12 +22,15 @@ import com.unispeaking.domain.po.auth.UserStatus;
 import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.domain.po.profile.WeeklyLearningGoals;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
+import com.unispeaking.domain.po.scene.InterviewSceneDefinition;
+import com.unispeaking.domain.vo.scene.InterviewDifficulty;
 import com.unispeaking.domain.vo.scene.TargetRoleSummary;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.CustomTurnEvaluation;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.PronunciationWordDetail;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SceneSentenceReadingRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionEvaluationRepository;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.TurnEvaluationRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.InterviewSceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.MybatisSceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.MybatisUserAccountRepository;
@@ -77,7 +80,7 @@ class PostgresPersistenceIT {
 		registry.add("spring.sql.init.mode", () -> "never");
 		registry.add(
 				"mybatis-plus.type-handlers-package",
-				() -> "com.unispeaking.infrastructure.persistence.typehandler");
+				() -> "com.unispeaking.common.persistence.typehandler");
 	}
 
 	@Autowired
@@ -109,6 +112,9 @@ class PostgresPersistenceIT {
 
 	@Autowired
 	private SceneSentenceReadingRepository sentenceReadingRepository;
+
+	@Autowired
+	private InterviewSceneRepository interviewSceneRepository;
 
 	@BeforeEach
 	void clearBusinessTables() {
@@ -178,7 +184,7 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(List.of("1"), migrationVersions);
+		assertEquals(List.of("1", "2", "9"), migrationVersions);
 		assertEquals(303, topicCount);
 		assertEquals(1771, questionCount);
 		assertEquals(0, questionLikeTitleCount);
@@ -510,6 +516,45 @@ class PostgresPersistenceIT {
 	}
 
 	@Test
+	void roundTripsInterviewSceneWithJsonbAndOwnershipFilter() {
+		String userId = "00000000-0000-0000-0000-000000000001";
+		InterviewSceneDefinition definition = new InterviewSceneDefinition(
+				"interview_it1",
+				userId,
+				"{\"jobTitle\":\"Java Engineer\",\"responsibilities\":[\"build services\"],\"qualificationRequirements\":[\"Java 21\"]}",
+				"Java Engineer 岗位职责与任职要求",
+				"{\"candidateOverview\":\"candidate overview\",\"roleOverview\":\"role overview\",\"interviewTopics\":[\"自我介绍\",\"经历与项目\",\"团队协作\",\"职业规划\"]}",
+				InterviewDifficulty.STANDARD,
+				"interview system prompt",
+				null,
+				null,
+				null);
+		interviewSceneRepository.save(definition);
+
+		InterviewSceneDefinition loaded = interviewSceneRepository
+				.findById("interview_it1")
+				.orElseThrow();
+		assertEquals("interview_it1", loaded.sceneId());
+		assertEquals(userId, loaded.userId());
+		assertEquals(InterviewDifficulty.STANDARD, loaded.difficulty());
+		assertEquals("interview system prompt", loaded.scenePrompt());
+		assertTrue(loaded.confirmedMaterialJson().contains("Java Engineer"));
+		assertTrue(loaded.interviewContextJson().contains("自我介绍"));
+		assertNull(loaded.deletedAt());
+		assertEquals("object", jdbcTemplate.queryForObject(
+				"SELECT jsonb_typeof(confirmed_material) FROM interview_scene WHERE scene_id = ?",
+				String.class,
+				"interview_it1"));
+		// 归属辅助：非所有者查不到；软删后查不到。
+		assertTrue(interviewSceneRepository.findOwnedById("interview_it1", userId).isPresent());
+		assertTrue(interviewSceneRepository.findOwnedById("interview_it1", "other-user").isEmpty());
+		jdbcTemplate.update(
+				"UPDATE interview_scene SET deleted_at = CURRENT_TIMESTAMP WHERE scene_id = ?",
+				"interview_it1");
+		assertTrue(interviewSceneRepository.findById("interview_it1").isEmpty());
+	}
+
+	@Test
 	void baselinesLegacySchemaAtZeroAndKeepsExistingData() {
 		String schema = "legacy_ci";
 		jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
@@ -557,7 +602,7 @@ class PostgresPersistenceIT {
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
 		assertEquals(
-				List.of("0", "1"),
+				List.of("0", "1", "2", "9"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version

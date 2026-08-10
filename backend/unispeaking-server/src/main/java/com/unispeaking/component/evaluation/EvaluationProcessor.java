@@ -22,6 +22,7 @@ import com.unispeaking.domain.po.session.PracticeSessionRecord;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.scene.IeltsPart;
 import com.unispeaking.domain.vo.scene.IeltsMode;
+import com.unispeaking.domain.vo.scene.IeltsStage;
 import com.unispeaking.domain.vo.scene.RecommendedExpression;
 import com.unispeaking.domain.vo.session.SessionStatus;
 import com.unispeaking.common.logging.RealtimeFlowLog;
@@ -39,11 +40,11 @@ import com.unispeaking.infrastructure.persistence.repository.scene.SceneReposito
 import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPracticeRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.IeltsRepository;
 import com.unispeaking.infrastructure.config.ObjectStorageProperties;
-import com.unispeaking.infrastructure.storage.ObjectStorageProvider;
+import com.unispeaking.provider.ObjectStorageProvider;
 import com.unispeaking.component.session.ActiveSessionRegistry;
 import com.unispeaking.service.auth.AuthService;
-import com.unispeaking.component.recording.IeltsRecordingStore;
-import com.unispeaking.service.scene.impl.IeltsSceneFlowServiceImpl;
+import com.unispeaking.component.recording.RecordingStore;
+import com.unispeaking.service.scene.IeltsSceneFlowService;
 import com.unispeaking.common.evaluation.validation.PcmWavValidator;
 import com.unispeaking.common.evaluation.calculation.ConversationScoreCalculation;
 import com.unispeaking.common.evaluation.calculation.ConversationScoreCalculator;
@@ -80,6 +81,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -105,14 +107,14 @@ public class EvaluationProcessor {
 	private final SceneSentenceReadingRepository sceneSentenceReadingRepository;
 	private final IeltsPracticeRepository ieltsPracticeRepository;
 	private final IeltsRepository ieltsRepository;
-	private final IeltsSceneFlowServiceImpl sceneFlowService;
+	private final IeltsSceneFlowService sceneFlowService;
 	private final PracticeSessionRepository practiceSessionRepository;
 	private final IeltsEvaluationRepository ieltsEvaluationRepository;
 	private final IeltsEvaluationLlmClient ieltsLlmClient;
 	private final AuthService authService;
 	private final ObjectStorageProvider objectStorage;
 	private final ObjectStorageProperties objectStorageProperties;
-	private final IeltsRecordingStore ieltsRecordingStore;
+	private final RecordingStore ieltsRecordingStore;
 	private final Object[] ieltsEvaluationLocks =
 			new Object[IELTS_EVALUATION_LOCK_STRIPES];
 
@@ -127,14 +129,14 @@ public class EvaluationProcessor {
 			SceneSentenceReadingRepository sceneSentenceReadingRepository,
 			IeltsPracticeRepository ieltsPracticeRepository,
 			IeltsRepository ieltsRepository,
-			IeltsSceneFlowServiceImpl sceneFlowService,
+			IeltsSceneFlowService sceneFlowService,
 			PracticeSessionRepository practiceSessionRepository,
 			IeltsEvaluationRepository ieltsEvaluationRepository,
 			IeltsEvaluationLlmClient ieltsLlmClient,
 			AuthService authService,
 			ObjectStorageProvider objectStorage,
 			ObjectStorageProperties objectStorageProperties,
-			IeltsRecordingStore ieltsRecordingStore) {
+			@Qualifier("ieltsRecordingStore") RecordingStore ieltsRecordingStore) {
 		this.pronunciationClient = Objects.requireNonNull(
 				pronunciationClient,
 				"pronunciationClient must not be null");
@@ -1305,7 +1307,13 @@ public class EvaluationProcessor {
 		}
 		// Compatibility fallback for active sessions created before IELTS Part
 		// became immutable session metadata.
-		return sceneFlowService.currentPart(practice.ieltsId());
+		return switch (sceneFlowService.current(practice.ieltsId())) {
+			case PART1 -> IeltsPart.PART_1;
+			case PART2 -> IeltsPart.PART_2;
+			case PART3 -> IeltsPart.PART_3;
+			case COMPLETED -> throw new EvaluationException(
+					EvaluationErrorCode.SESSION_NOT_FOUND);
+		};
 	}
 
 	private TurnScoreContribution toContribution(

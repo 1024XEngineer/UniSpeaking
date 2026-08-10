@@ -94,7 +94,7 @@ public class SessionLifecycleManager {
 
 	/**
 	 * Shared lifecycle hook used by concrete scene implementations without
-	 * expanding the stable SessionService interface.
+	 * expanding the scene session service interfaces.
 	 */
 	public void registerSceneSession(AbstractSceneSession session) {
 		UUID userId = validateSceneSessionBinding(session);
@@ -122,7 +122,7 @@ public class SessionLifecycleManager {
 	/**
 	 * Shared terminal lifecycle hook for concrete scenes.
 	 * It intentionally remains an implementation capability rather than a
-	 * SessionService contract method.
+	 * scene session service contract method.
 	 */
 	public void terminateSceneSession(
 			String userId,

@@ -1,6 +1,8 @@
 package com.unispeaking;
 
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
+import com.unispeaking.infrastructure.persistence.repository.scene.InterviewSceneRepository;
+import com.unispeaking.infrastructure.persistence.repository.evaluation.InterviewReportRepository;
 import com.unispeaking.component.evaluation.EvaluationProcessor;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -16,6 +18,12 @@ class UniSpeakingApplicationTests {
 
 	@MockitoBean
 	private SceneRepository sceneRepository;
+
+	@MockitoBean
+	private InterviewSceneRepository interviewSceneRepository;
+
+	@MockitoBean
+	private InterviewReportRepository interviewReportRepository;
 
 	@Test
 	void contextLoads() {

@@ -4,7 +4,7 @@ import com.qiniu.storage.BucketManager;
 import com.qiniu.storage.UploadManager;
 import com.qiniu.util.Auth;
 import com.unispeaking.common.exception.BusinessException;
-import com.unispeaking.infrastructure.storage.ObjectStorageProvider;
+import com.unispeaking.provider.ObjectStorageProvider;
 import com.unispeaking.infrastructure.storage.qiniu.QiniuObjectStorageProvider;
 import java.net.URI;
 import java.time.Duration;

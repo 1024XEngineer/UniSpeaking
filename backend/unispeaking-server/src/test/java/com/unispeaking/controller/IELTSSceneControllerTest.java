@@ -1,6 +1,6 @@
 package com.unispeaking.controller;
 
-import com.unispeaking.component.recording.IeltsRecordingStore;
+import com.unispeaking.component.recording.RecordingStore;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -23,6 +23,7 @@ import com.unispeaking.domain.dto.scene.IeltsTrainingResponse;
 import com.unispeaking.domain.dto.scene.SceneFlowResponse;
 import com.unispeaking.domain.dto.session.StartIeltsDialogueRequest;
 import com.unispeaking.domain.dto.session.StartIeltsSessionResponse;
+import com.unispeaking.domain.dto.session.StartIeltsSessionCommand;
 import com.unispeaking.domain.dto.session.IeltsPart2StateResponse;
 import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.scene.IeltsContent;
@@ -51,7 +52,7 @@ class IELTSSceneControllerTest {
 
 	@Test
 	void recordingEndpointIsExposedByIeltsController() throws Exception {
-		IeltsRecordingStore recordingStore = mock(IeltsRecordingStore.class);
+		RecordingStore recordingStore = mock(RecordingStore.class);
 		when(recordingStore.loadOwned("session_1", "turn-1.wav"))
 				.thenReturn(new ByteArrayResource(new byte[] {1, 2, 3}));
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(
@@ -76,7 +77,7 @@ class IELTSSceneControllerTest {
 		IeltsSceneServiceImpl sceneService = mock(IeltsSceneServiceImpl.class);
 		IeltsSceneFlowServiceImpl flowService = mock(IeltsSceneFlowServiceImpl.class);
 		IeltsSessionServiceImpl sessionService = mock(IeltsSessionServiceImpl.class);
-		when(sessionService.advancePart2State(
+		when(flowService.advancePart2State(
 				"ielts_2",
 				"session_2",
 				IeltsPart2Event.PREPARATION_COMPLETE)).thenReturn(
@@ -92,7 +93,7 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationServiceImpl.class),
 						sessionService,
-						mock(IeltsRecordingStore.class))).build();
+						mock(RecordingStore.class))).build();
 
 		mvc.perform(post("/api/ielts/ielts_2/sessions/session_2/part2/state")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -103,7 +104,7 @@ class IELTSSceneControllerTest {
 				.andExpect(jsonPath("$.data.phase").value("LONG_TURN"))
 				.andExpect(jsonPath("$.data.completed").value(false));
 
-		verify(sessionService).advancePart2State(
+		verify(flowService).advancePart2State(
 				"ielts_2",
 				"session_2",
 				IeltsPart2Event.PREPARATION_COMPLETE);
@@ -129,7 +130,7 @@ class IELTSSceneControllerTest {
 						flowService,
 						evaluationService,
 						mock(IeltsSessionServiceImpl.class),
-						mock(IeltsRecordingStore.class))).build();
+						mock(RecordingStore.class))).build();
 
 		mvc.perform(get("/api/ielts/settings"))
 				.andExpect(status().isOk())
@@ -180,7 +181,7 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationServiceImpl.class),
 						mock(IeltsSessionServiceImpl.class),
-						mock(IeltsRecordingStore.class))).build();
+						mock(RecordingStore.class))).build();
 
 		mvc.perform(get("/api/ielts/topics")
 						.param("part", "PART_1")
@@ -228,7 +229,7 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationServiceImpl.class),
 						mock(IeltsSessionServiceImpl.class),
-						mock(IeltsRecordingStore.class))).build();
+						mock(RecordingStore.class))).build();
 
 		mvc.perform(post("/api/ielts/generate")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -262,7 +263,7 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationServiceImpl.class),
 						mock(IeltsSessionServiceImpl.class),
-						mock(IeltsRecordingStore.class))).build();
+						mock(RecordingStore.class))).build();
 
 		mvc.perform(post("/api/ielts/flows")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -292,7 +293,8 @@ class IELTSSceneControllerTest {
 				"qwen3.5-omni-flash-realtime",
 				"Harvey",
 				true);
-		when(sessionService.startSession("ielts_123", request)).thenReturn(
+		when(sessionService.startSession(
+				new StartIeltsSessionCommand("ielts_123", request))).thenReturn(
 				new StartIeltsSessionResponse(
 						"ielts_123",
 						"Weekends",
@@ -314,7 +316,7 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationServiceImpl.class),
 						sessionService,
-						mock(IeltsRecordingStore.class))).build();
+						mock(RecordingStore.class))).build();
 
 		mvc.perform(post("/api/ielts/ielts_123/sessions")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -336,6 +338,7 @@ class IELTSSceneControllerTest {
 				.andExpect(jsonPath("$.data.currentStage").value("PART_1"))
 				.andExpect(jsonPath("$.data.answerSdp").value("answer-sdp"));
 
-		verify(sessionService).startSession("ielts_123", request);
+		verify(sessionService).startSession(
+				new StartIeltsSessionCommand("ielts_123", request));
 	}
 }

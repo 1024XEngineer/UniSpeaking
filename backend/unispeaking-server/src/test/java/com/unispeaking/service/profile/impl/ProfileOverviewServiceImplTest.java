@@ -16,7 +16,7 @@ import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionE
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.UserAccountRepository;
-import com.unispeaking.infrastructure.storage.ObjectStorageProvider;
+import com.unispeaking.provider.ObjectStorageProvider;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;

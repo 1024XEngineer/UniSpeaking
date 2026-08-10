@@ -50,6 +50,12 @@ dist/
 logs/
 data/
 
+### Architecture design working files (not committed) ###
+docs/arch-design/
+
+### Local editor (Obsidian) ###
+.obsidian/
+
 ### VS Code ###
 .vscode/
 

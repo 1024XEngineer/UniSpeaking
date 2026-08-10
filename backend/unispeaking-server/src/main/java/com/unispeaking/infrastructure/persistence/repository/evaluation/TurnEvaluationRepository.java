@@ -1,7 +1,7 @@
 package com.unispeaking.infrastructure.persistence.repository.evaluation;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.unispeaking.infrastructure.persistence.codec.evaluation.EvaluationJsonbCodec;
+import com.unispeaking.common.persistence.codec.evaluation.EvaluationJsonbCodec;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.PronunciationDetailsJson;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.CustomTurnEvaluation;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.PronunciationWordDetail;

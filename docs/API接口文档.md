@@ -349,6 +349,9 @@
 
 `IeltsPart2StateResponse`：`sceneId`、`sessionId`、`phase`、`completed`、`controlInstruction`。
 
+以上状态接口由 `IeltsSceneFlowService` 处理。`IeltsSessionService` 只负责启动会话、
+保存消息和结束会话，不负责题目推进或 Part 2 阶段转换。
+
 ### 7.3 IELTS 评分、历史和录音
 
 | 方法 | 路径 | 请求 | 响应 |
@@ -423,13 +426,9 @@
 
 这些是后端内部稳定接口，不是 HTTP 路由。具体场景实现可以添加自身业务方法，但不得修改公共接口来迁就单一场景。
 
-### 10.1 Scene
+### 10.1 场景准备职责与 SceneFlowService
 
 ```java
-public interface SceneService<REQUEST, RESPONSE> {
-    RESPONSE generate(REQUEST request);
-}
-
 public interface SceneFlowService<S> {
     S start(String sceneId);
     S current(String sceneId);
@@ -438,21 +437,20 @@ public interface SceneFlowService<S> {
 }
 ```
 
-`SceneService` 负责完成场景准备，包括权限、次数、题目/内容、Prompt 和场景持久化。`SceneFlowService` 只负责阶段状态，不启动会话、不评分。
+`SceneService` 公共基类已删除：场景准备是**职责**（权限、次数、题目/内容、Prompt 和场景持久化），由各场景专用接口自身声明 `generate`（如 `CustomSceneService.generate`）。`SceneFlowService` 只负责阶段状态，不启动会话、不评分。
 
-### 10.2 Session
+### 10.2 会话生命周期形状
 
 ```java
-public interface SessionService {
-    StartSessionResponse startSession(StartSessionCommand command);
+public interface CustomSessionService {
+    StartSceneSessionResponse startSession(StartCustomSessionCommand command);
     void addMessage(String sessionId, Message message);
-    void endSession(String sessionId);
-    SessionDetail getSession(String sessionId);
-    List<SessionDetail> getBySceneId(String sceneId);
+    CompleteCustomSceneDialogueResponse endSession(EndCustomSessionCommand command);
 }
+// FreeChatSessionService / IeltsSessionService 声明同形 startSession/addMessage/endSession
 ```
 
-Session 只管理已准备场景的会话生命周期和消息，不调用认证服务生成场景，也不重复场景模块的准备逻辑。
+`SessionService` 公共基类已删除：接受 WS 实时帧的场景会话接口必须各自声明 `startSession/addMessage/endSession` 生命周期形状（`addMessage` 由 `SessionMessageDispatcher` 消费）。会话只管理已准备场景的会话生命周期和消息，不调用认证服务生成场景，也不重复场景模块的准备逻辑。会话详情和按场景查询是内部协作能力，由 `SessionLifecycleManager` 提供，不属于场景会话接口。
 
 ### 10.3 Evaluation
 
@@ -497,3 +495,27 @@ IELTS 专项训练/模考：
 6. 每阶段后台评分；最后调用 evaluation 获取汇总
 7. `/evaluations` 用于学习资产列表、报告、趋势和录音链接
 
+Interview（英文面试，第 4 场景，逐步实现中）：
+
+1. `POST /api/interview-scenes/prepare-materials` — 解析 JD/简历 → 脱敏 → LLM-1 整理 → `{material}` 草稿
+   - multipart：`resumeText`/`resumeFile`（PDF/DOCX 文本，`.doc` 拒绝）、`jobDescriptionText`/`jobDescriptionImage`（单张图片 OCR）；JD 文本与图片二选一。
+   - 失败码：`DOCUMENT_FORMAT_UNSUPPORTED`→422（`.doc`/图片简历）、`OCR_UNAVAILABLE`→503、`OCR_TIMEOUT`→504、`OCR_PROCESS_FAILED/RESPONSE_INVALID`→502。
+2. `POST /api/interview-scenes` — 生成面试场景（body：`{material, difficulty}` → `{sceneId, scenePrompt}`）
+   - `material` 需含非空 `responsibilities`/`qualificationRequirements`；`difficulty` ∈ EASY/STANDARD/HARD。
+   - 失败码：`INTERVIEW_MATERIAL_INVALID`→400、`INTERVIEW_REQUEST_INVALID`→400、`INTERVIEW_SCENE_ACCESS_DENIED`→403、`INTERVIEW_SCENE_NOT_FOUND`→404、`INTERVIEW_SCENE_PERSISTENCE_FAILED`→500、`INTERVIEW_CONTEXT_LLM_RESPONSE_INVALID`→400。
+3. `POST /api/interview-scenes/{sceneId}/sessions` — 启动实时会话（body 复用 `StartCustomSceneDialogueRequest`：offerSdp/provider/model/voice/translationEnabled）
+   - 首面/复练统一入口（body 无 material/difficulty，结构上禁改材料/难度）；复练计入门槛（当日 COMPLETED 5 次，独立计数）。
+   - 失败码：`INTERVIEW_SCENE_NOT_FOUND`→404、`INTERVIEW_SCENE_ACCESS_DENIED`→403、`INTERVIEW_DAILY_LIMIT_REACHED`→429。
+4. `POST /api/interview-scenes/{sceneId}/sessions/{sessionId}/turns/{turnNo}` — 逐轮提交（multipart：`transcript` 必填 + `audio` 可空）
+   - 幂等粒度 `(sessionId, turnNo)`：重复请求返回已记录状态；同轮内容不一致 → 409 `INTERVIEW_TURN_CONTENT_MISMATCH`；WS 消息在途 → 409 `INTERVIEW_TURN_MESSAGE_PENDING`（可重试）；轮次空洞/非正 → 400 `INTERVIEW_TURN_OUT_OF_ORDER`；会话已结束 → 409 `INTERVIEW_SESSION_ENDED`。
+   - 返回 `{state: {shouldEnd, completedTopicCount, coveredTopicCount, currentTopic}, reportStatus}`；`shouldEnd=true` 时前端停录音关连接，`reportStatus=PROCESSING`。
+5. `POST /api/interview-scenes/{sceneId}/sessions/{sessionId}/end` — 用户主动结束（幂等结束编排，自动/手动只允许一次 end + 一次报告任务）→ `{sessionId, reportStatus}`。
+6. `GET /api/interview-scenes/{sceneId}/sessions/{sessionId}/report` — 轮询报告：`{sessionId, sceneId, status: PROCESSING/COMPLETED/FAILED, report, failureReason}`（PROCESSING 时 report 为空）。
+7. `POST /api/interview-scenes/{sceneId}/sessions/{sessionId}/report/retry` — FAILED→PROCESSING 重试（CAS 幂等；瞬时失败自动重试 1 次后留手动）。
+8. `POST /api/interview-scenes/{sceneId}/sessions/{sessionId}/ai-audio` — AI「实际播放的」音频上报（`RecordingStore` 落盘，TTL 清扫）。
+9. `GET /api/interview-scenes/{sceneId}/sessions/{sessionId}/recording` — 总音频回放（`audio/wav`，`Cache-Control: private, no-store`，归属校验；V1 为按轮序拼接的用户录音段）。
+10. `GET /api/interview-scenes/{sceneId}/sessions/{sessionId}/recordings/{fileName:.+}` — 分段录音读取（内部/调试，私有缓存）。
+11. `DELETE /api/interview-scenes/{sceneId}` — 后端删除：软删 `interview_scene` + 物理清该 scene 音频；practice_session/session_message/interview_report 保留（审计 + 学习日历），下游访问经软删过滤 404/403。
+12. 失败码补充：`INTERVIEW_REPORT_NOT_FOUND`→404、`INTERVIEW_RECORDING_NOT_FOUND`→404、`INTERVIEW_REPORT_PERSISTENCE_FAILED`→500、`INTERVIEW_AUDIO_INVALID`→400、`INTERVIEW_SESSION_ENDED`→409。
+13. `GET /api/interview-scenes/assets` — 面试学习资产列表：`List<InterviewAssetItem>`（`sceneId/jobTitle/difficulty/latestSessionId/latestReportStatus/latestOverallScore/latestPracticedAt/practiceCount/createdAt`），复练入口。
+14. `GET /api/interview-scenes/ocr/availability` — OCR 可用性探测：`{available: boolean}`（本地未配置 PaddleOCR 时为 false，前端据此禁用 JD 图片上传）。

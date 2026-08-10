@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
 import com.unispeaking.domain.dto.session.CompleteCustomSceneDialogueResponse;
+import com.unispeaking.domain.dto.session.EndCustomSessionCommand;
 import com.unispeaking.service.asset.LearningAssetService;
 import com.unispeaking.service.evaluation.impl.CustomEvaluationServiceImpl;
 import com.unispeaking.service.scene.impl.CustomSceneFlowServiceImpl;
@@ -38,10 +39,11 @@ class CustomSceneCompletionEndpointTest {
 				"本次场景练习已完成。",
 				List.of("表达清楚"),
 				List.of("增加词汇变化"));
-		when(customSessionService.completeSession(
-				eq("custom_2001"),
-				eq("scene_5001"),
-				eq("2026-07-30T10:42:00Z")))
+		when(customSessionService.endSession(eq(
+				new EndCustomSessionCommand(
+						"custom_2001",
+						"scene_5001",
+						"2026-07-30T10:42:00Z"))))
 				.thenReturn(new CompleteCustomSceneDialogueResponse(
 						"custom_2001",
 						"scene_5001",
@@ -72,9 +74,10 @@ class CustomSceneCompletionEndpointTest {
 				.andExpect(jsonPath("$.data.evaluation.naturalnessScore").value(83.0))
 				.andExpect(jsonPath("$.data.evaluation.finalScore").value(83.0));
 
-		verify(customSessionService).completeSession(
-				"custom_2001",
-				"scene_5001",
-				"2026-07-30T10:42:00Z");
+		verify(customSessionService).endSession(
+				new EndCustomSessionCommand(
+						"custom_2001",
+						"scene_5001",
+						"2026-07-30T10:42:00Z"));
 	}
 }

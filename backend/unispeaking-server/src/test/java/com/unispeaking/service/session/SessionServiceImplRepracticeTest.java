@@ -9,12 +9,11 @@ import static org.mockito.Mockito.when;
 import com.unispeaking.component.session.ActiveSessionRegistry;
 import com.unispeaking.component.session.RealtimeSessionCoordinator;
 import com.unispeaking.component.session.SessionLifecycleManager;
-import com.unispeaking.component.statemachine.IeltsPart2StateMachine;
-import com.unispeaking.component.statemachine.IeltsQuestionStateMachine;
 import com.unispeaking.domain.po.session.CustomSceneSession;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
+import com.unispeaking.service.scene.IeltsSceneFlowService;
 import com.unispeaking.service.scene.impl.IeltsSceneServiceImpl;
 import com.unispeaking.service.session.impl.IeltsSessionServiceImpl;
 import org.junit.jupiter.api.Test;
@@ -53,13 +52,15 @@ class SessionServiceImplRepracticeTest {
 		CustomSceneSession session = ieltsSession("ielts_session_1", userId, "ielts_part_1");
 		when(lifecycle.requireSceneType(userId, session.getId()))
 				.thenReturn(SceneType.IELTS_SCENE);
+		when(lifecycle.requireOwnerId(session.getId()))
+				.thenReturn(userId);
 		when(coordinator.requireOwnedSession(userId, session.getId()))
 				.thenReturn(session);
 		IeltsSessionServiceImpl service = ieltsService(scenes, lifecycle, coordinator);
 
-		service.endSession(userId, session.getId(), null);
+		service.endSession(session.getId());
 
-		verify(lifecycle).endSession(userId, session.getId(), null);
+		verify(lifecycle).endSession(session.getId());
 		verify(scenes).completeDialogue("ielts_part_1", userId);
 	}
 
@@ -73,13 +74,15 @@ class SessionServiceImplRepracticeTest {
 		CustomSceneSession session = ieltsSession("ielts_session_2", userId, "ielts_mock_1");
 		when(lifecycle.requireSceneType(userId, session.getId()))
 				.thenReturn(SceneType.IELTS_SCENE);
+		when(lifecycle.requireOwnerId(session.getId()))
+				.thenReturn(userId);
 		when(coordinator.requireOwnedSession(userId, session.getId()))
 				.thenReturn(session);
 		IeltsSessionServiceImpl service = ieltsService(scenes, lifecycle, coordinator);
 
-		service.endSession(userId, session.getId(), null);
+		service.endSession(session.getId());
 
-		verify(lifecycle).endSession(userId, session.getId(), null);
+		verify(lifecycle).endSession(session.getId());
 		verify(scenes).completeDialogue("ielts_mock_1", userId);
 	}
 
@@ -89,10 +92,9 @@ class SessionServiceImplRepracticeTest {
 			RealtimeSessionCoordinator coordinator) {
 		return new IeltsSessionServiceImpl(
 				scenes,
+				mock(IeltsSceneFlowService.class),
 				lifecycle,
-				coordinator,
-				new IeltsQuestionStateMachine(),
-				new IeltsPart2StateMachine());
+				coordinator);
 	}
 
 	private CustomSceneSession ieltsSession(

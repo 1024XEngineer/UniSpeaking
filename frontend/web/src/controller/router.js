@@ -24,6 +24,8 @@ export const APP_PAGES = [
   "assets",
   "ielts",
   "ielts-assets",
+  "interview",
+  "interview-assets",
   "profile",
   "insights",
   "membership",
@@ -46,6 +48,8 @@ export const PAGE_PATHS = {
   about: "/about",
   ielts: "/ielts",
   "ielts-assets": "/ielts/assets",
+  interview: "/interview",
+  "interview-assets": "/interview/assets",
 };
 
 export const paths = {
@@ -87,6 +91,12 @@ export const paths = {
       history: "/ielts/assets/history",
       trends: "/ielts/assets/trends",
     },
+  },
+  interview: {
+    root: "/interview",
+    assets: "/interview/assets",
+    session: (sceneId) => `/interview/scenes/${encodeURIComponent(sceneId)}/session`,
+    report: (sceneId, sessionId) => `/interview/scenes/${encodeURIComponent(sceneId)}/session/${encodeURIComponent(sessionId)}/report`,
   },
   help: {
     root: "/help",
@@ -256,6 +266,38 @@ export function parseAboutRoute(pathname) {
   });
 }
 
+export function parseInterviewRoute(pathname) {
+  const path = normalizePath(pathname);
+  const segments = path.split("/").filter(Boolean);
+  if (segments[0] !== "interview") return null;
+  if (segments.length === 1) {
+    return appRoute("interview", { interviewRoute: { screen: "home" } });
+  }
+  if (segments[1] === "assets") {
+    return appRoute("interview-assets", {
+      interviewRoute: { area: "assets" },
+      canonicalPath: paths.interview.assets,
+    });
+  }
+  if (segments[1] === "scenes" && segments.length >= 3) {
+    const sceneId = safeDecode(segments[2]);
+    if (segments[3] === "session") {
+      if (segments.length >= 6 && segments[5] === "report") {
+        return appRoute("interview", {
+          interviewRoute: { screen: "report", sceneId, sessionId: safeDecode(segments[4]) },
+        });
+      }
+      return appRoute("interview", {
+        interviewRoute: { screen: "session", sceneId },
+      });
+    }
+  }
+  return appRoute("interview", {
+    interviewRoute: { screen: "home" },
+    canonicalPath: paths.interview.root,
+  });
+}
+
 function previewRoute(preview) {
   if (!preview) return null;
   if (preview === "teacher") return { ...baseRoute, flow: "teacher", page: "conversation" };
@@ -322,6 +364,8 @@ export function resolveRoute(locationLike = window.location) {
   if (helpRoute) return helpRoute;
   const aboutRoute = parseAboutRoute(pathname);
   if (aboutRoute) return aboutRoute;
+  const interviewRoute = parseInterviewRoute(pathname);
+  if (interviewRoute) return interviewRoute;
 
   const page = Object.entries(PAGE_PATHS).find(([, routePath]) => routePath === pathname)?.[0];
   if (page) return appRoute(page, {

@@ -9,7 +9,7 @@ import com.unispeaking.infrastructure.persistence.repository.evaluation.SessionE
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.UserAccountRepository;
-import com.unispeaking.infrastructure.storage.ObjectStorageProvider;
+import com.unispeaking.provider.ObjectStorageProvider;
 import com.unispeaking.service.profile.ProfileOverviewService;
 import com.unispeaking.component.profile.PracticeDurationCalculator;
 import java.net.URI;

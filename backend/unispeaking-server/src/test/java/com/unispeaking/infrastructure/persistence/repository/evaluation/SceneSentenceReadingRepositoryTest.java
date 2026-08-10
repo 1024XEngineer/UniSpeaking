@@ -14,7 +14,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SceneSentenceReadingRepository;
-import com.unispeaking.infrastructure.persistence.codec.evaluation.EvaluationJsonbCodec;
+import com.unispeaking.common.persistence.codec.evaluation.EvaluationJsonbCodec;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.SentenceEvaluationEntity;
 import com.unispeaking.infrastructure.persistence.mapper.evaluation.SentenceEvaluationMapper;
 import com.unispeaking.infrastructure.persistence.mapper.scene.SceneSentenceMapper;

@@ -10,15 +10,13 @@ import com.unispeaking.domain.dto.evaluation.IeltsEvaluationHistoryItem;
 import com.unispeaking.domain.dto.evaluation.IeltsEvaluationReport;
 import com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult;
 import com.unispeaking.domain.dto.session.SessionDetail;
-import com.unispeaking.service.evaluation.EvaluationService;
+import com.unispeaking.service.evaluation.IeltsEvaluationService;
 import java.math.BigDecimal;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
-public class IeltsEvaluationServiceImpl implements EvaluationService<
-		IeltsEvaluationReport,
-		IeltsEvaluationDetail> {
+public class IeltsEvaluationServiceImpl implements IeltsEvaluationService {
 
 	private final EvaluationProcessor delegate;
 	private final SessionLifecycleManager sessionLifecycle;
@@ -48,16 +46,19 @@ public class IeltsEvaluationServiceImpl implements EvaluationService<
 		return new IeltsEvaluationDetail(toReport(result), result);
 	}
 
+	@Override
 	public IeltsEvaluationResult generateEvaluation(
 			String ieltsId,
 			String sessionId) {
 		return delegate.generateIeltsEvaluation(ieltsId, sessionId);
 	}
 
+	@Override
 	public BigDecimal getLatestEstimatedScore() {
 		return delegate.getLatestIeltsEstimatedScore();
 	}
 
+	@Override
 	public List<IeltsEvaluationHistoryItem> getHistory() {
 		return delegate.getIeltsEvaluationHistory();
 	}

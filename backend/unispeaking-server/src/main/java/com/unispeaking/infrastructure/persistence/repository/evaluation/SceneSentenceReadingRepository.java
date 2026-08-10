@@ -1,7 +1,7 @@
 package com.unispeaking.infrastructure.persistence.repository.evaluation;
 
 import com.unispeaking.domain.dto.scene.LearningContentItem;
-import com.unispeaking.infrastructure.persistence.codec.evaluation.EvaluationJsonbCodec;
+import com.unispeaking.common.persistence.codec.evaluation.EvaluationJsonbCodec;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.ReadingDetailsJson;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.SentenceEvaluationEntity;
 import com.unispeaking.infrastructure.persistence.entity.scene.SceneSentenceEntity;

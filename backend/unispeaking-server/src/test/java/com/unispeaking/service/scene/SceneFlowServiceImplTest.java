@@ -5,6 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.unispeaking.component.session.RealtimeSessionCoordinator;
+import com.unispeaking.component.statemachine.IeltsPart2StateMachine;
+import com.unispeaking.component.statemachine.IeltsQuestionStateMachine;
+import com.unispeaking.component.statemachine.ScenarioDialogueStateMachine;
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.po.scene.IeltsPracticeRecord;
@@ -40,8 +44,28 @@ class SceneFlowServiceImplTest {
 				CustomSceneFlowServiceImpl.class));
 		assertTrue(SceneFlowService.class.isAssignableFrom(
 				IeltsSceneFlowServiceImpl.class));
+		assertTrue(CustomSceneFlowService.class.isAssignableFrom(
+				CustomSceneFlowServiceImpl.class));
+		assertTrue(IeltsSceneFlowService.class.isAssignableFrom(
+				IeltsSceneFlowServiceImpl.class));
 		assertTrue(!SceneFlowService.class.isAssignableFrom(
 				FreeChatSceneServiceImpl.class));
+		Set<String> customMethods = List.of(
+				CustomSceneFlowService.class.getDeclaredMethods()).stream()
+				.map(java.lang.reflect.Method::getName)
+				.collect(Collectors.toSet());
+		Set<String> ieltsMethods = List.of(
+				IeltsSceneFlowService.class.getDeclaredMethods()).stream()
+				.map(java.lang.reflect.Method::getName)
+				.collect(Collectors.toSet());
+		assertTrue(customMethods.containsAll(Set.of(
+				"advanceDialogueState",
+				"getDialogueState")));
+		assertTrue(ieltsMethods.containsAll(Set.of(
+				"advanceDialogueState",
+				"getDialogueState",
+				"advancePart2State",
+				"getPart2State")));
 	}
 
 	@Test
@@ -50,7 +74,10 @@ class SceneFlowServiceImplTest {
 		SceneGenerationResponse scene = scene("custom_def456");
 		when(repository.findGeneratedById(scene.sceneId()))
 				.thenReturn(Optional.of(scene));
-		CustomSceneFlowServiceImpl service = new CustomSceneFlowServiceImpl(repository);
+		CustomSceneFlowServiceImpl service = new CustomSceneFlowServiceImpl(
+				repository,
+				mock(ScenarioDialogueStateMachine.class),
+				mock(RealtimeSessionCoordinator.class));
 
 		assertEquals(CustomStage.WORD, service.start(scene.sceneId()));
 		assertEquals("membership", service.content(scene.sceneId()).getFirst().englishText());
@@ -70,7 +97,7 @@ class SceneFlowServiceImplTest {
 				IeltsPart.PART_2);
 		when(repository.findPractice(practice.ieltsId()))
 				.thenReturn(Optional.of(practice));
-		IeltsSceneFlowServiceImpl service = new IeltsSceneFlowServiceImpl(repository);
+		IeltsSceneFlowServiceImpl service = ieltsFlow(repository);
 
 		assertEquals(IeltsStage.PART2, service.start(practice.ieltsId()));
 		assertEquals(IeltsStage.COMPLETED, service.next(practice.ieltsId()));
@@ -86,7 +113,7 @@ class SceneFlowServiceImplTest {
 				null);
 		when(repository.findPractice(practice.ieltsId()))
 				.thenReturn(Optional.of(practice));
-		IeltsSceneFlowServiceImpl service = new IeltsSceneFlowServiceImpl(repository);
+		IeltsSceneFlowServiceImpl service = ieltsFlow(repository);
 
 		assertEquals(IeltsStage.PART1, service.start(practice.ieltsId()));
 		assertEquals(IeltsStage.PART2, service.next(practice.ieltsId()));
@@ -101,6 +128,15 @@ class SceneFlowServiceImplTest {
 				List.of(item("phrase_1", "ask about")),
 				List.of(item("sentence_1", "Could you help me?")),
 				"dialogue prompt");
+	}
+
+	private IeltsSceneFlowServiceImpl ieltsFlow(
+			IeltsPracticeRepository repository) {
+		return new IeltsSceneFlowServiceImpl(
+				repository,
+				mock(IeltsQuestionStateMachine.class),
+				mock(IeltsPart2StateMachine.class),
+				mock(RealtimeSessionCoordinator.class));
 	}
 
 	private IeltsPracticeRecord practice(
