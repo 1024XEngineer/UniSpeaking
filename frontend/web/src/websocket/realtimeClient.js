@@ -1078,9 +1078,11 @@ export function createRealtimeClient({
             });
           } else {
             requestTurnResponse({
-              instructions: state?.currentTopic
-                ? `Current interview topic: ${state.currentTopic}. Continue the interview naturally — ask a focused follow-up within this topic, or transition to the NEXT topic in the interview flow when this one is covered. Do not skip topics.`
-                : "",
+              instructions:
+                state?.controlInstruction ||
+                (state?.currentTopic
+                  ? `Current interview topic: ${state.currentTopic}. Continue the interview naturally — ask a focused follow-up within this topic, or transition to the NEXT topic in the interview flow when this one is covered. Do not skip topics.`
+                  : ""),
             });
           }
         } catch (error) {

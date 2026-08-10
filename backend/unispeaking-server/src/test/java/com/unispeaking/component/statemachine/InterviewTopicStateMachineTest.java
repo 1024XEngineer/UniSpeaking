@@ -344,6 +344,117 @@ class InterviewTopicStateMachineTest {
 		assertNull(state.currentTopic());
 	}
 
+	@Test
+	void naturalEndFiresAfterAllTopicsCoveredAndLastTopicFollowedUp() {
+		List<String> topics = topics(
+				"自我介绍", "项目经历", "技术栈", "团队协作", "高并发问题解决");
+		stateMachine.start("session-1", topics, InterviewDifficulty.STANDARD);
+
+		InterviewTopicState last = null;
+		int turnNo = 1;
+		for (String topic : topics) {
+			stateMachine.advance(
+					"session-1",
+					turnNo++,
+					new InterviewTopicEvent(topic, false));
+			last = stateMachine.advance(
+					"session-1",
+					turnNo++,
+					new InterviewTopicEvent(topic, false));
+		}
+
+		assertEquals(10, turnNo - 1);
+		assertTrue(last.shouldEnd());
+		assertEquals(5, last.coveredTopicCount());
+	}
+
+	@Test
+	void singleAnswerPerTopicDoesNotEnd() {
+		List<String> topics = topics(
+				"自我介绍", "项目经历", "技术栈", "团队协作", "高并发问题解决");
+		stateMachine.start("session-1", topics, InterviewDifficulty.STANDARD);
+
+		InterviewTopicState last = null;
+		for (int turnNo = 1; turnNo <= topics.size(); turnNo++) {
+			last = stateMachine.advance(
+					"session-1",
+					turnNo,
+					new InterviewTopicEvent(topics.get(turnNo - 1), false));
+		}
+
+		assertFalse(last.shouldEnd());
+		assertEquals(5, last.coveredTopicCount());
+		assertTrue(last.controlInstruction().contains("Current interview topic"));
+		assertFalse(last.controlInstruction().contains("Move on to the NEXT topic"));
+	}
+
+	@Test
+	void maxTurnBackstopForcesEnd() {
+		List<String> topics = topics(
+				"自我介绍", "项目经历", "技术栈", "团队协作", "高并发问题解决");
+		stateMachine.start("session-1", topics, InterviewDifficulty.STANDARD);
+
+		InterviewTopicState before = null;
+		for (int turnNo = 1; turnNo <= 17; turnNo++) {
+			before = stateMachine.advance(
+					"session-1",
+					turnNo,
+					new InterviewTopicEvent("自我介绍", false));
+		}
+		assertFalse(before.shouldEnd());
+
+		InterviewTopicState last = stateMachine.advance(
+				"session-1",
+				18,
+				new InterviewTopicEvent("自我介绍", false));
+
+		assertTrue(last.shouldEnd());
+	}
+
+	@Test
+	void controlInstructionTracksSatisfiedTopic() {
+		List<String> topics = topics(
+				"自我介绍", "项目经历", "技术栈", "团队协作", "高并发问题解决");
+		stateMachine.start("session-1", topics, InterviewDifficulty.STANDARD);
+
+		InterviewTopicState first = stateMachine.advance(
+				"session-1",
+				1,
+				new InterviewTopicEvent("自我介绍", false));
+		assertTrue(first.controlInstruction().contains("Current interview topic"));
+		assertFalse(first.controlInstruction().contains("Move on to the NEXT topic"));
+
+		InterviewTopicState satisfied = stateMachine.advance(
+				"session-1",
+				2,
+				new InterviewTopicEvent("自我介绍", false));
+		assertTrue(satisfied.controlInstruction().contains("Move on to the NEXT topic"));
+	}
+
+	@Test
+	void closingInstructionAfterAllCoveredButMandatoryNotSatisfied() {
+		// 4 主题中仅"自我介绍"为必选：全部覆盖且最后主题满足后规则③不触发，进入收尾指令而非结束
+		List<String> topics = topics("自我介绍", "技术栈", "职业规划", "薪资期望");
+		stateMachine.start("session-1", topics, InterviewDifficulty.STANDARD);
+
+		InterviewTopicState last = null;
+		int turnNo = 1;
+		for (String topic : topics) {
+			stateMachine.advance(
+					"session-1",
+					turnNo++,
+					new InterviewTopicEvent(topic, false));
+			last = stateMachine.advance(
+					"session-1",
+					turnNo++,
+					new InterviewTopicEvent(topic, false));
+		}
+
+		assertFalse(last.shouldEnd());
+		assertTrue(last.controlInstruction().contains("The interview is complete"));
+		assertTrue(last.controlInstruction().contains("thank the candidate"));
+	}
+
 	private List<String> topics(String... values) {
 		return List.of(values);
 	}
