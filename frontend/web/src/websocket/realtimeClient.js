@@ -1111,11 +1111,24 @@ export function createRealtimeClient({
     const completedAssistantMessage = extractCompletedAssistantMessage(event);
     if (completedAssistantMessage) {
       scheduleIeltsInputRecovery();
-      await addSessionMessage(
-        0,
-        completedAssistantMessage.text,
-        completedAssistantMessage.id,
-      );
+      if (scenarioCompletionPending && interviewSceneId) {
+        // 收尾期间会话已被后端终态化：跳过 WS 落库（否则 Session not found），仅展示收尾语
+        const closingText = String(completedAssistantMessage.text || "").trim();
+        if (closingText) {
+          emit({
+            type: "local.transcript.final",
+            owner: 0,
+            itemId: completedAssistantMessage.id || eventId("transcript"),
+            text: closingText,
+          });
+        }
+      } else {
+        await addSessionMessage(
+          0,
+          completedAssistantMessage.text,
+          completedAssistantMessage.id,
+        );
+      }
     }
     if (event.type === "response.done") {
       responsePending = false;

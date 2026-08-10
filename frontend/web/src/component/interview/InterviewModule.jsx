@@ -449,6 +449,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
   const [error, setError] = useState("");
   const [paused, setPaused] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [lines, setLines] = useState([]);
   const [currentTopic, setCurrentTopic] = useState("");
   const [completedTopicCount, setCompletedTopicCount] = useState(0);
@@ -527,10 +528,12 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     } else if (event.type === "local.interview_closing") {
       endingRef.current = true;
       setEnding(true);
+      setClosing(true);
       setStatus("面试官正在做本次面试的收尾…");
     } else if (event.type === "local.interview_end_requested") {
       endingRef.current = true;
       setEnding(true);
+      setClosing(false);
       setStatus("面试已结束，正在生成报告");
       onEndInterviewRef.current?.(sceneId, sessionIdRef.current, event.reportStatus || null);
     } else if (event.type === "local.interview_end_error") {
@@ -630,7 +633,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     <main className="conversation call call--subtitles interview-call">
       <audio ref={remoteAudioRef} autoPlay />
       <div className="conversation__top interview-call-top">
-        <div><button className="ielts-back" onClick={() => setExitOpen(true)}><ArrowLeft />返回场景广场</button><strong>模拟面试</strong><span>{ending ? "面试计时已停止，正在生成报告" : currentTopic ? `当前主题：${currentTopic}` : status}</span></div>
+        <div><button className="ielts-back" onClick={() => setExitOpen(true)}><ArrowLeft />返回场景广场</button><strong>模拟面试</strong><span>{closing ? "面试收尾中…" : ending ? "面试计时已停止，正在生成报告" : currentTopic ? `当前主题：${currentTopic}` : status}</span></div>
         <div className="interview-call-progress"><span>已覆盖 {completedTopicCount} 个主题</span><button className="round-control interview-call-exit" disabled={ending} onClick={() => setExitOpen(true)} aria-label="退出面试"><X /></button></div>
       </div>
       <section className="call__stage">
@@ -639,7 +642,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
           <div className="listening-state listening-state--compact">
             <InterviewWaveform active={!ending && !paused && !error} compact />
             <InterviewTimer paused={paused} state={ending || error ? "ended" : "active"} />
-            {!ending && <span>{status}</span>}
+            {(!ending || closing) && <span>{status}</span>}
           </div>
         </div>
         <InterviewTranscript lines={lines} status={status} transcriptRef={transcriptRef} />
