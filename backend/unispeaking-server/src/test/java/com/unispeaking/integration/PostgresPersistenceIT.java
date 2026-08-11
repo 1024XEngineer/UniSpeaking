@@ -12,6 +12,7 @@ import com.unispeaking.common.evaluation.model.PronunciationAssessmentResult;
 import com.unispeaking.common.evaluation.model.PronunciationPhonemeResult;
 import com.unispeaking.common.evaluation.model.PronunciationWordResult;
 import com.unispeaking.common.evaluation.model.WordReadStatus;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
@@ -33,6 +34,10 @@ import com.unispeaking.infrastructure.persistence.repository.evaluation.TurnEval
 import com.unispeaking.infrastructure.persistence.repository.scene.InterviewSceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.MybatisSceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
+import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
+import com.unispeaking.admin.usage.adapters.jdbc.JdbcOfficialUsageSink;
+import com.unispeaking.admin.usage.domain.ModelUsage;
+import com.unispeaking.admin.usage.domain.OfficialUsageRecord;
 import com.unispeaking.infrastructure.persistence.repository.user.MybatisUserAccountRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.MybatisUserProfileRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.WeeklyLearningGoalRepository;
@@ -105,6 +110,9 @@ class PostgresPersistenceIT {
 	private SessionMessageRepository sessionMessageRepository;
 
 	@Autowired
+	private PracticeSessionRepository practiceSessionRepository;
+
+	@Autowired
 	private TurnEvaluationRepository turnEvaluationRepository;
 
 	@Autowired
@@ -120,6 +128,13 @@ class PostgresPersistenceIT {
 	void clearBusinessTables() {
 		jdbcTemplate.execute("""
 				TRUNCATE TABLE
+				    official_usage_records,
+				    auth_email_challenges,
+				    user_sessions,
+				    admin_sessions,
+				    user_entitlements,
+				    app_users,
+				    admin_accounts,
 				    user_feedback,
 				    ielts_part_evaluation,
 				    ielts_evaluation,
@@ -184,12 +199,41 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(List.of("1", "2", "9"), migrationVersions);
+		assertEquals(List.of("1", "2", "9", "10", "11", "12", "13"), migrationVersions);
 		assertEquals(303, topicCount);
 		assertEquals(1771, questionCount);
 		assertEquals(0, questionLikeTitleCount);
 		assertEquals(3, helpTableCount);
 		assertEquals("jsonb", successFactorType);
+		assertEquals(
+				1,
+				jdbcTemplate.queryForObject(
+						"""
+						SELECT COUNT(*)
+						FROM information_schema.columns
+						WHERE table_schema = 'public'
+						  AND table_name = 'practice_session'
+						  AND column_name = 'provider_session_id'
+						""",
+						Integer.class));
+		assertTrue(jdbcTemplate.queryForObject(
+				"""
+				SELECT indexdef LIKE 'CREATE UNIQUE INDEX%'
+				FROM pg_indexes
+				WHERE schemaname = 'public'
+				  AND indexname = 'idx_practice_session_provider_session_id'
+				""",
+				Boolean.class));
+		assertEquals(
+				1,
+				jdbcTemplate.queryForObject(
+						"""
+						SELECT COUNT(*)
+						FROM information_schema.tables
+						WHERE table_schema = 'public'
+						  AND table_name = 'official_usage_records'
+						""",
+						Integer.class));
 	}
 
 	@Test
@@ -287,6 +331,42 @@ class PostgresPersistenceIT {
 						""",
 						Integer.class,
 						userId.toString()));
+	}
+
+	@Test
+	void bindsProviderSessionAndMatchesOfficialSlsUsageWithoutCrossUserAmbiguity() {
+		UUID firstUserId = UUID.randomUUID();
+		UUID secondUserId = UUID.randomUUID();
+		jdbcTemplate.update(
+				"insert into \"user\" (id, username, password_hash) values (?::uuid, ?, 'hash')",
+				firstUserId.toString(), "sls-first@example.com");
+		jdbcTemplate.update(
+				"insert into \"user\" (id, username, password_hash) values (?::uuid, ?, 'hash')",
+				secondUserId.toString(), "sls-second@example.com");
+		jdbcTemplate.update(
+				"""
+				insert into practice_session
+				    (session_id, user_id, scene_type, status, started_at)
+				values ('local-sls-1', ?::uuid, 'FREE_CHAT', 'ACTIVE', current_timestamp),
+				       ('local-sls-2', ?::uuid, 'FREE_CHAT', 'ACTIVE', current_timestamp)
+				""",
+				firstUserId.toString(), secondUserId.toString());
+
+		practiceSessionRepository.bindProviderSession("local-sls-1", firstUserId, "sess_qwen_sls_1");
+		var imported = new JdbcOfficialUsageSink(jdbcTemplate).importRecords(List.of(
+				new OfficialUsageRecord(
+						"request-sls-1", "sess_qwen_sls_1", 1000, 2500, "200",
+						"qwen3.5-omni-flash-realtime", "workspace", "apikey", "webrtc",
+						new ModelUsage(1, 100, 70, 30, 20, 50, 10, 20))));
+
+		assertEquals(1, imported.matched());
+		assertEquals("sess_qwen_sls_1", jdbcTemplate.queryForObject(
+				"select provider_session_id from practice_session where session_id = 'local-sls-1'",
+				String.class));
+		BusinessException duplicateBinding = assertThrows(BusinessException.class,
+				() -> practiceSessionRepository.bindProviderSession(
+						"local-sls-2", secondUserId, "sess_qwen_sls_1"));
+		assertEquals("PRACTICE_SESSION_PERSISTENCE_FAILED", duplicateBinding.code());
 	}
 
 	@Test
@@ -602,7 +682,7 @@ class PostgresPersistenceIT {
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
 		assertEquals(
-				List.of("0", "1", "2", "9"),
+				List.of("0", "1", "2", "9", "10", "11", "12", "13"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version

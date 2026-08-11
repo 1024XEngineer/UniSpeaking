@@ -65,14 +65,12 @@ import {
   evaluateSentenceReading,
   generateCustomScene,
   getAchievementOverview,
+  getAccessToken,
   getCurrentUser,
   getLearningAsset,
   getLearningAssets,
   getProfileOverview,
   getUserPreference,
-  hasAuthSession,
-  login,
-  register,
   synthesizeSpeech,
   translateSceneText,
   translateSessionText,
@@ -93,7 +91,15 @@ import { LearningInsights } from "../component/profile/LearningInsights.jsx";
 import { AccountSecurity } from "../component/profile/AccountSecurity.jsx";
 import { AboutProduct } from "../component/profile/AboutProduct.jsx";
 import { ProductLegalDocument } from "../component/profile/ProductLegalDocument.jsx";
+import { HumanVerification } from "../HumanVerification.jsx";
 import { hrefForPage, paths, resolveRoute } from "./router.js";
+import {
+  issueEmailChallenge,
+  loginWithPassword,
+  logoutUser,
+  registerWithEmail,
+  validateRegistrationCredentials,
+} from "../userAuthApi.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
 const pronunciationAudioCache = new Map();
@@ -596,25 +602,124 @@ function Splash({ onStart, onLogin }) {
 function Auth({ mode: initialMode, onBack, onSuccess }) {
   const [mode, setMode] = useState(initialMode || "signup");
   const [showPassword, setShowPassword] = useState(false);
-  const [username, setUsername] = useState("");
+  const [step, setStep] = useState("credentials");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [challengeId, setChallengeId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const submit = async (event) => {
+  const registrationDraftRef = useRef({ email: "", password: "" });
+  const captchaButtonId = "signup-email-challenge";
+
+  const switchMode = () => {
+    setMode(mode === "signup" ? "login" : "signup");
+    setStep("credentials");
+    setCode("");
+    setChallengeId("");
+    setError("");
+    registrationDraftRef.current = { email: "", password: "" };
+  };
+
+  const submitCredentials = async (event) => {
     event.preventDefault();
+    if (mode === "signup") return;
     setSubmitting(true);
     setError("");
     try {
-      const auth = mode === "signup"
-        ? await register({ username, password })
-        : await login({ username, password });
-      await onSuccess(auth, mode);
+      const auth = await loginWithPassword(email.trim(), password);
+      await onSuccess(auth, "login");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "认证请求失败");
     } finally {
       setSubmitting(false);
     }
   };
+
+  const verifyAndIssueChallenge = async (captchaVerifyParam) => {
+    setError("");
+    const normalizedEmail = email.trim();
+    const validationCode = validateRegistrationCredentials(normalizedEmail, password);
+    if (validationCode === "INVALID_EMAIL") {
+      setError("请输入有效邮箱地址。");
+      return { captchaResult: true, bizResult: false };
+    }
+    if (validationCode === "WEAK_PASSWORD") {
+      setError("密码至少需要 12 位字符。");
+      return { captchaResult: true, bizResult: false };
+    }
+    registrationDraftRef.current = { email: normalizedEmail, password };
+    setSubmitting(true);
+    try {
+      const challenge = await issueEmailChallenge(normalizedEmail, captchaVerifyParam);
+      setChallengeId(challenge.challengeId);
+      setStep("verification");
+      return { captchaResult: true, bizResult: true };
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "请求失败，请稍后重试。");
+      return {
+        captchaResult: requestError?.code !== "HUMAN_VERIFICATION_REQUIRED",
+        bizResult: false,
+      };
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const submitVerification = async (event) => {
+    event.preventDefault();
+    const draft = registrationDraftRef.current;
+    const validationCode = validateRegistrationCredentials(draft.email, draft.password);
+    if (validationCode) {
+      setError(validationCode === "INVALID_EMAIL" ? "请输入有效邮箱地址。" : "密码至少需要 12 位字符。");
+      setStep("credentials");
+      setChallengeId("");
+      setCode("");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      const auth = await registerWithEmail({
+        email: draft.email,
+        password: draft.password,
+        challengeId,
+        code,
+      });
+      await onSuccess(auth, "signup");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "验证码校验失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (step === "verification") {
+    return (
+      <main className="auth-layout">
+        <aside className="auth-layout__aside"><Brand /><div><p className="eyebrow">ONE STEP LEFT</p><h2>先验证邮箱，<br />再开始第一次对话。</h2></div><p>语你说 · UniSpeaking</p></aside>
+        <section className="auth-panel verify-panel">
+          <div className="verify-icon"><EnvelopeSimple /></div>
+          <p className="eyebrow">CHECK YOUR INBOX</p>
+          <h1>验证你的邮箱</h1>
+          <p>验证码已发送至 <strong>{email}</strong>，10 分钟内有效。</p>
+          <form className="verification-form" onSubmit={submitVerification}>
+            <label htmlFor="verification-code">6 位验证码</label>
+            <input id="verification-code" className="verification-code" inputMode="numeric" autoComplete="one-time-code" maxLength="6" pattern="[0-9]{6}" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} required autoFocus />
+            {error && <p className="auth-error" role="alert">{error}</p>}
+            <Button type="submit" disabled={submitting || code.length !== 6}>{submitting ? "正在验证…" : "完成注册"}</Button>
+          </form>
+          <button className="text-button verify-back" type="button" onClick={() => {
+            setStep("credentials");
+            setError("");
+            setChallengeId("");
+            setCode("");
+          }}>返回修改邮箱</button>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="auth-layout">
       <aside className="auth-layout__aside">
@@ -625,14 +730,15 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
       <section className="auth-panel">
         <button className="back-link" onClick={onBack}><ArrowLeft />返回</button>
         <div className="auth-panel__heading"><h1>{mode === "signup" ? "创建账号" : "欢迎回来"}</h1><p>{mode === "signup" ? "用邮箱注册，开始你的口语练习。" : "继续上一次的学习进度。"}</p></div>
-        <form onSubmit={submit}>
-          <label>邮箱<input type="email" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="name@example.com" maxLength="254" required /></label>
-          <label>密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 6 位字符" minLength="6" maxLength="72" required /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>
+        <form onSubmit={submitCredentials}>
+          <label>邮箱<input type="email" value={email} onChange={(event) => { const nextEmail = event.target.value; setEmail(nextEmail); registrationDraftRef.current.email = nextEmail.trim(); }} placeholder="name@example.com" autoComplete="email" maxLength="254" required disabled={submitting} /></label>
+          <label>密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => { const nextPassword = event.target.value; setPassword(nextPassword); registrationDraftRef.current.password = nextPassword; }} placeholder="至少 12 位字符" autoComplete={mode === "signup" ? "new-password" : "current-password"} minLength="12" maxLength="200" required disabled={submitting} /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>
+          {mode === "signup" && <HumanVerification buttonId={captchaButtonId} onVerify={verifyAndIssueChallenge} />}
           {mode === "login" && <button type="button" className="forgot-link">忘记密码？</button>}
-          {error && <p className="call-error">{error}</p>}
-          <Button className="auth-submit" type="submit" disabled={submitting}>{submitting ? "请稍候" : mode === "signup" ? "注册" : "登录"}</Button>
+          {error && <p className="auth-error" role="alert">{error}</p>}
+          <Button id={mode === "signup" ? captchaButtonId : undefined} className="auth-submit" type="submit" disabled={submitting}>{submitting ? "正在处理…" : mode === "signup" ? "发送邮箱验证码" : "登录"}</Button>
         </form>
-        <p className="auth-switch">{mode === "signup" ? "已经有账号？" : "还没有账号？"}<button onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setError(""); }}>{mode === "signup" ? "直接登录" : "创建账号"}</button></p>
+        <p className="auth-switch">{mode === "signup" ? "已经有账号？" : "还没有账号？"}<button onClick={switchMode}>{mode === "signup" ? "直接登录" : "创建账号"}</button></p>
         <div className="auth-help">
           <span>登录或注册遇到问题？</span>
           <a href={paths.help.root}><Lifebuoy weight="bold" />访问帮助中心</a>
@@ -2601,7 +2707,8 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     const bootstrapAuth = async () => {
-      if (!hasAuthSession()) {
+      const bootstrapToken = getAccessToken();
+      if (!bootstrapToken) {
         if (!["splash", "auth"].includes(initialRoute.flow) && !initialRoute.publicAccess) {
           navigate(paths.auth.login, { authMode: "login" }, true);
         }
@@ -2626,7 +2733,7 @@ export function App() {
           navigate(paths.auth.teacher, {}, true);
         }
       } catch {
-        clearAuthSession();
+        clearAuthSession(bootstrapToken);
         if (!cancelled && !["splash", "auth"].includes(initialRoute.flow) && !initialRoute.publicAccess) {
           navigate(paths.auth.login, { authMode: "login" }, true);
         }
@@ -2717,9 +2824,9 @@ export function App() {
       return false;
     }
   };
-  const logout = () => {
+  const logout = async () => {
     clearAchievementNotifications();
-    clearAuthSession();
+    await logoutUser().catch(() => clearAuthSession());
     setUser(null);
     setProfileOverview(null);
     goSplash();

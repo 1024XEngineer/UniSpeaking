@@ -1,11 +1,12 @@
 # Deployment and configuration
 
-The local deploy stack contains four services:
+The local deploy stack contains five services:
 
 - `postgres`: local PostgreSQL database for development;
 - `backend`: Spring Boot API and Qwen signaling integration;
 - `frontend`: React client;
-- `nginx`: reverse proxy for the frontend and `/backend/` API route.
+- `admin`: React/Vite governance console served at `/admin/`;
+- `nginx`: reverse proxy for both frontends and `/backend/`/`/api/` API routes.
 
 ## Secret file
 
@@ -207,7 +208,8 @@ docker compose --env-file env/.env up --build
 ```
 
 Compose passes `env/.env` into the backend container. `VITE_BACKEND_URL` is a
-frontend build-time value and defaults to `/backend`. Both REST requests and
+frontend build-time value and defaults to `/backend`; it is used by both the
+user authentication flow and the admin console. Both REST requests and
 the authenticated session WebSocket preserve this prefix, so nginx routes them
 to the backend service.
 

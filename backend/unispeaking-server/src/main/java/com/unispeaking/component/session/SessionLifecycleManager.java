@@ -19,10 +19,12 @@ import com.unispeaking.domain.vo.session.SessionStatus;
 import com.unispeaking.domain.vo.session.SpeakerType;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
+import com.unispeaking.component.policy.UserEntitlementPolicy;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @Component
 public class SessionLifecycleManager {
@@ -30,14 +32,25 @@ public class SessionLifecycleManager {
 	private final ActiveSessionRegistry activeSessionRegistry;
 	private final SessionMessageRepository sessionMessageRepository;
 	private final PracticeSessionRepository practiceSessionRepository;
+	private final UserEntitlementPolicy entitlementPolicy;
 
 	public SessionLifecycleManager(
 			ActiveSessionRegistry activeSessionRegistry,
 			SessionMessageRepository sessionMessageRepository,
 			PracticeSessionRepository practiceSessionRepository) {
+		this(activeSessionRegistry, sessionMessageRepository, practiceSessionRepository, null);
+	}
+
+	@Autowired
+	public SessionLifecycleManager(
+			ActiveSessionRegistry activeSessionRegistry,
+			SessionMessageRepository sessionMessageRepository,
+			PracticeSessionRepository practiceSessionRepository,
+			UserEntitlementPolicy entitlementPolicy) {
 		this.activeSessionRegistry = activeSessionRegistry;
 		this.sessionMessageRepository = sessionMessageRepository;
 		this.practiceSessionRepository = practiceSessionRepository;
+		this.entitlementPolicy = entitlementPolicy;
 	}
 
 	public StartSessionResponse startSession(StartSessionCommand command) {
@@ -69,8 +82,9 @@ public class SessionLifecycleManager {
 			String userId,
 			SceneType sceneType,
 			String sceneId,
-			String prompt) {
+		String prompt) {
 		requireUserUuid(userId);
+		if (entitlementPolicy != null) entitlementPolicy.assertAllowed(userId);
 		SceneType type = sceneType == null ? SceneType.FREE_CHAT : sceneType;
 		String sessionId = SessionIdGenerator.generate(type);
 		AbstractSceneSession session = type == SceneType.FREE_CHAT
@@ -90,6 +104,28 @@ public class SessionLifecycleManager {
 		return new StartSessionResponse(
 				session.getId(),
 				session.getCreatedAt().toString());
+	}
+
+	public void bindProviderSession(String userId, String sessionId, String providerSessionId) {
+		if (providerSessionId == null || providerSessionId.isBlank()) {
+			throw new BusinessException("PROVIDER_SESSION_ID_REQUIRED", "服务商会话标识不能为空");
+		}
+		String normalizedProviderSessionId = providerSessionId.trim();
+		if (normalizedProviderSessionId.length() > 128) {
+			throw new BusinessException("PROVIDER_SESSION_ID_INVALID", "服务商会话标识长度无效");
+		}
+		AbstractSceneSession session = requireOwnedSession(userId, sessionId);
+		String existingProviderSessionId = session.getProviderSessionId();
+		if (existingProviderSessionId != null
+				&& !existingProviderSessionId.equals(normalizedProviderSessionId)) {
+			throw new BusinessException("PROVIDER_SESSION_CONFLICT", "当前会话已绑定其他服务商会话");
+		}
+		practiceSessionRepository.bindProviderSession(
+				sessionId,
+				UUID.fromString(session.getUserId()),
+				normalizedProviderSessionId);
+		session.bindProviderSession(normalizedProviderSessionId);
+		activeSessionRegistry.save(session);
 	}
 
 	/**
@@ -152,6 +188,9 @@ public class SessionLifecycleManager {
 			}
 			if (terminalStatus == SessionStatus.COMPLETED) {
 				practiceSessionRepository.complete(sessionId, ownerId, endedAt);
+				if (entitlementPolicy != null) {
+					entitlementPolicy.recordUsage(userId, session.getCreatedAt(), endedAt);
+				}
 				session.complete(endedAt);
 			}
 			else {

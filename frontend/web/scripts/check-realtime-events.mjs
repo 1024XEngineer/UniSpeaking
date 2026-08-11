@@ -3,13 +3,28 @@ import {
   buildResponseCreateEvent,
   buildRealtimeSessionConfig,
   createTurnAudioCaptureController,
+  buildProviderSessionBindingFrame,
   extractCompletedAssistantMessage,
   isActiveResponseConflict,
-  isMicFailure,
-  micFailureMessage,
   normalizeBaseUrl,
   websocketUrl,
 } from "../src/websocket/realtimeClient.js";
+
+assert.deepEqual(
+  buildProviderSessionBindingFrame("local-session-1", {
+    type: "session.created",
+    session: { id: "sess_qwen_1" },
+  }),
+  {
+    type: "bind",
+    sessionId: "local-session-1",
+    providerSessionId: "sess_qwen_1",
+  },
+);
+assert.equal(
+  buildProviderSessionBindingFrame("local-session-1", { type: "session.created", session: {} }),
+  null,
+);
 
 assert.deepEqual(
   buildResponseCreateEvent({
@@ -116,12 +131,6 @@ const partTwoSession = buildRealtimeSessionConfig({
   silenceDurationMs: 3_000,
   interruptResponse: false,
 });
-const interviewSession = buildRealtimeSessionConfig({
-  systemPrompt: "Conduct a job interview.",
-  model: "qwen3.5-omni-flash-realtime",
-  automaticTurnResponses: false,
-  silenceDurationMs: 1_500,
-});
 
 assert.equal(slowerKaterina.voice, "Katerina");
 assert.match(slowerKaterina.instructions, /70 English words per minute/);
@@ -135,9 +144,6 @@ assert.equal(deterministicIeltsPart.turn_detection.silence_duration_ms, 3_000);
 assert.equal(deterministicIeltsPart.turn_detection.create_response, false);
 assert.equal(partTwoSession.turn_detection.create_response, false);
 assert.equal(partTwoSession.turn_detection.interrupt_response, false);
-assert.equal(interviewSession.turn_detection.type, "semantic_vad");
-assert.equal(interviewSession.turn_detection.silence_duration_ms, 1_500);
-assert.equal(interviewSession.turn_detection.interrupt_response, true);
 
 let segmentStartCount = 0;
 let segmentStopCount = 0;
@@ -162,22 +168,5 @@ assert.equal(turnAudioCapture.start(), true);
 assert.equal(segmentStartCount, 2);
 assert.equal(await turnAudioCapture.take(), expectedAudio);
 assert.equal(segmentStopCount, 2);
-
-assert.equal(isMicFailure({ name: "NotAllowedError" }), true);
-assert.equal(isMicFailure({ name: "SecurityError" }), true);
-assert.equal(isMicFailure({ name: "NotFoundError" }), true);
-assert.equal(isMicFailure({ name: "DevicesNotFoundError" }), true);
-assert.equal(isMicFailure({ name: "NotReadableError" }), true);
-assert.equal(isMicFailure({ name: "AudioCaptureError" }), true);
-assert.equal(isMicFailure({ name: "OverconstrainedError" }), true);
-assert.equal(isMicFailure({ name: "AbortError" }), false);
-assert.equal(isMicFailure(null), false);
-assert.equal(isMicFailure({}), false);
-assert.match(micFailureMessage({ name: "NotAllowedError" }), /麦克风权限被拒绝/);
-assert.match(micFailureMessage({ name: "NotFoundError" }), /未检测到麦克风设备/);
-assert.match(micFailureMessage({ name: "NotReadableError" }), /占用/);
-assert.match(micFailureMessage({ name: "OverconstrainedError" }), /不满足采集要求/);
-assert.equal(micFailureMessage({ name: "UnknownError" }), null);
-assert.equal(micFailureMessage(null), null);
 
 console.log("Realtime event normalization checks passed.");

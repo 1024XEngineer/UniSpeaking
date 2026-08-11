@@ -8,6 +8,9 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * 独立配额策略（派生计数，无需每日重置 job）：按 {@code practice_session} 当日
@@ -21,9 +24,18 @@ import org.springframework.stereotype.Component;
 public class DailyQuotaPolicy {
 
 	private final PracticeSessionRepository practiceSessionRepository;
+	private final JdbcTemplate jdbc;
 
 	public DailyQuotaPolicy(PracticeSessionRepository practiceSessionRepository) {
+		this(practiceSessionRepository, null);
+	}
+
+	@Autowired
+	public DailyQuotaPolicy(
+			PracticeSessionRepository practiceSessionRepository,
+			JdbcTemplate jdbc) {
 		this.practiceSessionRepository = practiceSessionRepository;
+		this.jdbc = jdbc;
 	}
 
 	/**
@@ -40,6 +52,7 @@ public class DailyQuotaPolicy {
 					"SCENE_TYPE_REQUIRED",
 					"配额校验必须指定场景类型");
 		}
+		assertGovernanceEntitlement(ownerId);
 		long completedToday = practiceSessionRepository.countCompletedOnDate(
 				ownerId,
 				sceneType,
@@ -49,6 +62,36 @@ public class DailyQuotaPolicy {
 					InterviewErrorCode.INTERVIEW_DAILY_LIMIT_REACHED,
 					"今日练习次数已达上限，请明天再试");
 		}
+	}
+
+	private void assertGovernanceEntitlement(UUID userId) {
+		if (jdbc == null) return;
+		jdbc.update("update user_entitlements set used_seconds = 0, "
+				+ "quota_date = current_date, updated_at = current_timestamp "
+				+ "where user_id = ? and (quota_date is null or quota_date <> current_date)",
+				userId);
+		try {
+			Entitlement entitlement = jdbc.queryForObject(
+					"select status, quota_seconds, used_seconds from user_entitlements "
+							+ "where user_id = ?",
+					(rs, row) -> new Entitlement(
+							rs.getString("status"),
+							rs.getDouble("quota_seconds"),
+							rs.getDouble("used_seconds")),
+					userId);
+			if (entitlement == null) return;
+			if ("suspended".equalsIgnoreCase(entitlement.status())) {
+				throw new BusinessException("USER_ENTITLEMENT_SUSPENDED", "当前账号已暂停练习权限");
+			}
+			if (entitlement.usedSeconds() >= entitlement.quotaSeconds()) {
+				throw new BusinessException("USER_QUOTA_EXHAUSTED", "今日练习额度已用完");
+			}
+		} catch (EmptyResultDataAccessException ignored) {
+			// Accounts created before governance rollout keep the legacy product defaults.
+		}
+	}
+
+	private record Entitlement(String status, double quotaSeconds, double usedSeconds) {
 	}
 
 	private UUID requireUserId(String userId) {

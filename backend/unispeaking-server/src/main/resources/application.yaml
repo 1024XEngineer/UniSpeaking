@@ -1,13 +1,25 @@
 spring:
   application:
     name: unispeaking_server
+  datasource:
+    url: ${DATABASE_URL:${UNISPEAKING_DB_URL:jdbc:postgresql://localhost:5432/unispeaking}}
+    username: ${DATABASE_USERNAME:${UNISPEAKING_DB_USERNAME:postgres}}
+    password: ${DATABASE_PASSWORD:${UNISPEAKING_DB_PASSWORD:}}
+    driver-class-name: org.postgresql.Driver
+  mail:
+    host: ${AUTH_EMAIL_SMTP_HOST:smtpdm.aliyun.com}
+    port: ${AUTH_EMAIL_SMTP_PORT:465}
+    username: ${AUTH_EMAIL_SMTP_USERNAME:}
+    password: ${AUTH_EMAIL_SMTP_PASSWORD:}
+    test-connection: false
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.ssl.enable: ${AUTH_EMAIL_SMTP_SSL:true}
+      mail.smtp.connectiontimeout: ${AUTH_EMAIL_SMTP_CONNECTION_TIMEOUT_MS:10000}
+      mail.smtp.timeout: ${AUTH_EMAIL_SMTP_TIMEOUT_MS:10000}
+      mail.smtp.writetimeout: ${AUTH_EMAIL_SMTP_WRITE_TIMEOUT_MS:10000}
   config:
     import: optional:file:${UNISPEAKING_ENV_FILE:../../deploy/env/.env}[.properties]
-  datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/unispeaking}
-    username: ${DATABASE_USERNAME:postgres}
-    password: ${DATABASE_PASSWORD:}
-    driver-class-name: org.postgresql.Driver
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -93,3 +105,58 @@ realtime:
     connect-timeout: ${REALTIME_QWEN_CONNECT_TIMEOUT:10s}
     read-timeout: ${REALTIME_QWEN_READ_TIMEOUT:20s}
     max-answer-bytes: ${REALTIME_QWEN_MAX_ANSWER_BYTES:1048576}
+
+gateway:
+  enabled: ${GATEWAY_ENABLED:false}
+  credential-ttl-seconds: ${GATEWAY_CREDENTIAL_TTL_SECONDS:300}
+  session-lease-seconds: ${GATEWAY_SESSION_LEASE_SECONDS:600}
+  key-failure-cooldown-seconds: ${GATEWAY_KEY_FAILURE_COOLDOWN_SECONDS:30}
+
+unispeaking:
+  auth:
+    persistence: ${AUTH_PERSISTENCE:postgres}
+    secure-cookie: ${AUTH_COOKIE_SECURE:false}
+    session-max-age-seconds: ${AUTH_SESSION_MAX_AGE_SECONDS:28800}
+    captcha:
+      provider: ${AUTH_CAPTCHA_PROVIDER:aliyun}
+      development-token: ${AUTH_CAPTCHA_DEVELOPMENT_TOKEN:local-human-verified}
+      turnstile-secret-key: ${AUTH_CAPTCHA_TURNSTILE_SECRET_KEY:}
+      access-key-id: ${ALIYUN_CAPTCHA_ACCESS_KEY_ID:}
+      access-key-secret: ${ALIYUN_CAPTCHA_ACCESS_KEY_SECRET:}
+      region: ${ALIYUN_CAPTCHA_REGION:cn-shanghai}
+      endpoint: ${ALIYUN_CAPTCHA_ENDPOINT:captcha.cn-shanghai.aliyuncs.com}
+      scene-id: ${ALIYUN_CAPTCHA_SCENE_ID:}
+    email:
+      enabled: ${AUTH_EMAIL_ENABLED:false}
+      host: ${AUTH_EMAIL_SMTP_HOST:smtpdm.aliyun.com}
+      port: ${AUTH_EMAIL_SMTP_PORT:465}
+      username: ${AUTH_EMAIL_SMTP_USERNAME:}
+      password: ${AUTH_EMAIL_SMTP_PASSWORD:}
+      from-address: ${AUTH_EMAIL_FROM_ADDRESS:no-reply@mail.unispeaking.cn}
+      from-name: ${AUTH_EMAIL_FROM_NAME:UniSpeaking}
+      ssl: ${AUTH_EMAIL_SMTP_SSL:true}
+  admin:
+    persistence: ${UNISPEAKING_ADMIN_PERSISTENCE:postgres}
+    bootstrap-password: ${UNISPEAKING_ADMIN_BOOTSTRAP_PASSWORD:}
+    session-idle-seconds: ${UNISPEAKING_ADMIN_SESSION_IDLE_SECONDS:1800}
+    session-absolute-seconds: ${UNISPEAKING_ADMIN_SESSION_ABSOLUTE_SECONDS:28800}
+    secure-cookie: ${UNISPEAKING_ADMIN_SECURE_COOKIE:false}
+  integrations:
+    freetalk:
+      enabled: ${FREETALK_INTEGRATION_ENABLED:false}
+      base-url: ${FREETALK_BASE_URL:http://127.0.0.1:8000}
+    usage-source: ${UNISPEAKING_ADMIN_USAGE_SOURCE:postgres}
+    aliyun:
+      region: ${ALIYUN_SLS_REGION:cn-beijing}
+      project: ${ALIYUN_SLS_PROJECT:}
+      audit-logstore: ${ALIYUN_SLS_AUDIT_LOGSTORE:bailian-model-audit-log}
+      inference-logstore: ${ALIYUN_SLS_INFERENCE_LOGSTORE:bailian-model-inference-log}
+      access-key-id: ${ALIYUN_SLS_ACCESS_KEY_ID:${ALIBABA_CLOUD_ACCESS_KEY_ID:}}
+      access-key-secret: ${ALIYUN_SLS_ACCESS_KEY_SECRET:${ALIBABA_CLOUD_ACCESS_KEY_SECRET:}}
+      workspace-id: ${ALIYUN_MODEL_WORKSPACE_ID:${BAILIAN_WORKSPACE_ID:}}
+      model: ${ALIYUN_REALTIME_MODEL:${BAILIAN_MODEL:qwen3.5-omni-flash-realtime}}
+      sync-enabled: ${ALIYUN_SLS_SYNC_ENABLED:false}
+      sync-lookback-seconds: ${ALIYUN_SLS_SYNC_LOOKBACK_SECONDS:21600}
+      sync-fixed-delay-ms: ${ALIYUN_SLS_SYNC_FIXED_DELAY_MS:60000}
+      max-query-records: ${ALIYUN_SLS_MAX_QUERY_RECORDS:1000}
+      prometheus-enabled: ${ALIYUN_PROMETHEUS_ENABLED:true}

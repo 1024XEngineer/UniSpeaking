@@ -61,7 +61,23 @@ docker compose --env-file deploy/env/.env \
 An empty database is expected to report `Did not find any relations.` at this
 point. Do not import a separate schema file and do not configure a Flyway
 baseline version. The first backend startup automatically executes every
-committed migration in version order, currently `V1`, `V2`, then `V9`.
+committed migration in version order, including `V10` for the shared user
+identity, email sessions, entitlements, and admin sessions, `V11` for the
+provider-session identifier used to bind official Alibaba SLS usage, `V12` for
+official inference-usage records retained by this backend, and `V13` for the
+unique provider-session binding index. Before applying `V13` to an existing
+database, check for duplicate values and resolve them explicitly:
+
+```sql
+SELECT provider_session_id, COUNT(*)
+FROM practice_session
+WHERE provider_session_id IS NOT NULL
+GROUP BY provider_session_id
+HAVING COUNT(*) > 1;
+```
+
+The migration intentionally fails rather than guessing which user should own
+a duplicated provider session.
 
 ## Start and verify the application
 
