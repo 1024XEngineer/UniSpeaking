@@ -88,6 +88,7 @@ import { IeltsAssets, IeltsTrainingCenter } from "../component/ielts/IeltsModule
 import { InterviewAssets, InterviewModule } from "../component/interview/InterviewModule.jsx";
 import { HelpCenter } from "../component/help/HelpCenter.jsx";
 import { HelpLayout } from "../component/help/HelpLayout.jsx";
+import { LandingPage } from "../component/landing/LandingPage.jsx";
 import { NewtonsCradle } from "../component/common/NewtonsCradle.jsx";
 import { Modal } from "../component/common/Modal.jsx";
 import { LearningInsights } from "../component/profile/LearningInsights.jsx";
@@ -560,38 +561,6 @@ function Button({ children, variant = "primary", icon, className, ...props }) {
     <button className={cx("button", `button--${variant}`, className)} {...props}>
       <span>{children}</span>{icon}
     </button>
-  );
-}
-
-function SplashStartButton({ onClick }) {
-  return (
-    <button className="splash-start-button" type="button" onClick={onClick}>
-      <span>开始练习</span>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <polygon points="4,4 12,12 4,20" />
-        <polygon points="9,4 17,12 9,20" />
-        <polygon points="14,4 22,12 14,20" />
-      </svg>
-    </button>
-  );
-}
-
-function Splash({ onStart, onLogin }) {
-  return (
-    <main className="splash">
-      <header className="splash__header">
-        <Brand />
-        <button className="text-button" onClick={onLogin}>登录</button>
-      </header>
-      <section className="splash__hero">
-        <p className="eyebrow">AI ENGLISH SPEAKING PARTNER</p>
-        <h1>Speak More,<br />Speak Better.</h1>
-        <p className="splash__cn">越说，越会说。</p>
-        <p className="splash__copy">和懂你的 AI 老师自然对话，在低压力的练习中慢慢建立表达自信。</p>
-        <SplashStartButton onClick={onStart} />
-      </section>
-      <footer className="splash__footer"><span>语你说</span><span>Web · Desktop</span></footer>
-    </main>
   );
 }
 
@@ -2706,6 +2675,8 @@ export function App() {
 
   const goSplash = () => navigate(paths.root);
   const goAuth = (mode) => navigate(mode === "login" ? paths.auth.login : paths.auth.signup);
+  const openLandingStart = () => user ? setMainPage("conversation") : goAuth("signup");
+  const openWebApp = () => user ? setMainPage("conversation") : goAuth("login");
   const goLevel = () => navigate(paths.auth.level, { authMode });
   const goTeacher = () => navigate(paths.auth.teacher, { authMode });
   const enterApp = () => {
@@ -2935,7 +2906,7 @@ export function App() {
   };
 
   if (!authReady) return <main className="splash" aria-busy="true" />;
-  if (flow === "splash") return <Splash onStart={() => goAuth("signup")} onLogin={() => goAuth("login")} />;
+  if (flow === "splash") return <LandingPage onStart={openLandingStart} onLogin={() => goAuth("login")} onWeb={openWebApp} />;
   if (flow === "auth") return <Auth mode={authMode} onBack={goSplash} onSuccess={completeAuthentication} />;
   if (flow === "level") return <LevelSetup selected={level} onSelect={setLevel} onNext={saveLevelAndContinue} />;
   if (flow === "teacher") return <TeacherSetup selectedId={teacher.id} onSelect={(id) => setTeacher(teachers.find((item) => item.id === id))} onFinish={saveTeacherAndEnter} />;
@@ -2944,6 +2915,16 @@ export function App() {
       <HelpLayout onNavigate={navigate}>
         <HelpCenter route={helpRoute} onNavigate={navigateHelp} />
       </HelpLayout>
+    );
+  }
+  if (page === "about" && !user) {
+    return (
+      <main className="public-about-shell">
+        <header className="public-about-shell__header"><Brand /><a href={paths.root}>返回首页 <ArrowRight weight="bold" /></a></header>
+        {aboutRoute?.screen === "document"
+          ? <ProductLegalDocument documentId={aboutRoute.documentId} onNavigate={navigateAbout} />
+          : <AboutProduct onNavigate={navigateAbout} onHelpNavigate={navigateHelp} />}
+      </main>
     );
   }
   let content;
