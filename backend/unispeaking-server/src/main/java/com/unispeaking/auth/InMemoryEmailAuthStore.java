@@ -54,6 +54,29 @@ final class InMemoryEmailAuthStore implements EmailAuthStore {
     }
 
     @Override
+    public synchronized void updatePassword(String email, String passwordHash, Instant updatedAt) {
+        var current = usersByEmail.get(email);
+        if (current == null) {
+            return;
+        }
+        var updated = new UserRecord(current.id(), current.email(), passwordHash);
+        usersByEmail.put(email, updated);
+        usersById.put(updated.id(), updated);
+    }
+
+    @Override
+    public synchronized void revokeSessionsByEmail(String email, Instant revokedAt) {
+        var user = usersByEmail.get(email);
+        if (user == null) {
+            return;
+        }
+        sessions.replaceAll((tokenDigest, session) -> session.userId().equals(user.id())
+                ? new SessionRecord(session.tokenDigest(), session.userId(), session.createdAt(),
+                        session.lastSeenAt(), session.expiresAt(), revokedAt)
+                : session);
+    }
+
+    @Override
     public void saveSession(String tokenDigest, UUID userId, Instant createdAt, Instant lastSeenAt, Instant expiresAt) {
         sessions.put(tokenDigest, new SessionRecord(tokenDigest, userId, createdAt, lastSeenAt, expiresAt, null));
     }

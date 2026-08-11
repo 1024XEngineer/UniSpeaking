@@ -203,6 +203,7 @@ svg { display: block; }
 .verify-icon svg { width: 28px; height: 28px; }
 .human-verification { min-height: 66px; display: flex; align-items: center; justify-content: flex-start; }
 .auth-error { margin: -4px 0 0; color: var(--danger); font-size: 13px; line-height: 1.5; }
+.auth-notice { margin: -4px 0 0; padding: 11px 13px; border-radius: 9px; background: var(--soft); color: #3f5f48; font-size: 13px; line-height: 1.5; }
 .verification-form { display: grid; gap: 12px; margin-top: 26px; text-align: left; }
 .verification-form > label { font-size: 13px; font-weight: 650; }
 .verification-code { letter-spacing: .28em; text-align: center; }

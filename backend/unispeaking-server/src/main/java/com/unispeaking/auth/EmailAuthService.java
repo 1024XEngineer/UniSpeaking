@@ -13,10 +13,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 @Service
-public final class EmailAuthService {
+public class EmailAuthService {
 
     private static final int CODE_TTL_SECONDS = 600;
     private static final int CODE_LENGTH = 6;
@@ -101,6 +102,28 @@ public final class EmailAuthService {
         store.ensureGovernance(user, now);
         store.saveSession(digestString(token), user.id(), now, now, now.plus(sessionTtl));
         return new LoginResult(token, new UserView(user.id(), user.email()));
+    }
+
+    @Transactional
+    public void resetPassword(String rawEmail, String rawPassword, UUID challengeId, String code) {
+        var email = normalizeEmail(rawEmail);
+        if (!StringUtils.hasText(rawPassword) || rawPassword.length() < 12 || rawPassword.length() > 200) {
+            throw new AuthException("WEAK_PASSWORD");
+        }
+        var challenge = store.findChallenge(challengeId).orElse(null);
+        var now = clock.instant();
+        if (challenge == null || challenge.consumed() || challenge.expiresAt().isBefore(now)
+                || !challenge.email().equals(email) || !MessageDigest.isEqual(challenge.codeDigest(), digest(code))) {
+            throw new AuthException("CHALLENGE_INVALID");
+        }
+        if (!store.consumeChallenge(challengeId, now)) {
+            throw new AuthException("CHALLENGE_INVALID");
+        }
+        if (store.findUserByEmail(email).isEmpty()) {
+            throw new AuthException("IDENTITY_NOT_FOUND");
+        }
+        store.updatePassword(email, passwordEncoder.encode(rawPassword), now);
+        store.revokeSessionsByEmail(email, now);
     }
 
     public UserView currentUser(String rawToken) {

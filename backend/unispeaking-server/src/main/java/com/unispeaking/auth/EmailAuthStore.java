@@ -18,6 +18,10 @@ public interface EmailAuthStore {
 
     Optional<UserRecord> findUserById(UUID id);
 
+    void updatePassword(String email, String passwordHash, Instant updatedAt);
+
+    void revokeSessionsByEmail(String email, Instant revokedAt);
+
     /** Ensures that a legacy business user is visible to governance queries. */
     default void ensureGovernance(UserRecord user, Instant now) {
     }

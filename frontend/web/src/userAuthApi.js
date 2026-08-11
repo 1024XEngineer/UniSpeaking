@@ -19,6 +19,7 @@ const messages = {
   INVALID_CREDENTIALS: "邮箱或密码错误。",
   CHALLENGE_INVALID: "验证码无效或已过期，请重新获取。",
   IDENTITY_ALREADY_BOUND: "该邮箱已注册，请直接登录。",
+  IDENTITY_NOT_FOUND: "该邮箱尚未注册，请先创建账号。",
   WEAK_PASSWORD: "密码至少需要 12 位。",
   AUTH_SESSION_SYNC_FAILED: "邮箱认证已通过，但学习服务账号同步失败，请稍后重试。",
 };
@@ -59,6 +60,20 @@ export function issueEmailChallenge(email, humanVerificationToken) {
   return request("/api/auth/email/challenges", {
     method: "POST",
     body: JSON.stringify({ email, humanVerificationToken }),
+  });
+}
+
+export function issuePasswordResetChallenge(email, humanVerificationToken) {
+  return request("/api/auth/email/password-reset/challenges", {
+    method: "POST",
+    body: JSON.stringify({ email, humanVerificationToken }),
+  });
+}
+
+export function resetPasswordWithEmail({ email, password, challengeId, code }) {
+  return request("/api/auth/email/password-reset", {
+    method: "POST",
+    body: JSON.stringify({ email, password, challengeId, code }),
   });
 }
 

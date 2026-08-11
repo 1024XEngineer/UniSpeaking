@@ -74,6 +74,58 @@ class UserAuthControllerTest {
                 .andExpect(status().isUnauthorized());
     }
 
+    @Test
+    void issuesResetChallengeAndReplacesThePassword() throws Exception {
+        var registrationChallenge = issueChallenge("/api/auth/email/challenges");
+        mvc.perform(post("/api/auth/email/register")
+                        .contentType("application/json")
+                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-old-password\","
+                                + "\"challengeId\":\"" + registrationChallenge + "\",\"code\":\""
+                                + emailSender.code + "\"}"))
+                .andExpect(status().isOk());
+
+        var resetChallenge = issueChallenge("/api/auth/email/password-reset/challenges");
+        mvc.perform(post("/api/auth/email/password-reset")
+                        .contentType("application/json")
+                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-new-password\","
+                                + "\"challengeId\":\"" + resetChallenge + "\",\"code\":\""
+                                + emailSender.code + "\"}"))
+                .andExpect(status().isNoContent());
+
+        mvc.perform(post("/api/auth/email/password/login")
+                        .contentType("application/json")
+                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-old-password\"}"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/auth/email/password/login")
+                        .contentType("application/json")
+                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-new-password\"}"))
+                .andExpect(status().isOk())
+                .andExpect(cookie().exists("us-user-session"));
+    }
+
+    @Test
+    void rejectsWeakResetPasswordBeforeConsumingTheChallenge() throws Exception {
+        mvc.perform(post("/api/auth/email/password-reset")
+                        .contentType("application/json")
+                        .content("{\"email\":\"person@example.com\",\"password\":\"short\","
+                                + "\"challengeId\":\"00000000-0000-0000-0000-000000000001\","
+                                + "\"code\":\"123456\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", equalTo("VALIDATION_ERROR")));
+    }
+
+    private UUID issueChallenge(String path) throws Exception {
+        var challenge = mvc.perform(post(path)
+                        .contentType("application/json")
+                        .content("{\"email\":\"person@example.com\","
+                                + "\"humanVerificationToken\":\"local-human-verified\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.expiresInSeconds", equalTo(600)))
+                .andReturn();
+        return UUID.fromString(
+                com.jayway.jsonpath.JsonPath.read(challenge.getResponse().getContentAsString(), "$.data.challengeId"));
+    }
+
     private static final class CapturingEmailSender implements VerificationEmailSender {
         private String code;
 

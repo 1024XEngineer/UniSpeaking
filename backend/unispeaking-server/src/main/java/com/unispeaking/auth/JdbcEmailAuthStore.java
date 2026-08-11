@@ -133,12 +133,12 @@ public final class JdbcEmailAuthStore implements EmailAuthStore {
     @Override
     public Optional<UserRecord> findUserByEmail(String email) {
         var rows = jdbc.query(
-                "select id, username as email, password_hash from \"user\" where username = ?",
+                "select id, email, password_hash from app_users where email = ?",
                 (rs, row) -> new UserRecord(rs.getObject("id", UUID.class), rs.getString("email"), rs.getString("password_hash")),
                 email);
         if (!rows.isEmpty()) return rows.stream().findFirst();
         rows = jdbc.query(
-                "select id, email, password_hash from app_users where email = ?",
+                "select id, username as email, password_hash from \"user\" where username = ?",
                 (rs, row) -> new UserRecord(rs.getObject("id", UUID.class), rs.getString("email"), rs.getString("password_hash")),
                 email);
         return rows.stream().findFirst();
@@ -156,6 +156,30 @@ public final class JdbcEmailAuthStore implements EmailAuthStore {
                 (rs, row) -> new UserRecord(rs.getObject("id", UUID.class), rs.getString("email"), rs.getString("password_hash")),
                 id);
         return rows.stream().findFirst();
+    }
+
+    @Override
+    public void updatePassword(String email, String passwordHash, Instant updatedAt) {
+        int identityUpdates = jdbc.update(
+                "update app_users set password_hash = ? where lower(email) = lower(?)",
+                passwordHash, email);
+        int businessUpdates = jdbc.update(
+                "update \"user\" set password_hash = ?, auth_version = auth_version + 1, updated_at = ? "
+                        + "where lower(username) = lower(?)",
+                passwordHash, Timestamp.from(updatedAt), email);
+        int updated = identityUpdates + businessUpdates;
+        if (updated == 0) {
+            throw new DataIntegrityViolationException("Email identity no longer exists");
+        }
+    }
+
+    @Override
+    public void revokeSessionsByEmail(String email, Instant revokedAt) {
+        jdbc.update(
+                "update user_sessions set revoked_at = ? where revoked_at is null and user_id in ("
+                        + "select id from app_users where lower(email) = lower(?) "
+                        + "union select id from \"user\" where lower(username) = lower(?))",
+                Timestamp.from(revokedAt), email, email);
     }
 
     @Override

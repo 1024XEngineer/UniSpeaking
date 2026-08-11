@@ -43,6 +43,13 @@ public final class UserAuthController {
     public record LoginRequest(@NotBlank @Email String email, @NotBlank String password) {
     }
 
+    public record ResetPasswordRequest(
+            @NotBlank @Email String email,
+            @NotBlank @Size(min = 12, max = 200) String password,
+            @NotNull UUID challengeId,
+            @NotBlank @Pattern(regexp = "[0-9]{6}") String code) {
+    }
+
     public record ChallengeResponse(UUID challengeId, int expiresInSeconds, int resendAfterSeconds) {
     }
 
@@ -64,6 +71,19 @@ public final class UserAuthController {
         var challenge = authService.issueChallenge(request.email(), request.humanVerificationToken());
         return ApiResponse.success(new ChallengeResponse(
                 challenge.challengeId(), challenge.expiresInSeconds(), challenge.resendAfterSeconds()));
+    }
+
+    @PostMapping("/email/password-reset/challenges")
+    public ApiResponse<ChallengeResponse> issuePasswordResetChallenge(@Valid @RequestBody EmailRequest request) {
+        var challenge = authService.issueChallenge(request.email(), request.humanVerificationToken());
+        return ApiResponse.success(new ChallengeResponse(
+                challenge.challengeId(), challenge.expiresInSeconds(), challenge.resendAfterSeconds()));
+    }
+
+    @PostMapping("/email/password-reset")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request.email(), request.password(), request.challengeId(), request.code());
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/email/register")

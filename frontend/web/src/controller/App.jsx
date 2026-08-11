@@ -95,9 +95,11 @@ import { HumanVerification } from "../HumanVerification.jsx";
 import { hrefForPage, paths, resolveRoute } from "./router.js";
 import {
   issueEmailChallenge,
+  issuePasswordResetChallenge,
   loginWithPassword,
   logoutUser,
   registerWithEmail,
+  resetPasswordWithEmail,
   validateRegistrationCredentials,
 } from "../userAuthApi.js";
 
@@ -605,27 +607,52 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
   const [step, setStep] = useState("credentials");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [code, setCode] = useState("");
   const [challengeId, setChallengeId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const registrationDraftRef = useRef({ email: "", password: "" });
-  const captchaButtonId = "signup-email-challenge";
+  const captchaButtonId = mode === "reset" ? "reset-email-challenge" : "signup-email-challenge";
 
-  const switchMode = () => {
-    setMode(mode === "signup" ? "login" : "signup");
+  const clearChallenge = () => {
     setStep("credentials");
     setCode("");
     setChallengeId("");
+    setConfirmPassword("");
     setError("");
+  };
+
+  const switchMode = () => {
+    setMode(mode === "signup" ? "login" : "signup");
+    clearChallenge();
+    setPassword("");
+    setNotice("");
+    registrationDraftRef.current = { email: "", password: "" };
+  };
+
+  const beginPasswordReset = () => {
+    setMode("reset");
+    clearChallenge();
+    setPassword("");
+    setNotice("");
+    registrationDraftRef.current = { email: email.trim(), password: "" };
+  };
+
+  const returnToLogin = () => {
+    setMode("login");
+    clearChallenge();
+    setPassword("");
     registrationDraftRef.current = { email: "", password: "" };
   };
 
   const submitCredentials = async (event) => {
     event.preventDefault();
-    if (mode === "signup") return;
+    if (mode !== "login") return;
     setSubmitting(true);
     setError("");
+    setNotice("");
     try {
       const auth = await loginWithPassword(email.trim(), password);
       await onSuccess(auth, "login");
@@ -638,12 +665,16 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
 
   const verifyAndIssueChallenge = async (captchaVerifyParam) => {
     setError("");
+    setNotice("");
     const normalizedEmail = email.trim();
-    const validationCode = validateRegistrationCredentials(normalizedEmail, password);
-    if (validationCode === "INVALID_EMAIL") {
+    const emailIsValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+    if (!emailIsValid) {
       setError("请输入有效邮箱地址。");
       return { captchaResult: true, bizResult: false };
     }
+    const validationCode = mode === "signup"
+      ? validateRegistrationCredentials(normalizedEmail, password)
+      : null;
     if (validationCode === "WEAK_PASSWORD") {
       setError("密码至少需要 12 位字符。");
       return { captchaResult: true, bizResult: false };
@@ -651,7 +682,9 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
     registrationDraftRef.current = { email: normalizedEmail, password };
     setSubmitting(true);
     try {
-      const challenge = await issueEmailChallenge(normalizedEmail, captchaVerifyParam);
+      const challenge = mode === "reset"
+        ? await issuePasswordResetChallenge(normalizedEmail, captchaVerifyParam)
+        : await issueEmailChallenge(normalizedEmail, captchaVerifyParam);
       setChallengeId(challenge.challengeId);
       setStep("verification");
       return { captchaResult: true, bizResult: true };
@@ -669,17 +702,42 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
   const submitVerification = async (event) => {
     event.preventDefault();
     const draft = registrationDraftRef.current;
-    const validationCode = validateRegistrationCredentials(draft.email, draft.password);
-    if (validationCode) {
-      setError(validationCode === "INVALID_EMAIL" ? "请输入有效邮箱地址。" : "密码至少需要 12 位字符。");
-      setStep("credentials");
-      setChallengeId("");
-      setCode("");
-      return;
-    }
     setSubmitting(true);
     setError("");
     try {
+      if (mode === "reset") {
+        const validationCode = validateRegistrationCredentials(draft.email, password);
+        if (validationCode) {
+          setError(validationCode === "INVALID_EMAIL" ? "请输入有效邮箱地址。" : "密码至少需要 12 位字符。");
+          return;
+        }
+        if (password !== confirmPassword) {
+          setError("两次输入的新密码不一致。");
+          return;
+        }
+        await resetPasswordWithEmail({
+          email: draft.email,
+          password,
+          challengeId,
+          code,
+        });
+        setMode("login");
+        setStep("credentials");
+        setPassword("");
+        setConfirmPassword("");
+        setCode("");
+        setChallengeId("");
+        setNotice("密码已重置，请使用新密码登录。");
+        return;
+      }
+      const validationCode = validateRegistrationCredentials(draft.email, draft.password);
+      if (validationCode) {
+        setError(validationCode === "INVALID_EMAIL" ? "请输入有效邮箱地址。" : "密码至少需要 12 位字符。");
+        setStep("credentials");
+        setChallengeId("");
+        setCode("");
+        return;
+      }
       const auth = await registerWithEmail({
         email: draft.email,
         password: draft.password,
@@ -695,25 +753,28 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
   };
 
   if (step === "verification") {
+    const resettingPassword = mode === "reset";
     return (
       <main className="auth-layout">
-        <aside className="auth-layout__aside"><Brand /><div><p className="eyebrow">ONE STEP LEFT</p><h2>先验证邮箱，<br />再开始第一次对话。</h2></div><p>语你说 · UniSpeaking</p></aside>
+        <aside className="auth-layout__aside"><Brand /><div><p className="eyebrow">ONE STEP LEFT</p><h2>{resettingPassword ? <>验证邮箱后，<br />设置你的新密码。</> : <>先验证邮箱，<br />再开始第一次对话。</>}</h2></div><p>语你说 · UniSpeaking</p></aside>
         <section className="auth-panel verify-panel">
           <div className="verify-icon"><EnvelopeSimple /></div>
           <p className="eyebrow">CHECK YOUR INBOX</p>
-          <h1>验证你的邮箱</h1>
-          <p>验证码已发送至 <strong>{email}</strong>，10 分钟内有效。</p>
+          <h1>{resettingPassword ? "重置密码" : "验证你的邮箱"}</h1>
+          <p>验证码已发送至 <strong>{registrationDraftRef.current.email}</strong>，10 分钟内有效。</p>
           <form className="verification-form" onSubmit={submitVerification}>
             <label htmlFor="verification-code">6 位验证码</label>
             <input id="verification-code" className="verification-code" inputMode="numeric" autoComplete="one-time-code" maxLength="6" pattern="[0-9]{6}" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} required autoFocus />
+            {resettingPassword && <>
+              <label>新密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 12 位字符" autoComplete="new-password" minLength="12" maxLength="200" required disabled={submitting} /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>
+              <label>确认新密码<input type={showPassword ? "text" : "password"} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="再次输入新密码" autoComplete="new-password" minLength="12" maxLength="200" required disabled={submitting} /></label>
+            </>}
             {error && <p className="auth-error" role="alert">{error}</p>}
-            <Button type="submit" disabled={submitting || code.length !== 6}>{submitting ? "正在验证…" : "完成注册"}</Button>
+            <Button type="submit" disabled={submitting || code.length !== 6}>{submitting ? "正在验证…" : resettingPassword ? "重置密码" : "完成注册"}</Button>
           </form>
           <button className="text-button verify-back" type="button" onClick={() => {
-            setStep("credentials");
-            setError("");
-            setChallengeId("");
-            setCode("");
+            clearChallenge();
+            setPassword(resettingPassword ? "" : registrationDraftRef.current.password);
           }}>返回修改邮箱</button>
         </section>
       </main>
@@ -729,18 +790,21 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
       </aside>
       <section className="auth-panel">
         <button className="back-link" onClick={onBack}><ArrowLeft />返回</button>
-        <div className="auth-panel__heading"><h1>{mode === "signup" ? "创建账号" : "欢迎回来"}</h1><p>{mode === "signup" ? "用邮箱注册，开始你的口语练习。" : "继续上一次的学习进度。"}</p></div>
+        <div className="auth-panel__heading"><h1>{mode === "signup" ? "创建账号" : mode === "reset" ? "重置密码" : "欢迎回来"}</h1><p>{mode === "signup" ? "用邮箱注册，开始你的口语练习。" : mode === "reset" ? "输入注册邮箱，验证后设置新密码。" : "继续上一次的学习进度。"}</p></div>
         <form onSubmit={submitCredentials}>
           <label>邮箱<input type="email" value={email} onChange={(event) => { const nextEmail = event.target.value; setEmail(nextEmail); registrationDraftRef.current.email = nextEmail.trim(); }} placeholder="name@example.com" autoComplete="email" maxLength="254" required disabled={submitting} /></label>
-          <label>密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => { const nextPassword = event.target.value; setPassword(nextPassword); registrationDraftRef.current.password = nextPassword; }} placeholder="至少 12 位字符" autoComplete={mode === "signup" ? "new-password" : "current-password"} minLength="12" maxLength="200" required disabled={submitting} /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>
-          {mode === "signup" && <HumanVerification buttonId={captchaButtonId} onVerify={verifyAndIssueChallenge} />}
-          {mode === "login" && <button type="button" className="forgot-link">忘记密码？</button>}
+          {mode !== "reset" && <label>密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => { const nextPassword = event.target.value; setPassword(nextPassword); registrationDraftRef.current.password = nextPassword; }} placeholder="至少 12 位字符" autoComplete={mode === "signup" ? "new-password" : "current-password"} minLength="12" maxLength="200" required disabled={submitting} /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>}
+          {mode !== "login" && <HumanVerification buttonId={captchaButtonId} onVerify={verifyAndIssueChallenge} />}
+          {mode === "login" && <button type="button" className="forgot-link" onClick={beginPasswordReset}>忘记密码？</button>}
+          {notice && <p className="auth-notice" role="status">{notice}</p>}
           {error && <p className="auth-error" role="alert">{error}</p>}
-          <Button id={mode === "signup" ? captchaButtonId : undefined} className="auth-submit" type="submit" disabled={submitting}>{submitting ? "正在处理…" : mode === "signup" ? "发送邮箱验证码" : "登录"}</Button>
+          <Button id={mode !== "login" ? captchaButtonId : undefined} className="auth-submit" type="submit" disabled={submitting}>{submitting ? "正在处理…" : mode === "login" ? "登录" : "发送邮箱验证码"}</Button>
         </form>
-        <p className="auth-switch">{mode === "signup" ? "已经有账号？" : "还没有账号？"}<button onClick={switchMode}>{mode === "signup" ? "直接登录" : "创建账号"}</button></p>
+        {mode === "reset"
+          ? <p className="auth-switch">想起密码了？<button onClick={returnToLogin}>返回登录</button></p>
+          : <p className="auth-switch">{mode === "signup" ? "已经有账号？" : "还没有账号？"}<button onClick={switchMode}>{mode === "signup" ? "直接登录" : "创建账号"}</button></p>}
         <div className="auth-help">
-          <span>登录或注册遇到问题？</span>
+          <span>登录、注册或重置遇到问题？</span>
           <a href={paths.help.root}><Lifebuoy weight="bold" />访问帮助中心</a>
         </div>
       </section>

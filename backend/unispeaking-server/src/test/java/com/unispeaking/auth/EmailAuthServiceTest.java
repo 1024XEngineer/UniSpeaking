@@ -68,6 +68,34 @@ class EmailAuthServiceTest {
         assertThat(emailSender.codes).isEmpty();
     }
 
+    @Test
+    void resetsPasswordWithEmailChallengeAndRevokesExistingSessions() {
+        var registrationChallenge = service.issueChallenge("person@example.com", "verified-human");
+        service.register(
+                "person@example.com", "correct-old-password", registrationChallenge.challengeId(),
+                emailSender.lastCode());
+        var oldLogin = service.login("person@example.com", "correct-old-password");
+
+        var resetChallenge = service.issueChallenge("person@example.com", "verified-human");
+        service.resetPassword(
+                "person@example.com", "correct-new-password", resetChallenge.challengeId(),
+                emailSender.lastCode());
+
+        assertThatThrownBy(() -> service.currentUser(oldLogin.rawToken()))
+                .isInstanceOf(EmailAuthService.AuthException.class)
+                .hasMessage("UNAUTHENTICATED");
+        assertThatThrownBy(() -> service.login("person@example.com", "correct-old-password"))
+                .isInstanceOf(EmailAuthService.AuthException.class)
+                .hasMessage("INVALID_CREDENTIALS");
+        assertThat(service.login("person@example.com", "correct-new-password").user().email())
+                .isEqualTo("person@example.com");
+        assertThatThrownBy(() -> service.resetPassword(
+                "person@example.com", "another-new-password", resetChallenge.challengeId(),
+                emailSender.lastCode()))
+                .isInstanceOf(EmailAuthService.AuthException.class)
+                .hasMessage("CHALLENGE_INVALID");
+    }
+
     private static final class CapturingEmailSender implements VerificationEmailSender {
         private final List<String> codes = new ArrayList<>();
 
