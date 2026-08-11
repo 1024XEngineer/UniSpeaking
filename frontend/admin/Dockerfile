@@ -13,7 +13,9 @@ RUN npm ci --registry=${NPM_REGISTRY} \
     --fetch-retry-maxtimeout=120000
 
 COPY . .
-RUN npm run lint && npm run test && npm run build
+RUN npm run lint \
+    && VITE_BACKEND_URL= npm run test \
+    && npm run build
 
 FROM nginx:1.27-alpine
 
