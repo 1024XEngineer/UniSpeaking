@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.unispeaking.domain.vo.provider.AiCapability;
 import com.unispeaking.domain.vo.provider.AiModelDefinition;
 import com.unispeaking.domain.vo.provider.ProviderType;
+import com.unispeaking.domain.dto.session.RealtimeConnectCommand;
+import com.unispeaking.domain.vo.session.RealtimeConnectionResult;
 import com.unispeaking.common.exception.BusinessException;
 import java.util.List;
 import java.util.Map;
@@ -243,6 +245,11 @@ class AiProviderRegistryTest {
 					Set.of(
 							AiProviderRegistry.QWEN_REALTIME_FLASH,
 							AiProviderRegistry.QWEN_REALTIME_PLUS));
+		}
+
+		@Override
+		public RealtimeConnectionResult connect(RealtimeConnectCommand command) {
+			return new RealtimeConnectionResult(null, "answer", null);
 		}
 
 		@Override

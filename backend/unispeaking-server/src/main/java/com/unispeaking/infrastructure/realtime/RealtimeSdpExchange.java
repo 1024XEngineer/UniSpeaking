@@ -1,6 +1,7 @@
 package com.unispeaking.infrastructure.realtime;
 
 import com.unispeaking.common.logging.RealtimeFlowLog;
+import com.unispeaking.domain.dto.session.RealtimeConnectCommand;
 import com.unispeaking.domain.vo.session.SessionPrompt;
 import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.session.RealtimeConnectionResult;
@@ -16,42 +17,30 @@ import org.springframework.stereotype.Component;
 public class RealtimeSdpExchange {
 
 	private final AiProviderRegistry providerRegistry;
-	private final RealtimeCredentialIssuer credentialIssuer;
-
-	public RealtimeSdpExchange(
-			AiProviderRegistry providerRegistry,
-			RealtimeCredentialIssuer credentialIssuer) {
+	public RealtimeSdpExchange(AiProviderRegistry providerRegistry) {
 		this.providerRegistry = providerRegistry;
-		this.credentialIssuer = credentialIssuer;
 	}
 
 	public RealtimeConnectionResult exchangeSdp(
 			ProviderType type, AbstractSceneSession session, SessionPrompt prompt, StartCommand command) {
-		RealtimeAttempt attempt = providerRegistry.routeRealtime(
+		return providerRegistry.routeRealtime(
 				type,
 				command.model(),
 				(model, provider) -> {
-					var credential = credentialIssuer.issue(provider.type());
-					String answerSdp = provider.exchangeRealtimeSdp(
-							model,
-							command.offerSdp(),
-							credential.bearerToken());
+					RealtimeConnectionResult connection = provider.connect(
+							new RealtimeConnectCommand(
+									session.getId(),
+									command.userId(),
+									model,
+									command.voice(),
+									command.offerSdp()));
 					RealtimeFlowLog.info(
 							"flow.3.sdp.completed localSessionId={} provider={} model={} credentialExpiresAt={}",
 							session.getId(),
 							provider.type(),
 							model,
-							credential.expiresAt());
-					return new RealtimeAttempt(answerSdp, credential.expiresAt());
+							connection.credentialExpiresAt());
+					return connection;
 				});
-		return new RealtimeConnectionResult(
-				null,
-				attempt.answerSdp(),
-				attempt.credentialExpiresAt());
-	}
-
-	private record RealtimeAttempt(
-			String answerSdp,
-			java.time.Instant credentialExpiresAt) {
 	}
 }

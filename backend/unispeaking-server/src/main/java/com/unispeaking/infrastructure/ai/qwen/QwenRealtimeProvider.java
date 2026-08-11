@@ -4,7 +4,10 @@ import com.unispeaking.infrastructure.config.RealtimeProperties;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.logging.RealtimeFlowLog;
 import com.unispeaking.domain.vo.provider.ProviderType;
+import com.unispeaking.domain.dto.session.RealtimeConnectCommand;
+import com.unispeaking.domain.vo.session.RealtimeConnectionResult;
 import com.unispeaking.domain.vo.session.RealtimeCredential;
+import com.unispeaking.domain.vo.session.RealtimeTransportType;
 import com.unispeaking.infrastructure.realtime.RealtimeCredentialIssuer;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.RealtimeProvider;
@@ -35,6 +38,22 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 		this.httpClient = realtimeHttpClient;
 		this.properties = properties;
 		this.credentialIssuer = credentialIssuer;
+	}
+
+	@Override
+	public RealtimeConnectionResult connect(RealtimeConnectCommand command) {
+		RealtimeCredential credential = credentialIssuer.issue(ProviderType.QWEN);
+		String answerSdp = exchangeRealtimeSdp(
+				command.modelId(),
+				command.offerSdp(),
+				credential.bearerToken());
+		return new RealtimeConnectionResult(
+				null,
+				answerSdp,
+				credential.expiresAt(),
+				ProviderType.QWEN,
+				command.modelId(),
+				RealtimeTransportType.PLATFORM_RTC);
 	}
 
 	@Override
