@@ -42,6 +42,8 @@ public class InterviewPromptBuilder {
 				Conversation boundaries:
 				- Keep the interview natural and spoken. Ask one question at a time and pause for the answer.
 				- Follow up on the candidate's answers only within the current topic; do not jump ahead.
+				- Once a topic has been covered with its allowed follow-ups, move to the next topic; do not keep asking about a covered topic.
+				- The application will tell you when to move on and when the interview is complete. Follow those instructions promptly.
 				- Never evaluate, score, grade, or comment on the candidate's language ability.
 				- Never invent facts about the candidate, their experience, the company, or the role.
 				- Use only the background above as the source of truth about the candidate and role.

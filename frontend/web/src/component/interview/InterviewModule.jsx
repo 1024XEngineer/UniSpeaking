@@ -444,6 +444,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
   const [error, setError] = useState("");
   const [paused, setPaused] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [lines, setLines] = useState([]);
   const [exitOpen, setExitOpen] = useState(false);
   const clientRef = useRef(null);
@@ -507,15 +508,21 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       if (endingRef.current) {
         // Report recovery carries only reportStatus; keep the ending status.
       } else if (state?.shouldEnd) {
-        setStatus("面试已完成，正在生成报告");
+        setStatus("面试已完成，准备收尾…");
       } else if (state?.currentTopic) {
         setStatus(`正在面试 · ${state.currentTopic}`);
       } else {
         setStatus("面试官正在提问");
       }
+    } else if (event.type === "local.interview_closing") {
+      endingRef.current = true;
+      setEnding(true);
+      setClosing(true);
+      setStatus("面试官正在做本次面试的收尾…");
     } else if (event.type === "local.interview_end_requested") {
       endingRef.current = true;
       setEnding(true);
+      setClosing(false);
       setStatus("面试已结束，正在生成报告");
       onEndInterviewRef.current?.(sceneId, sessionIdRef.current, event.reportStatus || null);
     } else if (event.type === "local.interview_end_error") {
@@ -617,7 +624,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
           <div className="listening-state listening-state--compact">
             <InterviewWaveform active={!ending && !paused && !error} compact />
             <InterviewTimer paused={paused} state={ending || error ? "ended" : "active"} />
-            {!ending && <span>{status}</span>}
+            {(!ending || closing) && <span>{status}</span>}
           </div>
         </div>
         <InterviewTranscript lines={lines} status={status} transcriptRef={transcriptRef} />

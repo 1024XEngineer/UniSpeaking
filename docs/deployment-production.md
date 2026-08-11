@@ -7,7 +7,7 @@ It assumes Ubuntu 24.04, Docker Compose, PostgreSQL 17, and public TCP ports
 ## Prepare the server
 
 Clone the merged `main` branch into `/opt/unispeaking`, then create the runtime
-directories and install the Alibaba Cloud certificate files:
+directories and install the certificate files:
 
 ```bash
 sudo mkdir -p /opt/unispeaking/backups/postgres /etc/unispeaking/certs
@@ -33,15 +33,16 @@ nano deploy/env/.env
 Replace every credential placeholder. Keep `DATABASE_URL` pointed at the
 Compose service name `postgres`, not `localhost`.
 
-The environment template also selects mainland China mirrors for Maven, PyPI,
-npm, and PaddleOCR models. These values affect image builds only. The Docker
-daemon registry mirror remains configured separately in
-`/etc/docker/daemon.json` on the server.
+The environment template selects the official Debian, Maven Central, PyPI, and
+npm sources for the Singapore server. These values affect image builds only
+and can be overridden when another deployment region needs different mirrors.
+The Docker daemon registry mirror remains configured separately in
+`/etc/docker/daemon.json` on the server. PaddleOCR uses its supported `bos`
+model source by default.
 
 ## Initialize a new database
 
-The consolidated baseline is for an empty database only. Start PostgreSQL by
-itself, import the baseline, and only then start the backend:
+Start PostgreSQL by itself and verify that the new database is healthy:
 
 ```bash
 cd /opt/unispeaking
@@ -53,21 +54,14 @@ docker compose --env-file deploy/env/.env \
   pg_isready -U unispeaking -d unispeaking
 
 docker compose --env-file deploy/env/.env \
-  -f deploy/docker-compose.prod.yml exec -T postgres \
-  psql -v ON_ERROR_STOP=1 -U unispeaking -d unispeaking \
-  < deploy/postgres/unispeaking-baseline.sql
-```
-
-The runtime environment template sets `SPRING_FLYWAY_BASELINE_VERSION=8`.
-This tells Flyway that the imported schema already contains V1 through V8.
-Verify the import before starting the application:
-
-```bash
-docker compose --env-file deploy/env/.env \
   -f deploy/docker-compose.prod.yml exec postgres \
-  psql -U unispeaking -d unispeaking -c \
-  "SELECT COUNT(*) AS topics FROM ielts_topic; SELECT COUNT(*) AS questions FROM ielts_question;"
+  psql -U unispeaking -d unispeaking -c '\dt'
 ```
+
+An empty database is expected to report `Did not find any relations.` at this
+point. Do not import a separate schema file and do not configure a Flyway
+baseline version. The first backend startup automatically executes every
+committed migration in version order, currently `V1`, `V2`, then `V9`.
 
 ## Start and verify the application
 
@@ -82,8 +76,8 @@ docker compose --env-file deploy/env/.env \
   -f deploy/docker-compose.prod.yml logs --tail=200 backend
 ```
 
-The first backend startup creates the Flyway history table with baseline
-version 8. It must not execute V1 through V8 again. Check the recorded state:
+The first backend startup creates the schema and Flyway history table. Check
+that every committed migration succeeded:
 
 ```bash
 docker compose --env-file deploy/env/.env \
@@ -123,6 +117,6 @@ docker compose --env-file deploy/env/.env \
   -f deploy/docker-compose.prod.yml up -d --build
 ```
 
-New Flyway migrations such as V9 run normally after the baseline at version 8.
-Do not re-import `unispeaking-baseline.sql` into an existing production
-database.
+New Flyway migrations run automatically during backend startup. Never edit a
+migration that has already run in production, and never reinitialize an
+existing production database with the `V1` baseline.

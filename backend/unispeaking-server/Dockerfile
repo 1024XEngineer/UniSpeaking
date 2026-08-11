@@ -1,7 +1,7 @@
 FROM eclipse-temurin:21-jdk AS build
 WORKDIR /workspace
 
-ARG MAVEN_REPO_URL=https://maven.aliyun.com/repository/public
+ARG MAVEN_REPO_URL=https://repo.maven.apache.org/maven2
 ENV MAVEN_REPO_URL=${MAVEN_REPO_URL}
 ENV MVNW_REPOURL=${MAVEN_REPO_URL}
 
@@ -18,14 +18,22 @@ FROM eclipse-temurin:21-jre AS java-runtime
 FROM python:3.11-slim-bookworm AS ocr-base
 WORKDIR /app
 
-ARG PYPI_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG DEBIAN_MIRROR=https://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
+ARG PYPI_INDEX_URL=https://pypi.org/simple
 ARG PADDLE_PDX_MODEL_SOURCE=bos
 
 RUN sed -i \
-        -e 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' \
-        -e 's|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+        -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+        -e "s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+        -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+        -e "s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
         /etc/apt/sources.list.d/debian.sources \
-    && apt-get -o Acquire::Retries=3 update \
+    && apt-get \
+        -o Acquire::Retries=5 \
+        -o Acquire::http::Timeout=30 \
+        -o Acquire::https::Timeout=30 \
+        update \
     && apt-get install -y --no-install-recommends \
         libgomp1 \
         libgl1 \
@@ -61,11 +69,21 @@ RUN python /app/ocr/paddle_ocr_runner.py \
 FROM python:3.11-slim-bookworm
 WORKDIR /app
 
+ARG DEBIAN_MIRROR=https://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
+ARG PADDLE_PDX_MODEL_SOURCE=bos
+
 RUN sed -i \
-        -e 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' \
-        -e 's|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+        -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+        -e "s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+        -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+        -e "s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
         /etc/apt/sources.list.d/debian.sources \
-    && apt-get -o Acquire::Retries=3 update \
+    && apt-get \
+        -o Acquire::Retries=5 \
+        -o Acquire::http::Timeout=30 \
+        -o Acquire::https::Timeout=30 \
+        update \
     && apt-get install -y --no-install-recommends \
         libgomp1 \
         libgl1 \
@@ -79,7 +97,7 @@ COPY --from=ocr-base /app/ocr /app/ocr
 ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH="/opt/java/openjdk/bin:/opt/ocr-venv/bin:${PATH}"
 ENV PADDLE_PDX_CACHE_HOME=/app/ocr/models
-ENV PADDLE_PDX_MODEL_SOURCE=bos
+ENV PADDLE_PDX_MODEL_SOURCE=${PADDLE_PDX_MODEL_SOURCE}
 
 COPY --from=build /workspace/target/unispeaking_server-0.0.1-SNAPSHOT.jar /app/unispeaking-server.jar
 EXPOSE 8080
