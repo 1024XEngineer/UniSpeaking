@@ -7,7 +7,6 @@ import {
   CaretRight,
   Check,
   FileText,
-  HandSwipeLeft,
   Image,
   Microphone,
   MicrophoneSlash,
@@ -18,6 +17,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { NewtonsCradle } from "../common/NewtonsCradle.jsx";
+import { EvaluationLoader } from "../common/EvaluationLoader.jsx";
 import { Modal } from "../common/Modal.jsx";
 import {
   generateInterviewScene,
@@ -28,6 +28,7 @@ import {
 } from "../../infrastructure/http/apiClient.js";
 import { createRealtimeClient } from "../../websocket/realtimeClient.js";
 import { paths } from "../../controller/router.js";
+import { SimpleCta, TrendLineChart } from "../ielts/IeltsModule.jsx";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
 
@@ -227,12 +228,6 @@ function MaterialEditor({ material, onChange, compact = false }) {
           还有必填内容未填写：{missing.map((item) => item.label).join("、")}。请补充后点击「确认并生成面试」。
         </p>
       )}
-      {material.finalText && (
-        <details className="interview-editor__final">
-          <summary>查看服务端生成的材料原文</summary>
-          <p>{material.finalText}</p>
-        </details>
-      )}
     </section>
   );
 }
@@ -345,7 +340,7 @@ function InterviewHome({ onNavigate, onBack }) {
   return (
     <main className="page page--interview">
       <div className="interview-home">
-        <button className="ielts-back" onClick={onBack}><ArrowLeft />返回场景广场</button>
+        <button className="ielts-back" onClick={onBack}><ArrowLeft />返回</button>
         <PageHeader
           eyebrow="JOB INTERVIEW"
           title="模拟面试"
@@ -359,6 +354,17 @@ function InterviewHome({ onNavigate, onBack }) {
 
           <div className="interview-form">
             <fieldset className="interview-form__group">
+              <legend>简历 <small>选填</small></legend>
+              <div className="interview-source-toggle">
+                <button type="button" className={resumeMode === "text" ? "is-active" : ""} onClick={() => setResumeMode("text")}>粘贴文本</button>
+                <button type="button" className={resumeMode === "file" ? "is-active" : ""} onClick={() => setResumeMode("file")}>上传文件</button>
+              </div>
+              {resumeMode === "text"
+                ? <textarea className="interview-form__textarea" value={resumeText} maxLength={20000} onChange={(event) => setResumeText(event.target.value)} placeholder="粘贴简历中的工作与项目经历…（可留空）" />
+                : <FilePicker accept=".pdf,.docx,.doc" hint="支持 PDF / DOCX 文本简历，.doc 暂不支持" file={resumeFile} onFile={setResumeFile} icon={<FileText weight="bold" />} />}
+            </fieldset>
+
+            <fieldset className="interview-form__group">
               <legend>岗位描述（JD）</legend>
               <div className="interview-source-toggle">
                 <button type="button" className={jdMode === "text" ? "is-active" : ""} onClick={() => setJdMode("text")}>粘贴文本</button>
@@ -369,17 +375,6 @@ function InterviewHome({ onNavigate, onBack }) {
                 : jdImageUnavailable
                   ? <p className="call-error" role="alert">OCR 暂不可用，请使用“粘贴文本”方式上传 JD。</p>
                   : <FilePicker accept="image/*" hint="支持单张图片，将由 OCR 识别文字" file={jdImage} onFile={setJdImage} icon={<Image weight="bold" />} />}
-            </fieldset>
-
-            <fieldset className="interview-form__group">
-              <legend>简历 <small>选填</small></legend>
-              <div className="interview-source-toggle">
-                <button type="button" className={resumeMode === "text" ? "is-active" : ""} onClick={() => setResumeMode("text")}>粘贴文本</button>
-                <button type="button" className={resumeMode === "file" ? "is-active" : ""} onClick={() => setResumeMode("file")}>上传文件</button>
-              </div>
-              {resumeMode === "text"
-                ? <textarea className="interview-form__textarea" value={resumeText} maxLength={20000} onChange={(event) => setResumeText(event.target.value)} placeholder="粘贴简历中的工作与项目经历…（可留空）" />
-                : <FilePicker accept=".pdf,.docx,.doc" hint="支持 PDF / DOCX 文本简历，.doc 暂不支持" file={resumeFile} onFile={setResumeFile} icon={<FileText weight="bold" />} />}
             </fieldset>
 
             <fieldset className="interview-form__group">
@@ -396,7 +391,7 @@ function InterviewHome({ onNavigate, onBack }) {
             {(formError || generateError) && <p className="call-error" role="alert">{formError || generateError}</p>}
 
             <div className="interview-form__actions">
-              <button className="button button--secondary" onClick={onBack}>返回场景广场</button>
+              <button className="button button--secondary" onClick={onBack}>返回</button>
               <ExpandingCta disabled={preparing} onClick={() => (draft ? setDraftOpen(true) : void prepareMaterials())}>{preparing ? "正在整理材料" : draft ? "查看整理结果" : "整理材料"}</ExpandingCta>
             </div>
           </div>
@@ -450,8 +445,6 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
   const [paused, setPaused] = useState(false);
   const [ending, setEnding] = useState(false);
   const [lines, setLines] = useState([]);
-  const [currentTopic, setCurrentTopic] = useState("");
-  const [completedTopicCount, setCompletedTopicCount] = useState(0);
   const [exitOpen, setExitOpen] = useState(false);
   const clientRef = useRef(null);
   const sessionIdRef = useRef("");
@@ -511,10 +504,6 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       });
     } else if (event.type === "local.interview_state") {
       const state = event.state;
-      if (state) {
-        setCurrentTopic(state.currentTopic || "");
-        setCompletedTopicCount(state.coveredTopicCount ?? state.completedTopicCount ?? 0);
-      }
       if (endingRef.current) {
         // Report recovery carries only reportStatus; keep the ending status.
       } else if (state?.shouldEnd) {
@@ -531,8 +520,6 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       onEndInterviewRef.current?.(sceneId, sessionIdRef.current, event.reportStatus || null);
     } else if (event.type === "local.interview_end_error") {
       setError(event.message || "面试自动结束失败");
-    } else if (event.type === "local.interrupted") {
-      setStatus("已打断面试官，请开始回答");
     } else if (event.type === "local.backend_warning") {
       setError(event.message || "会话记录保存失败，请稍后重试");
     } else if (event.type === "local.mic_error") {
@@ -588,11 +575,6 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     else await clientRef.current?.resume();
   };
 
-  const interruptInterview = () => {
-    if (ending) return;
-    clientRef.current?.interrupt(); // 发 response.cancel，物理打断面试官当前提问
-  };
-
   const endConversation = async () => {
     if (endingRef.current) return;
     endingRef.current = true;
@@ -626,8 +608,8 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     <main className="conversation call call--subtitles interview-call">
       <audio ref={remoteAudioRef} autoPlay />
       <div className="conversation__top interview-call-top">
-        <div><button className="ielts-back" onClick={() => setExitOpen(true)}><ArrowLeft />返回场景广场</button><strong>模拟面试</strong><span>{ending ? "面试计时已停止，正在生成报告" : currentTopic ? `当前主题：${currentTopic}` : status}</span></div>
-        <div className="interview-call-progress"><span>已覆盖 {completedTopicCount} 个主题</span><button className="round-control interview-call-exit" disabled={ending} onClick={() => setExitOpen(true)} aria-label="退出面试"><X /></button></div>
+        <button className="ielts-back" onClick={() => setExitOpen(true)}><ArrowLeft />返回</button>
+        <button className="round-control interview-call-exit" disabled={ending} onClick={() => setExitOpen(true)} aria-label="退出面试"><X /></button>
       </div>
       <section className="call__stage">
         <div className="call-presence call-presence--compact">
@@ -643,7 +625,6 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       </section>
       <div className="call-controls interview-call-controls">
         <button className={cx("round-control", paused && "is-on")} aria-label={paused ? "恢复会话" : "暂停会话"} disabled={ending} onClick={() => void togglePaused()}>{paused ? <MicrophoneSlash /> : <Microphone />}</button>
-        <button className="round-control" aria-label="打断面试官，开始回答" disabled={ending} onClick={interruptInterview}><HandSwipeLeft /></button>
         <button className="round-control round-control--end" aria-label="结束面试" disabled={ending} onClick={() => void endConversation()}><PhoneDisconnect weight="fill" /></button>
       </div>
       {exitDialog}
@@ -659,7 +640,7 @@ const reportDimensionMeta = {
   VOCABULARY_EXPRESSION: { label: "词汇表达", hint: "用词丰富度与贴切度" },
 };
 
-function InterviewReport({ sceneId, sessionId, onHome, onBack }) {
+function InterviewReport({ sceneId, sessionId, onHome }) {
   const [status, setStatus] = useState("PROCESSING");
   const [report, setReport] = useState(null);
   const [failureReason, setFailureReason] = useState("");
@@ -717,13 +698,12 @@ function InterviewReport({ sceneId, sessionId, onHome, onBack }) {
     return (
       <main className="page page--interview interview-report-page">
         <div className="interview-report-pending">
-          <button className="ielts-back" onClick={onBack}><ArrowLeft />返回场景广场</button>
-          <NewtonsCradle label="报告生成中" />
+          <EvaluationLoader />
           <p className="eyebrow">REPORT GENERATING</p>
           <h1>正在生成面试报告</h1>
           <p>AI 正在逐维度评估你的整场回答，通常需要 1–2 分钟。报告会自动出现，无需刷新。</p>
           {error && <p className="call-error" role="alert">{error}</p>}
-          <button className="button button--secondary" onClick={onBack}>返回场景广场</button>
+          <button className="button button--secondary" onClick={onHome}>返回</button>
         </div>
       </main>
     );
@@ -733,13 +713,13 @@ function InterviewReport({ sceneId, sessionId, onHome, onBack }) {
     return (
       <main className="page page--interview interview-report-page">
         <div className="interview-report-pending">
-          <button className="ielts-back" onClick={onBack}><ArrowLeft />返回场景广场</button>
+          <button className="ielts-back" onClick={onHome}><ArrowLeft />返回</button>
           <p className="eyebrow">REPORT FAILED</p>
           <h1>报告生成失败</h1>
           <p>{failureReason || "报告生成过程中发生异常，请重新生成一次。"}</p>
           {error && <p className="call-error" role="alert">{error}</p>}
           <div className="interview-report-pending__actions">
-            <button className="button button--secondary" onClick={onBack}>返回场景广场</button>
+            <button className="button button--secondary" onClick={onHome}>返回</button>
             <ExpandingCta disabled={retrying} onClick={() => void retry()}>{retrying ? "正在重新生成" : "重新生成"}</ExpandingCta>
           </div>
         </div>
@@ -755,12 +735,12 @@ function InterviewReport({ sceneId, sessionId, onHome, onBack }) {
   return (
     <main className="page page--interview interview-report-page">
       <div className="interview-report">
-        <button className="ielts-back" onClick={onBack}><ArrowLeft />返回场景广场</button>
+        <button className="ielts-back" onClick={onHome}><ArrowLeft />返回</button>
         <PageHeader
           eyebrow="INTERVIEW REPORT"
           title="面试表现报告"
           subtitle="整场回答的五维评估与改进建议，已自动打卡。"
-          action={<button className="button button--secondary interview-report-home" onClick={onHome}>返回面试首页</button>}
+          action={<button className="button button--secondary interview-report-home" onClick={onHome}>返回训练中心</button>}
         />
         <section className="interview-report__summary">
           <div className="interview-report__score">
@@ -793,19 +773,254 @@ function InterviewReport({ sceneId, sessionId, onHome, onBack }) {
           </div>
         </section>
         <div className="interview-report__footer">
-          <button className="button button--secondary" onClick={onBack}>返回场景广场</button>
+          <button className="button button--secondary" onClick={onHome}>返回</button>
         </div>
       </div>
     </main>
   );
 }
 
+const interviewAssetTabs = [
+  { id: "overview", label: "概览" },
+  { id: "history", label: "训练记录" },
+  { id: "trends", label: "能力趋势" },
+];
+
+function interviewAssetDate(value, withTime = false) {
+  if (!value) return "尚未练习";
+  const options = withTime
+    ? { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
+    : { year: "numeric", month: "numeric", day: "numeric" };
+  return new Intl.DateTimeFormat("zh-CN", options).format(new Date(value));
+}
+
+function interviewAssetStatus(item) {
+  if (item.latestReportStatus === "COMPLETED") {
+    const score = Number(item.latestOverallScore);
+    return Number.isFinite(score) ? `${Math.round(score)} 分` : "已出报告";
+  }
+  if (item.latestReportStatus === "PROCESSING") return "报告生成中";
+  if (item.latestReportStatus === "FAILED") return "报告生成失败";
+  return "待练习";
+}
+
+function recentInterviewActivity(items) {
+  const formatter = new Intl.DateTimeFormat("zh-CN", { weekday: "short" });
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (6 - index));
+    const next = new Date(date);
+    next.setDate(next.getDate() + 1);
+    const count = items.filter((item) => {
+      const practicedAt = new Date(item.latestPracticedAt);
+      return Number.isFinite(practicedAt.getTime()) && practicedAt >= date && practicedAt < next;
+    }).length;
+    return { label: formatter.format(date), count };
+  });
+}
+
+function reportWeakestDimension(report) {
+  const dimensions = Array.isArray(report?.dimensions) ? report.dimensions : [];
+  return dimensions
+    .map((item) => ({ ...item, scoreValue: Number(item.score) }))
+    .filter((item) => Number.isFinite(item.scoreValue))
+    .sort((left, right) => left.scoreValue - right.scoreValue)[0] || null;
+}
+
+function InterviewAssetsOverview({ items, reportsByScene, onTab }) {
+  const completed = items.filter((item) => item.latestReportStatus === "COMPLETED");
+  const latest = completed[0] || items[0] || null;
+  const latestReport = latest ? reportsByScene[latest.sceneId]?.report : null;
+  const weakest = reportWeakestDimension(latestReport);
+  const weakestMeta = weakest ? reportDimensionMeta[weakest.dimension] : null;
+  const activity = recentInterviewActivity(items);
+  const maxCount = Math.max(1, ...activity.map((item) => item.count));
+  const activeDays = activity.filter((item) => item.count > 0).length;
+  const weeklyCount = activity.reduce((sum, item) => sum + item.count, 0);
+  const totalPracticeCount = items.reduce((sum, item) => sum + Number(item.practiceCount || 0), 0);
+  const recentSlots = Array.from({ length: 3 }, (_, index) => items[index] || null);
+  const latestScore = Number(latest?.latestOverallScore);
+
+  return (
+    <section className="interview-assets-overview">
+      <section className="interview-assets-hero">
+        <div>
+          <span>最近一次完整面试</span>
+          <h2>{Number.isFinite(latestScore) ? Math.round(latestScore) : "—"}<small>/100</small></h2>
+          <p>{latest ? `${latest.jobTitle || "未命名岗位"} · ${interviewAssetDate(latest.latestPracticedAt, true)}` : "完成面试后显示最近表现"}</p>
+        </div>
+        <div>
+          <span>优先提升</span>
+          <strong>{weakestMeta?.label || "等待五维报告"}</strong>
+          <small>{weakest ? `当前 ${Math.round(weakest.scoreValue)} 分` : "生成报告后自动识别弱项"}</small>
+        </div>
+        <button className="button button--primary" onClick={() => onTab("trends")}>查看能力趋势<ArrowRight weight="bold" /></button>
+      </section>
+
+      <section className="interview-assets-weekly">
+        <header>
+          <div><span>近七天面试活跃</span><h2>{weeklyCount} <small>次</small></h2><p>累计完成 {totalPracticeCount} 次面试练习</p></div>
+          <div className="interview-assets-weekly__stats"><p><strong>{activeDays}</strong><small>活跃天数</small></p><p><strong>{items.length}</strong><small>岗位覆盖</small></p><p><strong>{completed.length}</strong><small>有效报告</small></p></div>
+        </header>
+        <div className="interview-assets-weekly__bars">{activity.map((item) => <span key={item.label}><i className={item.count ? "" : "is-empty"} style={{ height: `${Math.max(item.count ? 14 : 5, (item.count / maxCount) * 100)}%` }} /><strong>{item.count}</strong><small>{item.label}</small></span>)}</div>
+      </section>
+
+      <section className="interview-assets-recent">
+        <header><h2>最近面试</h2><span>最近 3 个岗位</span></header>
+        <div>
+          {recentSlots.map((item, index) => item ? (
+            <button key={item.sceneId} onClick={() => onTab("history")}>
+              <span>{DIFFICULTY_LABELS[item.difficulty] || item.difficulty || "标准"}难度</span>
+              <strong>{item.jobTitle || "未命名岗位"}</strong>
+              <small>{interviewAssetDate(item.latestPracticedAt, true)}</small>
+              <em>{interviewAssetStatus(item)}</em>
+            </button>
+          ) : (
+            <article className="is-empty" key={`empty-${index}`}>
+              <span>记录 {index + 1}</span><strong>暂无面试记录</strong><small>完成面试后显示</small><em>待生成</em>
+            </article>
+          ))}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function InterviewAssetsHistory({ items, reportsByScene, reportsLoading, onPractice }) {
+  const [selectedId, setSelectedId] = useState(items[0]?.sceneId || "");
+  useEffect(() => {
+    setSelectedId((current) => items.some((item) => item.sceneId === current) ? current : items[0]?.sceneId || "");
+  }, [items]);
+  const selected = items.find((item) => item.sceneId === selectedId) || null;
+  const payload = selected ? reportsByScene[selected.sceneId] : null;
+  const report = payload?.report || null;
+  const reportStatus = payload?.status || selected?.latestReportStatus || "";
+  const dimensions = Array.isArray(report?.dimensions) ? report.dimensions : [];
+  const hasOverall = report?.overallScore != null && Number.isFinite(Number(report.overallScore));
+  const waitingForReport = Boolean(selected?.latestSessionId && reportsLoading && !payload);
+
+  return (
+    <section className="ielts-history-layout interview-assets-layout">
+      <aside className="interview-assets-list" aria-label="面试训练记录">
+        <header><h2>面试记录</h2><span>{items.length} 条</span></header>
+        {items.map((item) => (
+          <button key={item.sceneId} className={selected?.sceneId === item.sceneId ? "is-active" : ""} onClick={() => setSelectedId(item.sceneId)}>
+            <div className="ielts-history-record-meta"><time>{interviewAssetDate(item.latestPracticedAt)}</time><em>{DIFFICULTY_LABELS[item.difficulty] || item.difficulty || "标准"} · {interviewAssetStatus(item)}</em></div>
+            <strong>{item.jobTitle || "未命名岗位"}</strong>
+            <span className="ielts-history-record-duration">累计练习 {Number(item.practiceCount || 0)} 次</span>
+          </button>
+        ))}
+        {!items.length && <div className="ielts-history-empty">暂无面试学习资产</div>}
+      </aside>
+      <article className="interview-assets-detail">
+        {selected && reportStatus === "COMPLETED" && report && (
+          <>
+            <header>
+              <div><p className="eyebrow">INTERVIEW ASSET</p><h2>{selected.jobTitle || "未命名岗位"}</h2><p>{interviewAssetDate(selected.latestPracticedAt, true)} · {DIFFICULTY_LABELS[selected.difficulty] || "标准"}难度 · 累计练习 {Number(selected.practiceCount || 0)} 次</p></div>
+              <div className="interview-assets-detail__actions"><button className="button button--secondary" onClick={() => onPractice(selected.sceneId)}>复练本岗位</button></div>
+            </header>
+            <section className="interview-assets-report">
+              <div className="interview-assets-report__score"><span>综合评分</span><strong>{hasOverall ? Math.round(Number(report.overallScore)) : "—"}</strong><small>/ 100</small></div>
+              <div className="interview-assets-report__summary"><p className="eyebrow">SUMMARY</p><p>{report.summary || "本次面试已结束，暂无文字总结。"}</p></div>
+            </section>
+            <section className="interview-assets-dimensions">
+              <h3>五维能力反馈</h3>
+              <div className="interview-assets-dimension-grid">
+                {dimensions.map((item) => {
+                  const meta = reportDimensionMeta[item.dimension] || { label: item.dimension, hint: "" };
+                  const score = item.score == null ? null : Number(item.score);
+                  const hasScore = score != null && Number.isFinite(score);
+                  return <article key={item.dimension} className="interview-assets-dimension"><header><span>{meta.label}<small>{meta.hint}</small></span><strong className={hasScore && score < 60 ? "is-low" : ""}>{hasScore ? Math.round(score) : "—"}</strong></header><p>{item.evaluation || "该维度暂无可用的评分说明。"}</p></article>;
+                })}
+                {!dimensions.length && <p className="interview-assets-empty">报告暂未包含分维度评分。</p>}
+              </div>
+            </section>
+          </>
+        )}
+        {selected && waitingForReport && <div className="ielts-history-empty interview-assets-state"><NewtonsCradle label="正在读取面试报告" /></div>}
+        {selected && !waitingForReport && selected.latestSessionId && (reportStatus !== "COMPLETED" || !report) && (
+          <div className="ielts-history-empty interview-assets-state"><h2>{reportStatus === "PROCESSING" ? "报告生成中" : "报告暂不可用"}</h2><p>{reportStatus === "FAILED" ? "上一次报告生成失败，可直接复练本岗位重新面试。" : "报告仍在生成或读取失败，稍后回到这里即可查看五维反馈。"}</p><button className="button button--primary" onClick={() => onPractice(selected.sceneId)}>复练本岗位</button></div>
+        )}
+        {selected && !selected.latestSessionId && <div className="ielts-history-empty interview-assets-state"><h2>尚未开始面试</h2><p>该岗位已生成场景，完成一次面试后将在这里展示五维报告。</p><button className="button button--primary" onClick={() => onPractice(selected.sceneId)}>开始面试</button></div>}
+        {!selected && <div className="ielts-history-empty"><BookOpenText /><h2>暂无面试记录</h2><p>创建岗位并完成面试后，报告会保存在这里。</p></div>}
+      </article>
+    </section>
+  );
+}
+
+function InterviewAssetsTrends({ items, reportsByScene, reportsLoading }) {
+  const scoredItems = items
+    .filter((item) => Number.isFinite(Number(item.latestOverallScore)))
+    .slice(0, 5)
+    .reverse();
+  const scores = scoredItems.map((item) => Math.round(Number(item.latestOverallScore)));
+  const latestScore = scores.at(-1);
+  const change = scores.length >= 2 ? latestScore - scores[0] : null;
+  const reports = Object.values(reportsByScene).map((item) => item?.report).filter(Boolean);
+  const dimensions = Object.entries(reportDimensionMeta).map(([dimension, meta]) => {
+    const values = reports.flatMap((report) => Array.isArray(report.dimensions) ? report.dimensions : [])
+      .filter((item) => item.dimension === dimension)
+      .map((item) => Number(item.score))
+      .filter(Number.isFinite);
+    const score = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
+    return { dimension, ...meta, score };
+  });
+  const available = dimensions.filter((item) => item.score > 0);
+  const highest = available.length ? Math.max(...available.map((item) => item.score)) : 0;
+  const lowest = available.length ? Math.min(...available.map((item) => item.score)) : 0;
+  const average = available.length ? Math.round(available.reduce((sum, item) => sum + item.score, 0) / available.length) : 0;
+  const weakness = available.find((item) => item.score === lowest);
+  const totalPracticeCount = items.reduce((sum, item) => sum + Number(item.practiceCount || 0), 0);
+
+  return (
+    <section className="interview-assets-trends">
+      <section className="interview-assets-trend-summary">
+        <div><span>最近五次评分</span><h2>{latestScore ?? "—"}</h2><p>{change == null ? "至少完成两次面试后显示变化" : `最近 ${scores.length} 次变化 ${change >= 0 ? "+" : ""}${change} 分`}</p></div>
+        {scores.length ? (
+          <div className="ielts-trend-chart-wrap">
+            <TrendLineChart
+              values={scores}
+              maxScore={100}
+              lineColor="#2875c8"
+              gridColor="#dbe8f7"
+              fillStart="rgba(40, 117, 200, .24)"
+              fillEnd="rgba(40, 117, 200, 0)"
+              pointColor="#1f5798"
+              ariaLabel={`最近五次面试评分：${scores.join("、")}`}
+            />
+            <small>较早</small><small>较近</small>
+          </div>
+        ) : <div className="interview-assets-trend-empty"><strong>{reportsLoading ? "正在计算趋势" : "暂无评分趋势"}</strong><p>完成面试并生成报告后显示。</p></div>}
+        <div><span>训练积累</span><strong>{totalPracticeCount} 次</strong><p>覆盖 {items.length} 个岗位</p></div>
+      </section>
+
+      <section className={cx("interview-assets-dimension-trends", !available.length && "is-empty")}>
+        <h2>五项能力平均分</h2>
+        {available.length ? dimensions.map((item) => (
+          <article key={item.dimension}><span>{item.label}<small>{item.hint}</small></span><strong>{item.score || "—"}<small>/100</small></strong><div><i style={{ width: `${item.score}%` }} /></div><em>{item.score === 0 ? "暂无数据" : highest > lowest && item.score === highest ? "相对优势" : highest > lowest && item.score === lowest ? "重点提升" : item.score >= average ? "表现稳定" : "继续提升"}</em></article>
+        )) : <div className="interview-assets-trend-empty"><strong>{reportsLoading ? "正在读取五维报告" : "暂无能力评分"}</strong><p>完成一次有效面试后，这里会展示五维平均表现。</p></div>}
+      </section>
+
+      <section className="interview-assets-next-step">
+        <article><span>优先能力</span><strong>{weakness?.label || "等待报告"}</strong><p>{weakness ? `当前平均 ${weakness.score} 分，下一次复练优先观察${weakness.label}。` : "生成五维报告后自动定位当前弱项。"}</p></article>
+        <article><span>回答结构</span><strong>强化 STAR 叙述</strong><p>用情境、任务、行动和结果组织案例，减少无关铺垫。</p></article>
+        <article><span>结果表达</span><strong>量化个人贡献</strong><p>用数字和业务影响说明成果，让回答更具体可信。</p></article>
+      </section>
+    </section>
+  );
+}
+
 export function InterviewAssets({ route, onNavigate, onBack, onBackToAssets, onBackToIelts, onTraining, onPractice }) {
+  const availableTabs = interviewAssetTabs.map((item) => item.id);
+  const tab = availableTabs.includes(route?.tab) ? route.tab : "overview";
+  const setTab = (nextTab) => onNavigate(nextTab === "overview" ? paths.interview.assets.root : paths.interview.assets[nextTab]);
+  const tabRef = useRef(null);
+  const tabButtons = useRef({});
+  const [tabIndicator, setTabIndicator] = useState({ x: 0, width: 0, ready: false });
   const [items, setItems] = useState([]);
-  const [selectedId, setSelectedId] = useState("");
-  const [report, setReport] = useState(null);
-  const [reportStatus, setReportStatus] = useState("");
-  const [reportLoading, setReportLoading] = useState(false);
+  const [reportsByScene, setReportsByScene] = useState({});
+  const [reportsLoading, setReportsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
@@ -815,9 +1030,12 @@ export function InterviewAssets({ route, onNavigate, onBack, onBackToAssets, onB
     getInterviewAssets()
       .then((data) => {
         if (cancelled) return;
-        const next = Array.isArray(data) ? data : [];
+        const next = (Array.isArray(data) ? data : []).slice().sort((left, right) => {
+          const leftTime = new Date(left.latestPracticedAt || left.createdAt || 0).getTime();
+          const rightTime = new Date(right.latestPracticedAt || right.createdAt || 0).getTime();
+          return rightTime - leftTime;
+        });
         setItems(next);
-        setSelectedId((current) => current || next[0]?.sceneId || "");
         setLoadError("");
       })
       .catch((error) => {
@@ -829,44 +1047,40 @@ export function InterviewAssets({ route, onNavigate, onBack, onBackToAssets, onB
     return () => { cancelled = true; };
   }, []);
 
-  const selected = items.find((item) => item.sceneId === selectedId) || null;
-
   useEffect(() => {
-    if (!selected?.latestSessionId) {
-      setReport(null);
-      setReportStatus("");
-      setReportLoading(false);
+    const candidates = items.filter((item) => item.latestSessionId);
+    if (!candidates.length) {
+      setReportsByScene({});
+      setReportsLoading(false);
       return undefined;
     }
     let cancelled = false;
-    setReportLoading(true);
-    getInterviewReport(selected.sceneId, selected.latestSessionId)
-      .then((data) => {
-        if (cancelled) return;
-        setReport(data?.report || null);
-        setReportStatus(data?.status || "");
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setReport(null);
-          setReportStatus("");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setReportLoading(false);
-      });
+    setReportsLoading(true);
+    Promise.all(candidates.map(async (item) => {
+      try {
+        const payload = await getInterviewReport(item.sceneId, item.latestSessionId);
+        return [item.sceneId, { status: payload?.status || item.latestReportStatus || "", report: payload?.report || null }];
+      } catch {
+        return [item.sceneId, { status: "ERROR", report: null }];
+      }
+    })).then((entries) => {
+      if (!cancelled) setReportsByScene(Object.fromEntries(entries));
+    }).finally(() => {
+      if (!cancelled) setReportsLoading(false);
+    });
     return () => { cancelled = true; };
-  }, [selected?.sceneId, selected?.latestSessionId]);
+  }, [items]);
 
-  const statusLabel = (item) => {
-    if (item.latestReportStatus === "COMPLETED") {
-      const score = Number(item.latestOverallScore);
-      return Number.isFinite(score) ? `${Math.round(score)} 分` : "已出报告";
-    }
-    if (item.latestReportStatus === "PROCESSING") return "报告生成中";
-    if (item.latestReportStatus === "FAILED") return "报告生成失败";
-    return "待练习";
-  };
+  useEffect(() => {
+    const updateIndicator = () => {
+      const activeButton = tabButtons.current[tab];
+      if (!tabRef.current || !activeButton) return;
+      setTabIndicator({ x: activeButton.offsetLeft, width: activeButton.offsetWidth, ready: true });
+    };
+    updateIndicator();
+    window.addEventListener("resize", updateIndicator);
+    return () => window.removeEventListener("resize", updateIndicator);
+  }, [tab]);
 
   const otherAssetsMenu = (
     <div className="asset-module-menu interview-other-assets">
@@ -878,89 +1092,19 @@ export function InterviewAssets({ route, onNavigate, onBack, onBackToAssets, onB
     </div>
   );
 
-  const dimensions = Array.isArray(report?.dimensions) ? report.dimensions : [];
-  const hasOverall = report?.overallScore != null && Number.isFinite(Number(report.overallScore));
-
   return (
-    <main className="page page--interview interview-assets-page">
-      <button className="ielts-back" onClick={onBack}><ArrowLeft />返回场景广场</button>
-      <PageHeader
-        title="面试学习资产"
-        subtitle="回看最近一次面试的五维报告，针对弱项直接复练同岗位面试。"
-        action={<div className="ielts-assets-actions">{otherAssetsMenu}<button className="button button--secondary ielts-assets-header-cta" onClick={onTraining}>返回面试首页</button></div>}
-      />
-      {loadError && <p className="call-error" role="alert">{loadError}</p>}
-      <section className="ielts-history-layout interview-assets-layout">
-        <aside className="interview-assets-list" aria-label="面试训练记录">
-          <header><h2>面试记录</h2><span>{items.length} 条</span></header>
-          {items.map((item) => (
-            <button key={item.sceneId} className={selected?.sceneId === item.sceneId ? "is-active" : ""} onClick={() => setSelectedId(item.sceneId)}>
-              <div className="ielts-history-record-meta">
-                <time>{item.latestPracticedAt ? new Date(item.latestPracticedAt).toLocaleDateString("zh-CN") : "尚未练习"}</time>
-                <em>{DIFFICULTY_LABELS[item.difficulty] || item.difficulty || "标准"} · {statusLabel(item)}</em>
-              </div>
-              <strong>{item.jobTitle || "未命名岗位"}</strong>
-            </button>
-          ))}
-          {!items.length && <div className="ielts-history-empty">{loading ? "正在加载面试学习资产" : "暂无面试学习资产"}</div>}
-        </aside>
-        <article className="interview-assets-detail">
-          {selected && selected.latestSessionId && reportStatus === "COMPLETED" && report && (
-            <>
-              <header>
-                <div><p className="eyebrow">INTERVIEW ASSET</p><h2>{selected.jobTitle || "未命名岗位"}</h2><p>{selected.latestPracticedAt ? `${new Date(selected.latestPracticedAt).toLocaleDateString("zh-CN")} · ${DIFFICULTY_LABELS[selected.difficulty] || "标准"} 难度` : "最近一次面试"}</p></div>
-                <div className="interview-assets-detail__actions"><button className="button button--secondary" onClick={() => onPractice(selected.sceneId)}>复练本岗位</button></div>
-              </header>
-              <section className="interview-assets-report">
-                <div className="interview-assets-report__score">
-                  <span>综合评分</span>
-                  <strong>{hasOverall ? Math.round(Number(report.overallScore)) : "—"}</strong>
-                  <small>/ 100</small>
-                </div>
-                <div className="interview-assets-report__summary">
-                  <p className="eyebrow">SUMMARY</p>
-                  <p>{report.summary || "本次面试已结束，暂无文字总结。"}</p>
-                </div>
-              </section>
-              <section className="interview-assets-dimensions">
-                <h3>五维能力反馈</h3>
-                <div className="interview-assets-dimension-grid">
-                  {dimensions.map((item) => {
-                    const meta = reportDimensionMeta[item.dimension] || { label: item.dimension, hint: "" };
-                    const score = item.score == null ? null : Number(item.score);
-                    const hasScore = score != null && Number.isFinite(score);
-                    return (
-                      <article key={item.dimension} className="interview-assets-dimension">
-                        <header><span>{meta.label}<small>{meta.hint}</small></span><strong className={hasScore && score < 60 ? "is-low" : ""}>{hasScore ? Math.round(score) : "—"}</strong></header>
-                        <p>{item.evaluation || "该维度暂无可用的评分说明。"}</p>
-                      </article>
-                    );
-                  })}
-                  {!dimensions.length && <p className="interview-assets-empty">报告暂未包含分维度评分。</p>}
-                </div>
-              </section>
-            </>
-          )}
-          {selected && selected.latestSessionId && reportLoading && (
-            <div className="ielts-history-empty interview-assets-state"><NewtonsCradle label="正在读取面试报告" /></div>
-          )}
-          {selected && selected.latestSessionId && !reportLoading && reportStatus !== "COMPLETED" && (
-            <div className="ielts-history-empty interview-assets-state">
-              <h2>{reportStatus === "PROCESSING" ? "报告生成中" : "报告生成失败"}</h2>
-              <p>{reportStatus === "FAILED" ? "上一次报告生成失败，可直接复练本岗位重新面试。" : "报告仍在生成，稍后回到这里即可查看五维反馈。"}</p>
-              <button className="button button--primary" onClick={() => onPractice(selected.sceneId)}>复练本岗位</button>
-            </div>
-          )}
-          {selected && !selected.latestSessionId && (
-            <div className="ielts-history-empty interview-assets-state">
-              <h2>尚未开始面试</h2>
-              <p>该岗位已生成场景，开始一次面试后将在这里展示五维报告。</p>
-              <button className="button button--primary" onClick={() => onPractice(selected.sceneId)}>开始面试</button>
-            </div>
-          )}
-          {!selected && !loading && <div className="ielts-history-empty">选择一个面试记录查看报告</div>}
-        </article>
-      </section>
+    <main className={cx("page", "page--interview", "interview-assets-page", tab === "overview" && "interview-assets-page--overview", tab === "trends" && "interview-assets-page--trends")}>
+      <button className="ielts-back" onClick={onBack}><ArrowLeft />返回</button>
+      <PageHeader title="面试学习资产" action={<div className="ielts-assets-actions">{otherAssetsMenu}<SimpleCta className="ielts-assets-header-cta" onClick={onTraining}>返回训练中心</SimpleCta></div>} />
+      <nav className="interview-assets-tabs" ref={tabRef} aria-label="面试学习资产视图">
+        <span className={cx("interview-assets-tab-indicator", tabIndicator.ready && "is-ready")} style={{ width: tabIndicator.width, transform: `translateX(${tabIndicator.x}px)` }} />
+        {interviewAssetTabs.map((item) => <button ref={(node) => { tabButtons.current[item.id] = node; }} key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}
+      </nav>
+      {loading ? <div className="ielts-history-empty"><NewtonsCradle label="正在读取面试学习资产" /></div>
+        : loadError ? <div className="ielts-history-empty"><h2>学习资产加载失败</h2><p>{loadError}</p></div>
+          : tab === "overview" ? <InterviewAssetsOverview items={items} reportsByScene={reportsByScene} onTab={setTab} />
+            : tab === "history" ? <InterviewAssetsHistory items={items} reportsByScene={reportsByScene} reportsLoading={reportsLoading} onPractice={onPractice} />
+              : <InterviewAssetsTrends items={items} reportsByScene={reportsByScene} reportsLoading={reportsLoading} />}
     </main>
   );
 }
@@ -977,6 +1121,7 @@ function ExpandingCta({ children, className, direction = "forward", disabled = f
 export function InterviewModule({ route, teacher, speed, onNavigate, onBack }) {
   const screen = route?.screen || "home";
   const navigate = (path) => onNavigate(path);
+  const returnHome = () => navigate(paths.interview.root);
   if (screen === "session") {
     return (
       <InterviewSession
@@ -985,9 +1130,9 @@ export function InterviewModule({ route, teacher, speed, onNavigate, onBack }) {
         speed={speed}
         onEndInterview={(sceneId, sessionId, reportStatus) => {
           if (sessionId) navigate(paths.interview.report(sceneId, sessionId));
-          else onBack();
+          else returnHome();
         }}
-        onExit={onBack}
+        onExit={returnHome}
       />
     );
   }
@@ -996,8 +1141,7 @@ export function InterviewModule({ route, teacher, speed, onNavigate, onBack }) {
       <InterviewReport
         sceneId={route.sceneId}
         sessionId={route.sessionId}
-        onHome={() => navigate(paths.interview.root)}
-        onBack={onBack}
+        onHome={returnHome}
       />
     );
   }

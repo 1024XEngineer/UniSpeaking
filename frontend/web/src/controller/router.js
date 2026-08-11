@@ -94,7 +94,11 @@ export const paths = {
   },
   interview: {
     root: "/interview",
-    assets: "/interview/assets",
+    assets: {
+      root: "/interview/assets",
+      history: "/interview/assets/history",
+      trends: "/interview/assets/trends",
+    },
     session: (sceneId) => `/interview/scenes/${encodeURIComponent(sceneId)}/session`,
     report: (sceneId, sessionId) => `/interview/scenes/${encodeURIComponent(sceneId)}/session/${encodeURIComponent(sessionId)}/report`,
   },
@@ -274,9 +278,10 @@ export function parseInterviewRoute(pathname) {
     return appRoute("interview", { interviewRoute: { screen: "home" } });
   }
   if (segments[1] === "assets") {
+    const tab = assetTabs.includes(segments[2]) ? segments[2] : "overview";
     return appRoute("interview-assets", {
-      interviewRoute: { area: "assets" },
-      canonicalPath: paths.interview.assets,
+      interviewRoute: { area: "assets", tab },
+      canonicalPath: tab === "overview" ? paths.interview.assets.root : paths.interview.assets[tab],
     });
   }
   if (segments[1] === "scenes" && segments.length >= 3) {
@@ -382,4 +387,13 @@ export function resolveRoute(locationLike = window.location) {
 
 export function hrefForPage(page) {
   return PAGE_PATHS[page] || paths.app.conversation;
+}
+
+// Preserve the active specialty when navigating between the shared sidebar areas.
+export function sidebarPageTarget(currentPage, destination) {
+  if (destination === "assets" && currentPage === "ielts") return "ielts-assets";
+  if (destination === "assets" && currentPage === "interview") return "interview-assets";
+  if (destination === "scenes" && currentPage === "ielts-assets") return "ielts";
+  if (destination === "scenes" && currentPage === "interview-assets") return "interview";
+  return destination;
 }

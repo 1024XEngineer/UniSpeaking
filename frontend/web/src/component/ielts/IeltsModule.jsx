@@ -3,9 +3,12 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpenText,
+  Briefcase,
+  CalendarCheck,
   CaretDown,
   CaretRight,
   Check,
+  Fire,
   MagnifyingGlass,
   NotePencil,
   Pause,
@@ -13,9 +16,11 @@ import {
   Shuffle,
   SquaresFour,
   Subtitles,
+  Target,
   X,
 } from "@phosphor-icons/react";
 import { NewtonsCradle } from "../common/NewtonsCradle.jsx";
+import { EvaluationLoader } from "../common/EvaluationLoader.jsx";
 import {
   createIeltsSceneFlow,
   fetchAuthenticatedMedia,
@@ -97,10 +102,10 @@ export function TrainingCta({ children, onClick, className, disabled = false, ty
   return <button type={type} className={cx("expanding-cta", "teacher-gradient-cta", "ielts-training-cta", className)} onClick={onClick} disabled={disabled}><span>{children}</span><ArrowRight weight="bold" /></button>;
 }
 
-export function IeltsHeader({ title, subtitle, onBack, action, leadAction }) {
+export function IeltsHeader({ title, subtitle, eyebrow, onBack, action, leadAction }) {
   return (
     <header className="ielts-page-header">
-      <div>{onBack && <button className="ielts-back" onClick={onBack}><ArrowLeft />返回</button>}{leadAction}<h1>{title}</h1>{subtitle && <p>{subtitle}</p>}</div>
+      <div>{onBack && <button className="ielts-back" onClick={onBack}><ArrowLeft />返回</button>}{leadAction}{eyebrow && <span className="ielts-header-eyebrow">{eyebrow}</span>}<h1>{title}</h1>{subtitle && <p>{subtitle}</p>}</div>
       {action}
     </header>
   );
@@ -133,7 +138,7 @@ function IeltsIntake({ onComplete, initialProfile, onCancel = null }) {
 
   return (
     <main className="setup-page ielts-intake">
-      <header><span>IELTS SPEAKING · 轻问询</span><span>{stepIndex + 1} / {ieltsIntakeSteps.length}</span></header>
+      <header className="ielts-intake-progress"><span>{stepIndex + 1} / {ieltsIntakeSteps.length}</span><span aria-hidden="true"><i style={{ width: `${((stepIndex + 1) / ieltsIntakeSteps.length) * 100}%` }} /></span></header>
       <section className="setup-card">
         <p className="eyebrow">{step.eyebrow}</p>
         <h1>{step.title}</h1>
@@ -167,13 +172,14 @@ function formatBand(value) {
 
 function IeltsHome({ onChoose, onAssets, onEditGoal, onBack, settings }) {
   const target = formatBand(settings?.targetScore);
-  const latestEstimatedScore = formatBand(settings?.latestEstimatedScore);
+  const currentStreakDays = Number(settings?.currentStreakDays || 0);
   const todayCompletedCount = Number(settings?.todayCompletedCount || 0);
   return (
     <main className="ielts-page ielts-home">
       <IeltsHeader
         onBack={onBack}
-        title="IELTS 口语特训"
+        eyebrow="IELTS SPEAKING"
+        title="雅思口语"
         subtitle="实战训练，持续复盘，看见进步"
         action={(
           <div className="ielts-home-actions">
@@ -183,9 +189,9 @@ function IeltsHome({ onChoose, onAssets, onEditGoal, onBack, settings }) {
         )}
       />
       <section className="ielts-goal-row" aria-label="备考目标">
-        <div><span>目标</span><strong>{target}</strong></div>
-        <div><span>最近模考预估</span><strong>{latestEstimatedScore}</strong></div>
-        <div><span>今日特训</span><strong>{todayCompletedCount} <small>/ 5</small></strong></div>
+        <div><span>学习目标</span><strong>{target}</strong><span className="ielts-goal-icon" aria-hidden="true"><Target weight="duotone" /></span></div>
+        <div><span>连续打卡</span><strong>{currentStreakDays} <small>天</small></strong><span className="ielts-goal-icon" aria-hidden="true"><CalendarCheck weight="duotone" /></span></div>
+        <div><span>今日特训</span><strong>{todayCompletedCount} <small>/ 5</small></strong><span className="ielts-goal-icon" aria-hidden="true"><Fire weight="duotone" /></span></div>
       </section>
 
       <section className="ielts-mock-feature">
@@ -195,18 +201,16 @@ function IeltsHome({ onChoose, onAssets, onEditGoal, onBack, settings }) {
       </section>
 
       <section className="ielts-quick-start">
-        <p>快速开始训练</p>
+        <p><span />快速开始训练</p>
         <div className="ielts-part-grid">
           {["p1", "p2", "p3"].map((id) => {
             const item = partMeta[id];
             return (
-            <article key={id} className="ielts-part-card">
+            <button type="button" key={id} className="ielts-part-card" onClick={() => onChoose(id, "browse")}>
               <span className="ielts-part-number">{item.number}</span>
-              <small>{item.label}</small>
-              <h2>{item.title}</h2>
-              <p>{item.duration} · {item.note}</p>
-              <TrainingCta onClick={() => onChoose(id, "browse")}>开始练习</TrainingCta>
-            </article>
+              <span className="ielts-part-card__copy"><small>{item.label}</small><h2>{item.title}</h2><p>{item.duration} · {item.note}</p></span>
+              <span className="ielts-part-card__arrow"><CaretRight weight="bold" /></span>
+            </button>
           );})}
         </div>
       </section>
@@ -285,7 +289,7 @@ function TopicBrowser({ part, onBack, onStart }) {
 
   return (
     <main className="ielts-page ielts-topics">
-      <IeltsHeader onBack={onBack} title={`${partMeta[part].label} · ${partMeta[part].title}`} subtitle="选择一个话题，正式开始后才会由考官揭晓具体问题。" action={<SimpleCta className="ielts-random-cta" onClick={() => onStart(null, true)}><Shuffle />随机练习</SimpleCta>} />
+      <IeltsHeader eyebrow={`IELTS ${partMeta[part].label.toUpperCase()}`} onBack={onBack} title={`${partMeta[part].label} · ${partMeta[part].title}`} subtitle="选择一个话题，正式开始后才会由考官揭晓具体问题。" action={<SimpleCta className="ielts-random-cta" onClick={() => onStart(null, true)}><Shuffle />随机练习</SimpleCta>} />
       <section className="ielts-topic-tools">
         <div className="ielts-topic-filters" ref={filterRef}>
           <span className={cx("ielts-topic-filter-indicator", filterIndicator.ready && "is-ready")} style={{ width: filterIndicator.width, transform: `translateX(${filterIndicator.x}px)` }} />
@@ -465,14 +469,7 @@ function formatTime(seconds) {
 function IeltsEvaluationWaiting() {
   return (
     <section className="ielts-evaluation-waiting" role="status" aria-live="polite" aria-label="正在生成 IELTS 评分">
-      <div className="ielts-evaluation-loader" aria-hidden="true">
-        <span className="ielts-evaluation-loader__circle" />
-        <span className="ielts-evaluation-loader__circle" />
-        <span className="ielts-evaluation-loader__circle" />
-        <span className="ielts-evaluation-loader__shadow" />
-        <span className="ielts-evaluation-loader__shadow" />
-        <span className="ielts-evaluation-loader__shadow" />
-      </div>
+      <EvaluationLoader />
       <p>IELTS EVALUATION</p>
       <h1>正在生成评分</h1>
       <span>正在整理本次回答与四项能力反馈，请稍候。</span>
@@ -1317,7 +1314,39 @@ function AssetsOverview({ settings, reports, onTab }) {
   const activeDays = activity.filter((item) => item.minutes > 0).length;
   const totalMinutes = activity.reduce((sum, item) => sum + item.minutes, 0);
   const partCoverage = new Set(reports.flatMap((item) => item.mode === "MOCK_TEST" ? ["PART_1", "PART_2", "PART_3"] : [item.part]).filter(Boolean)).size;
-  return <section className="ielts-overview-dashboard"><section className="ielts-asset-hero"><div><span>最近一次完整模考</span><h2>{latestMock ? `预估 ${formatBand(latestMock.overallBandScore)}` : "暂无完整模考"}</h2><p>AI 训练评估，并非官方考试成绩</p></div><div><span>目标</span><strong>{formatBand(settings?.targetScore)}</strong><small>{gap == null ? "完成模考后显示差距" : gap === "0.0" ? "已达到当前目标" : `还差约 ${gap} 分`}</small></div><TrainingCta className="ielts-asset-gradient-action" onClick={() => onTab("trends")}>查看能力趋势</TrainingCta></section><section className="ielts-weekly-activity"><header><div><span>近七天训练时长</span><h2>{totalMinutes} <small>分钟</small></h2><p>今日已完成 {Number(settings?.todayCompletedCount || 0)} / 5 次 · 连续打卡 {Number(settings?.currentStreakDays || 0)} 天</p></div><div className="ielts-weekly-stats"><p><strong>{activeDays}</strong><small>活跃天数</small></p><p><strong>{activeDays ? Math.round(totalMinutes / activeDays) : 0}</strong><small>日均分钟</small></p><p><strong>{partCoverage}</strong><small>专项覆盖</small></p></div></header><div className="ielts-weekly-bars">{activity.map((item) => <span key={item.label}><i className={item.minutes ? "" : "is-empty"} style={{ height: `${Math.max(item.minutes ? 10 : 4, (item.minutes / maxMinutes) * 100)}%` }} /><strong>{item.minutes}</strong><small>{item.label}</small></span>)}</div></section><section className="ielts-asset-recent"><header><h2>最近训练</h2></header>{reports.length ? reports.slice(0, 3).map((item) => <article key={item.sessionId}><span>{reportType(item)}</span><div><strong><ReportTitle item={item} compact /></strong><small>{reportDate(item.endedAt)} · {reportDuration(item)}</small></div><p>{reportPerformanceLabel(item)}</p></article>) : <div className="ielts-history-empty"><BookOpenText /><h2>暂无评分记录</h2><p>完成一次有效训练后，后端报告会显示在这里。</p></div>}</section></section>;
+  const recentReports = reports.slice(0, 3);
+  const recentSlots = Array.from({ length: 3 }, (_, index) => recentReports[index] || null);
+  return (
+    <section className="ielts-overview-dashboard">
+      <section className="ielts-asset-hero">
+        <div><span>最近一次完整模考</span><h2>{latestMock ? `预估 ${formatBand(latestMock.overallBandScore)}` : "暂无完整模考"}</h2><p>AI 训练评估，并非官方考试成绩</p></div>
+        <div><span>目标</span><strong>{formatBand(settings?.targetScore)}</strong><small>{gap == null ? "完成模考后显示差距" : gap === "0.0" ? "已达到当前目标" : `还差约 ${gap} 分`}</small></div>
+        <TrainingCta className="ielts-asset-gradient-action" onClick={() => onTab("trends")}>查看能力趋势</TrainingCta>
+      </section>
+      <section className="ielts-weekly-activity">
+        <header><div><span>近七天训练时长</span><h2>{totalMinutes} <small>分钟</small></h2><p>今日已完成 {Number(settings?.todayCompletedCount || 0)} / 5 次 · 连续打卡 {Number(settings?.currentStreakDays || 0)} 天</p></div><div className="ielts-weekly-stats"><p><strong>{activeDays}</strong><small>活跃天数</small></p><p><strong>{activeDays ? Math.round(totalMinutes / activeDays) : 0}</strong><small>日均分钟</small></p><p><strong>{partCoverage}</strong><small>专项覆盖</small></p></div></header>
+        <div className="ielts-weekly-bars">{activity.map((item) => <span key={item.label}><i className={item.minutes ? "" : "is-empty"} style={{ height: `${Math.max(item.minutes ? 10 : 4, (item.minutes / maxMinutes) * 100)}%` }} /><strong>{item.minutes}</strong><small>{item.label}</small></span>)}</div>
+      </section>
+      <section className="ielts-asset-recent">
+        <header><h2>最近训练</h2><span>最近 3 次</span></header>
+        <div className="ielts-asset-recent__grid">
+          {recentSlots.map((item, index) => item ? (
+            <article key={item.sessionId}>
+              <span>{reportType(item)}</span>
+              <div><strong><ReportTitle item={item} compact /></strong><small>{reportDate(item.endedAt)} · {reportDuration(item)}</small></div>
+              <p>{reportPerformanceLabel(item)}</p>
+            </article>
+          ) : (
+            <article className="is-empty" key={`empty-${index}`}>
+              <span>记录 {index + 1}</span>
+              <div><strong>暂无训练记录</strong><small>完成训练后显示</small></div>
+              <p>待生成</p>
+            </article>
+          ))}
+        </div>
+      </section>
+    </section>
+  );
 }
 
 function AssetsHistory({ items }) {
@@ -1422,7 +1451,16 @@ function AssetsHistory({ items }) {
   );
 }
 
-export function TrendLineChart({ values }) {
+export function TrendLineChart({
+  values,
+  maxScore = 9,
+  lineColor = "#8060e8",
+  gridColor = "#e6dbff",
+  fillStart = "rgba(128, 96, 232, .24)",
+  fillEnd = "rgba(128, 96, 232, 0)",
+  pointColor = "#5a3dbb",
+  ariaLabel,
+}) {
   const canvasRef = useRef(null);
 
   useEffect(() => {
@@ -1444,10 +1482,13 @@ export function TrendLineChart({ values }) {
       if (!scoredValues.length) return;
       const scoreMin = Math.min(...scoredValues);
       const scoreMax = Math.max(...scoredValues);
-      const min = Math.max(0, Math.floor((scoreMin - .5) * 2) / 2);
-      const max = Math.min(9, Math.max(min + 1, Math.ceil((scoreMax + .5) * 2) / 2));
+      const isPercentScale = maxScore > 10;
+      const step = isPercentScale ? 10 : .5;
+      const min = isPercentScale ? 0 : Math.max(0, Math.floor((scoreMin - step) / step) * step);
+      const max = isPercentScale ? maxScore : Math.min(maxScore, Math.max(min + step, Math.ceil((scoreMax + step) / step) * step));
+      const xDenominator = Math.max(1, values.length - 1);
       const points = values.map((value, index) => ({
-        x: padding.left + (chartWidth * index) / (values.length - 1),
+        x: padding.left + (chartWidth * index) / xDenominator,
         y: Number.isFinite(value) ? padding.top + ((max - value) / (max - min)) * chartHeight : null,
         value,
       }));
@@ -1455,7 +1496,7 @@ export function TrendLineChart({ values }) {
 
       context.clearRect(0, 0, width, height);
       context.lineWidth = 1;
-      context.strokeStyle = "#e5e5e0";
+        context.strokeStyle = gridColor;
       [0, .5, 1].forEach((progress) => {
         const y = padding.top + chartHeight * progress;
         context.beginPath();
@@ -1466,8 +1507,8 @@ export function TrendLineChart({ values }) {
 
       if (scoredPoints.length >= 2) {
         const gradient = context.createLinearGradient(0, padding.top, 0, height);
-        gradient.addColorStop(0, "rgba(77, 77, 73, .24)");
-        gradient.addColorStop(1, "rgba(77, 77, 73, 0)");
+        gradient.addColorStop(0, fillStart);
+        gradient.addColorStop(1, fillEnd);
         context.beginPath();
         context.moveTo(scoredPoints[0].x, padding.top + chartHeight);
         scoredPoints.forEach((point) => context.lineTo(point.x, point.y));
@@ -1478,7 +1519,7 @@ export function TrendLineChart({ values }) {
 
         context.beginPath();
         scoredPoints.forEach((point, index) => index === 0 ? context.moveTo(point.x, point.y) : context.lineTo(point.x, point.y));
-        context.strokeStyle = "#242423";
+        context.strokeStyle = lineColor;
         context.lineWidth = 3;
         context.lineJoin = "round";
         context.lineCap = "round";
@@ -1492,9 +1533,9 @@ export function TrendLineChart({ values }) {
         context.fillStyle = "#fff";
         context.fill();
         context.lineWidth = point.y == null ? 2 : 3;
-        context.strokeStyle = point.y == null ? "#d4d4cf" : "#242423";
+        context.strokeStyle = point.y == null ? gridColor : lineColor;
         context.stroke();
-        context.fillStyle = "#6f6f6a";
+        context.fillStyle = pointColor;
         context.font = "600 11px sans-serif";
         context.textAlign = "center";
         context.fillText(point.y == null ? "--" : point.value.toFixed(1), point.x, height - 5);
@@ -1505,7 +1546,7 @@ export function TrendLineChart({ values }) {
     return () => window.removeEventListener("resize", draw);
   }, [values]);
 
-  return <canvas ref={canvasRef} className="ielts-trend-line-chart" aria-label={`最近五次模考成绩：${values.join("、")}`} />;
+  return <canvas ref={canvasRef} className="ielts-trend-line-chart" aria-label={ariaLabel || `最近五次模考成绩：${values.join("、")}`} />;
 }
 
 function AssetsTrends({ settings, reports }) {
@@ -1570,7 +1611,7 @@ function AssetsTrends({ settings, reports }) {
         </div>
       </section>
       <section className={cx("ielts-dimension-trends", !hasTrainingData && "is-empty")}>
-        <h2>四项能力平均分 · 最近 {recent.length} 次训练</h2>
+        <h2>四项能力平均分</h2>
         {hasTrainingData
           ? dimensions.map((item) => <article key={item.label}><span>{item.label}</span><strong className="ielts-dimension-score">{item.percent}<small>/100</small></strong><div><i style={{ width: `${item.percent}%` }} /></div><strong>{item.status}</strong></article>)
           : <div className="ielts-dimension-empty-state"><strong>暂无能力评分</strong><p>完成一次有效训练后，这里会展示四项能力平均分。</p></div>}
@@ -1582,7 +1623,7 @@ function AssetsTrends({ settings, reports }) {
   );
 }
 
-export function IeltsAssets({ route, onNavigate, onBackToAssets, onTraining }) {
+export function IeltsAssets({ route, onNavigate, onBack, onBackToAssets, onBackToInterview, onTraining }) {
   const availableTabs = ["overview", "history", "trends"];
   const tab = availableTabs.includes(route?.tab) ? route.tab : "overview";
   const setTab = (nextTab) => onNavigate(nextTab === "overview" ? paths.ielts.assets.root : paths.ielts.assets[nextTab]);
@@ -1623,6 +1664,14 @@ export function IeltsAssets({ route, onNavigate, onBackToAssets, onTraining }) {
     return () => window.removeEventListener("resize", updateIndicator);
   }, [tab]);
 
-  const otherAssetsButton = <div className="asset-module-menu ielts-other-assets"><button className="asset-module-menu__trigger" type="button" aria-label="切换学习资产模块" aria-haspopup="menu"><SquaresFour weight="bold" /><span>其他资产</span><CaretDown weight="bold" /></button><div className="asset-module-menu__popover" role="menu"><button type="button" role="menuitem" onClick={onBackToAssets}><BookOpenText /><span><strong>场景训练学习资产</strong><small>对话记录、纠错与场景复练</small></span><CaretRight /></button></div></div>;
-  return <main className={cx("ielts-page", "ielts-assets", tab === "overview" && "ielts-assets--overview", tab === "trends" && "ielts-assets--trends")}><IeltsHeader title="IELTS 学习资产" subtitle="集中查看数据库中已生成的训练评分与总体报告。" action={<div className="ielts-assets-actions">{otherAssetsButton}<SimpleCta className="ielts-assets-header-cta" onClick={onTraining}>返回训练中心</SimpleCta></div>} /><nav className="ielts-asset-tabs" ref={tabRef}><span className={cx("ielts-asset-tab-indicator", tabIndicator.ready && "is-ready")} style={{ width: tabIndicator.width, transform: `translateX(${tabIndicator.x}px)` }} />{tabs.map((item) => <button ref={(node) => { tabButtons.current[item.id] = node; }} key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>{loading ? <div className="ielts-history-empty"><NewtonsCradle label="正在读取后端评分记录" /></div> : loadError ? <div className="ielts-history-empty"><h2>学习资产加载失败</h2><p>{loadError}</p></div> : tab === "overview" ? <AssetsOverview settings={settings} reports={reports} onTab={setTab} /> : tab === "history" ? <AssetsHistory items={reports} /> : <AssetsTrends settings={settings} reports={reports} />}</main>;
+  const otherAssetsButton = (
+    <div className="asset-module-menu ielts-other-assets">
+      <button className="asset-module-menu__trigger" type="button" aria-label="切换学习资产模块" aria-haspopup="menu"><SquaresFour weight="bold" /><span>其他资产</span><CaretDown weight="bold" /></button>
+      <div className="asset-module-menu__popover" role="menu">
+        <button type="button" role="menuitem" onClick={onBackToAssets}><BookOpenText /><span><strong>场景训练学习资产</strong><small>对话记录、纠错与场景复练</small></span><CaretRight /></button>
+        <button type="button" role="menuitem" onClick={onBackToInterview}><Briefcase /><span><strong>面试学习资产</strong><small>面试报告与同岗位复练</small></span><CaretRight /></button>
+      </div>
+    </div>
+  );
+  return <main className={cx("ielts-page", "ielts-assets", tab === "overview" && "ielts-assets--overview", tab === "trends" && "ielts-assets--trends")}><IeltsHeader onBack={onBack} title="IELTS 学习资产" action={<div className="ielts-assets-actions">{otherAssetsButton}<SimpleCta className="ielts-assets-header-cta" onClick={onTraining}>返回训练中心</SimpleCta></div>} /><nav className="ielts-asset-tabs" ref={tabRef}><span className={cx("ielts-asset-tab-indicator", tabIndicator.ready && "is-ready")} style={{ width: tabIndicator.width, transform: `translateX(${tabIndicator.x}px)` }} />{tabs.map((item) => <button ref={(node) => { tabButtons.current[item.id] = node; }} key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>{loading ? <div className="ielts-history-empty"><NewtonsCradle label="正在读取后端评分记录" /></div> : loadError ? <div className="ielts-history-empty"><h2>学习资产加载失败</h2><p>{loadError}</p></div> : tab === "overview" ? <AssetsOverview settings={settings} reports={reports} onTab={setTab} /> : tab === "history" ? <AssetsHistory items={reports} /> : <AssetsTrends settings={settings} reports={reports} />}</main>;
 }

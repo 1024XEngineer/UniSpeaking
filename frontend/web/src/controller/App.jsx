@@ -56,8 +56,9 @@ import {
   Target,
   ChartLine,
 } from "lucide-react";
-import { learningItems, levels, plans, recommendations, teachers } from "../domain/content/data.js";
+import { learningItems, levels, plans, recommendations, sceneCategories, teachers } from "../domain/content/data.js";
 import {
+  AUTH_SESSION_EXPIRED_EVENT,
   changePassword,
   clearAuthSession,
   advanceCustomSceneFlow,
@@ -82,7 +83,7 @@ import {
 } from "../infrastructure/http/apiClient.js";
 import { createPcmWavRecorder } from "../infrastructure/audio/audioRecorder.js";
 import { useAchievementNotifications } from "../component/achievement/AchievementNotifications.jsx";
-import { createRealtimeClient } from "../websocket/realtimeClient.js";
+import { createRealtimeClient, realtimeFailureMessage } from "../websocket/realtimeClient.js";
 import { IeltsAssets, IeltsTrainingCenter } from "../component/ielts/IeltsModule.jsx";
 import { InterviewAssets, InterviewModule } from "../component/interview/InterviewModule.jsx";
 import { HelpCenter } from "../component/help/HelpCenter.jsx";
@@ -93,13 +94,14 @@ import { LearningInsights } from "../component/profile/LearningInsights.jsx";
 import { AccountSecurity } from "../component/profile/AccountSecurity.jsx";
 import { AboutProduct } from "../component/profile/AboutProduct.jsx";
 import { ProductLegalDocument } from "../component/profile/ProductLegalDocument.jsx";
-import { hrefForPage, paths, resolveRoute } from "./router.js";
+import { hrefForPage, paths, resolveRoute, sidebarPageTarget } from "./router.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
 const pronunciationAudioCache = new Map();
 const maxPronunciationAudioCacheEntries = 128;
 const chineseCharacterPattern = /[\u3400-\u9fff]/;
 const sceneCachePrefix = "unispeaking.scene.";
+const authReturnPathKey = "unispeaking.authReturnPath";
 
 function cacheGeneratedScene(scene) {
   if (!scene?.sceneId) return;
@@ -704,11 +706,17 @@ function AppShell({ page, setPage, teacher, avatarUrl, children }) {
     { id: "assets", label: "学习资产", icon: BookOpenText },
   ];
   const activePage = page === "ielts" || page === "interview" ? "scenes" : page === "ielts-assets" || page === "interview-assets" ? "assets" : page;
+  const navigateSidebar = (destination) => {
+    const targetPage = sidebarPageTarget(page, destination);
+    // Keep the current specialty page selected when clicking its active sidebar section.
+    if (activePage === destination && targetPage === destination) return;
+    if (targetPage !== page) setPage(targetPage);
+  };
   return (
     <div className={cx("app-shell", sidebarOpen && "is-sidebar-open")}>
       <aside className={cx("sidebar", sidebarOpen && "is-open")} onMouseEnter={() => setSidebarOpen(true)} onMouseLeave={() => setSidebarOpen(false)}>
         <Brand compact={!sidebarOpen} />
-        <nav>{items.map(({ id, label, icon: Icon }) => <button key={id} className={cx("sidebar__item", activePage === id && "is-active")} onClick={() => { if (activePage !== id) setPage(id); }} aria-label={label} title={label}><Icon weight={activePage === id ? "bold" : "regular"} /><span className="sidebar__label"><span>{label}</span></span></button>)}</nav>
+        <nav>{items.map(({ id, label, icon: Icon }) => <button key={id} className={cx("sidebar__item", activePage === id && "is-active")} onClick={() => navigateSidebar(id)} aria-label={label} title={label}><Icon weight={activePage === id ? "bold" : "regular"} /><span className="sidebar__label"><span>{label}</span></span></button>)}</nav>
         <button className={cx("sidebar__avatar", ["profile", "insights", "membership", "settings", "help", "about"].includes(page) && "is-active")} onClick={() => setPage("profile")}><img src={avatarUrl || teacher.image} alt="个人中心" /></button>
       </aside>
       <div className="app-main">{children}</div>
@@ -1058,7 +1066,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     } catch (error) {
       if (clientRef.current !== client) return;
       setCallState("error");
-      setCallError(error instanceof Error ? error.message : "无法开始实时对话");
+      setCallError(realtimeFailureMessage(error));
       setCallStatus("连接失败");
     }
   };
@@ -1130,6 +1138,13 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   );
 }
 
+function SceneCategoryTag({ category = "other", subtle = true }) {
+  const palette = sceneCategories[category] || sceneCategories.other;
+  const backgroundColor = subtle ? palette.subtleBackgroundColor : palette.backgroundColor;
+  const color = subtle ? palette.subtleTextColor || palette.textColor : palette.textColor;
+  return <span className="scene-category-tag" style={{ backgroundColor, color }}>{palette.label}</span>;
+}
+
 function Scenes({ onStartTraining, onIelts, onInterview }) {
   const [prompt, setPrompt] = useState("");
   const promptRef = useRef(null);
@@ -1139,7 +1154,6 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
   const [generationSource, setGenerationSource] = useState(null);
   const [startingTraining, setStartingTraining] = useState(false);
   const [generationError, setGenerationError] = useState("");
-  const [specialtyOpen, setSpecialtyOpen] = useState(false);
   const examples = ["餐厅点餐并说明忌口", "商场退换一件商品", "问路并确认交通方式", "预约理发并说明需求"];
   const syncPrompt = (event) => {
     setPrompt(event.currentTarget.value.slice(0, 200));
@@ -1193,13 +1207,6 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
         <section className="scene-builder scene-builder--featured scene-module">
           <div className="scene-section-heading scene-section-heading--primary">
             <div><p className="eyebrow">CREATE YOUR OWN</p><h2>创建专属场景</h2><p>用一句话描述你想练习的真实情境，AI 会为你整理角色、目标与表达任务。</p></div>
-            <div className={cx("scene-specialty-menu", specialtyOpen && "is-open")}>
-              <button type="button" className="scene-specialty-menu__trigger" aria-haspopup="menu" aria-expanded={specialtyOpen} onClick={() => setSpecialtyOpen(!specialtyOpen)}>专项训练<CaretDown weight="bold" /></button>
-              {specialtyOpen && <div className="scene-specialty-menu__popover" role="menu">
-                <button type="button" role="menuitem" onClick={() => { setSpecialtyOpen(false); onIelts(); }}><span className="scene-specialty-menu__icon"><BookOpenText /></span><span><strong>雅思口语</strong><small>Part 1 / 2 / 3 与全真模考</small></span><ArrowRight /></button>
-                <button type="button" role="menuitem" onClick={() => { setSpecialtyOpen(false); onInterview?.(); }}><span className="scene-specialty-menu__icon"><Briefcase /></span><span><strong>模拟面试</strong><small>上传 JD 与简历，AI 面试官逐轮追问</small></span><ArrowRight /></button>
-              </div>}
-            </div>
           </div>
           <div className={cx("scene-input", prompt.trim() && "has-content")}>
             <textarea ref={promptRef} value={prompt} maxLength={200} onChange={syncPrompt} onInput={syncPrompt} onCompositionEnd={syncPrompt} placeholder="你今天想练习什么？例如：第一次去健身房，咨询设施、开放时间和会员体验" />
@@ -1211,9 +1218,49 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
           </div>
         </section>
 
+        <section className="specialty-training scene-module">
+          <div className="scene-section-heading"><div><p className="eyebrow">SPECIALTY TRAINING</p><h2>专项训练</h2></div><p>围绕明确目标，进入完整的专项练习流程。</p></div>
+          <div className="specialty-training__grid">
+            <button type="button" className="specialty-card specialty-card--ielts" onClick={onIelts}>
+              <span className="specialty-card__art"><img src="/specialty/ielts.png" alt="" /></span>
+              <span className="specialty-card__copy"><small>IELTS SPEAKING</small><strong>雅思口语</strong><span>Part 1 / 2 / 3 专项练习与全真模考</span></span>
+              <span className="specialty-card__action" aria-hidden="true"><ArrowRight weight="bold" /></span>
+            </button>
+            <button type="button" className="specialty-card specialty-card--interview" onClick={onInterview}>
+              <span className="specialty-card__art"><img src="/specialty/interview.png" alt="" /></span>
+              <span className="specialty-card__copy"><small>ENGLISH INTERVIEW</small><strong>英文面试</strong><span>结合 JD 与简历，完成岗位模拟追问</span></span>
+              <span className="specialty-card__action" aria-hidden="true"><ArrowRight weight="bold" /></span>
+            </button>
+          </div>
+        </section>
+
         <section className="recommendations scene-module">
-          <div className="scene-section-heading"><div><p className="eyebrow">NEED INSPIRATION?</p><h2>从推荐场景开始</h2></div><p>还没想好？选择一个常用场景直接练习。</p></div>
-          <div className="recommendation-list">{recommendations.map((item) => { const loading = generationSource === `recommendation:${item.id}`; return <article key={item.id}><span className="recommendation__number">{item.number}</span><span className="recommendation__title"><span className="tag">{item.tag}</span><strong>{item.title}</strong></span><small>{item.duration}<i>·</i>{item.level}</small><p>{item.goal}</p><ExpandingCta className={cx("scene-card-cta", loading && "is-generating")} disabled={generating} onClick={() => void generate(item.title, item.id)}><span className="generation-button-state notranslate" translate="no"><span className={cx("generation-button-state__idle", loading && "is-hidden")}>开始练习</span><span className={cx("generation-button-state__loading", !loading && "is-hidden")}><NewtonsCradle size={20} className="newtons-cradle--inline" label={`正在生成${item.title}场景`} /><span>正在生成</span></span></span></ExpandingCta></article>; })}</div>
+          <div className="scene-section-heading"><div><p className="eyebrow">DAILY PICKS</p><h2>每日推荐</h2></div><p>选择一个常用场景，直接开始今天的练习。</p></div>
+          <div className="recommendation-list">
+            {recommendations.map((item) => {
+              const loading = generationSource === `recommendation:${item.id}`;
+              const category = sceneCategories[item.category] || sceneCategories.other;
+              return (
+                <article key={item.id} style={{ "--scene-category-bg": category.subtleBackgroundColor, "--scene-category-accent": category.subtleTextColor || category.textColor }}>
+                  <span className="recommendation__number">{item.number}</span>
+                  <span className="recommendation__title"><SceneCategoryTag category={item.category} subtle /><strong>{item.title}</strong></span>
+                  <small>{item.duration}<i>·</i>{item.level}</small>
+                  <p>{item.goal}</p>
+                  <button
+                    type="button"
+                    className={cx("scene-card-cta", loading && "is-generating")}
+                    disabled={generating}
+                    onClick={() => void generate(item.title, item.id)}
+                    aria-label={loading ? `正在生成 ${item.title} 场景` : `开始练习 ${item.title} 场景`}
+                  >
+                    {loading
+                      ? <NewtonsCradle size={18} className="newtons-cradle--inline" label={`正在生成${item.title}场景`} />
+                      : <ArrowRight weight="bold" />}
+                  </button>
+                </article>
+              );
+            })}
+          </div>
         </section>
       </div>
       {preview && <Modal onClose={() => { previewSceneIdRef.current = ""; setPreview(null); setPreviewDisplay(null); }}><p className="eyebrow">场景已准备好</p><h2>{previewDisplay?.title || (chineseCharacterPattern.test(preview.title || "") ? compactSceneText(preview.title, 18) : "正在整理场景…")}</h2><p className="modal-lead">确认场景信息，然后开始学习。</p><dl className="scene-summary"><div><dt>场景简介</dt><dd>{previewDisplay?.background || (chineseCharacterPattern.test(preview.background || "") ? compactSceneText(preview.background, 58) : "正在整理中文摘要…" )}</dd></div><div><dt>AI 扮演</dt><dd>{previewDisplay?.aiRole || (chineseCharacterPattern.test(preview.aiRole || "") ? compactSceneText(preview.aiRole, 22) : "正在整理…" )}</dd></div><div><dt>你将扮演</dt><dd>{previewDisplay?.userRole || (chineseCharacterPattern.test(preview.userRole || "") ? compactSceneText(preview.userRole, 22) : "正在整理…" )}</dd></div><div><dt>练习重点</dt><dd>{previewDisplay?.learningGoal || (chineseCharacterPattern.test(preview.learningGoal || "") ? compactSceneText(preview.learningGoal, 42) : "正在整理中文摘要…" )}</dd></div><div><dt>预计用时</dt><dd>{preview.estimatedMinutes} 分钟</dd></div></dl><div className="modal-actions"><Button variant="secondary" disabled={startingTraining} onClick={() => { previewSceneIdRef.current = ""; setPreview(null); setPreviewDisplay(null); }}>返回修改</Button><Button disabled={startingTraining} onClick={() => void startGeneratedTraining()} icon={<ArrowRight />}>{startingTraining ? "正在进入" : "确认进入"}</Button></div></Modal>}
@@ -2599,10 +2646,27 @@ export function App() {
   }, [initialRoute]);
 
   useEffect(() => {
+    const handleExpiredSession = () => {
+      const currentPath = `${window.location.pathname}${window.location.search}`;
+      if (![paths.auth.login, paths.auth.signup].includes(window.location.pathname)) {
+        try { window.sessionStorage.setItem(authReturnPathKey, currentPath); } catch { /* Login still proceeds when storage is unavailable. */ }
+      }
+      clearAchievementNotifications();
+      setUser(null);
+      setProfileOverview(null);
+      navigate(paths.auth.login, { authMode: "login" }, true);
+    };
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, handleExpiredSession);
+    return () => window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, handleExpiredSession);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     const bootstrapAuth = async () => {
       if (!hasAuthSession()) {
         if (!["splash", "auth"].includes(initialRoute.flow) && !initialRoute.publicAccess) {
+          const returnPath = `${window.location.pathname}${window.location.search}`;
+          try { window.sessionStorage.setItem(authReturnPathKey, returnPath); } catch { /* Login still proceeds when storage is unavailable. */ }
           navigate(paths.auth.login, { authMode: "login" }, true);
         }
         if (!cancelled) setAuthReady(true);
@@ -2644,7 +2708,18 @@ export function App() {
   const goAuth = (mode) => navigate(mode === "login" ? paths.auth.login : paths.auth.signup);
   const goLevel = () => navigate(paths.auth.level, { authMode });
   const goTeacher = () => navigate(paths.auth.teacher, { authMode });
-  const enterApp = () => setMainPage("conversation");
+  const enterApp = () => {
+    let returnPath = "";
+    try {
+      returnPath = window.sessionStorage.getItem(authReturnPathKey) || "";
+      if (returnPath) window.sessionStorage.removeItem(authReturnPathKey);
+    } catch { /* Fall back to the default authenticated page. */ }
+    if (returnPath.startsWith("/") && !returnPath.startsWith("//")) {
+      navigate(returnPath, {}, true);
+    } else {
+      setMainPage("conversation");
+    }
+  };
   const completeAuthentication = async (auth, mode) => {
     setUser(auth.user);
     const [preference, profile] = await Promise.all([
@@ -2877,7 +2952,7 @@ export function App() {
   else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={() => setMainPage("ielts")} onInterview={() => setMainPage("interview")} />;
   else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => setMainPage("ielts-assets")} onInterview={() => setMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(scene) => startTraining(scene, "learn", { returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
-  else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBackToAssets={() => setMainPage("assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
+  else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToInterview={() => setMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
   else if (page === "interview") content = <InterviewModule route={interviewRoute} teacher={teacher} speed={conversationSpeed} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} />;
   else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToIelts={() => setMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} onPractice={(sceneId) => navigateInterview(paths.interview.session(sceneId))} />;
   else content = <Profile section={page} setSection={setMainPage} helpRoute={helpRoute} aboutRoute={aboutRoute} onHelpNavigate={navigateHelp} onAboutNavigate={navigateAbout} user={user} profile={profileOverview} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onMonthChange={loadProfileMonth} onNicknameChange={updateNickname} onAvatarChange={updateAvatar} onPasswordChange={updatePassword} onAssets={() => setMainPage("assets")} onLogout={logout} />;
