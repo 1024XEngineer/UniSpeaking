@@ -245,6 +245,14 @@ svg { display: block; }
 .verify-panel .button { width: 100%; margin: 26px 0 8px; }
 .verify-icon { width: 64px; height: 64px; border-radius: 50%; background: var(--soft); display: grid; place-items: center; margin: 0 auto 28px; }
 .verify-icon svg { width: 28px; height: 28px; }
+.human-verification { min-height: 66px; display: flex; align-items: center; justify-content: flex-start; }
+.auth-error { margin: -4px 0 0; color: var(--danger); font-size: 13px; line-height: 1.5; }
+.auth-notice { margin: -4px 0 0; padding: 11px 13px; border-radius: 9px; background: var(--soft); color: #3f5f48; font-size: 13px; line-height: 1.5; }
+.verification-form { display: grid; gap: 12px; margin-top: 26px; text-align: left; }
+.verification-form > label { font-size: 13px; font-weight: 650; }
+.verification-code { letter-spacing: .28em; text-align: center; }
+.verification-form .button { margin: 8px 0 0; }
+.verify-back { position: static; margin-top: 10px; transform: none; }
 
 .setup-page, .teacher-setup { min-height: 100vh; padding: 28px 5vw 48px; }
 .setup-page > header, .teacher-setup > header { display: flex; justify-content: space-between; align-items: center; color: #989894; font-size: 13px; }

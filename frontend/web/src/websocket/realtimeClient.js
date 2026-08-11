@@ -136,6 +136,16 @@ export function websocketUrl(
   return url.toString();
 }
 
+export function buildProviderSessionBindingFrame(localSessionId, event) {
+  const providerSessionId = String(event?.session?.id || "").trim();
+  if (!String(localSessionId || "").trim() || !providerSessionId) return null;
+  return {
+    type: "bind",
+    sessionId: String(localSessionId).trim(),
+    providerSessionId,
+  };
+}
+
 async function unwrapResponse(response) {
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("application/json") ? await response.json() : await response.text();
@@ -378,6 +388,8 @@ export function createRealtimeClient({
   let ieltsTimedOutTurn = null;
   let closingInstructions = "";
   let pendingInterviewReportStatus = null;
+  let providerSessionId = null;
+  let providerSessionBound = false;
 
   const emit = (event) => onEvent(event);
 
@@ -527,10 +539,10 @@ export function createRealtimeClient({
     });
   }
 
-  async function sendSessionFrame(type, message = null, stopTime = null) {
+  async function sendSessionFrame(type, message = null, stopTime = null, providerSessionId = null) {
     if (!sessionId) throw new Error("会话 ID 尚未建立");
     const socket = await connectSessionSocket();
-    const operation = type === "end" ? "end" : "message";
+    const operation = type === "end" ? "end" : type === "bind" ? "bind" : "message";
     const ack = new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
         pendingAcks = pendingAcks.filter((pending) => pending.resolve !== resolve);
@@ -543,8 +555,28 @@ export function createRealtimeClient({
       sessionId,
       message,
       stopTime,
+      providerSessionId,
     }));
     return ack;
+  }
+
+  async function ensureProviderSessionBinding(nextProviderSessionId) {
+    const normalized = String(nextProviderSessionId || "").trim();
+    if (!normalized) return false;
+    providerSessionId = normalized;
+    if (providerSessionBound) return true;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await sendSessionFrame("bind", null, null, normalized);
+        providerSessionBound = true;
+        return true;
+      } catch (error) {
+        if (attempt === 1) {
+          emit({ type: "local.backend_warning", message: `服务商会话绑定失败：${error.message}` });
+        }
+      }
+    }
+    return false;
   }
 
   async function addSessionMessage(owner, content, providerMessageId) {
@@ -864,6 +896,18 @@ export function createRealtimeClient({
 
     if (event.type === "session.created") {
       started = true;
+      const binding = buildProviderSessionBindingFrame(sessionId, event);
+      if (binding) {
+        const operation = ensureProviderSessionBinding(binding.providerSessionId);
+        pendingOperations.add(operation);
+        try {
+          await operation;
+        } finally {
+          pendingOperations.delete(operation);
+        }
+      } else {
+        emit({ type: "local.backend_warning", message: "服务商未返回 session.created 会话标识，用量无法归属" });
+      }
       const audioTrack = localStream?.getAudioTracks?.()[0];
       if (audioTrack && audioSender?.track !== audioTrack) {
         await audioSender?.replaceTrack(audioTrack);
@@ -1423,6 +1467,9 @@ export function createRealtimeClient({
     }
     const stopTime = new Date().toISOString();
     const endingSessionId = sessionId;
+    if (providerSessionId && !providerSessionBound) {
+      await ensureProviderSessionBinding(providerSessionId);
+    }
     const endRequest = notifyBackend && sessionId
       ? customSceneId
         ? completeCustomDialogue(customSceneId, sessionId, stopTime)
@@ -1526,6 +1573,8 @@ export function createRealtimeClient({
       localStream = null;
       audioSender = null;
       sessionId = null;
+      providerSessionId = null;
+      providerSessionBound = false;
       sessionConfig = null;
       segmentRecorder = null;
       turnAudioCapture = null;

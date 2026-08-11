@@ -86,4 +86,19 @@ class SessionMessageDispatcherTest {
 
 		verify(freeChat).endSession("session-1");
 	}
+
+	@Test
+	void bindsProviderSessionThroughTheAuthenticatedLifecycle() {
+		SessionLifecycleManager lifecycle = mock(SessionLifecycleManager.class);
+		SessionMessageDispatcher dispatcher = new SessionMessageDispatcher(
+				lifecycle,
+				mock(FreeChatSessionService.class),
+				mock(CustomSessionService.class),
+				mock(IeltsSessionService.class),
+				mock(InterviewSessionService.class));
+
+		dispatcher.bindProviderSession("user-1", "session-1", "sess_qwen_1");
+
+		verify(lifecycle).bindProviderSession("user-1", "session-1", "sess_qwen_1");
+	}
 }

@@ -12,6 +12,21 @@ spring:
     init:
       mode: never
 
+unispeaking:
+  auth:
+    persistence: in-memory
+    captcha:
+      provider: development
+  admin:
+    persistence: postgres
+    secure-cookie: false
+  integrations:
+    usage-source: postgres
+    freetalk:
+      enabled: false
+    aliyun:
+      sync-enabled: false
+
 logging:
   level:
     com.baomidou.mybatisplus.core.metadata.TableInfoHelper: ERROR
@@ -34,3 +49,9 @@ realtime:
     connect-timeout: 1s
     read-timeout: 1s
     max-answer-bytes: 1048576
+
+gateway:
+  enabled: false
+  credential-ttl-seconds: 300
+  session-lease-seconds: 600
+  key-failure-cooldown-seconds: 30

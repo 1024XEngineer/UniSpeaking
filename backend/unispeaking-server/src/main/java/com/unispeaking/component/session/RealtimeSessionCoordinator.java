@@ -81,6 +81,10 @@ public class RealtimeSessionCoordinator {
 			if (connection.providerSessionId() != null
 					&& !connection.providerSessionId().isBlank()) {
 				session.bindProviderSession(connection.providerSessionId());
+				practiceSessions.bindProviderSession(
+						started.sessionId(),
+						UUID.fromString(session.getUserId()),
+						connection.providerSessionId());
 			}
 			session.setCredentialExpiresAt(connection.credentialExpiresAt());
 			session.waitForClient();

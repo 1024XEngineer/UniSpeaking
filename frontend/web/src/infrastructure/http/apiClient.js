@@ -6,7 +6,8 @@ async function unwrap(response) {
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("application/json") ? await response.json() : await response.text();
   if (!response.ok || (body && typeof body === "object" && body.success === false)) {
-    const message = body?.message || body?.code || `请求失败（${response.status}）`;
+    const error = body?.error || body;
+    const message = error?.message || error?.code || `请求失败（${response.status}）`;
     throw new Error(message);
   }
   return body && typeof body === "object" && "success" in body ? body.data : body;
@@ -17,6 +18,7 @@ async function request(path, options = {}) {
   const formDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
+    credentials: "include",
     headers: {
       ...(options.body && !formDataBody ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -24,8 +26,12 @@ async function request(path, options = {}) {
     },
   });
   if (response.status === 401 && !path.startsWith("/api/auth/")) {
-    clearAuthSession();
-    if (token) window.dispatchEvent(new Event(AUTH_SESSION_EXPIRED_EVENT));
+    // Bind cleanup to the token captured by this request so a delayed 401
+    // cannot erase a newer session established in the same browser tab.
+    if (token && getAccessToken() === token) {
+      clearAuthSession(token);
+      window.dispatchEvent(new Event(AUTH_SESSION_EXPIRED_EVENT));
+    }
   }
   return unwrap(response);
 }
@@ -39,7 +45,7 @@ export async function fetchAuthenticatedMedia(pathOrUrl) {
       ...(!absolute && token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
-  if (response.status === 401 && !absolute) clearAuthSession();
+  if (response.status === 401 && !absolute) clearAuthSession(token);
   if (!response.ok) throw new Error(`录音加载失败（${response.status}）`);
   return response.blob();
 }
@@ -56,7 +62,8 @@ export function saveAuthSession(authResponse) {
   window.localStorage.setItem(ACCESS_TOKEN_KEY, authResponse.accessToken);
 }
 
-export function clearAuthSession() {
+export function clearAuthSession(expectedToken = null) {
+  if (expectedToken !== null && getAccessToken() !== expectedToken) return;
   window.localStorage.removeItem(ACCESS_TOKEN_KEY);
 }
 

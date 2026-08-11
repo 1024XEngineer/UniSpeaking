@@ -25,7 +25,8 @@ services:
         PYPI_INDEX_URL: ${PYPI_INDEX_URL:-https://pypi.org/simple}
         PADDLE_PDX_MODEL_SOURCE: ${PADDLE_PDX_MODEL_SOURCE:-bos}
     env_file:
-      - ./env/.env
+      - path: ./env/.env
+        required: false
     expose:
       - "8080"
     depends_on:
@@ -39,6 +40,19 @@ services:
       args:
         VITE_BACKEND_URL: ${VITE_BACKEND_URL:-/backend}
         VITE_FEEDBACK_URL: ${VITE_FEEDBACK_URL:-}
+        VITE_ALIYUN_CAPTCHA_SCENE_ID: ${ALIYUN_CAPTCHA_SCENE_ID:-}
+        VITE_ALIYUN_CAPTCHA_PREFIX: ${ALIYUN_CAPTCHA_PREFIX:-}
+        VITE_ALIYUN_CAPTCHA_REGION: ${ALIYUN_CAPTCHA_REGION:-cn}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+    expose:
+      - "80"
+    restart: unless-stopped
+
+  admin:
+    build:
+      context: ../frontend/admin
+      args:
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-/backend}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     expose:
       - "80"
@@ -55,6 +69,7 @@ services:
     depends_on:
       - backend
       - frontend
+      - admin
     restart: unless-stopped
 
 volumes:

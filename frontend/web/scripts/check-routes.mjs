@@ -17,6 +17,12 @@ const cases = [
   [paths.ielts.assets.history, "ielts-assets"],
   [paths.ielts.step("part1", "home", "report"), "ielts"],
   [paths.ielts.step("mock", "random", "session"), "ielts"],
+  [paths.interview.root, "interview"],
+  [paths.interview.assets.root, "interview-assets"],
+  [paths.interview.assets.history, "interview-assets"],
+  [paths.interview.assets.trends, "interview-assets"],
+  [paths.interview.session("interview_1"), "interview"],
+  [paths.interview.report("interview_1", "session_1"), "interview"],
   [paths.app.insights, "insights"],
   [paths.app.security, "security"],
   [paths.help.root, "help"],
@@ -26,12 +32,6 @@ const cases = [
   [paths.about.userAgreement, "about"],
   [paths.about.privacyPolicy, "about"],
   [paths.about.aiService, "about"],
-  [paths.interview.root, "interview"],
-  [paths.interview.assets.root, "interview-assets"],
-  [paths.interview.assets.history, "interview-assets"],
-  [paths.interview.assets.trends, "interview-assets"],
-  [paths.interview.session("interview_1"), "interview"],
-  [paths.interview.report("interview_1", "session_1"), "interview"],
 ];
 
 for (const [pathname, expectedPage] of cases) {
@@ -50,6 +50,8 @@ assert.equal(route(paths.scenes.phrase("custom_1")).training.stage, "phrase");
 assert.equal(route(paths.scenes.sentence("custom_1")).training.initialStep, "read");
 assert.equal(route(paths.scenes.session("custom_1", "session/1")).sessionId, "session/1");
 assert.equal(route(paths.scenes.assets("custom_1")).assetSceneId, "custom_1");
+assert.equal(route(paths.interview.session("interview scene/1")).interviewRoute.sceneId, "interview scene/1");
+assert.equal(route(paths.interview.report("interview scene/1", "session/1")).interviewRoute.sessionId, "session/1");
 assert.equal(route(paths.help.root).helpRoute.screen, "home");
 assert.equal(route(paths.help.root).publicAccess, true);
 assert.equal(route(paths.app.profile).publicAccess, false);

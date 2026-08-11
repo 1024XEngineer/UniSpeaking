@@ -19,7 +19,8 @@ services:
     build:
       context: ../backend/unispeaking-server
     env_file:
-      - ./env/.env
+      - path: ./env/.env
+        required: false
     environment:
       DATABASE_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB:-unispeaking}"
       DATABASE_USERNAME: ${POSTGRES_USER:-unispeaking}
@@ -36,8 +37,19 @@ services:
       args:
         VITE_BACKEND_URL: ${VITE_BACKEND_URL:-/backend}
         VITE_FEEDBACK_URL: ${VITE_FEEDBACK_URL:-}
+        VITE_ALIYUN_CAPTCHA_SCENE_ID: ${ALIYUN_CAPTCHA_SCENE_ID:-}
+        VITE_ALIYUN_CAPTCHA_PREFIX: ${ALIYUN_CAPTCHA_PREFIX:-}
+        VITE_ALIYUN_CAPTCHA_REGION: ${ALIYUN_CAPTCHA_REGION:-cn}
     ports:
       - "3000:80"
+
+  admin:
+    build:
+      context: ../frontend/admin
+      args:
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-/backend}
+    ports:
+      - "5178:80"
 
   nginx:
     image: nginx:1.27-alpine
@@ -48,6 +60,7 @@ services:
     depends_on:
       - backend
       - frontend
+      - admin
 
 volumes:
   # Keep local development data separate from the production Compose volume.

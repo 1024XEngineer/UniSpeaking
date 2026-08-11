@@ -60,6 +60,10 @@ public class SessionMessageDispatcher {
 		}
 	}
 
+	public void bindProviderSession(String userId, String sessionId, String providerSessionId) {
+		lifecycle.bindProviderSession(userId, sessionId, providerSessionId);
+	}
+
 	private SceneType sceneType(String userId, String sessionId) {
 		return lifecycle.requireSceneType(userId, sessionId);
 	}
