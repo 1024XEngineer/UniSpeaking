@@ -1,5 +1,6 @@
 const API_BASE = (import.meta.env?.VITE_BACKEND_URL || "").replace(/\/$/, "");
 const ACCESS_TOKEN_KEY = "unispeaking.accessToken";
+export const AUTH_SESSION_EXPIRED_EVENT = "unispeaking:auth-session-expired";
 
 async function unwrap(response) {
   const contentType = response.headers.get("content-type") || "";
@@ -27,7 +28,10 @@ async function request(path, options = {}) {
   if (response.status === 401 && !path.startsWith("/api/auth/")) {
     // Bind cleanup to the token captured by this request so a delayed 401
     // cannot erase a newer session established in the same browser tab.
-    clearAuthSession(token);
+    if (token && getAccessToken() === token) {
+      clearAuthSession(token);
+      window.dispatchEvent(new Event(AUTH_SESSION_EXPIRED_EVENT));
+    }
   }
   return unwrap(response);
 }

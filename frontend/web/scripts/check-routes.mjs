@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { paths, resolveRoute } from "../src/controller/router.js";
+import { paths, resolveRoute, sidebarPageTarget } from "../src/controller/router.js";
 
 const route = (pathname, search = "") => resolveRoute({ pathname, search });
 
@@ -18,9 +18,11 @@ const cases = [
   [paths.ielts.step("part1", "home", "report"), "ielts"],
   [paths.ielts.step("mock", "random", "session"), "ielts"],
   [paths.interview.root, "interview"],
-  [paths.interview.assets, "interview-assets"],
-  [paths.interview.session("interview scene/1"), "interview"],
-  [paths.interview.report("interview scene/1", "session/1"), "interview"],
+  [paths.interview.assets.root, "interview-assets"],
+  [paths.interview.assets.history, "interview-assets"],
+  [paths.interview.assets.trends, "interview-assets"],
+  [paths.interview.session("interview_1"), "interview"],
+  [paths.interview.report("interview_1", "session_1"), "interview"],
   [paths.app.insights, "insights"],
   [paths.app.security, "security"],
   [paths.help.root, "help"],
@@ -65,5 +67,22 @@ assert.equal(route(paths.about.privacyPolicy).aboutRoute.documentId, "privacy-po
 assert.equal(route(paths.about.aiService).aboutRoute.documentId, "ai-service");
 assert.equal(route("/about/unknown").canonicalPath, paths.about.root);
 assert.equal(route(paths.about.root).publicAccess, false);
+assert.equal(route(paths.interview.root).interviewRoute.screen, "home");
+assert.equal(route(paths.interview.assets.root).page, "interview-assets");
+assert.equal(route(paths.interview.assets.root).interviewRoute.area, "assets");
+assert.equal(route(paths.interview.assets.root).interviewRoute.tab, "overview");
+assert.equal(route(paths.interview.assets.history).interviewRoute.tab, "history");
+assert.equal(route(paths.interview.assets.trends).interviewRoute.tab, "trends");
+assert.equal(route(paths.interview.session("interview scene/1")).interviewRoute.sceneId, "interview scene/1");
+assert.equal(route(paths.interview.session("interview_1")).interviewRoute.screen, "session");
+assert.equal(route(paths.interview.report("interview_1", "session/1")).interviewRoute.sessionId, "session/1");
+assert.equal(route(paths.interview.report("interview_1", "session_1")).interviewRoute.screen, "report");
+assert.equal(route("/interview/unknown").canonicalPath, paths.interview.root);
+assert.equal(sidebarPageTarget("ielts", "assets"), "ielts-assets");
+assert.equal(sidebarPageTarget("interview", "assets"), "interview-assets");
+assert.equal(sidebarPageTarget("ielts-assets", "scenes"), "ielts");
+assert.equal(sidebarPageTarget("interview-assets", "scenes"), "interview");
+assert.equal(sidebarPageTarget("scenes", "assets"), "assets");
+assert.equal(sidebarPageTarget("assets", "scenes"), "scenes");
 
-console.log(`Route contract passed: ${cases.length + 25} assertions`);
+console.log(`Route contract passed: ${cases.length + 38} assertions`);

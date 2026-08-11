@@ -18,6 +18,10 @@ const DEFAULT_VOICE = "Katerina";
 const DEFAULT_MODEL = "qwen3.5-omni-flash-realtime";
 const DATA_CHANNEL_LABEL = "oai-events";
 const DEFAULT_SPEECH_SPEED = "NATURAL";
+const DEFAULT_ICE_SERVERS = [
+  { urls: "stun:stun.aliyun.com:3478" },
+  { urls: "stun:stun.l.google.com:19302" },
+];
 const SCENARIO_CLOSING_TIMEOUT_MS = 20_000;
 const SCENARIO_AUDIO_DRAIN_MS = 1_200;
 const SESSION_UPDATE_TIMEOUT_MS = 5_000;
@@ -56,6 +60,20 @@ export function isMicFailure(error) {
     .includes(error?.name);
 }
 
+export function realtimeFailureMessage(error) {
+  const rawMessage = error instanceof Error ? error.message : String(error || "");
+  if (/AllocationQuota\.FreeTierOnly|free quota exhausted|free tier only/i.test(rawMessage)) {
+    return "Qwen 实时服务的免费额度已用尽，请在阿里云百炼控制台充值或关闭“仅使用免费额度”后重试";
+  }
+  if (/QWEN_SIGNALING_FAILED|Qwen signaling returned 403/i.test(rawMessage)) {
+    return "Qwen 实时服务拒绝了连接，请检查模型权限、Workspace 配置和账户额度";
+  }
+  if (/ICE (?:connection )?(?:failed|disconnected)|ICE 候选|DataChannel/i.test(rawMessage)) {
+    return "实时网络通道建立失败，请检查当前网络是否允许 WebRTC；必要时配置可用的 TURN 服务器后重试";
+  }
+  return rawMessage || "无法开始实时对话";
+}
+
 export function defaultIceServers() {
   const configured = import.meta.env?.VITE_ICE_SERVERS;
   if (configured) {
@@ -66,7 +84,7 @@ export function defaultIceServers() {
       /* ignore malformed env value */
     }
   }
-  return [{ urls: "stun:stun.l.google.com:19302" }];
+  return DEFAULT_ICE_SERVERS;
 }
 
 export function buildResponseCreateEvent({ id, instructions = "" } = {}) {
@@ -162,18 +180,44 @@ function waitForIceGathering(peer) {
   });
 }
 
-function waitForChannel(channel) {
+function waitForChannel(channel, peer) {
   if (channel.readyState === "open") return Promise.resolve();
   return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error("实时数据通道连接超时")), 10_000);
-    channel.onopen = () => {
+    let settled = false;
+    const cleanup = () => {
       window.clearTimeout(timer);
-      resolve();
+      channel.removeEventListener?.("open", handleOpen);
+      channel.removeEventListener?.("error", handleError);
+      peer?.removeEventListener?.("iceconnectionstatechange", handleIceState);
+    };
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      error ? reject(error) : resolve();
+    };
+    const handleOpen = () => finish();
+    const handleError = () => finish(new Error("实时数据通道连接失败"));
+    const handleIceState = () => {
+      const state = peer?.iceConnectionState;
+      if (state === "failed" || state === "disconnected") {
+        finish(new Error(`ICE connection ${state}`));
+      }
+    };
+    const timer = window.setTimeout(() => {
+      const iceState = peer?.iceConnectionState || "unknown";
+      finish(new Error(`实时数据通道连接超时（ICE ${iceState}）`));
+    }, 20_000);
+    channel.onopen = () => {
+      handleOpen();
     };
     channel.onerror = () => {
-      window.clearTimeout(timer);
-      reject(new Error("实时数据通道连接失败"));
+      handleError();
     };
+    channel.addEventListener?.("open", handleOpen);
+    channel.addEventListener?.("error", handleError);
+    peer?.addEventListener?.("iceconnectionstatechange", handleIceState);
+    handleIceState();
   });
 }
 
@@ -1288,19 +1332,20 @@ export function createRealtimeClient({
 
       await connectSessionSocket();
       await peer.setRemoteDescription({ type: "answer", sdp: normalizeSdp(backend.answerSdp) });
-      await waitForChannel(channel);
+      await waitForChannel(channel, peer);
       emit({ type: "local.connected", sessionId, backend });
       return { sessionId, backend };
     } catch (error) {
       await stop({ notifyBackend: false, reason: "start_failed", emitEnded: false });
       const mic = isMicFailure(error);
+		const message = mic
+		  ? micFailureMessage(error) || "无法访问麦克风"
+		  : realtimeFailureMessage(error);
       emit({
         type: mic ? "local.mic_error" : "local.error",
-        message: mic
-          ? micFailureMessage(error) || "无法访问麦克风"
-          : error instanceof Error ? error.message : "无法开始实时对话",
+        message,
       });
-      throw error;
+      throw mic ? error : new Error(message, { cause: error });
     }
   }
 

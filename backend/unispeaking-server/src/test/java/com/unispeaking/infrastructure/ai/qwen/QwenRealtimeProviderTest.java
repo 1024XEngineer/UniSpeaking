@@ -271,6 +271,7 @@ class QwenRealtimeProviderTest {
 						"temporary-token"));
 
 		assertEquals("QWEN_SIGNALING_FAILED", exception.code());
+		assertTrue(exception.getMessage().contains("bad offer"));
 		assertEquals(1, httpClient.requests.size());
 		verify(issuer, never()).issue(any());
 	}
