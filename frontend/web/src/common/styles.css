@@ -13,6 +13,7 @@
 }
 
 * { box-sizing: border-box; }
+#root { width: 100%; min-height: 100vh; }
 .app-fatal-error { min-height: 100vh; display: grid; place-items: center; align-content: center; gap: 14px; padding: 40px; background: #fff; color: #191918; text-align: center; }
 .app-fatal-error h1, .app-fatal-error p { margin: 0; }
 .app-fatal-error p { max-width: 680px; color: #777773; }
@@ -922,6 +923,11 @@ svg { display: block; }
 .profile-nav nav svg, .logout svg { width: 19px; height: 19px; }
 .logout { flex: 0 0 46px; margin-top: auto; color: #555; }
 .profile-content { min-width: 0; min-height: 0; padding: 52px clamp(42px, 5vw, 84px) 60px; overflow: auto; }
+.public-about-shell { min-height: 100vh; background: #fff; }
+.public-about-shell__header { width: min(1040px, calc(100% - 48px)); min-height: 76px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+.public-about-shell__header > a { display: inline-flex; align-items: center; gap: 7px; color: #555551; font-size: 12px; font-weight: 680; text-decoration: none; }
+.public-about-shell__header > a svg { width: 15px; height: 15px; }
+.public-about-shell .about-product-page, .public-about-shell .product-legal-page { padding-bottom: 42px; }
 .about-product-page, .product-legal-page { width: min(100%, 1040px); margin: 0 auto; letter-spacing: 0; }
 .about-product-page a, .product-legal-page a { color: inherit; text-decoration: none; }
 .about-product-page a:focus-visible, .product-legal-page a:focus-visible { outline: 2px solid #252524; outline-offset: 3px; }

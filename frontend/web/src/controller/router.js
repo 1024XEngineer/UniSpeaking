@@ -256,16 +256,18 @@ export function parseAboutRoute(pathname) {
   const segments = path.split("/").filter(Boolean);
   if (segments[0] !== "about") return null;
   if (segments.length === 1) {
-    return appRoute("about", { aboutRoute: { screen: "home" } });
+    return appRoute("about", { aboutRoute: { screen: "home" }, publicAccess: true });
   }
   const documentIds = ["user-agreement", "privacy-policy", "ai-service"];
   if (segments.length === 2 && documentIds.includes(segments[1])) {
     return appRoute("about", {
       aboutRoute: { screen: "document", documentId: segments[1] },
+      publicAccess: true,
     });
   }
   return appRoute("about", {
     aboutRoute: { screen: "home" },
+    publicAccess: true,
     canonicalPath: paths.about.root,
   });
 }
