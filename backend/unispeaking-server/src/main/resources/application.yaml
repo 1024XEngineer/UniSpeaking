@@ -105,6 +105,25 @@ realtime:
     connect-timeout: ${REALTIME_QWEN_CONNECT_TIMEOUT:10s}
     read-timeout: ${REALTIME_QWEN_READ_TIMEOUT:20s}
     max-answer-bytes: ${REALTIME_QWEN_MAX_ANSWER_BYTES:1048576}
+  qiniu:
+    base-url: ${QINIU_RTI_BASE_URL:https://rti.example.invalid}
+    api-key: ${QINIU_RTI_API_KEY:}
+    app-id: ${QINIU_RTI_APP_ID:}
+    model-profile: ${QINIU_RTI_MODEL_PROFILE:}
+    role-profile: ${QINIU_RTI_ROLE_PROFILE:}
+    scenario: ${QINIU_RTI_SCENARIO:}
+    voice-profiles:
+      katerina: ${QINIU_RTI_VOICE_KATERINA:}
+      aiden: ${QINIU_RTI_VOICE_AIDEN:}
+      raymond: ${QINIU_RTI_VOICE_RAYMOND:}
+      tina: ${QINIU_RTI_VOICE_TINA:}
+      harvey: ${QINIU_RTI_VOICE_HARVEY:}
+      dolce: ${QINIU_RTI_VOICE_DOLCE:}
+      mione: ${QINIU_RTI_VOICE_MIONE:}
+      maia: ${QINIU_RTI_VOICE_MAIA:}
+    connect-timeout: ${QINIU_RTI_CONNECT_TIMEOUT:10s}
+    read-timeout: ${QINIU_RTI_READ_TIMEOUT:20s}
+    max-response-bytes: ${QINIU_RTI_MAX_RESPONSE_BYTES:1048576}
 
 gateway:
   enabled: ${GATEWAY_ENABLED:false}

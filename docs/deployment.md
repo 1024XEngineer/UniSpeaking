@@ -26,6 +26,12 @@ QINIU_BUCKET=replace-with-your-private-bucket
 QINIU_DOMAIN=https://replace-with-your-https-download-domain
 QINIU_AVATAR_PREFIX=avatars
 QINIU_SIGNED_URL_TTL=1h
+QINIU_RTI_BASE_URL=https://replace-with-your-qiniu-rti-endpoint
+QINIU_RTI_API_KEY=replace-with-your-qiniu-rti-api-key
+QINIU_RTI_APP_ID=replace-with-your-qiniu-rti-app-id
+QINIU_RTI_MODEL_PROFILE=replace-with-your-model-profile
+QINIU_RTI_ROLE_PROFILE=replace-with-your-role-profile
+QINIU_RTI_VOICE_KATERINA=replace-with-your-katerina-voice-profile
 PROFILE_TIME_ZONE=Asia/Shanghai
 ```
 
@@ -153,6 +159,18 @@ realtime:
     connect-timeout: ${REALTIME_QWEN_CONNECT_TIMEOUT:10s}
     read-timeout: ${REALTIME_QWEN_READ_TIMEOUT:20s}
     max-answer-bytes: ${REALTIME_QWEN_MAX_ANSWER_BYTES:1048576}
+  qiniu:
+    base-url: ${QINIU_RTI_BASE_URL:https://rti.example.invalid}
+    api-key: ${QINIU_RTI_API_KEY:}
+    app-id: ${QINIU_RTI_APP_ID:}
+    model-profile: ${QINIU_RTI_MODEL_PROFILE:}
+    role-profile: ${QINIU_RTI_ROLE_PROFILE:}
+    scenario: ${QINIU_RTI_SCENARIO:}
+    voice-profiles:
+      katerina: ${QINIU_RTI_VOICE_KATERINA:}
+    connect-timeout: ${QINIU_RTI_CONNECT_TIMEOUT:10s}
+    read-timeout: ${QINIU_RTI_READ_TIMEOUT:20s}
+    max-response-bytes: ${QINIU_RTI_MAX_RESPONSE_BYTES:1048576}
 
 profile:
   time-zone: ${PROFILE_TIME_ZONE:Asia/Shanghai}
@@ -181,6 +199,12 @@ without them returns `QWEN_CREDENTIAL_MISSING` or `QWEN_SIGNALING_URL_MISSING`.
 The backend requests a short-lived DashScope token with `DASHSCOPE_API_KEY`,
 then uses that temporary Bearer credential for the Qwen Offer SDP to Answer SDP
 exchange.
+
+For Qiniu RTI, select model `qiniu/qwen3.5-omni-plus-realtime` with provider
+`QINIU`. The backend creates the RTI control-plane session, resolves the
+configured logical voice to a Qiniu voice profile, and exchanges SDP with the
+returned RTC endpoint. The Qiniu API key and endpoint access token remain on
+the backend.
 
 ## Local backend
 
@@ -214,4 +238,4 @@ the authenticated session WebSocket preserve this prefix, so nginx routes them
 to the backend service.
 
 After Spring returns the answer SDP, the browser establishes its WebRTC peer
-connection directly with Qwen.
+connection directly with the selected realtime provider.
