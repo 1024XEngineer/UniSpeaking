@@ -462,6 +462,7 @@ jobs:
           docker run --rm
           --add-host backend:127.0.0.1
           --add-host frontend:127.0.0.1
+          --add-host admin:127.0.0.1
           --volume "$PWD/deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
           nginx:1.27-alpine
           nginx -t
