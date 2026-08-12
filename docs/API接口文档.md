@@ -508,7 +508,7 @@ Interview（英文面试，第 4 场景，逐步实现中）：
    - 失败码：`INTERVIEW_SCENE_NOT_FOUND`→404、`INTERVIEW_SCENE_ACCESS_DENIED`→403、`INTERVIEW_DAILY_LIMIT_REACHED`→429。
 4. `POST /api/interview-scenes/{sceneId}/sessions/{sessionId}/turns/{turnNo}` — 逐轮提交（multipart：`transcript` 必填 + `audio` 可空）
    - 幂等粒度 `(sessionId, turnNo)`：重复请求返回已记录状态；同轮内容不一致 → 409 `INTERVIEW_TURN_CONTENT_MISMATCH`；WS 消息在途 → 409 `INTERVIEW_TURN_MESSAGE_PENDING`（可重试）；轮次空洞/非正 → 400 `INTERVIEW_TURN_OUT_OF_ORDER`；会话已结束 → 409 `INTERVIEW_SESSION_ENDED`。
-   - 返回 `{state: {shouldEnd, completedTopicCount, coveredTopicCount, currentTopic}, reportStatus}`；`shouldEnd=true` 时前端停录音关连接，`reportStatus=PROCESSING`。
+   - 返回 `{state: {shouldEnd, completedTopicCount, coveredTopicCount, currentTopic, controlInstruction}, reportStatus}`；`shouldEnd=true` 时前端停录音关连接，`reportStatus=PROCESSING`；`controlInstruction` 为下一轮实时指令（开场/推进/收尾，结束时为空）。
 5. `POST /api/interview-scenes/{sceneId}/sessions/{sessionId}/end` — 用户主动结束（幂等结束编排，自动/手动只允许一次 end + 一次报告任务）→ `{sessionId, reportStatus}`。
 6. `GET /api/interview-scenes/{sceneId}/sessions/{sessionId}/report` — 轮询报告：`{sessionId, sceneId, status: PROCESSING/COMPLETED/FAILED, report, failureReason}`（PROCESSING 时 report 为空）。
 7. `POST /api/interview-scenes/{sceneId}/sessions/{sessionId}/report/retry` — FAILED→PROCESSING 重试（CAS 幂等；瞬时失败自动重试 1 次后留手动）。

@@ -60,6 +60,33 @@ public class PracticeSessionRepository {
 				endedAt);
 	}
 
+	public void bindProviderSession(
+			String sessionId,
+			UUID userId,
+			String providerSessionId) {
+		if (providerSessionId == null || providerSessionId.isBlank()) {
+			throw new BusinessException(
+					"PROVIDER_SESSION_ID_REQUIRED",
+					"服务商会话标识不能为空");
+		}
+		try {
+			int updated = mapper.update(
+					null,
+					new LambdaUpdateWrapper<PracticeSessionEntity>()
+							.eq(PracticeSessionEntity::getSessionId, sessionId)
+							.eq(PracticeSessionEntity::getUserId, userId)
+							.set(PracticeSessionEntity::getProviderSessionId, providerSessionId)
+							.set(PracticeSessionEntity::getUpdatedAt, OffsetDateTime.now(ZoneOffset.UTC)));
+			if (updated != 1) throw persistenceFailure();
+		}
+		catch (BusinessException exception) {
+			throw exception;
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
 	public List<PracticeSessionRecord> findCompletedOverlapping(
 			UUID userId,
 			Instant start,
@@ -243,6 +270,7 @@ public class PracticeSessionRepository {
 		entity.setStatus(record.status().name());
 		entity.setStartedAt(atUtc(record.startedAt()));
 		entity.setEndedAt(record.endedAt() == null ? null : atUtc(record.endedAt()));
+		entity.setProviderSessionId(record.providerSessionId());
 		return entity;
 	}
 
@@ -253,10 +281,11 @@ public class PracticeSessionRepository {
 				entity.getSceneId(),
 				SceneType.valueOf(entity.getSceneType()),
 				SessionStatus.valueOf(entity.getStatus()),
-				entity.getStartedAt().toInstant(),
-				entity.getEndedAt() == null
-						? null
-						: entity.getEndedAt().toInstant());
+					entity.getStartedAt().toInstant(),
+					entity.getEndedAt() == null
+							? null
+							: entity.getEndedAt().toInstant(),
+					entity.getProviderSessionId());
 	}
 
 	private OffsetDateTime atUtc(Instant instant) {

@@ -59,6 +59,10 @@ public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 						sessionId, frame.stopTime());
 				send(webSocketSession, SessionSocketAck.success("session.end.accepted", sessionId, null));
 			}
+			case "bind" -> {
+				sessionDispatcher.bindProviderSession(userId, sessionId, requireProviderSessionId(frame.providerSessionId()));
+				send(webSocketSession, SessionSocketAck.success("session.bind.accepted", sessionId, null));
+			}
 			default -> throw new IllegalArgumentException("unsupported session socket type: " + frame.type());
 		}
 	}
@@ -79,6 +83,7 @@ public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 		return switch (type.trim()) {
 			case "message", "session.message", "addMessage" -> "message";
 			case "end", "session.end", "endSession" -> "end";
+			case "bind", "session.bind", "bindProviderSession" -> "bind";
 			default -> type.trim();
 		};
 	}
@@ -88,6 +93,13 @@ public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 			throw new IllegalArgumentException("sessionId is required");
 		}
 		return sessionId.trim();
+	}
+
+	private String requireProviderSessionId(String providerSessionId) {
+		if (providerSessionId == null || providerSessionId.isBlank()) {
+			throw new IllegalArgumentException("providerSessionId is required");
+		}
+		return providerSessionId.trim();
 	}
 
 	private String ackType(String type, String suffix) {

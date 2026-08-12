@@ -8,6 +8,7 @@ const baseRoute = {
   assetSceneId: null,
   helpRoute: null,
   aboutRoute: null,
+  selectedVoice: null,
   publicAccess: false,
 };
 
@@ -94,7 +95,11 @@ export const paths = {
   },
   interview: {
     root: "/interview",
-    assets: "/interview/assets",
+    assets: {
+      root: "/interview/assets",
+      history: "/interview/assets/history",
+      trends: "/interview/assets/trends",
+    },
     session: (sceneId) => `/interview/scenes/${encodeURIComponent(sceneId)}/session`,
     report: (sceneId, sessionId) => `/interview/scenes/${encodeURIComponent(sceneId)}/session/${encodeURIComponent(sessionId)}/report`,
   },
@@ -252,16 +257,18 @@ export function parseAboutRoute(pathname) {
   const segments = path.split("/").filter(Boolean);
   if (segments[0] !== "about") return null;
   if (segments.length === 1) {
-    return appRoute("about", { aboutRoute: { screen: "home" } });
+    return appRoute("about", { aboutRoute: { screen: "home" }, publicAccess: true });
   }
   const documentIds = ["user-agreement", "privacy-policy", "ai-service"];
   if (segments.length === 2 && documentIds.includes(segments[1])) {
     return appRoute("about", {
       aboutRoute: { screen: "document", documentId: segments[1] },
+      publicAccess: true,
     });
   }
   return appRoute("about", {
     aboutRoute: { screen: "home" },
+    publicAccess: true,
     canonicalPath: paths.about.root,
   });
 }
@@ -274,9 +281,10 @@ export function parseInterviewRoute(pathname) {
     return appRoute("interview", { interviewRoute: { screen: "home" } });
   }
   if (segments[1] === "assets") {
+    const tab = assetTabs.includes(segments[2]) ? segments[2] : "overview";
     return appRoute("interview-assets", {
-      interviewRoute: { area: "assets" },
-      canonicalPath: paths.interview.assets,
+      interviewRoute: { area: "assets", tab },
+      canonicalPath: tab === "overview" ? paths.interview.assets.root : paths.interview.assets[tab],
     });
   }
   if (segments[1] === "scenes" && segments.length >= 3) {
@@ -317,12 +325,15 @@ function previewRoute(preview) {
 export function resolveRoute(locationLike = window.location) {
   const pathname = normalizePath(locationLike.pathname);
   const search = locationLike.search || "";
-  const preview = previewRoute(new URLSearchParams(search).get("preview"));
+  const searchParams = new URLSearchParams(search);
+  const selectedVoice = searchParams.get("voice") || null;
+  const withSelectedVoice = (route) => ({ ...route, selectedVoice });
+  const preview = previewRoute(searchParams.get("preview"));
   if (preview) return preview;
 
   if (pathname === paths.root) return { ...baseRoute, flow: "splash", page: "conversation" };
-  if (pathname === paths.auth.login) return { ...baseRoute, flow: "auth", page: "conversation", authMode: "login" };
-  if (pathname === paths.auth.signup) return { ...baseRoute, flow: "auth", page: "conversation", authMode: "signup" };
+  if (pathname === paths.auth.login) return withSelectedVoice({ ...baseRoute, flow: "auth", page: "conversation", authMode: "login" });
+  if (pathname === paths.auth.signup) return withSelectedVoice({ ...baseRoute, flow: "auth", page: "conversation", authMode: "signup" });
   if (pathname === paths.auth.level) return { ...baseRoute, flow: "level", page: "conversation" };
   if (pathname === paths.auth.teacher) return { ...baseRoute, flow: "teacher", page: "conversation" };
 
@@ -382,4 +393,13 @@ export function resolveRoute(locationLike = window.location) {
 
 export function hrefForPage(page) {
   return PAGE_PATHS[page] || paths.app.conversation;
+}
+
+// Preserve the active specialty when navigating between the shared sidebar areas.
+export function sidebarPageTarget(currentPage, destination) {
+  if (destination === "assets" && currentPage === "ielts") return "ielts-assets";
+  if (destination === "assets" && currentPage === "interview") return "interview-assets";
+  if (destination === "scenes" && currentPage === "ielts-assets") return "ielts";
+  if (destination === "scenes" && currentPage === "interview-assets") return "interview";
+  return destination;
 }

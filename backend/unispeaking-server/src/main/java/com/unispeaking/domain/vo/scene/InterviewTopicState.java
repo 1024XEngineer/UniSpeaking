@@ -10,6 +10,7 @@ package com.unispeaking.domain.vo.scene;
  * @param followUpCount           当前主题追问次数（受难度上限约束）
  * @param mandatoryTopicsCompleted 两个必选主题（自我介绍/经历项目）是否均已完成
  * @param shouldEnd               状态机是否判定面试结束
+ * @param controlInstruction      下一轮 realtime 指令（开场/推进/收尾；结束时为收尾指令）
  */
 public record InterviewTopicState(
 		String currentTopic,
@@ -18,5 +19,6 @@ public record InterviewTopicState(
 		int unknownStreak,
 		int followUpCount,
 		boolean mandatoryTopicsCompleted,
-		boolean shouldEnd) {
+		boolean shouldEnd,
+		String controlInstruction) {
 }

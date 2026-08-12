@@ -22,10 +22,11 @@ import org.springframework.stereotype.Component;
  * 不实现 {@code SceneFlowService}（无场景级阶段）。</p>
  *
  * <p>终止规则（优先级高→低）：① 连续 3 次 UNKNOWN → 结束；② 第 5 主题硬顶：已覆盖
- * ≥N-1 个不同主题 ∧ 当前为最后一个主题且已判完成 → 强制结束；③ 自然结束：全部主题已
- * 覆盖 ∧ 两必选已覆盖 ∧ 当前主题完成 → 结束；④ 否则继续。切题不隐式完成上一主题，
- * 只有 LLM 明确 {@code topicCompleted=true} 才计入已完成；空/空白转录 no-op（不计
- * UNKNOWN、不切题）。</p>
+ * ≥N-1 个不同主题 ∧ 当前为最后一个主题且已满足（完成或追问预算耗尽）→ 强制结束；
+ * ③ 自然结束：全部主题已覆盖 ∧ 两必选已覆盖 ∧ 最后一个主题已满足（锁存）→ 结束；
+ * ④ 最大轮次兜底（每主题 1 问 + maxFollowUps 追问 + 3 轮缓冲）→ 强制结束。切题不隐式
+ * 完成上一主题；"满足"以追问预算耗尽为主信号，{@code topicCompleted} 只是提前信号；
+ * 空/空白转录 no-op（不计 UNKNOWN、不切题）。</p>
  *
  * <p>生成主题数为硬顶（来自 {@code InterviewContext.interviewTopics}），状态机不自行增长；
  * 识别到列表外的主题视为 UNKNOWN，防 LLM 幻觉越界。难度只约束每主题追问次数上限。</p>
@@ -34,6 +35,11 @@ import org.springframework.stereotype.Component;
 public class InterviewTopicStateMachine {
 
 	private final Map<String, State> states = new ConcurrentHashMap<>();
+
+	/** 面试结束时的收尾指令：让模型自然生成一句致谢收尾，不再追问。 */
+	private static final String CLOSING_INSTRUCTION =
+			"The interview is complete. Give a brief, natural closing and thank the "
+					+ "candidate for their time. Do not ask more questions.";
 
 	/** 初始化一个会话的主题状态。 */
 	public InterviewTopicState start(
@@ -102,6 +108,7 @@ public class InterviewTopicStateMachine {
 		private int unknownStreak;
 		private int followUpCount;
 		private boolean currentTopicCompleted;
+		private boolean lastTopicSatisfied;
 		private boolean shouldEnd;
 		private int lastProcessedTurnNo;
 
@@ -139,7 +146,8 @@ public class InterviewTopicStateMachine {
 					unknownStreak,
 					followUpCount,
 					completedMandatoryTopics.size() >= 2,
-					shouldEnd);
+					shouldEnd,
+					buildControlInstruction());
 		}
 
 		private void apply(InterviewTopicEvent event) {
@@ -177,7 +185,22 @@ public class InterviewTopicStateMachine {
 					completeCurrentTopic();
 				}
 			}
+			latchLastTopicSatisfied();
 			checkTermination();
+		}
+
+		/** 当前主题是否"已满足"：LLM 明确完成，或追问预算耗尽（预算是主信号）。 */
+		private boolean currentTopicSatisfied() {
+			return currentTopicCompleted || followUpCount >= maxFollowUps;
+		}
+
+		/** 当前主题为最后一个主题且已满足时锁存，防止模型收尾时切回旧主题导致永不结束。 */
+		private void latchLastTopicSatisfied() {
+			if (currentTopic != null
+					&& topics.indexOf(currentTopic) == topics.size() - 1
+					&& currentTopicSatisfied()) {
+				lastTopicSatisfied = true;
+			}
 		}
 
 		private void recordCovered(String topic) {
@@ -213,20 +236,53 @@ public class InterviewTopicStateMachine {
 			if (shouldEnd) {
 				return;
 			}
-			// ② 第 5 主题硬顶：须已覆盖 ≥N-1 个不同主题才允许强制结束
+			// ② 第 5 主题硬顶：已覆盖 ≥N-1 个不同主题 ∧ 当前为最后一个主题 ∧ 已满足（完成或追问预算耗尽）
 			if (topics.size() >= 5
 					&& coveredTopics.size() >= topics.size() - 1
 					&& topics.indexOf(currentTopic) == topics.size() - 1
-					&& currentTopicCompleted) {
+					&& currentTopicSatisfied()) {
 				shouldEnd = true;
 				return;
 			}
-			// ③ 自然结束：全部主题已覆盖 ∧ 两必选已覆盖 ∧ 当前主题完成
+			// ③ 自然结束：全部主题已覆盖 ∧ 两必选已覆盖 ∧ 最后一个主题已满足（锁存，不依赖当前轮主题）
 			if (coveredTopics.size() >= topics.size()
 					&& coveredMandatoryTopics.size() >= 2
-					&& currentTopicCompleted) {
+					&& lastTopicSatisfied) {
+				shouldEnd = true;
+				return;
+			}
+			// ④ 最大轮次兜底：防模型/识别退化导致永不结束
+			if (lastProcessedTurnNo >= maxInterviewTurns()) {
 				shouldEnd = true;
 			}
+		}
+
+		/** 每主题 1 问 + maxFollowUps 个追问，加 3 轮缓冲；STANDARD 5 主题=18，HARD 5 主题=23。 */
+		private int maxInterviewTurns() {
+			return topics.size() * (maxFollowUps + 2) + 3;
+		}
+
+		/** 下一轮 realtime 指令：开场、推进、收尾或结束，由状态机统一生成。 */
+		private String buildControlInstruction() {
+			if (shouldEnd) {
+				return CLOSING_INSTRUCTION;
+			}
+			if (currentTopic == null) {
+				return "Begin the interview. Open with the first topic: "
+						+ topics.get(0) + ".";
+			}
+			if (coveredTopics.size() >= topics.size() && lastTopicSatisfied) {
+				return CLOSING_INSTRUCTION;
+			}
+			if (currentTopicSatisfied()
+					&& topics.indexOf(currentTopic) < topics.size() - 1) {
+				return "You have covered the topic: " + currentTopic
+						+ ". Move on to the NEXT topic in the interview flow now. "
+						+ "Do not ask further follow-ups on this topic.";
+			}
+			return "Current interview topic: " + currentTopic
+					+ ". Ask a focused follow-up within this topic, then transition to the "
+					+ "NEXT topic when it is covered. Do not skip topics.";
 		}
 
 		private String matchTopic(String topic) {

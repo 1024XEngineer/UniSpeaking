@@ -56,8 +56,9 @@ import {
   Target,
   ChartLine,
 } from "lucide-react";
-import { learningItems, levels, plans, recommendations, teachers } from "../domain/content/data.js";
+import { learningItems, levels, plans, recommendations, sceneCategories, teachers } from "../domain/content/data.js";
 import {
+  AUTH_SESSION_EXPIRED_EVENT,
   changePassword,
   clearAuthSession,
   advanceCustomSceneFlow,
@@ -65,14 +66,12 @@ import {
   evaluateSentenceReading,
   generateCustomScene,
   getAchievementOverview,
+  getAccessToken,
   getCurrentUser,
   getLearningAsset,
   getLearningAssets,
   getProfileOverview,
   getUserPreference,
-  hasAuthSession,
-  login,
-  register,
   synthesizeSpeech,
   translateSceneText,
   translateSessionText,
@@ -82,24 +81,38 @@ import {
 } from "../infrastructure/http/apiClient.js";
 import { createPcmWavRecorder } from "../infrastructure/audio/audioRecorder.js";
 import { useAchievementNotifications } from "../component/achievement/AchievementNotifications.jsx";
-import { createRealtimeClient } from "../websocket/realtimeClient.js";
+import { createRealtimeClient, realtimeFailureMessage } from "../websocket/realtimeClient.js";
 import { IeltsAssets, IeltsTrainingCenter } from "../component/ielts/IeltsModule.jsx";
 import { InterviewAssets, InterviewModule } from "../component/interview/InterviewModule.jsx";
 import { HelpCenter } from "../component/help/HelpCenter.jsx";
 import { HelpLayout } from "../component/help/HelpLayout.jsx";
+import { LandingPage } from "../component/landing/LandingPage.jsx";
 import { NewtonsCradle } from "../component/common/NewtonsCradle.jsx";
 import { Modal } from "../component/common/Modal.jsx";
 import { LearningInsights } from "../component/profile/LearningInsights.jsx";
 import { AccountSecurity } from "../component/profile/AccountSecurity.jsx";
 import { AboutProduct } from "../component/profile/AboutProduct.jsx";
 import { ProductLegalDocument } from "../component/profile/ProductLegalDocument.jsx";
-import { hrefForPage, paths, resolveRoute } from "./router.js";
+import { HumanVerification } from "../HumanVerification.jsx";
+import { hrefForPage, paths, resolveRoute, sidebarPageTarget } from "./router.js";
+import {
+  issueEmailChallenge,
+  issuePasswordResetChallenge,
+  loginWithPassword,
+  logoutUser,
+  registerWithEmail,
+  resetPasswordWithEmail,
+  validateRegistrationCredentials,
+} from "../userAuthApi.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
 const pronunciationAudioCache = new Map();
 const maxPronunciationAudioCacheEntries = 128;
 const chineseCharacterPattern = /[\u3400-\u9fff]/;
 const sceneCachePrefix = "unispeaking.scene.";
+const authReturnPathKey = "unispeaking.authReturnPath";
+
+const teacherForVoice = (voiceId) => teachers.find((item) => item.voiceId === voiceId) || null;
 
 function cacheGeneratedScene(scene) {
   if (!scene?.sceneId) return;
@@ -561,60 +574,186 @@ function Button({ children, variant = "primary", icon, className, ...props }) {
   );
 }
 
-function SplashStartButton({ onClick }) {
-  return (
-    <button className="splash-start-button" type="button" onClick={onClick}>
-      <span>开始练习</span>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <polygon points="4,4 12,12 4,20" />
-        <polygon points="9,4 17,12 9,20" />
-        <polygon points="14,4 22,12 14,20" />
-      </svg>
-    </button>
-  );
-}
-
-function Splash({ onStart, onLogin }) {
-  return (
-    <main className="splash">
-      <header className="splash__header">
-        <Brand />
-        <button className="text-button" onClick={onLogin}>登录</button>
-      </header>
-      <section className="splash__hero">
-        <p className="eyebrow">AI ENGLISH SPEAKING PARTNER</p>
-        <h1>Speak More,<br />Speak Better.</h1>
-        <p className="splash__cn">越说，越会说。</p>
-        <p className="splash__copy">和懂你的 AI 老师自然对话，在低压力的练习中慢慢建立表达自信。</p>
-        <SplashStartButton onClick={onStart} />
-      </section>
-      <footer className="splash__footer"><span>语你说</span><span>Web · Desktop</span></footer>
-    </main>
-  );
-}
-
 function Auth({ mode: initialMode, onBack, onSuccess }) {
   const [mode, setMode] = useState(initialMode || "signup");
   const [showPassword, setShowPassword] = useState(false);
-  const [username, setUsername] = useState("");
+  const [step, setStep] = useState("credentials");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [challengeId, setChallengeId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const submit = async (event) => {
+  const [notice, setNotice] = useState("");
+  const registrationDraftRef = useRef({ email: "", password: "" });
+  const captchaButtonId = mode === "reset" ? "reset-email-challenge" : "signup-email-challenge";
+
+  const clearChallenge = () => {
+    setStep("credentials");
+    setCode("");
+    setChallengeId("");
+    setConfirmPassword("");
+    setError("");
+  };
+
+  const switchMode = () => {
+    setMode(mode === "signup" ? "login" : "signup");
+    clearChallenge();
+    setPassword("");
+    setNotice("");
+    registrationDraftRef.current = { email: "", password: "" };
+  };
+
+  const beginPasswordReset = () => {
+    setMode("reset");
+    clearChallenge();
+    setPassword("");
+    setNotice("");
+    registrationDraftRef.current = { email: email.trim(), password: "" };
+  };
+
+  const returnToLogin = () => {
+    setMode("login");
+    clearChallenge();
+    setPassword("");
+    registrationDraftRef.current = { email: "", password: "" };
+  };
+
+  const submitCredentials = async (event) => {
     event.preventDefault();
+    if (mode !== "login") return;
     setSubmitting(true);
     setError("");
+    setNotice("");
     try {
-      const auth = mode === "signup"
-        ? await register({ username, password })
-        : await login({ username, password });
-      await onSuccess(auth, mode);
+      const auth = await loginWithPassword(email.trim(), password);
+      await onSuccess(auth, "login");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "认证请求失败");
     } finally {
       setSubmitting(false);
     }
   };
+
+  const verifyAndIssueChallenge = async (captchaVerifyParam) => {
+    setError("");
+    setNotice("");
+    const normalizedEmail = email.trim();
+    const emailIsValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+    if (!emailIsValid) {
+      setError("请输入有效邮箱地址。");
+      return { captchaResult: true, bizResult: false };
+    }
+    const validationCode = mode === "signup"
+      ? validateRegistrationCredentials(normalizedEmail, password)
+      : null;
+    if (validationCode === "WEAK_PASSWORD") {
+      setError("密码至少需要 12 位字符。");
+      return { captchaResult: true, bizResult: false };
+    }
+    registrationDraftRef.current = { email: normalizedEmail, password };
+    setSubmitting(true);
+    try {
+      const challenge = mode === "reset"
+        ? await issuePasswordResetChallenge(normalizedEmail, captchaVerifyParam)
+        : await issueEmailChallenge(normalizedEmail, captchaVerifyParam);
+      setChallengeId(challenge.challengeId);
+      setStep("verification");
+      return { captchaResult: true, bizResult: true };
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "请求失败，请稍后重试。");
+      return {
+        captchaResult: requestError?.code !== "HUMAN_VERIFICATION_REQUIRED",
+        bizResult: false,
+      };
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const submitVerification = async (event) => {
+    event.preventDefault();
+    const draft = registrationDraftRef.current;
+    setSubmitting(true);
+    setError("");
+    try {
+      if (mode === "reset") {
+        const validationCode = validateRegistrationCredentials(draft.email, password);
+        if (validationCode) {
+          setError(validationCode === "INVALID_EMAIL" ? "请输入有效邮箱地址。" : "密码至少需要 12 位字符。");
+          return;
+        }
+        if (password !== confirmPassword) {
+          setError("两次输入的新密码不一致。");
+          return;
+        }
+        await resetPasswordWithEmail({
+          email: draft.email,
+          password,
+          challengeId,
+          code,
+        });
+        setMode("login");
+        setStep("credentials");
+        setPassword("");
+        setConfirmPassword("");
+        setCode("");
+        setChallengeId("");
+        setNotice("密码已重置，请使用新密码登录。");
+        return;
+      }
+      const validationCode = validateRegistrationCredentials(draft.email, draft.password);
+      if (validationCode) {
+        setError(validationCode === "INVALID_EMAIL" ? "请输入有效邮箱地址。" : "密码至少需要 12 位字符。");
+        setStep("credentials");
+        setChallengeId("");
+        setCode("");
+        return;
+      }
+      const auth = await registerWithEmail({
+        email: draft.email,
+        password: draft.password,
+        challengeId,
+        code,
+      });
+      await onSuccess(auth, "signup");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "验证码校验失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (step === "verification") {
+    const resettingPassword = mode === "reset";
+    return (
+      <main className="auth-layout">
+        <aside className="auth-layout__aside"><Brand /><div><p className="eyebrow">ONE STEP LEFT</p><h2>{resettingPassword ? <>验证邮箱后，<br />设置你的新密码。</> : <>先验证邮箱，<br />再开始第一次对话。</>}</h2></div><p>语你说 · UniSpeaking</p></aside>
+        <section className="auth-panel verify-panel">
+          <div className="verify-icon"><EnvelopeSimple /></div>
+          <p className="eyebrow">CHECK YOUR INBOX</p>
+          <h1>{resettingPassword ? "重置密码" : "验证你的邮箱"}</h1>
+          <p>验证码已发送至 <strong>{registrationDraftRef.current.email}</strong>，10 分钟内有效。</p>
+          <form className="verification-form" onSubmit={submitVerification}>
+            <label htmlFor="verification-code">6 位验证码</label>
+            <input id="verification-code" className="verification-code" inputMode="numeric" autoComplete="one-time-code" maxLength="6" pattern="[0-9]{6}" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} required autoFocus />
+            {resettingPassword && <>
+              <label>新密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 12 位字符" autoComplete="new-password" minLength="12" maxLength="200" required disabled={submitting} /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>
+              <label>确认新密码<input type={showPassword ? "text" : "password"} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="再次输入新密码" autoComplete="new-password" minLength="12" maxLength="200" required disabled={submitting} /></label>
+            </>}
+            {error && <p className="auth-error" role="alert">{error}</p>}
+            <Button type="submit" disabled={submitting || code.length !== 6}>{submitting ? "正在验证…" : resettingPassword ? "重置密码" : "完成注册"}</Button>
+          </form>
+          <button className="text-button verify-back" type="button" onClick={() => {
+            clearChallenge();
+            setPassword(resettingPassword ? "" : registrationDraftRef.current.password);
+          }}>返回修改邮箱</button>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="auth-layout">
       <aside className="auth-layout__aside">
@@ -624,17 +763,21 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
       </aside>
       <section className="auth-panel">
         <button className="back-link" onClick={onBack}><ArrowLeft />返回</button>
-        <div className="auth-panel__heading"><h1>{mode === "signup" ? "创建账号" : "欢迎回来"}</h1><p>{mode === "signup" ? "用邮箱注册，开始你的口语练习。" : "继续上一次的学习进度。"}</p></div>
-        <form onSubmit={submit}>
-          <label>邮箱<input type="email" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="name@example.com" maxLength="254" required /></label>
-          <label>密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 6 位字符" minLength="6" maxLength="72" required /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>
-          {mode === "login" && <button type="button" className="forgot-link">忘记密码？</button>}
-          {error && <p className="call-error">{error}</p>}
-          <Button className="auth-submit" type="submit" disabled={submitting}>{submitting ? "请稍候" : mode === "signup" ? "注册" : "登录"}</Button>
+        <div className="auth-panel__heading"><h1>{mode === "signup" ? "创建账号" : mode === "reset" ? "重置密码" : "欢迎回来"}</h1><p>{mode === "signup" ? "用邮箱注册，开始你的口语练习。" : mode === "reset" ? "输入注册邮箱，验证后设置新密码。" : "继续上一次的学习进度。"}</p></div>
+        <form onSubmit={submitCredentials}>
+          <label>邮箱<input type="email" value={email} onChange={(event) => { const nextEmail = event.target.value; setEmail(nextEmail); registrationDraftRef.current.email = nextEmail.trim(); }} placeholder="name@example.com" autoComplete="email" maxLength="254" required disabled={submitting} /></label>
+          {mode !== "reset" && <label>密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => { const nextPassword = event.target.value; setPassword(nextPassword); registrationDraftRef.current.password = nextPassword; }} placeholder="至少 12 位字符" autoComplete={mode === "signup" ? "new-password" : "current-password"} minLength="12" maxLength="200" required disabled={submitting} /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>}
+          {mode !== "login" && <HumanVerification buttonId={captchaButtonId} onVerify={verifyAndIssueChallenge} />}
+          {mode === "login" && <button type="button" className="forgot-link" onClick={beginPasswordReset}>忘记密码？</button>}
+          {notice && <p className="auth-notice" role="status">{notice}</p>}
+          {error && <p className="auth-error" role="alert">{error}</p>}
+          <Button id={mode !== "login" ? captchaButtonId : undefined} className="auth-submit" type="submit" disabled={submitting}>{submitting ? "正在处理…" : mode === "login" ? "登录" : "发送邮箱验证码"}</Button>
         </form>
-        <p className="auth-switch">{mode === "signup" ? "已经有账号？" : "还没有账号？"}<button onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setError(""); }}>{mode === "signup" ? "直接登录" : "创建账号"}</button></p>
+        {mode === "reset"
+          ? <p className="auth-switch">想起密码了？<button onClick={returnToLogin}>返回登录</button></p>
+          : <p className="auth-switch">{mode === "signup" ? "已经有账号？" : "还没有账号？"}<button onClick={switchMode}>{mode === "signup" ? "直接登录" : "创建账号"}</button></p>}
         <div className="auth-help">
-          <span>登录或注册遇到问题？</span>
+          <span>登录、注册或重置遇到问题？</span>
           <a href={paths.help.root}><Lifebuoy weight="bold" />访问帮助中心</a>
         </div>
       </section>
@@ -704,11 +847,17 @@ function AppShell({ page, setPage, teacher, avatarUrl, children }) {
     { id: "assets", label: "学习资产", icon: BookOpenText },
   ];
   const activePage = page === "ielts" || page === "interview" ? "scenes" : page === "ielts-assets" || page === "interview-assets" ? "assets" : page;
+  const navigateSidebar = (destination) => {
+    const targetPage = sidebarPageTarget(page, destination);
+    // Keep the current specialty page selected when clicking its active sidebar section.
+    if (activePage === destination && targetPage === destination) return;
+    if (targetPage !== page) setPage(targetPage);
+  };
   return (
     <div className={cx("app-shell", sidebarOpen && "is-sidebar-open")}>
       <aside className={cx("sidebar", sidebarOpen && "is-open")} onMouseEnter={() => setSidebarOpen(true)} onMouseLeave={() => setSidebarOpen(false)}>
         <Brand compact={!sidebarOpen} />
-        <nav>{items.map(({ id, label, icon: Icon }) => <button key={id} className={cx("sidebar__item", activePage === id && "is-active")} onClick={() => { if (activePage !== id) setPage(id); }} aria-label={label} title={label}><Icon weight={activePage === id ? "bold" : "regular"} /><span className="sidebar__label"><span>{label}</span></span></button>)}</nav>
+        <nav>{items.map(({ id, label, icon: Icon }) => <button key={id} className={cx("sidebar__item", activePage === id && "is-active")} onClick={() => navigateSidebar(id)} aria-label={label} title={label}><Icon weight={activePage === id ? "bold" : "regular"} /><span className="sidebar__label"><span>{label}</span></span></button>)}</nav>
         <button className={cx("sidebar__avatar", ["profile", "insights", "membership", "settings", "help", "about"].includes(page) && "is-active")} onClick={() => setPage("profile")}><img src={avatarUrl || teacher.image} alt="个人中心" /></button>
       </aside>
       <div className="app-main">{children}</div>
@@ -1058,7 +1207,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     } catch (error) {
       if (clientRef.current !== client) return;
       setCallState("error");
-      setCallError(error instanceof Error ? error.message : "无法开始实时对话");
+      setCallError(realtimeFailureMessage(error));
       setCallStatus("连接失败");
     }
   };
@@ -1130,6 +1279,13 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   );
 }
 
+function SceneCategoryTag({ category = "other", subtle = true }) {
+  const palette = sceneCategories[category] || sceneCategories.other;
+  const backgroundColor = subtle ? palette.subtleBackgroundColor : palette.backgroundColor;
+  const color = subtle ? palette.subtleTextColor || palette.textColor : palette.textColor;
+  return <span className="scene-category-tag" style={{ backgroundColor, color }}>{palette.label}</span>;
+}
+
 function Scenes({ onStartTraining, onIelts, onInterview }) {
   const [prompt, setPrompt] = useState("");
   const promptRef = useRef(null);
@@ -1139,7 +1295,6 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
   const [generationSource, setGenerationSource] = useState(null);
   const [startingTraining, setStartingTraining] = useState(false);
   const [generationError, setGenerationError] = useState("");
-  const [specialtyOpen, setSpecialtyOpen] = useState(false);
   const examples = ["餐厅点餐并说明忌口", "商场退换一件商品", "问路并确认交通方式", "预约理发并说明需求"];
   const syncPrompt = (event) => {
     setPrompt(event.currentTarget.value.slice(0, 200));
@@ -1193,13 +1348,6 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
         <section className="scene-builder scene-builder--featured scene-module">
           <div className="scene-section-heading scene-section-heading--primary">
             <div><p className="eyebrow">CREATE YOUR OWN</p><h2>创建专属场景</h2><p>用一句话描述你想练习的真实情境，AI 会为你整理角色、目标与表达任务。</p></div>
-            <div className={cx("scene-specialty-menu", specialtyOpen && "is-open")}>
-              <button type="button" className="scene-specialty-menu__trigger" aria-haspopup="menu" aria-expanded={specialtyOpen} onClick={() => setSpecialtyOpen(!specialtyOpen)}>专项训练<CaretDown weight="bold" /></button>
-              {specialtyOpen && <div className="scene-specialty-menu__popover" role="menu">
-                <button type="button" role="menuitem" onClick={() => { setSpecialtyOpen(false); onIelts(); }}><span className="scene-specialty-menu__icon"><BookOpenText /></span><span><strong>雅思口语</strong><small>Part 1 / 2 / 3 与全真模考</small></span><ArrowRight /></button>
-                <button type="button" role="menuitem" onClick={() => { setSpecialtyOpen(false); onInterview?.(); }}><span className="scene-specialty-menu__icon"><Briefcase /></span><span><strong>模拟面试</strong><small>上传 JD 与简历，AI 面试官逐轮追问</small></span><ArrowRight /></button>
-              </div>}
-            </div>
           </div>
           <div className={cx("scene-input", prompt.trim() && "has-content")}>
             <textarea ref={promptRef} value={prompt} maxLength={200} onChange={syncPrompt} onInput={syncPrompt} onCompositionEnd={syncPrompt} placeholder="你今天想练习什么？例如：第一次去健身房，咨询设施、开放时间和会员体验" />
@@ -1211,9 +1359,49 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
           </div>
         </section>
 
+        <section className="specialty-training scene-module">
+          <div className="scene-section-heading"><div><p className="eyebrow">SPECIALTY TRAINING</p><h2>专项训练</h2></div><p>围绕明确目标，进入完整的专项练习流程。</p></div>
+          <div className="specialty-training__grid">
+            <button type="button" className="specialty-card specialty-card--ielts" onClick={onIelts}>
+              <span className="specialty-card__art"><img src="/specialty/ielts.png" alt="" /></span>
+              <span className="specialty-card__copy"><small>IELTS SPEAKING</small><strong>雅思口语</strong><span>Part 1 / 2 / 3 专项练习与全真模考</span></span>
+              <span className="specialty-card__action" aria-hidden="true"><ArrowRight weight="bold" /></span>
+            </button>
+            <button type="button" className="specialty-card specialty-card--interview" onClick={onInterview}>
+              <span className="specialty-card__art"><img src="/specialty/interview.png" alt="" /></span>
+              <span className="specialty-card__copy"><small>ENGLISH INTERVIEW</small><strong>英文面试</strong><span>结合 JD 与简历，完成岗位模拟追问</span></span>
+              <span className="specialty-card__action" aria-hidden="true"><ArrowRight weight="bold" /></span>
+            </button>
+          </div>
+        </section>
+
         <section className="recommendations scene-module">
-          <div className="scene-section-heading"><div><p className="eyebrow">NEED INSPIRATION?</p><h2>从推荐场景开始</h2></div><p>还没想好？选择一个常用场景直接练习。</p></div>
-          <div className="recommendation-list">{recommendations.map((item) => { const loading = generationSource === `recommendation:${item.id}`; return <article key={item.id}><span className="recommendation__number">{item.number}</span><span className="recommendation__title"><span className="tag">{item.tag}</span><strong>{item.title}</strong></span><small>{item.duration}<i>·</i>{item.level}</small><p>{item.goal}</p><ExpandingCta className={cx("scene-card-cta", loading && "is-generating")} disabled={generating} onClick={() => void generate(item.title, item.id)}><span className="generation-button-state notranslate" translate="no"><span className={cx("generation-button-state__idle", loading && "is-hidden")}>开始练习</span><span className={cx("generation-button-state__loading", !loading && "is-hidden")}><NewtonsCradle size={20} className="newtons-cradle--inline" label={`正在生成${item.title}场景`} /><span>正在生成</span></span></span></ExpandingCta></article>; })}</div>
+          <div className="scene-section-heading"><div><p className="eyebrow">DAILY PICKS</p><h2>每日推荐</h2></div><p>选择一个常用场景，直接开始今天的练习。</p></div>
+          <div className="recommendation-list">
+            {recommendations.map((item) => {
+              const loading = generationSource === `recommendation:${item.id}`;
+              const category = sceneCategories[item.category] || sceneCategories.other;
+              return (
+                <article key={item.id} style={{ "--scene-category-bg": category.subtleBackgroundColor, "--scene-category-accent": category.subtleTextColor || category.textColor }}>
+                  <span className="recommendation__number">{item.number}</span>
+                  <span className="recommendation__title"><SceneCategoryTag category={item.category} subtle /><strong>{item.title}</strong></span>
+                  <small>{item.duration}<i>·</i>{item.level}</small>
+                  <p>{item.goal}</p>
+                  <button
+                    type="button"
+                    className={cx("scene-card-cta", loading && "is-generating")}
+                    disabled={generating}
+                    onClick={() => void generate(item.title, item.id)}
+                    aria-label={loading ? `正在生成 ${item.title} 场景` : `开始练习 ${item.title} 场景`}
+                  >
+                    {loading
+                      ? <NewtonsCradle size={18} className="newtons-cradle--inline" label={`正在生成${item.title}场景`} />
+                      : <ArrowRight weight="bold" />}
+                  </button>
+                </article>
+              );
+            })}
+          </div>
         </section>
       </div>
       {preview && <Modal onClose={() => { previewSceneIdRef.current = ""; setPreview(null); setPreviewDisplay(null); }}><p className="eyebrow">场景已准备好</p><h2>{previewDisplay?.title || (chineseCharacterPattern.test(preview.title || "") ? compactSceneText(preview.title, 18) : "正在整理场景…")}</h2><p className="modal-lead">确认场景信息，然后开始学习。</p><dl className="scene-summary"><div><dt>场景简介</dt><dd>{previewDisplay?.background || (chineseCharacterPattern.test(preview.background || "") ? compactSceneText(preview.background, 58) : "正在整理中文摘要…" )}</dd></div><div><dt>AI 扮演</dt><dd>{previewDisplay?.aiRole || (chineseCharacterPattern.test(preview.aiRole || "") ? compactSceneText(preview.aiRole, 22) : "正在整理…" )}</dd></div><div><dt>你将扮演</dt><dd>{previewDisplay?.userRole || (chineseCharacterPattern.test(preview.userRole || "") ? compactSceneText(preview.userRole, 22) : "正在整理…" )}</dd></div><div><dt>练习重点</dt><dd>{previewDisplay?.learningGoal || (chineseCharacterPattern.test(preview.learningGoal || "") ? compactSceneText(preview.learningGoal, 42) : "正在整理中文摘要…" )}</dd></div><div><dt>预计用时</dt><dd>{preview.estimatedMinutes} 分钟</dd></div></dl><div className="modal-actions"><Button variant="secondary" disabled={startingTraining} onClick={() => { previewSceneIdRef.current = ""; setPreview(null); setPreviewDisplay(null); }}>返回修改</Button><Button disabled={startingTraining} onClick={() => void startGeneratedTraining()} icon={<ArrowRight />}>{startingTraining ? "正在进入" : "确认进入"}</Button></div></Modal>}
@@ -2523,7 +2711,8 @@ export function App() {
   const [authMode, setAuthMode] = useState(initialRoute.authMode);
   const [level, setLevel] = useState("");
   const [conversationSpeed, setConversationSpeed] = useState("自然");
-  const [teacher, setTeacher] = useState(teachers[0]);
+  const [teacher, setTeacher] = useState(() => teacherForVoice(initialRoute.selectedVoice) || teachers[0]);
+  const [pendingVoice, setPendingVoice] = useState(() => teacherForVoice(initialRoute.selectedVoice)?.voiceId || null);
   const [page, setPage] = useState(initialRoute.page);
   const [sceneTitle, setSceneTitle] = useState("咖啡店点单");
   const [generatedScene, setGeneratedScene] = useState(
@@ -2554,6 +2743,11 @@ export function App() {
     setHelpRoute(route.helpRoute || null);
     setAboutRoute(route.aboutRoute || null);
     setPaywall(null);
+    const routeTeacher = teacherForVoice(route.selectedVoice);
+    if (routeTeacher) {
+      setPendingVoice(routeTeacher.voiceId);
+      setTeacher(routeTeacher);
+    }
     const routeSceneId = route.sceneId || route.assetSceneId;
     if (routeSceneId) {
       const cachedScene = cachedGeneratedScene(routeSceneId);
@@ -2599,10 +2793,28 @@ export function App() {
   }, [initialRoute]);
 
   useEffect(() => {
+    const handleExpiredSession = () => {
+      const currentPath = `${window.location.pathname}${window.location.search}`;
+      if (![paths.auth.login, paths.auth.signup].includes(window.location.pathname)) {
+        try { window.sessionStorage.setItem(authReturnPathKey, currentPath); } catch { /* Login still proceeds when storage is unavailable. */ }
+      }
+      clearAchievementNotifications();
+      setUser(null);
+      setProfileOverview(null);
+      navigate(paths.auth.login, { authMode: "login" }, true);
+    };
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, handleExpiredSession);
+    return () => window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, handleExpiredSession);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     const bootstrapAuth = async () => {
-      if (!hasAuthSession()) {
+      const bootstrapToken = getAccessToken();
+      if (!bootstrapToken) {
         if (!["splash", "auth"].includes(initialRoute.flow) && !initialRoute.publicAccess) {
+          const returnPath = `${window.location.pathname}${window.location.search}`;
+          try { window.sessionStorage.setItem(authReturnPathKey, returnPath); } catch { /* Login still proceeds when storage is unavailable. */ }
           navigate(paths.auth.login, { authMode: "login" }, true);
         }
         if (!cancelled) setAuthReady(true);
@@ -2626,7 +2838,7 @@ export function App() {
           navigate(paths.auth.teacher, {}, true);
         }
       } catch {
-        clearAuthSession();
+        clearAuthSession(bootstrapToken);
         if (!cancelled && !["splash", "auth"].includes(initialRoute.flow) && !initialRoute.publicAccess) {
           navigate(paths.auth.login, { authMode: "login" }, true);
         }
@@ -2641,10 +2853,65 @@ export function App() {
   }, []);
 
   const goSplash = () => navigate(paths.root);
-  const goAuth = (mode) => navigate(mode === "login" ? paths.auth.login : paths.auth.signup);
+  const goAuth = (mode, requestedVoice = null) => {
+    const selectedTeacher = teacherForVoice(requestedVoice);
+    setPendingVoice(selectedTeacher?.voiceId || null);
+    if (selectedTeacher) setTeacher(selectedTeacher);
+    const targetPath = mode === "login" ? paths.auth.login : paths.auth.signup;
+    const query = selectedTeacher ? `?voice=${encodeURIComponent(selectedTeacher.voiceId)}` : "";
+    navigate(`${targetPath}${query}`);
+  };
+  const openLandingStart = async (requestedVoice) => {
+    const selectedTeacher = typeof requestedVoice === "string" ? teacherForVoice(requestedVoice) : null;
+    if (!selectedTeacher) {
+      if (user) setMainPage("conversation");
+      else goAuth("signup");
+      return;
+    }
+    setPendingVoice(selectedTeacher.voiceId);
+    setTeacher(selectedTeacher);
+    if (!user) {
+      goAuth("signup", selectedTeacher.voiceId);
+      return;
+    }
+    try {
+      const preference = await updateUserPreference({ preferredVoice: selectedTeacher.voiceId });
+      applyPreference(preference);
+      setPendingVoice(null);
+      setMainPage("conversation");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "AI 老师保存失败");
+    }
+  };
+  const openWebApp = () => user ? setMainPage("conversation") : goAuth("login");
+  const openLandingSpecialty = (specialty) => {
+    const targetPath = specialty === "ielts"
+      ? paths.ielts.root
+      : specialty === "interview"
+        ? paths.interview.root
+        : null;
+    if (!targetPath) return;
+    if (user) {
+      navigate(targetPath);
+      return;
+    }
+    try { window.sessionStorage.setItem(authReturnPathKey, targetPath); } catch { /* Authentication can still continue without storage. */ }
+    goAuth("signup");
+  };
   const goLevel = () => navigate(paths.auth.level, { authMode });
   const goTeacher = () => navigate(paths.auth.teacher, { authMode });
-  const enterApp = () => setMainPage("conversation");
+  const enterApp = () => {
+    let returnPath = "";
+    try {
+      returnPath = window.sessionStorage.getItem(authReturnPathKey) || "";
+      if (returnPath) window.sessionStorage.removeItem(authReturnPathKey);
+    } catch { /* Fall back to the default authenticated page. */ }
+    if (returnPath.startsWith("/") && !returnPath.startsWith("//")) {
+      navigate(returnPath, {}, true);
+    } else {
+      setMainPage("conversation");
+    }
+  };
   const completeAuthentication = async (auth, mode) => {
     setUser(auth.user);
     const [preference, profile] = await Promise.all([
@@ -2653,12 +2920,22 @@ export function App() {
     ]);
     setProfileOverview(profile);
     applyPreference(preference);
+    const landingTeacher = teacherForVoice(pendingVoice);
+    if (landingTeacher) setTeacher(landingTeacher);
     await synchronizeAchievements();
     if (mode === "signup" || !preference.cefrLevel) {
       goLevel();
+    } else if (landingTeacher) {
+      if (landingTeacher.voiceId !== preference.preferredVoice) {
+        const updatedPreference = await updateUserPreference({ preferredVoice: landingTeacher.voiceId });
+        applyPreference(updatedPreference);
+      }
+      setPendingVoice(null);
+      enterApp();
     } else if (!preference.preferredVoice) {
       goTeacher();
     } else {
+      setPendingVoice(null);
       enterApp();
     }
   };
@@ -2677,6 +2954,7 @@ export function App() {
     try {
       const preference = await updateUserPreference({ preferredVoice: teacher.voiceId });
       applyPreference(preference);
+      setPendingVoice(null);
       enterApp();
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "AI 老师保存失败");
@@ -2717,9 +2995,9 @@ export function App() {
       return false;
     }
   };
-  const logout = () => {
+  const logout = async () => {
     clearAchievementNotifications();
-    clearAuthSession();
+    await logoutUser().catch(() => clearAuthSession());
     setUser(null);
     setProfileOverview(null);
     goSplash();
@@ -2860,7 +3138,7 @@ export function App() {
   };
 
   if (!authReady) return <main className="splash" aria-busy="true" />;
-  if (flow === "splash") return <Splash onStart={() => goAuth("signup")} onLogin={() => goAuth("login")} />;
+  if (flow === "splash") return <LandingPage onStart={openLandingStart} onLogin={() => goAuth("login")} onWeb={openWebApp} onSpecialty={openLandingSpecialty} />;
   if (flow === "auth") return <Auth mode={authMode} onBack={goSplash} onSuccess={completeAuthentication} />;
   if (flow === "level") return <LevelSetup selected={level} onSelect={setLevel} onNext={saveLevelAndContinue} />;
   if (flow === "teacher") return <TeacherSetup selectedId={teacher.id} onSelect={(id) => setTeacher(teachers.find((item) => item.id === id))} onFinish={saveTeacherAndEnter} />;
@@ -2871,13 +3149,23 @@ export function App() {
       </HelpLayout>
     );
   }
+  if (page === "about" && !user) {
+    return (
+      <main className="public-about-shell">
+        <header className="public-about-shell__header"><Brand /><a href={paths.root}>返回首页 <ArrowRight weight="bold" /></a></header>
+        {aboutRoute?.screen === "document"
+          ? <ProductLegalDocument documentId={aboutRoute.documentId} onNavigate={navigateAbout} />
+          : <AboutProduct onNavigate={navigateAbout} onHelpNavigate={navigateHelp} />}
+      </main>
+    );
+  }
   let content;
   if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={showResult} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
   else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={() => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); void synchronizeAchievements({ revealNotifications: true }); }} />;
   else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={() => setMainPage("ielts")} onInterview={() => setMainPage("interview")} />;
   else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => setMainPage("ielts-assets")} onInterview={() => setMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(scene) => startTraining(scene, "learn", { returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
-  else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBackToAssets={() => setMainPage("assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
+  else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToInterview={() => setMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
   else if (page === "interview") content = <InterviewModule route={interviewRoute} teacher={teacher} speed={conversationSpeed} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} />;
   else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToIelts={() => setMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} onPractice={(sceneId) => navigateInterview(paths.interview.session(sceneId))} />;
   else content = <Profile section={page} setSection={setMainPage} helpRoute={helpRoute} aboutRoute={aboutRoute} onHelpNavigate={navigateHelp} onAboutNavigate={navigateAbout} user={user} profile={profileOverview} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onMonthChange={loadProfileMonth} onNicknameChange={updateNickname} onAvatarChange={updateAvatar} onPasswordChange={updatePassword} onAssets={() => setMainPage("assets")} onLogout={logout} />;

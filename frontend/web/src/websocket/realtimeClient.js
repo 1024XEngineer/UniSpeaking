@@ -18,11 +18,16 @@ const DEFAULT_VOICE = "Katerina";
 const DEFAULT_MODEL = "qwen3.5-omni-flash-realtime";
 const DATA_CHANNEL_LABEL = "oai-events";
 const DEFAULT_SPEECH_SPEED = "NATURAL";
+const DEFAULT_ICE_SERVERS = [
+  { urls: "stun:stun.aliyun.com:3478" },
+  { urls: "stun:stun.l.google.com:19302" },
+];
 const SCENARIO_CLOSING_TIMEOUT_MS = 20_000;
 const SCENARIO_AUDIO_DRAIN_MS = 1_200;
 const SESSION_UPDATE_TIMEOUT_MS = 5_000;
 const IELTS_STATE_TIMEOUT_MS = 5_000;
 const IELTS_INPUT_RECOVERY_MS = 2_500;
+const DEFAULT_INTERVIEW_CLOSING = "The interview is complete. Give a brief, natural closing and thank the candidate for their time. Do not ask more questions.";
 const SPEECH_SPEED_INSTRUCTIONS = {
   SLOWER: "Voice delivery rule: speak distinctly and very slowly, around 70 English words per minute, with clear pauses between short phrases.",
   MODERATE: "Voice delivery rule: speak at a calm moderate pace, around 120 English words per minute, with clear pauses between ideas.",
@@ -55,6 +60,20 @@ export function isMicFailure(error) {
     .includes(error?.name);
 }
 
+export function realtimeFailureMessage(error) {
+  const rawMessage = error instanceof Error ? error.message : String(error || "");
+  if (/AllocationQuota\.FreeTierOnly|free quota exhausted|free tier only/i.test(rawMessage)) {
+    return "Qwen 实时服务的免费额度已用尽，请在阿里云百炼控制台充值或关闭“仅使用免费额度”后重试";
+  }
+  if (/QWEN_SIGNALING_FAILED|Qwen signaling returned 403/i.test(rawMessage)) {
+    return "Qwen 实时服务拒绝了连接，请检查模型权限、Workspace 配置和账户额度";
+  }
+  if (/ICE (?:connection )?(?:failed|disconnected)|ICE 候选|DataChannel/i.test(rawMessage)) {
+    return "实时网络通道建立失败，请检查当前网络是否允许 WebRTC；必要时配置可用的 TURN 服务器后重试";
+  }
+  return rawMessage || "无法开始实时对话";
+}
+
 export function defaultIceServers() {
   const configured = import.meta.env?.VITE_ICE_SERVERS;
   if (configured) {
@@ -65,7 +84,7 @@ export function defaultIceServers() {
       /* ignore malformed env value */
     }
   }
-  return [{ urls: "stun:stun.l.google.com:19302" }];
+  return DEFAULT_ICE_SERVERS;
 }
 
 export function buildResponseCreateEvent({ id, instructions = "" } = {}) {
@@ -117,6 +136,16 @@ export function websocketUrl(
   return url.toString();
 }
 
+export function buildProviderSessionBindingFrame(localSessionId, event) {
+  const providerSessionId = String(event?.session?.id || "").trim();
+  if (!String(localSessionId || "").trim() || !providerSessionId) return null;
+  return {
+    type: "bind",
+    sessionId: String(localSessionId).trim(),
+    providerSessionId,
+  };
+}
+
 async function unwrapResponse(response) {
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("application/json") ? await response.json() : await response.text();
@@ -151,18 +180,44 @@ function waitForIceGathering(peer) {
   });
 }
 
-function waitForChannel(channel) {
+function waitForChannel(channel, peer) {
   if (channel.readyState === "open") return Promise.resolve();
   return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error("实时数据通道连接超时")), 10_000);
-    channel.onopen = () => {
+    let settled = false;
+    const cleanup = () => {
       window.clearTimeout(timer);
-      resolve();
+      channel.removeEventListener?.("open", handleOpen);
+      channel.removeEventListener?.("error", handleError);
+      peer?.removeEventListener?.("iceconnectionstatechange", handleIceState);
+    };
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      error ? reject(error) : resolve();
+    };
+    const handleOpen = () => finish();
+    const handleError = () => finish(new Error("实时数据通道连接失败"));
+    const handleIceState = () => {
+      const state = peer?.iceConnectionState;
+      if (state === "failed" || state === "disconnected") {
+        finish(new Error(`ICE connection ${state}`));
+      }
+    };
+    const timer = window.setTimeout(() => {
+      const iceState = peer?.iceConnectionState || "unknown";
+      finish(new Error(`实时数据通道连接超时（ICE ${iceState}）`));
+    }, 20_000);
+    channel.onopen = () => {
+      handleOpen();
     };
     channel.onerror = () => {
-      window.clearTimeout(timer);
-      reject(new Error("实时数据通道连接失败"));
+      handleError();
     };
+    channel.addEventListener?.("open", handleOpen);
+    channel.addEventListener?.("error", handleError);
+    peer?.addEventListener?.("iceconnectionstatechange", handleIceState);
+    handleIceState();
   });
 }
 
@@ -331,6 +386,10 @@ export function createRealtimeClient({
   let instructionUpdateQueue = Promise.resolve(true);
   let activeInputItemId = null;
   let ieltsTimedOutTurn = null;
+  let closingInstructions = "";
+  let pendingInterviewReportStatus = null;
+  let providerSessionId = null;
+  let providerSessionBound = false;
 
   const emit = (event) => onEvent(event);
 
@@ -480,10 +539,10 @@ export function createRealtimeClient({
     });
   }
 
-  async function sendSessionFrame(type, message = null, stopTime = null) {
+  async function sendSessionFrame(type, message = null, stopTime = null, providerSessionId = null) {
     if (!sessionId) throw new Error("会话 ID 尚未建立");
     const socket = await connectSessionSocket();
-    const operation = type === "end" ? "end" : "message";
+    const operation = type === "end" ? "end" : type === "bind" ? "bind" : "message";
     const ack = new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
         pendingAcks = pendingAcks.filter((pending) => pending.resolve !== resolve);
@@ -496,8 +555,28 @@ export function createRealtimeClient({
       sessionId,
       message,
       stopTime,
+      providerSessionId,
     }));
     return ack;
+  }
+
+  async function ensureProviderSessionBinding(nextProviderSessionId) {
+    const normalized = String(nextProviderSessionId || "").trim();
+    if (!normalized) return false;
+    providerSessionId = normalized;
+    if (providerSessionBound) return true;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await sendSessionFrame("bind", null, null, normalized);
+        providerSessionBound = true;
+        return true;
+      } catch (error) {
+        if (attempt === 1) {
+          emit({ type: "local.backend_warning", message: `服务商会话绑定失败：${error.message}` });
+        }
+      }
+    }
+    return false;
   }
 
   async function addSessionMessage(owner, content, providerMessageId) {
@@ -627,11 +706,16 @@ export function createRealtimeClient({
       scenarioAudioDrainTimer = null;
     }
     scenarioCompletionEmitted = true;
-    emit({ type: "local.scenario_completed" });
+    if (interviewSceneId) {
+      emit({ type: "local.interview_end_requested", reportStatus: pendingInterviewReportStatus });
+    } else {
+      emit({ type: "local.scenario_completed" });
+    }
     void stop({ reason: "state_machine" }).catch((error) => {
       emit({
-        type: "local.scenario_completion_error",
-        message: error instanceof Error ? error.message : "场景自动结束失败",
+        type: interviewSceneId ? "local.interview_end_error" : "local.scenario_completion_error",
+        message: error instanceof Error ? error.message
+          : interviewSceneId ? "面试自动结束失败" : "场景自动结束失败",
       });
     });
   }
@@ -812,6 +896,18 @@ export function createRealtimeClient({
 
     if (event.type === "session.created") {
       started = true;
+      const binding = buildProviderSessionBindingFrame(sessionId, event);
+      if (binding) {
+        const operation = ensureProviderSessionBinding(binding.providerSessionId);
+        pendingOperations.add(operation);
+        try {
+          await operation;
+        } finally {
+          pendingOperations.delete(operation);
+        }
+      } else {
+        emit({ type: "local.backend_warning", message: "服务商未返回 session.created 会话标识，用量无法归属" });
+      }
       const audioTrack = localStream?.getAudioTracks?.()[0];
       if (audioTrack && audioSender?.track !== audioTrack) {
         await audioSender?.replaceTrack(audioTrack);
@@ -1066,21 +1162,25 @@ export function createRealtimeClient({
             reportStatus,
           });
           if (state?.shouldEnd) {
+            pendingInterviewReportStatus = reportStatus ?? null;
+            closingInstructions = String(state.controlInstruction || "").trim()
+              || DEFAULT_INTERVIEW_CLOSING;
+            scenarioCompletionPending = true;
             inputReady = false;
             setTrackEnabled();
             turnAudioCapture?.stop();
-            emit({ type: "local.interview_end_requested", reportStatus });
-            void stop({ reason: "state_machine" }).catch((error) => {
-              emit({
-                type: "local.interview_end_error",
-                message: error instanceof Error ? error.message : "面试自动结束失败",
-              });
-            });
+            armScenarioCompletionTimeout();
+            emit({ type: "local.interview_closing" });
+            if (!responsePending) {
+              requestTurnResponse({ closing: true, instructions: closingInstructions });
+            }
           } else {
             requestTurnResponse({
-              instructions: state?.currentTopic
-                ? `Current interview topic: ${state.currentTopic}. Continue the interview naturally — ask a focused follow-up within this topic, or transition to the NEXT topic in the interview flow when this one is covered. Do not skip topics.`
-                : "",
+              instructions:
+                state?.controlInstruction ||
+                (state?.currentTopic
+                  ? `Current interview topic: ${state.currentTopic}. Continue the interview naturally — ask a focused follow-up within this topic, or transition to the NEXT topic in the interview flow when this one is covered. Do not skip topics.`
+                  : ""),
             });
           }
         } catch (error) {
@@ -1099,11 +1199,24 @@ export function createRealtimeClient({
     const completedAssistantMessage = extractCompletedAssistantMessage(event);
     if (completedAssistantMessage) {
       scheduleIeltsInputRecovery();
-      await addSessionMessage(
-        0,
-        completedAssistantMessage.text,
-        completedAssistantMessage.id,
-      );
+      if (scenarioCompletionPending && interviewSceneId) {
+        // 收尾期间会话已被后端终态化：跳过 WS 落库（否则 Session not found），仅展示收尾语
+        const closingText = String(completedAssistantMessage.text || "").trim();
+        if (closingText) {
+          emit({
+            type: "local.transcript.final",
+            owner: 0,
+            itemId: completedAssistantMessage.id || eventId("transcript"),
+            text: closingText,
+          });
+        }
+      } else {
+        await addSessionMessage(
+          0,
+          completedAssistantMessage.text,
+          completedAssistantMessage.id,
+        );
+      }
     }
     if (event.type === "response.done") {
       responsePending = false;
@@ -1120,7 +1233,7 @@ export function createRealtimeClient({
           }
           scheduleScenarioCompletionAfterAudioDrain();
         } else {
-          requestTurnResponse({ closing: true });
+          requestTurnResponse({ closing: true, instructions: closingInstructions });
         }
       } else if (manualTurnResponses) {
         if (isDeterministicIeltsPart()) {
@@ -1219,19 +1332,20 @@ export function createRealtimeClient({
 
       await connectSessionSocket();
       await peer.setRemoteDescription({ type: "answer", sdp: normalizeSdp(backend.answerSdp) });
-      await waitForChannel(channel);
+      await waitForChannel(channel, peer);
       emit({ type: "local.connected", sessionId, backend });
       return { sessionId, backend };
     } catch (error) {
       await stop({ notifyBackend: false, reason: "start_failed", emitEnded: false });
       const mic = isMicFailure(error);
+		const message = mic
+		  ? micFailureMessage(error) || "无法访问麦克风"
+		  : realtimeFailureMessage(error);
       emit({
         type: mic ? "local.mic_error" : "local.error",
-        message: mic
-          ? micFailureMessage(error) || "无法访问麦克风"
-          : error instanceof Error ? error.message : "无法开始实时对话",
+        message,
       });
-      throw error;
+      throw mic ? error : new Error(message, { cause: error });
     }
   }
 
@@ -1353,6 +1467,9 @@ export function createRealtimeClient({
     }
     const stopTime = new Date().toISOString();
     const endingSessionId = sessionId;
+    if (providerSessionId && !providerSessionBound) {
+      await ensureProviderSessionBinding(providerSessionId);
+    }
     const endRequest = notifyBackend && sessionId
       ? customSceneId
         ? completeCustomDialogue(customSceneId, sessionId, stopTime)
@@ -1456,6 +1573,8 @@ export function createRealtimeClient({
       localStream = null;
       audioSender = null;
       sessionId = null;
+      providerSessionId = null;
+      providerSessionBound = false;
       sessionConfig = null;
       segmentRecorder = null;
       turnAudioCapture = null;
@@ -1469,6 +1588,8 @@ export function createRealtimeClient({
       scenarioAudioDrainTimer = null;
       responsePending = false;
       closingResponseRequested = false;
+      closingInstructions = "";
+      pendingInterviewReportStatus = null;
       statePipeline = Promise.resolve();
       ieltsActivePart = null;
       ieltsPreparedQuestions = [];

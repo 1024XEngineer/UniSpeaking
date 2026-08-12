@@ -111,18 +111,18 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 			// 429/5xx：瞬时失败，用新的临时 key 重试。
 			throw new TransientSignalingFailure(
 					retryableFailure("QWEN_SIGNALING_FAILED",
-							"Qwen signaling returned " + statusCode));
+						signalingFailureMessage(statusCode, response.body())));
 		}
 		if (statusCode >= 400) {
 			// 其余 4xx：offer 被拒，属于确定性失败，不重试。
 			throw nonRetryableFailure("QWEN_SIGNALING_FAILED",
-					"Qwen signaling returned " + statusCode);
+					signalingFailureMessage(statusCode, response.body()));
 		}
 		if (statusCode < 200 || statusCode >= 300) {
 			// 罕见 3xx：瞬时失败，可重试。
 			throw new TransientSignalingFailure(
-					retryableFailure("QWEN_SIGNALING_FAILED",
-							"Qwen signaling returned " + statusCode));
+				retryableFailure("QWEN_SIGNALING_FAILED",
+						signalingFailureMessage(statusCode, response.body())));
 		}
 		if (response.body().length() > properties.getMaxAnswerBytes()) {
 			throw retryableFailure("QWEN_ANSWER_TOO_LARGE", "Qwen answer SDP exceeds the configured limit");
@@ -131,6 +131,15 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 				statusCode,
 				RealtimeFlowLog.sdpSummary(response.body()));
 		return response.body();
+	}
+
+	private String signalingFailureMessage(int statusCode, String body) {
+		String detail = body == null ? "" : body.replaceAll("\\s+", " ").trim();
+		if (detail.length() > 500) {
+			detail = detail.substring(0, 500) + "...";
+		}
+		return "Qwen signaling returned " + statusCode
+				+ (detail.isBlank() ? "" : ": " + detail);
 	}
 
 	/** 瞬时信令失败载体：携带重试后需抛出的业务异常（避免二次重试吞掉原始失败）。 */

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:auth": "node --test scripts/check-auth-contract.mjs scripts/check-captcha-config.mjs scripts/check-api-client-auth.mjs",
     "check:realtime-events": "node scripts/check-realtime-events.mjs",
     "check:routes": "node scripts/check-routes.mjs",
     "generate:teacher-previews": "node scripts/generate-teacher-previews.mjs",

@@ -131,6 +131,28 @@ class PracticeSessionRepositoryTest {
 	}
 
 	@Test
+	void persistsTheProviderSessionIdUsedToBindOfficialSlsUsage() {
+		PracticeSessionMapper mapper = mock(PracticeSessionMapper.class);
+		when(mapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(1);
+		PracticeSessionRepository repository = new PracticeSessionRepository(mapper);
+		UUID userId = UUID.randomUUID();
+
+		repository.bindProviderSession("session_local_1", userId, "sess_provider_1");
+
+		@SuppressWarnings("unchecked")
+		ArgumentCaptor<LambdaUpdateWrapper<PracticeSessionEntity>> captor =
+				ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+		verify(mapper).update(isNull(), captor.capture());
+		String condition = captor.getValue().getSqlSegment().toLowerCase(java.util.Locale.ROOT);
+		String assignments = captor.getValue().getSqlSet().toLowerCase(java.util.Locale.ROOT);
+		assertTrue(condition.contains("session_id ="), condition);
+		assertTrue(condition.contains("user_id ="), condition);
+		assertTrue(assignments.contains("provider_session_id="), assignments);
+		assertTrue(captor.getValue().getParamNameValuePairs().values().containsAll(List.of(
+				"session_local_1", userId, "sess_provider_1")));
+	}
+
+	@Test
 	void repeatedTerminalUpdateIsIdempotentOnlyForTheSameStatus() {
 		PracticeSessionMapper mapper = mock(PracticeSessionMapper.class);
 		when(mapper.update(isNull(), any(LambdaUpdateWrapper.class)))

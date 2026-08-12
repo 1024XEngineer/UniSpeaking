@@ -74,10 +74,23 @@ export const levels = [
   { id: "fluent", cefrLevel: "D", title: "表达比较流利", note: "能自然参与大多数日常交流" },
 ];
 
+export const sceneCategories = {
+  food: { label: "餐饮", backgroundColor: "#FFF0C7", subtleBackgroundColor: "#FFF8E8", textColor: "#8A5400" },
+  shopping: { label: "购物", backgroundColor: "#FFE4ED", subtleBackgroundColor: "#FFF2F7", textColor: "#A32658" },
+  transit: { label: "出行", backgroundColor: "#E3EFFF", subtleBackgroundColor: "#F0F6FF", textColor: "#245FA8" },
+  accommodation: { label: "住宿", backgroundColor: "#F0E6FA", subtleBackgroundColor: "#F6F1FC", textColor: "#69419A" },
+  health: { label: "健康", backgroundColor: "#DFF4E6", subtleBackgroundColor: "#ECF8F0", textColor: "#247344" },
+  workplace: { label: "职场", backgroundColor: "#E6EAF3", subtleBackgroundColor: "#F1F3F8", textColor: "#3E527C" },
+  social: { label: "社交", backgroundColor: "#FFE5E1", subtleBackgroundColor: "#FFF1EE", textColor: "#A33E35" },
+  education: { label: "学习", backgroundColor: "#DDF3F0", subtleBackgroundColor: "#ECF9F7", textColor: "#176B63" },
+  services: { label: "服务", backgroundColor: "#EBECEA", subtleBackgroundColor: "#F3F4F2", textColor: "#555954" },
+  other: { label: "其他", backgroundColor: "#1B1B1A", subtleBackgroundColor: "#F0F0EF", textColor: "#FFFFFF", subtleTextColor: "#4B4B48" },
+};
+
 export const recommendations = [
-  { id: "coffee", number: "01", title: "咖啡店点单", tag: "日常", duration: "8–10 分钟", level: "初级", goal: "流利点单，清晰表达需求" },
-  { id: "hotel", number: "02", title: "酒店入住", tag: "旅行", duration: "10–12 分钟", level: "中级", goal: "礼貌沟通，确认入住细节" },
-  { id: "pharmacy", number: "03", title: "药店咨询", tag: "生活", duration: "8–10 分钟", level: "中级", goal: "描述症状，确认用法与注意事项" },
+  { id: "coffee", number: "01", title: "咖啡店点单", category: "food", duration: "8–10 分钟", level: "初级", goal: "流利点单，清晰表达需求" },
+  { id: "hotel", number: "02", title: "酒店入住", category: "accommodation", duration: "10–12 分钟", level: "中级", goal: "礼貌沟通，确认入住细节" },
+  { id: "pharmacy", number: "03", title: "药店咨询", category: "health", duration: "8–10 分钟", level: "中级", goal: "描述症状，确认用法与注意事项" },
 ];
 
 export const learningItems = [
