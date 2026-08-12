@@ -205,7 +205,7 @@ export class InterviewSessionController {
               // Interview answers commonly contain thinking pauses. Keep the microphone
               // open through natural pauses and never let a new user turn cancel an
               // interviewer response while the candidate is still speaking.
-              turn_detection: { type: 'semantic_vad', threshold: 0.65, prefix_padding_ms: 800, silence_duration_ms: 2_500, create_response: false, interrupt_response: true },
+              turn_detection: { type: 'semantic_vad', threshold: 0.8, prefix_padding_ms: 1_000, silence_duration_ms: 4_000, create_response: false, interrupt_response: true },
             },
           });
           this.configured = true;
@@ -213,6 +213,9 @@ export class InterviewSessionController {
         return;
       case 'session.updated':
         this.state = 'active';
+        this.muted = false;
+        this.dependencies.recorder.setInputEnabled(true);
+        this.applyInput();
         this.publish();
         if (!this.openingRequested) {
           this.dependencies.transport.sendProviderEvent({ event_id: this.createEventId(), type: 'response.create' });
@@ -223,6 +226,7 @@ export class InterviewSessionController {
         // Keep the candidate microphone live while the interviewer is speaking so
         // Qwen can detect a deliberate barge-in and stop its response.
         this.muted = false;
+        this.state = 'active';
         this.dependencies.recorder.setInputEnabled(true);
         this.currentQuestion = '';
         this.applyInput();
@@ -241,6 +245,7 @@ export class InterviewSessionController {
         return;
       case 'user.speech.started':
         if (this.closingRequested || this.endRequested) return;
+        this.dependencies.transport.sendProviderEvent({ event_id: this.createEventId(), type: 'response.cancel' });
         this.dependencies.recorder.speechStarted();
         return;
       case 'user.speech.stopped':
@@ -293,10 +298,9 @@ export class InterviewSessionController {
       this.publish();
       return;
     }
-    await this.persistTranscript(1, transcript, itemId);
-    const wav = await this.dependencies.recorder.takeTurn(++this.turnNo);
+    const nextTurnNo = this.turnNo + 1;
+    const wav = await this.dependencies.recorder.takeTurn(nextTurnNo);
     if (!wav || wav.durationMs < 300) {
-      this.turnNo -= 1;
       this.muted = false;
       this.dependencies.recorder.setInputEnabled(true);
       this.applyInput();
@@ -308,6 +312,8 @@ export class InterviewSessionController {
       this.publish();
       return;
     }
+    this.turnNo = nextTurnNo;
+    await this.persistTranscript(1, transcript, itemId);
     try {
       const result = await this.dependencies.sessionApi.submitTurn(this.backend!.sessionId, this.turnNo, transcript, wav?.uri);
       this.interviewState = result.state;
