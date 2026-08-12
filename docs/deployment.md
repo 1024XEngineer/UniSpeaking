@@ -158,7 +158,7 @@ realtime:
       Raymond: ${QINIU_RTI_VOICE_RAYMOND:Ethan}
       Tina: ${QINIU_RTI_VOICE_TINA:Tina}
       Harvey: ${QINIU_RTI_VOICE_HARVEY:Ethan}
-      Dolce: ${QINIU_RTI_VOICE_DOLCE:Cherry}
+      Dolce: ${QINIU_RTI_VOICE_DOLCE:Ethan}
       Mione: ${QINIU_RTI_VOICE_MIONE:Cindy}
       Maia: ${QINIU_RTI_VOICE_MAIA:Serena}
     client-transport: ${QINIU_RTI_CLIENT_TRANSPORT:platform_rtc}
