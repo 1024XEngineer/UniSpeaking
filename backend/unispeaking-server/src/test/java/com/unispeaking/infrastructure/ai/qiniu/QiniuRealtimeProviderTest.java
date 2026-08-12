@@ -117,6 +117,17 @@ class QiniuRealtimeProviderTest {
 	}
 
 	@Test
+	void mapsArthurVoiceToEthan() throws Exception {
+		RecordingHttpClient client = successfulConnectionClient("rti-session-arthur");
+		QiniuRealtimeProvider provider = provider(client, "server-api-key");
+
+		var result = provider.connect(command("Dolce"), null);
+
+		assertEquals("Ethan", result.voiceId());
+		assertTrue(readBody(client.requests.get(1)).contains("\"voice_profile\":\"Ethan\""));
+	}
+
+	@Test
 	void acceptsAProfileNativeVoiceWithoutMapping() throws Exception {
 		RecordingHttpClient client = successfulConnectionClient("rti-session-native-voice");
 		QiniuRealtimeProvider provider = provider(client, "server-api-key");
@@ -175,6 +186,7 @@ class QiniuRealtimeProviderTest {
 					"Tina",
 					Map.of(
 							"Harvey", "Ethan",
+							"Dolce", "Ethan",
 							"Mione", "Cindy"),
 					"platform_rtc",
 				"cn-east",
