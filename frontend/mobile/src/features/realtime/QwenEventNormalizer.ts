@@ -52,7 +52,12 @@ export function normalizeQwenEvent(raw: unknown): RealtimeDomainEvent[] {
 
   switch (type) {
     case 'session.created':
-      return [{ type: 'session.created' }];
+      return [{
+        type: 'session.created',
+        providerSessionId: isRecord(raw.session)
+          ? nonEmptyString(raw.session.id)
+          : undefined,
+      }];
     case 'session.updated':
       return [{ type: 'session.updated' }];
     case 'input_audio_buffer.speech_started':

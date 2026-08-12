@@ -32,6 +32,7 @@ export type InterviewSessionSnapshot = Readonly<{
 
 type InterviewSocket = {
   connect(sessionId: string): Promise<void>;
+  bindProviderSession(providerSessionId: string): Promise<unknown>;
   persistMessage(message: { owner: 0 | 1; content: string; providerMessageId?: string }): Promise<unknown>;
   close(): void;
 };
@@ -158,6 +159,9 @@ export class InterviewSessionController {
     switch (event.type) {
       case 'session.created':
         if (!this.configured && this.backend) {
+          if (event.providerSessionId) {
+            await this.dependencies.sessionSocket.bindProviderSession(event.providerSessionId);
+          }
           this.dependencies.transport.sendProviderEvent({
             event_id: this.createEventId(), type: 'session.update', session: {
               modalities: ['text', 'audio'], voice: this.backend.voiceId || this.options.voice,

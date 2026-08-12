@@ -21,7 +21,7 @@ type SessionSocketAck = {
 };
 
 type PendingAck = {
-  operation: 'message' | 'end';
+  operation: 'message' | 'end' | 'bind';
   resolve: (ack: SessionSocketAck) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -125,6 +125,12 @@ export class SessionMessageSocket {
     return this.sendFrame('end', null, stopTime);
   }
 
+  bindProviderSession(providerSessionId: string) {
+    const normalized = providerSessionId.trim();
+    if (!normalized) throw new Error('服务商会话 ID 不能为空');
+    return this.sendFrame('bind', null, null, normalized);
+  }
+
   close() {
     const socket = this.socket;
     this.socket = null;
@@ -137,9 +143,10 @@ export class SessionMessageSocket {
   }
 
   private async sendFrame(
-    type: 'message' | 'end',
+    type: 'message' | 'end' | 'bind',
     message: { owner: 0 | 1; content: string; audio: null } | null,
     stopTime: string | null = null,
+    providerSessionId: string | null = null,
   ) {
     const socket = this.socket;
     const sessionId = this.sessionId;
@@ -158,7 +165,7 @@ export class SessionMessageSocket {
       this.pendingAcks.push({ operation: type, resolve, reject, timer });
     });
     socket.send(
-      JSON.stringify({ type, sessionId, message, stopTime }),
+      JSON.stringify({ type, sessionId, message, stopTime, providerSessionId }),
     );
     return ack;
   }
