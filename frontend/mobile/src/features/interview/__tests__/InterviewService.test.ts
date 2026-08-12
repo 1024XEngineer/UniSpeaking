@@ -71,4 +71,11 @@ describe('InterviewService', () => {
     await expect(new InterviewService(createClient([{ material: { ...material, finalText: '' } }])).prepareMaterials({ jobDescriptionText: 'JD' })).rejects.toThrow('面试材料响应不完整');
     await expect(new InterviewService(createClient([{ sceneId: 'scene-1' }])).generateScene(material, 'STANDARD')).rejects.toThrow('面试场景响应不完整');
   });
+
+  it('normalizes harmless model shape drift instead of making the user retry', async () => {
+    const response = { material: { ...material, responsibilities: 'Build APIs\nReview code', requiredSkills: null } };
+    const result = await new InterviewService(createClient([response])).prepareMaterials({ jobDescriptionText: 'JD' });
+    expect(result.material.responsibilities).toEqual(['Build APIs', 'Review code']);
+    expect(result.material.requiredSkills).toEqual([]);
+  });
 });
