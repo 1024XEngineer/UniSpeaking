@@ -6,7 +6,12 @@ import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { LearningAssetsHeader } from '@/components/LearningAssetsHeader';
 import { AppButton, AppScreen, Card, PageHeader, ProgressBar, SectionTitle } from '@/components/ui';
-import type { IeltsLearningRecord, InterviewLearningRecord } from '@/data/learningAssets';
+import type { IeltsLearningRecord } from '@/data/learningAssets';
+import { InterviewAssetService, type InterviewAssetRecord } from '@/features/interview/InterviewAssetService';
+import type { InterviewReportResponse } from '@/features/interview/InterviewSessionApi';
+import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
+import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
+import { ApiClient } from '@/infrastructure/http/ApiClient';
 import { useAppModel } from '@/model/AppModel';
 import { rememberSpecialty } from '@/navigation/specialtyMemory';
 import { colors } from '@/theme/tokens';
@@ -14,6 +19,51 @@ import { colors } from '@/theme/tokens';
 export type SpecialtyAssetKind = 'ielts' | 'interview';
 export type SpecialtyAssetTab = 'overview' | 'history' | 'trends';
 const PAGE_SIZE = 8;
+
+function createInterviewAssetService() {
+  return new InterviewAssetService(new ApiClient({
+    baseUrl: getRuntimeConfig().backendUrl,
+    tokenStore: new SecureTokenStore(),
+  }));
+}
+
+function assetDate(value: string | null | undefined) {
+  return value ? value.slice(0, 10) : '待练习';
+}
+
+function difficultyLabel(value: string | null | undefined) {
+  return value === 'EASY' ? '简单' : value === 'HARD' ? '困难' : '标准';
+}
+
+function useInterviewAssets() {
+  const [records, setRecords] = useState<InterviewAssetRecord[]>([]);
+  const [reports, setReports] = useState<Record<string, InterviewReportResponse>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    const service = createInterviewAssetService();
+    void service.listAssets().then(async (next) => {
+      if (!active) return;
+      setRecords(next);
+      const entries = await Promise.all(next.filter((item) => item.latestSessionId).map(async (item) => {
+        try {
+          const report = await service.getReport(item.sceneId, item.latestSessionId as string);
+          return [item.sceneId, report] as const;
+        } catch {
+          return null;
+        }
+      }));
+      if (active) setReports(Object.fromEntries(entries.filter((entry): entry is readonly [string, InterviewReportResponse] => Boolean(entry))));
+    }).catch((cause) => {
+      if (active) setError(cause instanceof Error ? cause.message : '面试资产加载失败');
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, []);
+  return { records, reports, loading, error };
+}
 
 const assetPalettes = {
   ielts: {
@@ -40,8 +90,15 @@ type AssetPalette = (typeof assetPalettes)[SpecialtyAssetKind];
 
 const scoreLabels = {
   ielts: ['流利与连贯', '词汇资源', '语法范围', '发音'],
-  interview: ['内容结构', '表达清晰', '语言准确', '沟通自然'],
 } as const;
+
+const interviewDimensionLabels: Record<string, string> = {
+  FLUENCY: '表达流利',
+  PRONUNCIATION_INTELLIGIBILITY: '发音清晰',
+  LOGIC_COHERENCE: '逻辑连贯',
+  GRAMMAR_CONTROL: '语法控制',
+  VOCABULARY_EXPRESSION: '词汇表达',
+};
 
 function AssetTabs({ palette, tab, onChange }: { palette: AssetPalette; tab: SpecialtyAssetTab; onChange: (tab: SpecialtyAssetTab) => void }) {
   return (
@@ -61,11 +118,10 @@ function themedCard(palette: AssetPalette) {
 
 const weeklyTrainingData = {
   ielts: { values: [8, 16, 0, 24, 12, 21, 15], total: '96', completed: '6', coverage: '3' },
-  interview: { values: [6, 7, 0, 12, 5, 8, 4], total: '42', completed: '3', coverage: '2' },
 } as const;
 
 function WeeklyTrainingChart({ kind, palette }: { kind: SpecialtyAssetKind; palette: AssetPalette }) {
-  const chart = weeklyTrainingData[kind];
+  const chart = weeklyTrainingData.ielts;
   const maxValue = Math.max(...chart.values, 1);
   const dayLabels = ['周四', '周五', '周六', '周日', '周一', '周二', '今天'];
   return (
@@ -116,20 +172,36 @@ function IeltsOverview({ palette, onOpenRecord }: { palette: AssetPalette; onOpe
 }
 
 function InterviewOverview({ palette, onOpenRecord }: { palette: AssetPalette; onOpenRecord: (id: string) => void }) {
-  const { interviewRecords } = useAppModel();
-  const latest = interviewRecords[0];
+  const { records, reports, loading, error } = useInterviewAssets();
+  const latest = records.slice().sort((a, b) => new Date(b.latestPracticedAt ?? b.createdAt).getTime() - new Date(a.latestPracticedAt ?? a.createdAt).getTime())[0];
+  const latestReport = latest ? reports[latest.sceneId] : undefined;
+  const weakest = latestReport?.status === 'COMPLETED' ? latestReport.report.dimensions.filter((item) => item.score !== null).sort((a, b) => (a.score ?? 0) - (b.score ?? 0))[0] : undefined;
   return (
     <View style={styles.sectionStack}>
       <Card style={[styles.heroCard, themedCard(palette)]}>
         <Text style={[styles.cardLabel, { color: palette.muted }]}>最近一次完整面试</Text>
-        <Text style={[styles.heroScore, { color: palette.accent }]}>{latest?.score ?? '—'}</Text>
-        <Text style={[styles.heroCopy, { color: palette.muted }]}>{latest?.role} · {latest?.company}</Text>
-        <View style={[styles.targetRow, { borderTopColor: palette.border }]}><Text style={[styles.targetLabel, { color: palette.muted }]}>优先提升</Text><Text style={[styles.targetStrong, { color: palette.text }]}>回答深度</Text></View>
+        <Text style={[styles.heroScore, { color: palette.accent }]}>{latest?.latestOverallScore === null || latest?.latestOverallScore === undefined ? '—' : Math.round(latest.latestOverallScore)}</Text>
+        <Text style={[styles.heroCopy, { color: palette.muted }]}>{loading ? '正在读取真实面试资产…' : error ?? (latest ? `${latest.jobTitle} · ${assetDate(latest.latestPracticedAt)}` : '完成面试后显示最近表现')}</Text>
+        <View style={[styles.targetRow, { borderTopColor: palette.border }]}><Text style={[styles.targetLabel, { color: palette.muted }]}>优先提升</Text><Text style={[styles.targetStrong, { color: palette.text }]}>{weakest ? interviewDimensionLabels[weakest.dimension] ?? weakest.dimension : '生成报告后识别'}</Text></View>
       </Card>
-      <WeeklyTrainingChart kind="interview" palette={palette} />
+      <InterviewTrainingChart palette={palette} records={records} />
       <SectionTitle title="最近面试" />
-      <Card style={[styles.listCard, themedCard(palette)]}>{interviewRecords.slice(0, 3).map((item) => <AssetListRow key={item.id} title={item.role} subtitle={`${item.company} · ${item.date}`} meta={item.score === null ? '部分结果' : `${item.score} 分`} onPress={() => onOpenRecord(item.id)} />)}</Card>
+      <Card style={[styles.listCard, themedCard(palette)]}>{records.slice(0, 3).map((item) => <AssetListRow key={item.sceneId} title={item.jobTitle || '未命名岗位'} subtitle={`${assetDate(item.latestPracticedAt ?? item.createdAt)} · ${difficultyLabel(item.difficulty)} · 累计 ${item.practiceCount} 次`} meta={item.latestOverallScore === null ? '部分结果' : `${Math.round(item.latestOverallScore)} 分`} onPress={() => onOpenRecord(item.sceneId)} />)}</Card>
     </View>
+  );
+}
+
+function InterviewTrainingChart({ palette, records }: { palette: AssetPalette; records: InterviewAssetRecord[] }) {
+  const total = records.reduce((sum, item) => sum + item.practiceCount, 0);
+  return (
+    <Card style={[styles.weeklyChartCard, themedCard(palette)]}>
+      <View style={styles.weeklyChartSummary}>
+        <Text style={[styles.cardLabel, { color: palette.muted }]}>面试训练积累</Text>
+        <View style={styles.weeklyTotalRow}><Text style={[styles.weeklyTotal, { color: palette.accent }]}>{total}</Text><Text style={[styles.weeklyTotalSuffix, { color: palette.muted }]}>次</Text></View>
+        <Text style={[styles.weeklyCopy, { color: palette.muted }]}>覆盖 {records.length} 个岗位</Text>
+        <View style={styles.weeklyStats}><View style={styles.weeklyStat}><Text style={[styles.weeklyStatValue, { color: palette.text }]}>{records.filter((item) => item.latestSessionId).length}</Text><Text style={[styles.weeklyStatLabel, { color: palette.muted }]}>已实践岗位</Text></View><View style={styles.weeklyStat}><Text style={[styles.weeklyStatValue, { color: palette.text }]}>{records.filter((item) => item.latestReportStatus === 'COMPLETED').length}</Text><Text style={[styles.weeklyStatLabel, { color: palette.muted }]}>有效报告</Text></View></View>
+      </View>
+    </Card>
   );
 }
 
@@ -173,15 +245,16 @@ function IeltsHistory({ palette, onOpenRecord }: { palette: AssetPalette; onOpen
 }
 
 function InterviewHistory({ onOpenRecord, palette }: { onOpenRecord: (id: string) => void; palette: AssetPalette }) {
-  const { interviewRecords } = useAppModel();
+  const { records, loading, error } = useInterviewAssets();
   const [page, setPage] = useState(0);
-  const pageCount = Math.max(1, Math.ceil(interviewRecords.length / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(records.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
-  const visibleRecords = interviewRecords.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const visibleRecords = records.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
   return (
     <View style={styles.sectionStack}>
-      <SectionTitle title="面试记录" action={<Text style={[styles.count, { color: palette.muted }]}>{interviewRecords.length} 条</Text>} />
-      <Card style={[styles.listCard, themedCard(palette)]}>{visibleRecords.map((item) => <AssetListRow key={item.id} title={item.role} subtitle={`${item.company} · ${item.date} · ${item.duration}`} meta={item.score === null ? '部分结果' : `${item.score} 分`} onPress={() => onOpenRecord(item.id)} />)}</Card>
+      <SectionTitle title="面试记录" action={<Text style={[styles.count, { color: palette.muted }]}>{loading ? '读取中…' : `${records.length} 条`}</Text>} />
+      {error ? <Text style={[styles.assetError, { color: palette.accent }]}>{error}</Text> : null}
+      <Card style={[styles.listCard, themedCard(palette)]}>{visibleRecords.map((item) => <AssetListRow key={item.sceneId} title={item.jobTitle || '未命名岗位'} subtitle={`${assetDate(item.latestPracticedAt ?? item.createdAt)} · ${difficultyLabel(item.difficulty)} · 累计 ${item.practiceCount} 次`} meta={item.latestOverallScore === null ? '部分结果' : `${Math.round(item.latestOverallScore)} 分`} onPress={() => onOpenRecord(item.sceneId)} />)}</Card>
       <RecordPagination page={currentPage} pageCount={pageCount} palette={palette} onPageChange={setPage} />
     </View>
   );
@@ -246,18 +319,32 @@ function IeltsTrends({ palette }: { palette: AssetPalette }) {
   );
 }
 
+function InterviewRemoteTrends({ palette }: { palette: AssetPalette }) {
+  const { records, reports, loading, error } = useInterviewAssets();
+  const completed = records.filter((item) => item.latestOverallScore !== null).sort((a, b) => new Date(a.latestPracticedAt ?? a.createdAt).getTime() - new Date(b.latestPracticedAt ?? b.createdAt).getTime());
+  const average = completed.length ? Math.round(completed.reduce((sum, item) => sum + Number(item.latestOverallScore), 0) / completed.length) : null;
+  return (
+    <View style={styles.sectionStack}>
+      <Card style={[styles.trendHero, themedCard(palette)]}><Text style={[styles.cardLabel, { color: palette.muted }]}>真实面试表现</Text><Text style={[styles.trendValue, { color: palette.accent }]}>{loading ? '读取中…' : average === null ? '—' : `${average} / 100`}</Text><Text style={[styles.heroCopy, { color: palette.muted }]}>{error ?? (completed.length ? `基于 ${completed.length} 个岗位的最新报告。` : '完成面试并生成报告后显示真实趋势。')}</Text></Card>
+      <Card style={[styles.reportCard, themedCard(palette)]}><Text style={[styles.reportTitle, { color: palette.text }]}>五项能力平均表现</Text>{Object.keys(interviewDimensionLabels).map((dimension) => { const values = Object.values(reports).filter((item): item is Extract<InterviewReportResponse, { status: 'COMPLETED' }> => item.status === 'COMPLETED').flatMap((item) => item.report.dimensions.filter((entry) => entry.dimension === dimension && entry.score !== null).map((entry) => entry.score as number)); const averageValue = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0; return <ScoreRow key={dimension} label={interviewDimensionLabels[dimension]} value={averageValue} />; })}</Card>
+      <Card style={[styles.reportCard, themedCard(palette)]}><Text style={[styles.reportTitle, { color: palette.text }]}>数据范围</Text><Text style={[styles.reportCopy, { color: palette.muted }]}>岗位覆盖 {records.length} 个 · 已完成报告 {completed.length} 个 · 累计练习 {records.reduce((sum, item) => sum + item.practiceCount, 0)} 次</Text></Card>
+    </View>
+  );
+}
+
 function InterviewTrends({ kind, palette }: { kind: SpecialtyAssetKind; palette: AssetPalette }) {
-  const labels = scoreLabels[kind];
-  const values = kind === 'ielts' ? [68, 70, 64, 71] : [82, 86, 76, 81];
+  if (kind === 'interview') return <InterviewRemoteTrends palette={palette} />;
+  const labels = scoreLabels.ielts;
+  const values = [68, 70, 64, 71];
   return (
     <View style={styles.sectionStack}>
       <Card style={[styles.trendHero, themedCard(palette)]}>
         <Text style={[styles.cardLabel, { color: palette.muted }]}>{kind === 'ielts' ? '预估分数趋势' : '面试表现趋势'}</Text>
-        <Text style={[styles.trendValue, { color: palette.accent }]}>{kind === 'ielts' ? '6.0 → 6.5' : '76 → 82'}</Text>
+        <Text style={[styles.trendValue, { color: palette.accent }]}>6.0 → 6.5</Text>
         <Text style={[styles.heroCopy, { color: palette.muted }]}>最近三次训练保持上升，重点能力正在形成稳定改善。</Text>
       </Card>
       <Card style={[styles.reportCard, themedCard(palette)]}><Text style={[styles.reportTitle, { color: palette.text }]}>能力平均表现</Text>{labels.map((label, index) => <ScoreRow key={label} label={label} value={values[index]} />)}</Card>
-      <Card style={themedCard(palette)}><Text style={[styles.reportTitle, { color: palette.text }]}>下一阶段建议</Text><Text style={[styles.reportCopy, { color: palette.muted }]}>{kind === 'ielts' ? '优先练习观点展开与段落衔接，让 Part 2 的长回答更加稳定。' : '使用 STAR 结构组织案例，并用具体数字说明个人贡献与业务影响。'}</Text></Card>
+      <Card style={themedCard(palette)}><Text style={[styles.reportTitle, { color: palette.text }]}>下一阶段建议</Text><Text style={[styles.reportCopy, { color: palette.muted }]}>优先练习观点展开与段落衔接，让 Part 2 的长回答更加稳定。</Text></Card>
     </View>
   );
 }
@@ -339,7 +426,7 @@ export function IeltsAssetReport({ record, onBack }: { record: IeltsLearningReco
   );
 }
 
-export function InterviewAssetReport({ record, onBack }: { record: InterviewLearningRecord; onBack: () => void }) {
+export function InterviewAssetReport({ record, onBack }: { record: { role: string; company: string; date: string; duration: string; score: number | null; summary: string; scores: readonly number[] }; onBack: () => void }) {
   const palette = assetPalettes.interview;
   return (
     <AppScreen
@@ -351,9 +438,39 @@ export function InterviewAssetReport({ record, onBack }: { record: InterviewLear
         <Text style={[styles.reportCopy, { color: palette.muted }]}>{record.company} · {record.date} · {record.duration}</Text>
       </View>
       <Card style={[styles.heroCard, themedCard(palette)]}><Text style={[styles.cardLabel, { color: palette.muted }]}>综合表现</Text><Text style={[styles.heroScore, { color: palette.accent }]}>{record.score ?? '—'}</Text><Text style={[styles.heroCopy, { color: palette.muted }]}>{record.summary}</Text></Card>
-      <Card style={[styles.reportCard, themedCard(palette)]}><Text style={[styles.reportTitle, { color: palette.text }]}>四项能力评分</Text>{scoreLabels.interview.map((label, index) => <ScoreRow key={label} label={label} value={record.scores[index]} />)}</Card>
+      <Card style={[styles.reportCard, themedCard(palette)]}><Text style={[styles.reportTitle, { color: palette.text }]}>能力评分</Text>{record.scores.map((value, index) => <ScoreRow key={index} label={['表达流利', '发音清晰', '逻辑连贯', '语法控制', '词汇表达'][index] ?? `能力 ${index + 1}`} value={value} />)}</Card>
       <Card style={themedCard(palette)}><Text style={[styles.reportTitle, { color: palette.text }]}>下一次重点</Text><Text style={[styles.reportCopy, { color: palette.muted }]}>让案例结果更具体，并在回答结尾明确总结你的个人贡献。</Text></Card>
       <AppButton title="快速复练" icon="arrow-right" />
+    </AppScreen>
+  );
+}
+
+export function InterviewAssetRemoteReport({ asset, onBack }: { asset: InterviewAssetRecord; onBack: () => void }) {
+  const palette = assetPalettes.interview;
+  const [report, setReport] = useState<InterviewReportResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (!asset.latestSessionId) return () => { active = false; };
+    void createInterviewAssetService().getReport(asset.sceneId, asset.latestSessionId).then((value) => {
+      if (active) setReport(value);
+    }).catch((cause) => {
+      if (active) setError(cause instanceof Error ? cause.message : '报告读取失败');
+    });
+    return () => { active = false; };
+  }, [asset.latestSessionId, asset.sceneId]);
+  const completed = report?.status === 'COMPLETED' ? report.report : null;
+  return (
+    <AppScreen contentStyle={[styles.assetsContent, { backgroundColor: palette.canvas }]} fixedHeader={<PageHeader fixed onBack={onBack} title="面试报告" style={{ backgroundColor: palette.canvas, borderBottomColor: palette.border }} />}>
+      <View style={styles.detailHeading}>
+        <Text style={[styles.reportTitle, { color: palette.text }]}>{asset.jobTitle || '未命名岗位'}</Text>
+        <Text style={[styles.reportCopy, { color: palette.muted }]}>{assetDate(asset.latestPracticedAt ?? asset.createdAt)} · {difficultyLabel(asset.difficulty)}难度 · 累计练习 {asset.practiceCount} 次</Text>
+      </View>
+      {error ? <Text style={[styles.assetError, { color: palette.accent }]}>{error}</Text> : null}
+      {!completed ? <Card style={[styles.heroCard, themedCard(palette)]}><Text style={[styles.cardLabel, { color: palette.muted }]}>报告状态</Text><Text style={[styles.heroCopy, { color: palette.muted }]}>{report?.status === 'FAILED' ? report.failureReason : report?.status === 'PROCESSING' ? '报告生成中，请稍后刷新。' : asset.latestSessionId ? '正在读取报告…' : '尚未完成面试'}</Text></Card> : <>
+        <Card style={[styles.heroCard, themedCard(palette)]}><Text style={[styles.cardLabel, { color: palette.muted }]}>综合表现</Text><Text style={[styles.heroScore, { color: palette.accent }]}>{Math.round(completed.overallScore)}</Text><Text style={[styles.heroCopy, { color: palette.muted }]}>{completed.summary}</Text></Card>
+        <Card style={[styles.reportCard, themedCard(palette)]}><Text style={[styles.reportTitle, { color: palette.text }]}>五项能力评分</Text>{completed.dimensions.map((item) => <ScoreRow key={item.dimension} label={interviewDimensionLabels[item.dimension] ?? item.dimension} value={item.score ?? 0} />)}</Card>
+      </>}
     </AppScreen>
   );
 }
@@ -409,6 +526,7 @@ const styles = StyleSheet.create({
   reportCard: { gap: 13 },
   reportTitle: { color: colors.ink, fontSize: 19, lineHeight: 25, fontWeight: '500' },
   reportCopy: { marginTop: 7, color: colors.muted, fontSize: 13, lineHeight: 21, fontWeight: '300' },
+  assetError: { fontSize: 13, lineHeight: 19, fontWeight: '500' },
   scoreRow: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 10 },
   scoreLabel: { width: 68, color: colors.muted, fontSize: 11, fontWeight: '300' },
   scoreProgress: { flex: 1 },
