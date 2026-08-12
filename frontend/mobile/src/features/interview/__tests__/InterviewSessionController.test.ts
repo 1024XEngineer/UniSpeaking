@@ -63,7 +63,9 @@ describe('InterviewSessionController', () => {
     await provider(test, { type: 'session.created' });
     const update = test.transport.sendProviderEvent.mock.calls.find(([event]) => event.type === 'session.update')?.[0];
     expect(update.session.turn_detection).toEqual(expect.objectContaining({
-      silence_duration_ms: 1_500,
+      silence_duration_ms: 2_500,
+      threshold: 0.65,
+      prefix_padding_ms: 800,
       interrupt_response: false,
       create_response: false,
     }));
