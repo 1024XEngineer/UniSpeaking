@@ -3,6 +3,8 @@ package com.unispeaking.infrastructure.config;
 import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "realtime.qiniu")
@@ -13,6 +15,7 @@ public record QiniuRealtimeProperties(
 		String modelProfile,
 		String roleProfile,
 		String voiceProfile,
+		Map<String, String> voiceMappings,
 		String clientTransport,
 		String region,
 		Duration readTimeout,
@@ -25,6 +28,7 @@ public record QiniuRealtimeProperties(
 		modelProfile = trim(modelProfile);
 		roleProfile = trim(roleProfile);
 		voiceProfile = trim(voiceProfile);
+		voiceMappings = normalizeVoiceMappings(voiceMappings);
 		clientTransport = trim(clientTransport);
 		region = trim(region);
 	}
@@ -56,6 +60,16 @@ public record QiniuRealtimeProperties(
 		return URI.create(baseUrl + path);
 	}
 
+	public String resolveVoiceProfile(String requestedVoiceId) {
+		String requested = trim(requestedVoiceId);
+		if (requested.isBlank()) return voiceProfile;
+		return voiceMappings.entrySet().stream()
+				.filter(entry -> entry.getKey().equalsIgnoreCase(requested))
+				.map(Map.Entry::getValue)
+				.findFirst()
+				.orElse(requested);
+	}
+
 	public URI resolveClientEndpoint(String endpoint) {
 		String normalized = trim(endpoint);
 		if (normalized.isBlank()) return null;
@@ -81,5 +95,18 @@ public record QiniuRealtimeProperties(
 	private static String trimTrailingSlash(String value) {
 		while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
 		return value;
+	}
+
+	private static Map<String, String> normalizeVoiceMappings(Map<String, String> mappings) {
+		if (mappings == null || mappings.isEmpty()) return Map.of();
+		Map<String, String> normalized = new LinkedHashMap<>();
+		mappings.forEach((source, target) -> {
+			String normalizedSource = trim(source);
+			String normalizedTarget = trim(target);
+			if (!normalizedSource.isBlank() && !normalizedTarget.isBlank()) {
+				normalized.put(normalizedSource, normalizedTarget);
+			}
+		});
+		return Map.copyOf(normalized);
 	}
 }

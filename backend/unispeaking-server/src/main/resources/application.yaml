@@ -112,6 +112,15 @@ realtime:
     model-profile: ${QINIU_RTI_MODEL_PROFILE:qwen3.5-omni-plus-realtime}
     role-profile: ${QINIU_RTI_ROLE_PROFILE:default_assistant}
     voice-profile: ${QINIU_RTI_VOICE_PROFILE:Tina}
+    voice-mappings:
+      Katerina: ${QINIU_RTI_VOICE_KATERINA:Tina}
+      Aiden: ${QINIU_RTI_VOICE_AIDEN:Ethan}
+      Raymond: ${QINIU_RTI_VOICE_RAYMOND:Ethan}
+      Tina: ${QINIU_RTI_VOICE_TINA:Tina}
+      Harvey: ${QINIU_RTI_VOICE_HARVEY:Ethan}
+      Dolce: ${QINIU_RTI_VOICE_DOLCE:Cherry}
+      Mione: ${QINIU_RTI_VOICE_MIONE:Cindy}
+      Maia: ${QINIU_RTI_VOICE_MAIA:Serena}
     client-transport: ${QINIU_RTI_CLIENT_TRANSPORT:platform_rtc}
     region: ${QINIU_RTI_REGION:cn-east}
     read-timeout: ${QINIU_RTI_READ_TIMEOUT:20s}

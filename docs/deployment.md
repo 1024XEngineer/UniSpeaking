@@ -152,6 +152,15 @@ realtime:
     model-profile: ${QINIU_RTI_MODEL_PROFILE:qwen3.5-omni-plus-realtime}
     role-profile: ${QINIU_RTI_ROLE_PROFILE:default_assistant}
     voice-profile: ${QINIU_RTI_VOICE_PROFILE:Tina}
+    voice-mappings:
+      Katerina: ${QINIU_RTI_VOICE_KATERINA:Tina}
+      Aiden: ${QINIU_RTI_VOICE_AIDEN:Ethan}
+      Raymond: ${QINIU_RTI_VOICE_RAYMOND:Ethan}
+      Tina: ${QINIU_RTI_VOICE_TINA:Tina}
+      Harvey: ${QINIU_RTI_VOICE_HARVEY:Ethan}
+      Dolce: ${QINIU_RTI_VOICE_DOLCE:Cherry}
+      Mione: ${QINIU_RTI_VOICE_MIONE:Cindy}
+      Maia: ${QINIU_RTI_VOICE_MAIA:Serena}
     client-transport: ${QINIU_RTI_CLIENT_TRANSPORT:platform_rtc}
     region: ${QINIU_RTI_REGION:cn-east}
     read-timeout: ${QINIU_RTI_READ_TIMEOUT:20s}
@@ -186,9 +195,11 @@ The default realtime route is:
 AI_PROVIDER_ROUTE_REALTIME=qwen3.5-omni-plus-realtime,qwen3.5-omni-flash-realtime
 ```
 
-For Qiniu RTI, the backend validates the configured model, role, voice, and
+For Qiniu RTI, the backend maps the selected UniSpeaking teacher or examiner
+voice to a Qiniu profile voice, validates the model, role, resolved voice, and
 transport against Profiles, creates an RTI Session, and submits the browser SDP
-as JSON to the returned HTTPS media endpoint. It stores only the provider
+as JSON to the returned HTTPS media endpoint. Qiniu-native voice IDs can also be
+used directly when Profiles exposes them. It stores only the provider
 `session_id`, model, provider, and `trace_id`; neither the permanent API key nor
 the short-lived media token is persisted or returned to the client. Terminal
 session paths call Qiniu Stop on a best-effort basis.
