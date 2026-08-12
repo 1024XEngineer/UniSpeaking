@@ -28,6 +28,7 @@ export const routes = {
   specialty: {
     ielts: href('/ielts'),
     interview: href('/interview'),
+    interviewPractice: (sceneId: string, jobTitle = '') => href(`/interview?sceneId=${encodeURIComponent(sceneId)}&jobTitle=${encodeURIComponent(jobTitle)}`),
   },
   learning: {
     sceneDetail: (id: string) => href(`/learning/scenes/${id}`),

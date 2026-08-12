@@ -766,12 +766,12 @@ function InterviewSession({ preparation, onFinished }: { preparation: InterviewP
   );
 }
 
-export function InterviewFlow({ onExit }: { onExit: () => void; onViewDetails?: () => void }) {
+export function InterviewFlow({ onExit, onViewDetails, practiceScene }: { onExit: () => void; onViewDetails?: () => void; practiceScene?: { sceneId: string; jobTitle?: string } }) {
   const { setImmersiveLearning } = useLearningStage();
-  const [route, setRoute] = useState<InterviewRoute>('input');
+  const [route, setRoute] = useState<InterviewRoute>(practiceScene ? 'live' : 'input');
   const [jobDescription, setJobDescription] = useState('');
   const [difficulty, setDifficulty] = useState<InterviewDifficulty | null>(null);
-  const [preparation, setPreparation] = useState<InterviewPreparationResult | null>(null);
+  const [preparation, setPreparation] = useState<InterviewPreparationResult | null>(() => practiceScene ? ({ scene: { sceneId: practiceScene.sceneId, scenePrompt: '' }, material: null, jobTitle: practiceScene.jobTitle ?? null } as unknown as InterviewPreparationResult) : null);
   const [completedSession, setCompletedSession] = useState<{ sessionId: string; api: InterviewSessionApi } | null>(null);
   const { resumeFileName, resumeText, resumeMode, setResumeText, setResumeMode, isPreparing, error, pickResume, start, confirm } = useInterviewPreparation();
   const [draft, setDraft] = useState<InterviewPreparationResult['material'] | null>(null);
