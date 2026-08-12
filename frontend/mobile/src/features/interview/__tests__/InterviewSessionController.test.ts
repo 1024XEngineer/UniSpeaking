@@ -66,7 +66,7 @@ describe('InterviewSessionController', () => {
       silence_duration_ms: 2_500,
       threshold: 0.65,
       prefix_padding_ms: 800,
-      interrupt_response: false,
+      interrupt_response: true,
       create_response: false,
     }));
   });
