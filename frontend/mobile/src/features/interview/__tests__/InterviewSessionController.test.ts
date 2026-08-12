@@ -57,6 +57,18 @@ describe('InterviewSessionController', () => {
     expect(test.controller.getSnapshot().state).toBe('active');
   });
 
+  it('uses a pause-tolerant VAD configuration for interview answers', async () => {
+    const test = fixture();
+    await test.controller.start();
+    await provider(test, { type: 'session.created' });
+    const update = test.transport.sendProviderEvent.mock.calls.find(([event]) => event.type === 'session.update')?.[0];
+    expect(update.session.turn_detection).toEqual(expect.objectContaining({
+      silence_duration_ms: 1_500,
+      interrupt_response: false,
+      create_response: false,
+    }));
+  });
+
   it('persists ACK before submitting the turn WAV, and deduplicates a repeated provider item', async () => {
     const test = fixture();
     await test.controller.start();

@@ -191,7 +191,10 @@ export class InterviewSessionController {
               modalities: ['text', 'audio'], voice: this.backend.voiceId || this.options.voice,
               instructions: this.backend.systemPrompt, input_audio_format: 'pcm', output_audio_format: 'pcm',
               input_audio_transcription: { model: 'qwen3-asr-flash-realtime' }, smooth_output: false,
-              turn_detection: { type: 'semantic_vad', threshold: 0.5, prefix_padding_ms: 500, silence_duration_ms: 600, create_response: false, interrupt_response: true },
+              // Interview answers commonly contain thinking pauses. Keep the microphone
+              // open through natural pauses and never let a new user turn cancel an
+              // interviewer response while the candidate is still speaking.
+              turn_detection: { type: 'semantic_vad', threshold: 0.5, prefix_padding_ms: 500, silence_duration_ms: 1_500, create_response: false, interrupt_response: false },
             },
           });
           this.configured = true;
