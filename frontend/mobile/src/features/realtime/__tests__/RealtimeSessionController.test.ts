@@ -152,7 +152,7 @@ describe('RealtimeSessionController', () => {
     });
   });
 
-  it('publishes live learner subtitles and clears the previous AI turn when speech starts', async () => {
+  it('keeps completed subtitles in dialogue order while publishing the live learner turn', async () => {
     const dependencies = createDependencies();
     const controller = new RealtimeSessionController(dependencies, {
       mode: 'free_chat',
@@ -182,6 +182,12 @@ describe('RealtimeSessionController', () => {
         state: 'user_speaking',
         userTranscript: '',
         assistantTranscript: '',
+        transcriptHistory: [
+          expect.objectContaining({
+            owner: 0,
+            content: 'What would you like to order?',
+          }),
+        ],
       }),
     );
 
@@ -204,6 +210,28 @@ describe('RealtimeSessionController', () => {
     );
     expect(controller.getSnapshot().userTranscript).toBe('I would like a latte');
     expect(dependencies.sessionSocket.persistMessage).toHaveBeenCalledTimes(1);
+
+    await controller.handleProviderMessage(
+      JSON.stringify({
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'user-live',
+        transcript: 'I would like a latte.',
+      }),
+    );
+    await controller.handleProviderMessage(JSON.stringify({ type: 'response.created' }));
+    await controller.handleProviderMessage(
+      JSON.stringify({
+        type: 'response.audio_transcript.done',
+        item_id: 'assistant-next',
+        transcript: 'A latte is a great choice.',
+      }),
+    );
+
+    expect(controller.getSnapshot().transcriptHistory.map(({ owner, content }) => ({ owner, content }))).toEqual([
+      { owner: 0, content: 'What would you like to order?' },
+      { owner: 1, content: 'I would like a latte.' },
+      { owner: 0, content: 'A latte is a great choice.' },
+    ]);
   });
 
   it('mutes the local track and sends a response cancellation when interrupted', async () => {
@@ -272,6 +300,12 @@ describe('RealtimeSessionController', () => {
 
   it('coordinates each scene transcript and applies the backend control instruction once', async () => {
     const dependencies = createDependencies();
+    const turnAudioCapture = {
+      start: jest.fn(async () => undefined),
+      stop: jest.fn(() => true),
+      take: jest.fn(async () => 'file:///scene-turn.wav'),
+    };
+    dependencies.turnAudioCapture = turnAudioCapture;
     const sceneDialogue = {
       advanceState: jest.fn(async () => ({
         sceneId: 'scene-1',
@@ -298,6 +332,16 @@ describe('RealtimeSessionController', () => {
     });
     await controller.start();
     await controller.handleProviderMessage(JSON.stringify({ type: 'session.updated' }));
+    await controller.handleProviderMessage(JSON.stringify({ type: 'response.created' }));
+    await controller.handleProviderMessage(
+      JSON.stringify({ type: 'response.done', response: { status: 'completed' } }),
+    );
+    await controller.handleProviderMessage(
+      JSON.stringify({ type: 'input_audio_buffer.speech_started' }),
+    );
+    await controller.handleProviderMessage(
+      JSON.stringify({ type: 'input_audio_buffer.speech_stopped' }),
+    );
 
     await controller.handleProviderMessage(
       JSON.stringify({
@@ -312,10 +356,14 @@ describe('RealtimeSessionController', () => {
       1,
       'How much is the total?',
     );
+    expect(turnAudioCapture.start).toHaveBeenCalledTimes(1);
+    expect(turnAudioCapture.stop).toHaveBeenCalledTimes(1);
+    expect(turnAudioCapture.take).toHaveBeenCalledTimes(1);
     expect(sceneDialogue.evaluateTurn).toHaveBeenCalledWith(
       'session-1',
       1,
       'How much is the total?',
+      'file:///scene-turn.wav',
     );
     expect(dependencies.transport.sendProviderEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -333,13 +381,250 @@ describe('RealtimeSessionController', () => {
     );
   });
 
+  it('queues a scene turn until the active assistant response completes', async () => {
+    const dependencies = createDependencies();
+    const sceneDialogue: NonNullable<RealtimeSessionDependencies['sceneDialogue']> = {
+      advanceState: jest.fn(async () => ({
+        sceneId: 'scene-1',
+        sessionId: 'session-1',
+        stage: 'CORE_TASK',
+        effectiveUserTurns: 1,
+        maximumUserTurns: 6,
+        outcomes: [],
+        completed: false,
+        completionReason: null,
+        controlInstruction: 'Continue from the restored scene state.',
+        warning: null,
+      })),
+      evaluateTurn: jest.fn(async () => null),
+      complete: jest.fn(async () => null),
+    };
+    dependencies.sceneDialogue = sceneDialogue;
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'scene',
+      sceneId: 'scene-1',
+      voice: 'Harvey',
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    await controller.handleProviderMessage(JSON.stringify({ type: 'session.updated' }));
+    await controller.handleProviderMessage(JSON.stringify({ type: 'response.created' }));
+
+    await controller.handleProviderMessage(
+      JSON.stringify({
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'repractice-turn-1',
+        transcript: 'I would like to check in.',
+      }),
+    );
+
+    expect(
+      dependencies.transport.sendProviderEvent.mock.calls.filter(
+        ([event]) => event.type === 'response.create',
+      ),
+    ).toHaveLength(1);
+    expect(dependencies.transport.sendProviderEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'session.update',
+        session: expect.objectContaining({
+          instructions: expect.stringContaining('restored scene state'),
+        }),
+      }),
+    );
+
+    await controller.handleProviderMessage(
+      JSON.stringify({ type: 'response.done', response: { status: 'completed' } }),
+    );
+
+    expect(dependencies.transport.sendProviderEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'session.update',
+        session: expect.objectContaining({
+          instructions: expect.stringContaining('restored scene state'),
+        }),
+      }),
+    );
+    expect(
+      dependencies.transport.sendProviderEvent.mock.calls.filter(
+        ([event]) => event.type === 'response.create',
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('does not advance the scene state twice for a repeated provider transcript', async () => {
+    const dependencies = createDependencies();
+    const sceneDialogue: NonNullable<RealtimeSessionDependencies['sceneDialogue']> = {
+      advanceState: jest.fn(async () => ({
+        sceneId: 'scene-1',
+        sessionId: 'session-1',
+        stage: 'CORE_TASK',
+        effectiveUserTurns: 1,
+        maximumUserTurns: 6,
+        outcomes: [],
+        completed: false,
+        completionReason: null,
+        controlInstruction: 'Ask one follow-up question.',
+        warning: null,
+      })),
+      evaluateTurn: jest.fn(async () => null),
+      complete: jest.fn(async () => null),
+    };
+    dependencies.sceneDialogue = sceneDialogue;
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'scene',
+      sceneId: 'scene-1',
+      voice: 'Harvey',
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    const transcript = JSON.stringify({
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'same-turn',
+      transcript: 'Here is my passport.',
+    });
+
+    await controller.handleProviderMessage(transcript);
+    await controller.handleProviderMessage(transcript);
+
+    expect(sceneDialogue.advanceState).toHaveBeenCalledTimes(1);
+    expect(sceneDialogue.evaluateTurn).toHaveBeenCalledTimes(1);
+    expect(dependencies.sessionSocket.persistMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers from an active-response provider race without failing the session', async () => {
+    const dependencies = createDependencies();
+    const sceneDialogue: NonNullable<RealtimeSessionDependencies['sceneDialogue']> = {
+      advanceState: jest.fn(async () => ({
+        sceneId: 'scene-1',
+        sessionId: 'session-1',
+        stage: 'CORE_TASK',
+        effectiveUserTurns: 1,
+        maximumUserTurns: 6,
+        outcomes: [],
+        completed: false,
+        completionReason: null,
+        controlInstruction: 'Continue the dialogue.',
+        warning: null,
+      })),
+      evaluateTurn: jest.fn(async () => null),
+      complete: jest.fn(async () => null),
+    };
+    dependencies.sceneDialogue = sceneDialogue;
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'scene',
+      sceneId: 'scene-1',
+      voice: 'Harvey',
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    await controller.handleProviderMessage(
+      JSON.stringify({
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'race-turn',
+        transcript: 'Can I see the room?',
+      }),
+    );
+    expect(
+      dependencies.transport.sendProviderEvent.mock.calls.filter(
+        ([event]) => event.type === 'response.create',
+      ),
+    ).toHaveLength(1);
+
+    await controller.handleProviderMessage(
+      JSON.stringify({
+        type: 'error',
+        error: { message: 'Conversation already has an active response' },
+      }),
+    );
+
+    expect(controller.getSnapshot().state).not.toBe('error');
+    expect(controller.getSnapshot().error).toBeNull();
+
+    await controller.handleProviderMessage(
+      JSON.stringify({ type: 'response.done', response: { status: 'completed' } }),
+    );
+    expect(
+      dependencies.transport.sendProviderEvent.mock.calls.filter(
+        ([event]) => event.type === 'response.create',
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('waits for the final scene response before ending and exposing evaluation', async () => {
+    const dependencies = createDependencies();
+    const completion = {
+      sceneId: 'scene-1',
+      sessionId: 'session-1',
+      stopTime: '2026-08-05T06:00:00.000Z',
+      evaluation: {
+        accuracyScore: 88,
+        fluencyScore: 88,
+        grammarScore: 88,
+        vocabularyScore: 88,
+        naturalnessScore: 88,
+        finalScore: 88,
+        summary: 'Completed successfully.',
+        strengths: [],
+        improvements: [],
+      },
+    };
+    const sceneDialogue: NonNullable<RealtimeSessionDependencies['sceneDialogue']> = {
+      advanceState: jest.fn(async () => ({
+        sceneId: 'scene-1',
+        sessionId: 'session-1',
+        stage: 'COMPLETED',
+        effectiveUserTurns: 3,
+        maximumUserTurns: 6,
+        outcomes: [],
+        completed: true,
+        completionReason: 'OUTCOME_REACHED',
+        controlInstruction: 'Give one short closing sentence.',
+        warning: null,
+      })),
+      evaluateTurn: jest.fn(async () => null),
+      complete: jest.fn(async () => completion),
+    };
+    dependencies.sceneDialogue = sceneDialogue;
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'scene',
+      sceneId: 'scene-1',
+      voice: 'Harvey',
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    await controller.handleProviderMessage(
+      JSON.stringify({
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'final-turn',
+        transcript: 'Thank you, goodbye.',
+      }),
+    );
+
+    expect(sceneDialogue.complete).not.toHaveBeenCalled();
+    await controller.handleProviderMessage(JSON.stringify({ type: 'response.created' }));
+    expect(sceneDialogue.complete).not.toHaveBeenCalled();
+
+    await controller.handleProviderMessage(
+      JSON.stringify({ type: 'response.done', response: { status: 'completed' } }),
+    );
+
+    expect(sceneDialogue.complete).toHaveBeenCalledTimes(1);
+    expect(controller.getSnapshot()).toEqual(
+      expect.objectContaining({ state: 'ended', completion }),
+    );
+  });
+
   it('coordinates each ielts transcript and applies the backend control instruction once', async () => {
     const dependencies = createDependencies();
-    const ieltsDialogue = {
+    const ieltsDialogue: NonNullable<RealtimeSessionDependencies['ieltsDialogue']> = {
       advanceState: jest.fn(async () => ({
         sceneId: 'ielts-1',
         sessionId: 'session-1',
-        part: 'PART_1',
+        part: 'PART_1' as const,
         openingCompleted: true,
         answeredQuestions: 1,
         totalQuestions: 4,
@@ -357,7 +642,7 @@ describe('RealtimeSessionController', () => {
       getDialogueState: jest.fn(async () => ({
         sceneId: 'ielts-1',
         sessionId: 'session-1',
-        part: 'PART_1',
+        part: 'PART_1' as const,
         openingCompleted: true,
         answeredQuestions: 0,
         totalQuestions: 4,
@@ -418,7 +703,7 @@ describe('RealtimeSessionController', () => {
 
   it('advances part2 state through the public transition API', async () => {
     const dependencies = createDependencies();
-    const ieltsDialogue = {
+    const ieltsDialogue: NonNullable<RealtimeSessionDependencies['ieltsDialogue']> = {
       advanceState: jest.fn(),
       evaluateTurn: jest.fn(),
       advancePart2State: jest.fn(async () => ({
@@ -466,16 +751,136 @@ describe('RealtimeSessionController', () => {
     );
   });
 
+  it('uploads Part 2 turn audio so the report can include pronunciation', async () => {
+    const dependencies = createDependencies();
+    const turnAudioCapture = {
+      start: jest.fn(async () => undefined),
+      stop: jest.fn(() => true),
+      take: jest.fn(async () => 'file:///ielts-part2.wav'),
+    };
+    dependencies.turnAudioCapture = turnAudioCapture;
+    const ieltsDialogue: NonNullable<RealtimeSessionDependencies['ieltsDialogue']> = {
+      advanceState: jest.fn(),
+      evaluateTurn: jest.fn(async () => ({ pronunciationScore: 82 })),
+      advancePart2State: jest.fn(),
+      getDialogueState: jest.fn(),
+      getPart2State: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        phase: 'LONG_TURN',
+        completed: false,
+        controlInstruction: 'Continue the long turn.',
+      })),
+    };
+    dependencies.ieltsDialogue = ieltsDialogue;
+    dependencies.sessionApi.start.mockResolvedValue({
+      sessionId: 'session-1',
+      answerSdp: 'answer-sdp',
+      voiceId: 'Harvey',
+      systemPrompt: 'You are an IELTS examiner.',
+      currentStage: 'PART_2',
+    });
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'ielts',
+      ieltsId: 'ielts-1',
+      ieltsPart: 'PART_2',
+      voice: 'Harvey',
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    await controller.handleProviderMessage(
+      JSON.stringify({ type: 'input_audio_buffer.speech_started' }),
+    );
+    await controller.handleProviderMessage(
+      JSON.stringify({ type: 'input_audio_buffer.speech_stopped' }),
+    );
+
+    await controller.handleProviderMessage(
+      JSON.stringify({
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'part2-answer-1',
+        transcript: 'I would like to describe a memorable journey I took last year.',
+      }),
+    );
+
+    expect(turnAudioCapture.take).toHaveBeenCalledTimes(1);
+    expect(ieltsDialogue.evaluateTurn).toHaveBeenCalledWith(
+      'session-1',
+      1,
+      'I would like to describe a memorable journey I took last year.',
+      'file:///ielts-part2.wav',
+    );
+  });
+
+  it('waits for the pending Part 2 pronunciation evaluation before ending', async () => {
+    const dependencies = createDependencies();
+    let finishEvaluation!: () => void;
+    const evaluation = new Promise<void>((resolve) => {
+      finishEvaluation = resolve;
+    });
+    dependencies.turnAudioCapture = {
+      start: jest.fn(async () => undefined),
+      stop: jest.fn(() => true),
+      take: jest.fn(async () => 'file:///ielts-part2-final.wav'),
+    };
+    dependencies.ieltsDialogue = {
+      advanceState: jest.fn(),
+      evaluateTurn: jest.fn(() => evaluation),
+      advancePart2State: jest.fn(),
+      getDialogueState: jest.fn(),
+      getPart2State: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        phase: 'LONG_TURN',
+        completed: false,
+        controlInstruction: 'Continue the long turn.',
+      })),
+    };
+    dependencies.sessionApi.start.mockResolvedValue({
+      sessionId: 'session-1',
+      answerSdp: 'answer-sdp',
+      voiceId: 'Harvey',
+      systemPrompt: 'You are an IELTS examiner.',
+      currentStage: 'PART_2',
+    });
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'ielts',
+      ieltsId: 'ielts-1',
+      ieltsPart: 'PART_2',
+      voice: 'Harvey',
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    const transcriptOperation = controller.handleProviderMessage(
+      JSON.stringify({
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'part2-final-answer',
+        transcript: 'That is why this experience remains important to me.',
+      }),
+    );
+    await Promise.resolve();
+    const endOperation = controller.end();
+
+    expect(dependencies.sessionSocket.end).not.toHaveBeenCalled();
+    finishEvaluation();
+    await transcriptOperation;
+    await endOperation;
+
+    expect(dependencies.sessionSocket.end).toHaveBeenCalledTimes(1);
+  });
+
   it('restores ielts dialogue state after session start', async () => {
     const dependencies = createDependencies();
-    const ieltsDialogue = {
+    const ieltsDialogue: NonNullable<RealtimeSessionDependencies['ieltsDialogue']> = {
       advanceState: jest.fn(),
       evaluateTurn: jest.fn(),
       advancePart2State: jest.fn(),
       getDialogueState: jest.fn(async () => ({
         sceneId: 'ielts-1',
         sessionId: 'session-1',
-        part: 'PART_3',
+        part: 'PART_3' as const,
         openingCompleted: true,
         answeredQuestions: 2,
         totalQuestions: 5,

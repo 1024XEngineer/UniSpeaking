@@ -59,6 +59,12 @@ export type SessionMessage = {
   providerMessageId?: string;
 };
 
+export type RealtimeTranscriptEntry = Readonly<{
+  id: string;
+  owner: 0 | 1;
+  content: string;
+}>;
+
 export type RealtimeSessionDependencies = {
   transport: RealtimeTransport;
   sessionApi: {
@@ -80,6 +86,7 @@ export type RealtimeSessionDependencies = {
       sessionId: string,
       turnNo: number,
       transcript: string,
+      wavUri?: string | null,
     ): Promise<unknown>;
     complete(
       sessionId: string,
@@ -126,6 +133,7 @@ export type RealtimeSessionSnapshot = Readonly<{
   sessionId: string | null;
   userTranscript: string;
   assistantTranscript: string;
+  transcriptHistory: readonly RealtimeTranscriptEntry[];
   error: RealtimeError | null;
   sceneState?: ScenarioDialogueState | null;
   completion?: DialogueCompletion | null;
@@ -202,6 +210,11 @@ function toRealtimeError(
 
 type SnapshotListener = (snapshot: RealtimeSessionSnapshot) => void;
 
+type PendingResponseRequest = Readonly<{
+  sessionUpdate?: Record<string, unknown>;
+  responseCreate: Record<string, unknown>;
+}>;
+
 export class RealtimeSessionController {
   private readonly machine = new RealtimeStateMachine();
   private readonly listeners = new Set<SnapshotListener>();
@@ -213,9 +226,16 @@ export class RealtimeSessionController {
   private inputEnabled = false;
   private userTranscript = '';
   private assistantTranscript = '';
+  private transcriptHistory: RealtimeTranscriptEntry[] = [];
+  private transcriptSequence = 0;
   private providerConfigured = false;
   private initialResponseRequested = false;
+  private responseInFlight = false;
+  private currentResponseRequest: PendingResponseRequest | null = null;
+  private pendingResponseRequest: PendingResponseRequest | null = null;
   private readonly persistedMessageIds = new Set<string>();
+  private readonly coordinatedUserMessageIds = new Set<string>();
+  private readonly pendingTurnEvaluations = new Set<Promise<unknown>>();
   private endPromise: Promise<unknown> | null = null;
   private learnerTurnNo = 0;
   private sceneState: ScenarioDialogueState | null = null;
@@ -251,6 +271,7 @@ export class RealtimeSessionController {
       sessionId: this.backendSession?.sessionId ?? null,
       userTranscript: this.userTranscript,
       assistantTranscript: this.assistantTranscript,
+      transcriptHistory: this.transcriptHistory,
       error: this.machine.error,
       sceneState: this.sceneState,
       completion: this.completion,
@@ -379,6 +400,7 @@ export class RealtimeSessionController {
       this.inputEnabled = false;
       this.muted = true;
       this.applyAudioEnabled();
+      this.dependencies.turnAudioCapture?.stop();
     }
     const state = await ieltsDialogue.advancePart2State(sessionId, event);
     this.ieltsPart2State = state;
@@ -513,10 +535,7 @@ export class RealtimeSessionController {
           this.transition({ type: 'CHANNEL_OPEN' });
         }
         if (!this.initialResponseRequested) {
-          this.dependencies.transport.sendProviderEvent({
-            event_id: this.createEventId(),
-            type: 'response.create',
-          });
+          this.requestAssistantResponse();
           this.initialResponseRequested = true;
         }
         this.inputEnabled =
@@ -533,6 +552,7 @@ export class RealtimeSessionController {
           this.machine.state === 'ready' ||
           this.machine.state === 'assistant_speaking'
         ) {
+          this.captureTranscript(0, this.assistantTranscript);
           this.userTranscript = '';
           this.assistantTranscript = '';
           this.transition({ type: 'USER_SPEECH_STARTED' });
@@ -555,7 +575,15 @@ export class RealtimeSessionController {
         return;
       case 'user.transcript.completed':
         this.userTranscript = event.text;
+        this.captureTranscript(1, event.text, event.itemId);
         this.publish();
+        if (
+          event.itemId &&
+          this.coordinatedUserMessageIds.has(event.itemId)
+        ) {
+          return;
+        }
+        if (event.itemId) this.coordinatedUserMessageIds.add(event.itemId);
         try {
           await this.persistTranscript(1, event.text, event.itemId);
         } catch (error) {
@@ -568,6 +596,7 @@ export class RealtimeSessionController {
         }
         return;
       case 'assistant.response.started':
+        this.responseInFlight = true;
         if (
           this.machine.state === 'ready' ||
           this.machine.state === 'user_speaking'
@@ -582,13 +611,17 @@ export class RealtimeSessionController {
         return;
       case 'assistant.transcript.completed':
         this.assistantTranscript = event.text;
+        this.captureTranscript(0, event.text, event.itemId);
         this.publish();
         await this.persistTranscript(0, event.text, event.itemId);
         return;
       case 'assistant.response.completed':
+        this.responseInFlight = false;
+        this.currentResponseRequest = null;
         if (this.machine.state === 'assistant_speaking') {
           this.transition({ type: 'ASSISTANT_SPEECH_STOPPED' });
         }
+        if (this.flushPendingResponse()) return;
         if (this.options.mode === 'scene') {
           this.inputEnabled = true;
           this.applyAudioEnabled();
@@ -600,6 +633,17 @@ export class RealtimeSessionController {
         }
         return;
       case 'provider.error':
+        if (/conversation already has an active response/i.test(event.message)) {
+          if (!this.pendingResponseRequest && this.currentResponseRequest) {
+            this.pendingResponseRequest = this.currentResponseRequest;
+          }
+          this.currentResponseRequest = null;
+          this.responseInFlight = true;
+          this.inputEnabled = this.options.mode === 'free_chat';
+          this.applyAudioEnabled();
+          this.publish();
+          return;
+        }
         this.inputEnabled = false;
         this.applyAudioEnabled();
         this.machine.dispatch({
@@ -635,6 +679,29 @@ export class RealtimeSessionController {
     }
   }
 
+  private captureTranscript(
+    owner: 0 | 1,
+    content: string,
+    providerMessageId?: string,
+  ) {
+    const text = content.trim();
+    if (!text) return;
+    const id = providerMessageId
+      ? `${owner}:${providerMessageId}`
+      : `${owner}:local-${this.transcriptSequence++}`;
+    const existingIndex = this.transcriptHistory.findIndex((item) => item.id === id);
+    const entry = { id, owner, content: text } as const;
+    if (existingIndex >= 0) {
+      this.transcriptHistory = this.transcriptHistory.map((item, index) =>
+        index === existingIndex ? entry : item,
+      );
+      return;
+    }
+    const previous = this.transcriptHistory[this.transcriptHistory.length - 1];
+    if (previous?.owner === owner && previous.content === text) return;
+    this.transcriptHistory = [...this.transcriptHistory, entry];
+  }
+
   private async performEnd() {
     if (this.machine.state === 'ended') return null;
     if (this.machine.state === 'idle') {
@@ -648,6 +715,7 @@ export class RealtimeSessionController {
     let completion: unknown = null;
     try {
       if (this.backendSession) {
+        await this.waitForPendingTurnEvaluations();
         const stopTime = this.now().toISOString();
         completion =
           this.options.mode === 'scene' && this.dependencies.sceneDialogue
@@ -712,6 +780,12 @@ export class RealtimeSessionController {
       return;
     }
     if (this.isDeterministicIeltsPart()) {
+      if (this.ieltsDialogueCompleted) {
+        this.inputEnabled = false;
+        this.applyAudioEnabled();
+        void this.end();
+        return;
+      }
       this.releaseIeltsInput();
       return;
     }
@@ -757,10 +831,24 @@ export class RealtimeSessionController {
   ) {
     const ieltsDialogue = this.dependencies.ieltsDialogue;
     if (!ieltsDialogue) return null;
-    const wavUri = await this.takeTurnAudioUri();
-    return ieltsDialogue
-      .evaluateTurn(sessionId, turnNo, transcript, wavUri)
-      .catch(() => null);
+    const evaluation = (async () => {
+      const wavUri = await this.takeTurnAudioUri();
+      return ieltsDialogue
+        .evaluateTurn(sessionId, turnNo, transcript, wavUri)
+        .catch(() => null);
+    })();
+    this.pendingTurnEvaluations.add(evaluation);
+    try {
+      return await evaluation;
+    } finally {
+      this.pendingTurnEvaluations.delete(evaluation);
+    }
+  }
+
+  private async waitForPendingTurnEvaluations() {
+    while (this.pendingTurnEvaluations.size > 0) {
+      await Promise.allSettled([...this.pendingTurnEvaluations]);
+    }
   }
 
   private sendIeltsControlInstruction(controlInstruction?: string | null) {
@@ -785,18 +873,16 @@ export class RealtimeSessionController {
 
   private requestIeltsResponse(instructions?: string | null) {
     const turnInstructions = instructions?.trim() ?? '';
-    this.dependencies.transport.sendProviderEvent({
-      event_id: this.createEventId(),
-      type: 'response.create',
-      ...(turnInstructions
+    this.requestAssistantResponse(
+      turnInstructions
         ? {
             response: {
               instructions: turnInstructions,
               modalities: ['text', 'audio'],
             },
           }
-        : {}),
-    });
+        : undefined,
+    );
   }
 
   private async coordinateIeltsTurn(transcript: string) {
@@ -835,10 +921,14 @@ export class RealtimeSessionController {
       }
       return;
     }
-    if (this.ieltsActivePart === 'PART_2' && !this.ieltsDialogueCompleted) {
-      this.inputEnabled = true;
-      this.applyAudioEnabled();
-      this.bumpIeltsInputReady();
+    if (this.ieltsActivePart === 'PART_2') {
+      const turnNo = ++this.learnerTurnNo;
+      await this.evaluateIeltsTurn(sessionId, turnNo, transcript);
+      if (!this.ieltsDialogueCompleted) {
+        this.inputEnabled = true;
+        this.applyAudioEnabled();
+        this.bumpIeltsInputReady();
+      }
     }
   }
 
@@ -851,8 +941,9 @@ export class RealtimeSessionController {
     this.inputEnabled = false;
     this.applyAudioEnabled();
     const turnNo = ++this.learnerTurnNo;
+    const wavUri = await this.takeTurnAudioUri();
     const evaluation = sceneDialogue
-      .evaluateTurn(sessionId, turnNo, transcript)
+      .evaluateTurn(sessionId, turnNo, transcript, wavUri)
       .catch(() => null);
     const state = await sceneDialogue.advanceState(
       sessionId,
@@ -864,6 +955,7 @@ export class RealtimeSessionController {
     this.sceneCompletionPending = state.completed;
     this.publish();
 
+    let sessionUpdate: Record<string, unknown> | undefined;
     if (state.controlInstruction?.trim() && this.backendSession) {
       const update = buildSessionUpdate(
         this.createEventId(),
@@ -876,12 +968,52 @@ export class RealtimeSessionController {
       ]
         .filter(Boolean)
         .join('\n\n');
-      this.dependencies.transport.sendProviderEvent(update);
+      sessionUpdate = update;
     }
-    this.dependencies.transport.sendProviderEvent({
-      event_id: this.createEventId(),
-      type: 'response.create',
-    });
+    this.requestAssistantResponse(undefined, sessionUpdate);
+  }
+
+  private requestAssistantResponse(
+    response?: Record<string, unknown>,
+    sessionUpdate?: Record<string, unknown>,
+  ) {
+    const request: PendingResponseRequest = {
+      sessionUpdate,
+      responseCreate: {
+        event_id: this.createEventId(),
+        type: 'response.create',
+        ...(response ? { response } : {}),
+      },
+    };
+    if (this.responseInFlight) {
+      this.pendingResponseRequest = request;
+      return false;
+    }
+    this.dispatchResponseRequest(request);
+    return true;
+  }
+
+  private dispatchResponseRequest(request: PendingResponseRequest) {
+    this.responseInFlight = true;
+    this.currentResponseRequest = request;
+    try {
+      if (request.sessionUpdate) {
+        this.dependencies.transport.sendProviderEvent(request.sessionUpdate);
+      }
+      this.dependencies.transport.sendProviderEvent(request.responseCreate);
+    } catch (error) {
+      this.responseInFlight = false;
+      this.currentResponseRequest = null;
+      throw error;
+    }
+  }
+
+  private flushPendingResponse() {
+    const request = this.pendingResponseRequest;
+    if (!request) return false;
+    this.pendingResponseRequest = null;
+    this.dispatchResponseRequest(request);
+    return true;
   }
 
   private transition(event: Parameters<RealtimeStateMachine['dispatch']>[0]) {
@@ -898,10 +1030,17 @@ export class RealtimeSessionController {
     this.backendSession = null;
     this.userTranscript = '';
     this.assistantTranscript = '';
+    this.transcriptHistory = [];
+    this.transcriptSequence = 0;
     this.providerConfigured = false;
     this.initialResponseRequested = false;
+    this.responseInFlight = false;
+    this.currentResponseRequest = null;
+    this.pendingResponseRequest = null;
     this.inputEnabled = false;
     this.persistedMessageIds.clear();
+    this.coordinatedUserMessageIds.clear();
+    this.pendingTurnEvaluations.clear();
     this.endPromise = null;
     this.learnerTurnNo = 0;
     this.sceneState = null;

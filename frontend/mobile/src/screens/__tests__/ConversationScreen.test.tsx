@@ -1,4 +1,4 @@
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
 jest.mock('react-native-reanimated', () => {
   const { View } = require('react-native');
@@ -111,5 +111,67 @@ describe('CallExperience realtime binding', () => {
 
     expect(onMutedChange).toHaveBeenCalledWith(false);
     expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders completed dialogue turns in their original order', async () => {
+    const screen = await render(
+      <CallExperience
+        onEnd={jest.fn()}
+        transcriptEnglish="What kind of coffee do you prefer?"
+        transcriptHistory={[
+          { id: '0:assistant-1', owner: 0, content: 'Welcome. What would you like?' },
+          { id: '1:user-1', owner: 1, content: 'I would like a latte.' },
+        ]}
+      />,
+    );
+
+    const transcriptTexts = screen.getAllByText(
+      /Welcome\. What would you like\?|I would like a latte\.|What kind of coffee do you prefer\?/,
+    );
+    expect(transcriptTexts.map((node) => node.props.children)).toEqual([
+      'Welcome. What would you like?',
+      'I would like a latte.',
+      'What kind of coffee do you prefer?',
+    ]);
+  });
+
+  it('can hide learner subtitles while preserving assistant history', async () => {
+    const screen = await render(
+      <CallExperience
+        initialSubtitles
+        onEnd={jest.fn()}
+        showUserTranscript={false}
+        transcriptEnglish="What do you usually do on weekends?"
+        transcriptHistory={[
+          { id: 'assistant-1', owner: 0, content: 'Let us begin with your hometown.' },
+          { id: 'user-1', owner: 1, content: 'I live in Shanghai.' },
+        ]}
+        userTranscript="I often read books."
+      />,
+    );
+
+    expect(screen.getByText('Let us begin with your hometown.')).toBeTruthy();
+    expect(screen.queryByText('I live in Shanghai.')).toBeNull();
+    expect(screen.queryByText('I often read books.')).toBeNull();
+  });
+
+  it('translates an assistant message without replacing the dialogue history', async () => {
+    const onTranslate = jest.fn(async () => '欢迎，请问您需要什么？');
+    const screen = await render(
+      <CallExperience
+        onEnd={jest.fn()}
+        onTranslate={onTranslate}
+        transcriptEnglish="What would you like?"
+        transcriptHistory={[
+          { id: 'assistant-1', owner: 0, content: 'Welcome.' },
+          { id: 'user-1', owner: 1, content: 'A coffee, please.' },
+        ]}
+      />,
+    );
+
+    await fireEvent.press(screen.getAllByLabelText('翻译')[0]);
+    await waitFor(() => expect(screen.getByText('欢迎，请问您需要什么？')).toBeTruthy());
+    expect(onTranslate).toHaveBeenCalledWith('Welcome.');
+    expect(screen.getByText('A coffee, please.')).toBeTruthy();
   });
 });

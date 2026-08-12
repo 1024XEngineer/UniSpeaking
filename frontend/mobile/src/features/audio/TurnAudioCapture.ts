@@ -11,9 +11,15 @@ export function createTurnAudioCapture(
 ): TurnAudioCapturePort {
   let active = false;
   let finalized = false;
+  let stopRequested = false;
+  let startPromise: Promise<void> | null = null;
   let audioPromise: Promise<string | null> = Promise.resolve(null);
 
   const stop = () => {
+    if (startPromise && !active) {
+      stopRequested = true;
+      return true;
+    }
     if (!active) return false;
     audioPromise = recorder.stop().catch(() => null);
     active = false;
@@ -23,12 +29,22 @@ export function createTurnAudioCapture(
 
   return {
     async start() {
-      if (active || finalized) return;
-      await recorder.start();
-      active = true;
+      if (active || finalized || startPromise) return;
+      stopRequested = false;
+      startPromise = (async () => {
+        await recorder.start();
+        active = true;
+        if (stopRequested) stop();
+      })();
+      try {
+        await startPromise;
+      } finally {
+        startPromise = null;
+      }
     },
     stop,
     async take() {
+      if (startPromise) await startPromise;
       if (active) stop();
       const audio = await audioPromise;
       audioPromise = Promise.resolve(null);

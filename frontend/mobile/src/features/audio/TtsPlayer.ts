@@ -67,32 +67,63 @@ export class SceneSpeechClient {
 
 type NativeAudioPlayer = {
   play(): void;
+  pause(): void;
   remove(): void;
 };
 
 type TtsPlayerOptions = {
   speechClient: Pick<SceneSpeechClient, 'synthesize'>;
   createPlayer?: (uri: string) => NativeAudioPlayer;
+  preparePlayback?: () => Promise<void>;
 };
 
 function createNativePlayer(uri: string): NativeAudioPlayer {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { createAudioPlayer } = require('expo-audio') as typeof import('expo-audio');
-  return createAudioPlayer(uri);
+  return createAudioPlayer(uri, { downloadFirst: true });
+}
+
+async function prepareNativePlayback() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { setAudioModeAsync } = require('expo-audio') as typeof import('expo-audio');
+  await setAudioModeAsync({
+    allowsRecording: false,
+    interruptionMode: 'doNotMix',
+    playsInSilentMode: true,
+    shouldRouteThroughEarpiece: false,
+  });
 }
 
 export class TtsPlayer {
   private readonly createPlayer: (uri: string) => NativeAudioPlayer;
+  private readonly preparePlayback: () => Promise<void>;
   private player: NativeAudioPlayer | null = null;
   private asset: SpeechAsset | null = null;
+  private requestVersion = 0;
 
   constructor(private readonly options: TtsPlayerOptions) {
     this.createPlayer = options.createPlayer ?? createNativePlayer;
+    this.preparePlayback = options.preparePlayback ?? prepareNativePlayback;
   }
 
   async play(sceneId: string, text: string) {
     this.stop();
+    const requestVersion = this.requestVersion;
     const asset = await this.options.speechClient.synthesize(sceneId, text);
+    if (requestVersion !== this.requestVersion) {
+      asset.remove();
+      return;
+    }
+    try {
+      await this.preparePlayback();
+    } catch (error) {
+      asset.remove();
+      throw error;
+    }
+    if (requestVersion !== this.requestVersion) {
+      asset.remove();
+      return;
+    }
     const player = this.createPlayer(asset.uri);
     this.asset = asset;
     this.player = player;
@@ -100,11 +131,16 @@ export class TtsPlayer {
   }
 
   stop() {
+    this.requestVersion += 1;
     const player = this.player;
     const asset = this.asset;
     this.player = null;
     this.asset = null;
-    player?.remove();
-    asset?.remove();
+    try {
+      player?.pause();
+    } finally {
+      player?.remove();
+      asset?.remove();
+    }
   }
 }

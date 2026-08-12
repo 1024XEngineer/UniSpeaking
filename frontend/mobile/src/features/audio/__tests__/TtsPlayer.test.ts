@@ -56,23 +56,51 @@ describe('TtsPlayer', () => {
         .mockResolvedValueOnce(firstAsset)
         .mockResolvedValueOnce(secondAsset),
     };
-    const firstPlayer = { play: jest.fn(), remove: jest.fn() };
-    const secondPlayer = { play: jest.fn(), remove: jest.fn() };
+    const firstPlayer = { play: jest.fn(), pause: jest.fn(), remove: jest.fn() };
+    const secondPlayer = { play: jest.fn(), pause: jest.fn(), remove: jest.fn() };
     const createPlayer = jest
       .fn()
       .mockReturnValueOnce(firstPlayer)
       .mockReturnValueOnce(secondPlayer);
-    const player = new TtsPlayer({ speechClient, createPlayer });
+    const preparePlayback = jest.fn(async () => undefined);
+    const player = new TtsPlayer({ speechClient, createPlayer, preparePlayback });
 
     await player.play('scene-1', 'First');
     await player.play('scene-1', 'Second');
 
+    expect(firstPlayer.pause).toHaveBeenCalledTimes(1);
     expect(firstPlayer.remove).toHaveBeenCalledTimes(1);
     expect(firstAsset.remove).toHaveBeenCalledTimes(1);
     expect(secondPlayer.play).toHaveBeenCalledTimes(1);
+    expect(preparePlayback).toHaveBeenCalledTimes(2);
     player.stop();
     player.stop();
+    expect(secondPlayer.pause).toHaveBeenCalledTimes(1);
     expect(secondPlayer.remove).toHaveBeenCalledTimes(1);
     expect(secondAsset.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards an earlier synthesis that resolves after playback is stopped', async () => {
+    let resolveAsset: (asset: { uri: string; remove: jest.Mock }) => void = () => undefined;
+    const asset = { uri: 'file:///late.wav', remove: jest.fn() };
+    const speechClient = {
+      synthesize: jest.fn(() => new Promise<typeof asset>((resolve) => {
+        resolveAsset = resolve;
+      })),
+    };
+    const nativePlayer = { play: jest.fn(), pause: jest.fn(), remove: jest.fn() };
+    const player = new TtsPlayer({
+      speechClient,
+      createPlayer: jest.fn(() => nativePlayer),
+      preparePlayback: jest.fn(async () => undefined),
+    });
+
+    const playPromise = player.play('scene-1', 'First');
+    player.stop();
+    resolveAsset(asset);
+    await playPromise;
+
+    expect(asset.remove).toHaveBeenCalledTimes(1);
+    expect(nativePlayer.play).not.toHaveBeenCalled();
   });
 });
