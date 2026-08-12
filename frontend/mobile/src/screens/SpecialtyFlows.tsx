@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -8,27 +8,30 @@ import {
   AppIcon,
   AppScreen,
   Card,
+  EvaluationPendingOverlay,
   HeaderIconButton,
   MainModuleHeader,
   ProgressBar,
   uiStyles,
 } from '@/components/ui';
 import { ieltsParts, interviewQuestions } from '@/data/content';
-import { selectCallCaption } from '@/screens/ConversationScreen';
+import { CallExperience, selectCallCaption } from '@/screens/ConversationScreen';
 import { useIeltsFlowController } from '@/features/ielts/useIeltsFlowController';
 import { useIeltsSession } from '@/features/ielts/useIeltsSession';
 import { ieltsExaminers, toApiPart, type MobileIeltsPartId } from '@/features/ielts/ieltsMappings';
 import type { IeltsTopicSummary } from '@/features/ielts/types';
+import { compactPageNumbers } from '@/features/ielts/compactPagination';
+import { createTranscriptTranslationApi } from '@/features/conversation/TranscriptTranslationApi';
 import { useAppModel } from '@/model/AppModel';
 import { useLearningStage } from '@/navigation/learningStage';
+import { rememberSpecialty } from '@/navigation/specialtyMemory';
 import { colors, examinerAssets, ieltsAssets, interviewAssets, levels } from '@/theme/tokens';
-
-import { CallExperience } from './ConversationScreen';
 
 type IeltsRoute =
   | 'intake'
   | 'home'
   | 'topics'
+  | 'examiner'
   | 'session'
   | 'analysis'
   | 'report';
@@ -38,6 +41,13 @@ type IeltsPartId = MobileIeltsPartId;
 const examiners = ieltsExaminers.map((item) => ({
   ...item,
   image: examinerAssets[item.id],
+  description: item.id === 'daniel'
+    ? '节奏稳定，追问清晰，适合提前熟悉正式考场氛围。'
+    : item.id === 'marcus'
+      ? '表达清楚直接，会用自然追问帮助你快速进入回答状态。'
+      : item.id === 'margaret'
+        ? '语速从容、停顿自然，适合练习完整展开与细节组织。'
+        : '交流自然友好，同时保持严格的考试流程。',
 }));
 
 const ieltsPartOrder: readonly IeltsPartId[] = ['p1', 'p2', 'p3'];
@@ -99,6 +109,8 @@ function IeltsSession({
   const session = useIeltsSession({ ieltsId, voiceId, part: toApiPart(part) });
   const partThreeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastInputReadyTick = useRef(0);
+  const finishingRef = useRef(false);
+  const [translationApi] = useState(createTranscriptTranslationApi);
   const caption = selectCallCaption(
     session.snapshot,
     examiner.name,
@@ -108,6 +120,10 @@ function IeltsSession({
   const progressLabel = dialogueState
     ? `${dialogueState.answeredQuestions} / ${dialogueState.totalQuestions} 题`
     : session.statusLabel;
+  const translate = useCallback((text: string) => {
+    if (!session.sessionId) return Promise.reject(new Error('会话尚未连接，暂时无法翻译'));
+    return translationApi.translateFreeChat(session.sessionId, text);
+  }, [session.sessionId, translationApi]);
 
   useEffect(() => {
     if (part !== 'p3') return undefined;
@@ -145,7 +161,10 @@ function IeltsSession({
       clearInterval(partThreeTimerRef.current);
       partThreeTimerRef.current = null;
     }
-  }, [session.snapshot.ieltsDialogueCompleted]);
+    if (session.snapshot.state !== 'ended' || finishingRef.current) return;
+    finishingRef.current = true;
+    onFinish(session.sessionId);
+  }, [onFinish, session.sessionId, session.snapshot.ieltsDialogueCompleted, session.snapshot.state]);
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.ieltsCallScreen}>
@@ -154,15 +173,19 @@ function IeltsSession({
         endControlIcon="arrow"
         initialSubtitles={false}
         onEnd={() => {
+          if (finishingRef.current) return;
+          finishingRef.current = true;
           void session.end().finally(() => onFinish(session.sessionId));
         }}
         participant={examiner}
         showMuteControl={false}
-        showTranslationControl={false}
+        onTranslate={translate}
+        showUserTranscript={part !== 'p1'}
         statusText={`${part === 'p1' ? 'Part 1' : 'Part 3'} · ${progressLabel}`}
         transcriptEnglish={caption.text}
         transcriptSpeaker={caption.speaker}
         userTranscript={session.snapshot.userTranscript}
+        transcriptHistory={session.snapshot.transcriptHistory}
       />
     </SafeAreaView>
   );
@@ -173,6 +196,13 @@ function formatSessionDuration(seconds: number) {
   const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
   const remainingSeconds = (seconds % 60).toString().padStart(2, '0');
   return `${minutes}:${remainingSeconds}`;
+}
+
+function compactPerformanceSummary(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) return '已评分';
+  const firstPhrase = text.split(/[。！？；,.!?;]/)[0]?.trim() || text;
+  return firstPhrase.length > 6 ? `${firstPhrase.slice(0, 6)}…` : firstPhrase;
 }
 
 type Part2Phase = 'INTRODUCTION' | 'PREPARATION' | 'STARTING' | 'LONG_TURN' | 'FINISHING';
@@ -196,6 +226,7 @@ function IeltsPart2Session({
   const [longTurnRemaining, setLongTurnRemaining] = useState(120);
   const [notesLocked, setNotesLocked] = useState(false);
   const [note, setNote] = useState('');
+  const preparationScrollRef = useRef<ScrollView>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const phaseRef = useRef<Part2Phase>('INTRODUCTION');
   const prevStateRef = useRef(session.snapshot.state);
@@ -383,12 +414,6 @@ function IeltsPart2Session({
     [],
   );
 
-  const caption = selectCallCaption(
-    session.snapshot,
-    examiner.name,
-    session.statusLabel,
-  );
-  const showLongTurn = phase === 'STARTING' || phase === 'LONG_TURN' || phase === 'FINISHING';
   const statusText =
     phase === 'INTRODUCTION'
       ? '考官正在说明 Part 2 准备要求'
@@ -400,96 +425,84 @@ function IeltsPart2Session({
             ? 'Part 2 已完成，考官正在结束本部分'
             : session.statusLabel;
 
-  if (showLongTurn) {
-    return (
-      <SafeAreaView edges={['top', 'bottom']} style={styles.ieltsCallScreen}>
-        <CallExperience
-          endAccessibilityLabel="结束 Part 2"
-          endControlIcon="arrow"
-          initialSubtitles={false}
-          onEnd={() => {
-            if (phaseRef.current === 'LONG_TURN') {
-              finishPartTwoAfterSilence();
-              return;
-            }
-            void session.end().finally(() => onFinish(session.sessionId));
-          }}
-          participant={examiner}
-          showMuteControl={false}
-          showTranslationControl={false}
-          statusText={`Part 2 · ${statusText}`}
-          transcriptEnglish={caption.text}
-          transcriptSpeaker={caption.speaker}
-          userTranscript={session.snapshot.userTranscript}
-        />
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.part2Screen}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.part2KeyboardView}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={8} style={styles.part2KeyboardView}>
         <ScrollView
+          ref={preparationScrollRef}
           contentContainerStyle={styles.part2Content}
+          keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.part2Presence}>
             <Image source={examiner.image} style={styles.part2ExaminerImage} contentFit="contain" />
-            <Text style={styles.part2Timer}>{statusText}</Text>
-            <Text style={styles.part2ExaminerName}>{examiner.name}</Text>
-            <Text style={styles.part2Instruction}>
-              {phase === 'PREPARATION'
-                ? '你有 1 分钟准备时间，可以根据题卡记录关键词。'
-                : '请等待考官说明 Part 2 规则。'}
-            </Text>
+            <View style={styles.part2PresenceCopy}>
+              <Text style={styles.part2ExaminerName}>{examiner.name} · IELTS EXAMINER</Text>
+              <Text style={styles.part2Timer}>{statusText}</Text>
+              <Text style={styles.part2Instruction}>
+                {phase === 'PREPARATION'
+                  ? '请根据题卡记录关键词，准备结束后笔记将锁定。'
+                  : phase === 'LONG_TURN'
+                    ? '请持续作答，笔记内容已锁定。'
+                    : phase === 'FINISHING'
+                      ? '正在结束本部分并准备评分。'
+                      : '请等待考官说明 Part 2 规则。'}
+              </Text>
+            </View>
             {sessionError ? <Text style={styles.intakeError}>{sessionError}</Text> : null}
             {session.startupError ? <Text style={styles.intakeError}>{session.startupError}</Text> : null}
           </View>
 
-          <View style={styles.part2CueCard}>
-            <Text style={styles.part2Eyebrow}>PART 2 · CUE CARD</Text>
-            <Text style={styles.part2CueTitle}>{cueCard.title}</Text>
-            <Text style={styles.part2ShouldSay}>You should say:</Text>
-            <View style={styles.part2CuePoints}>
-              {cueCard.points.map((point) => (
-                <View key={point} style={styles.part2CuePointRow}>
-                  <View style={styles.part2Bullet} />
-                  <Text style={styles.part2CuePoint}>{point}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-
-          <View style={styles.part2NoteCard}>
-            <View style={styles.part2NoteHeader}>
-              <View style={styles.part2NoteTitleRow}>
-                <AppIcon name="edit" size={17} color={ieltsPalette.purpleDark} />
-                <Text style={styles.part2NoteTitle}>答题笔记</Text>
+          <View style={styles.part2Workspace}>
+            <View style={styles.part2CueCard}>
+              <Text style={styles.part2Eyebrow}>PART 2 · CUE CARD</Text>
+              <Text style={styles.part2CueTitle}>{cueCard.title}</Text>
+              <Text style={styles.part2ShouldSay}>You should say:</Text>
+              <View style={styles.part2CuePoints}>
+                {cueCard.points.map((point) => (
+                  <View key={point} style={styles.part2CuePointRow}>
+                    <View style={styles.part2Bullet} />
+                    <Text style={styles.part2CuePoint}>{point}</Text>
+                  </View>
+                ))}
               </View>
-              <Text style={styles.part2NoteHint}>
-                {notesLocked ? '准备已结束' : '准备结束后自动锁定'}
-              </Text>
             </View>
-            <TextInput
-              editable={!notesLocked}
-              multiline
-              onChangeText={setNote}
-              placeholder="记录关键词、人物、地点、原因或例子……"
-              placeholderTextColor={ieltsPalette.muted}
-              style={styles.part2NoteInput}
-              textAlignVertical="top"
-              value={note}
-            />
+
+            <View style={styles.part2NoteCard}>
+              <View style={styles.part2NoteHeader}>
+                <View style={styles.part2NoteTitleRow}>
+                  <AppIcon name={notesLocked ? 'lock' : 'edit'} size={16} color={ieltsPalette.purpleDark} />
+                  <Text style={styles.part2NoteTitle}>答题笔记</Text>
+                </View>
+                <Text style={styles.part2NoteHint}>{notesLocked ? '已锁定' : '可输入'}</Text>
+              </View>
+              {notesLocked ? (
+                <Text style={styles.part2LockedNote}>{note || '准备阶段未记录笔记'}</Text>
+              ) : (
+                <TextInput
+                  editable
+                  multiline
+                  onChangeText={setNote}
+                  onFocus={() => requestAnimationFrame(() => preparationScrollRef.current?.scrollToEnd({ animated: true }))}
+                  placeholder="记录关键词…"
+                  placeholderTextColor={ieltsPalette.muted}
+                  selectionColor={ieltsPalette.purple}
+                  style={styles.part2NoteInput}
+                  textAlignVertical="top"
+                  value={note}
+                />
+              )}
+            </View>
           </View>
         </ScrollView>
 
-        {phase === 'PREPARATION' ? (
+        {phase === 'PREPARATION' || phase === 'LONG_TURN' ? (
           <View style={styles.part2Footer}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="提前开始作答"
-              onPress={beginPartTwoAnswer}
+              accessibilityLabel={phase === 'PREPARATION' ? '提前开始作答' : '结束 Part 2'}
+              onPress={phase === 'PREPARATION' ? beginPartTwoAnswer : finishPartTwoAfterSilence}
               style={styles.part2EndButton}
             >
               <AppIcon name="arrow-right" size={25} color={colors.white} />
@@ -510,34 +523,56 @@ function ReportMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onViewDetails?: () => void }) {
-  const { addIeltsRecord } = useAppModel();
+export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onViewDetails?: (recordId: string) => void }) {
+  const { addIeltsRecord, hasCompletedOnboarding, level, saveLevel } = useAppModel();
   const { setImmersiveLearning } = useLearningStage();
   const ielts = useIeltsFlowController();
   const [route, setRoute] = useState<IeltsRoute>('intake');
   const [target, setTarget] = useState('7.0');
-  const [startingLevel, setStartingLevel] = useState<string>(levels[2].id);
+  const [startingLevel, setStartingLevel] = useState<string>(level);
   const [intakeStep, setIntakeStep] = useState(0);
   const [intakeSaving, setIntakeSaving] = useState(false);
   const [intakeError, setIntakeError] = useState<string | null>(null);
   const [part, setPart] = useState<IeltsPartId>('p2');
   const [topic, setTopic] = useState('');
-  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [fullMock, setFullMock] = useState(false);
   const [topicCategory, setTopicCategory] = useState('ALL');
   const [topicQuery, setTopicQuery] = useState('');
   const [topicPage, setTopicPage] = useState(1);
   const [examiner, setExaminer] = useState<(typeof examiners)[number]>(() => randomExaminer());
-  const [progress, setProgress] = useState(0);
+  const [pendingSession, setPendingSession] = useState<{
+    nextPart: IeltsPartId;
+    topicItem: IeltsTopicSummary | null;
+    random: boolean;
+  } | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
+  const loadTopics = ielts.loadTopics;
+  const refreshSettings = ielts.refreshSettings;
+  const finalizeEvaluation = ielts.finalizeEvaluation;
+  const generatedIeltsId = ielts.generated?.ieltsId;
+  const shouldSkipIntake =
+    !ielts.settingsLoading &&
+    ielts.settings?.targetScore != null &&
+    hasCompletedOnboarding;
+
+  useEffect(() => {
+    void rememberSpecialty('ielts');
+  }, []);
+
+  useEffect(() => {
+    if (route !== 'intake' || !shouldSkipIntake) return;
+    const timer = setTimeout(() => setRoute('home'), 0);
+    return () => clearTimeout(timer);
+  }, [route, shouldSkipIntake]);
 
   const beginSession = async (input: {
     nextPart: IeltsPartId | 'mock';
     topicItem: IeltsTopicSummary | null;
     random: boolean;
+    selectedExaminer?: (typeof examiners)[number];
   }) => {
-    const nextExaminer = randomExaminer();
+    const nextExaminer = input.selectedExaminer ?? examiner;
     setExaminer(nextExaminer);
     const scene = await ielts.prepareSession({
       part: input.nextPart,
@@ -546,34 +581,29 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
       examiner: nextExaminer,
     });
     setTopic(input.topicItem?.title ?? scene.title);
-    setSelectedTopicId(input.topicItem?.id ?? scene.selectedTopicId ?? null);
     setActiveSessionId(null);
     setRoute('session');
   };
 
   const startSinglePart = async (topicItem: IeltsTopicSummary | null, random = false) => {
     setFullMock(false);
-    setPart(part);
-    try {
-      await beginSession({ nextPart: part, topicItem, random });
-    } catch {
-      // prepareSession 已写入 sessionError
-    }
+    setPendingSession({ nextPart: part, topicItem, random });
+    setRoute('examiner');
   };
 
   const startFullMock = async () => {
     setFullMock(true);
     setPart('p1');
-    setProgress(0);
+    const nextExaminer = randomExaminer();
     try {
-      await beginSession({ nextPart: 'mock', topicItem: null, random: true });
+      await beginSession({ nextPart: 'mock', topicItem: null, random: true, selectedExaminer: nextExaminer });
     } catch {
       // prepareSession 已写入 sessionError
     }
   };
 
   useEffect(() => {
-    setImmersiveLearning(route === 'session' || route === 'analysis' || route === 'report');
+    setImmersiveLearning(route === 'session' || route === 'analysis');
   }, [route, setImmersiveLearning]);
 
   useEffect(() => () => setImmersiveLearning(false), [setImmersiveLearning]);
@@ -581,58 +611,62 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
   useEffect(() => {
     if (route !== 'topics') return;
     const timer = setTimeout(() => {
-      void ielts.loadTopics(part, topicCategory, topicQuery, topicPage);
+      void loadTopics(part, topicCategory, topicQuery, topicPage);
     }, 250);
     return () => clearTimeout(timer);
-  }, [route, part, topicCategory, topicQuery, topicPage, ielts]);
+  }, [route, part, topicCategory, topicQuery, topicPage, loadTopics]);
 
   useEffect(() => {
     if (route !== 'home') return;
-    void ielts.refreshSettings();
-  }, [route, ielts]);
+    void refreshSettings();
+  }, [route, refreshSettings]);
 
   useEffect(() => {
-    if (ielts.settings?.targetScore != null) {
-      setTarget(String(ielts.settings.targetScore));
-    }
-    if (ielts.settings?.examinerId) {
-      const saved = examiners.find((item) => item.id === ielts.settings?.examinerId);
-      if (saved) setExaminer(saved);
-    }
+    const timer = setTimeout(() => {
+      if (ielts.settings?.targetScore != null) {
+        setTarget(String(ielts.settings.targetScore));
+      }
+      if (ielts.settings?.examinerId) {
+        const saved = examiners.find((item) => item.id === ielts.settings?.examinerId);
+        if (saved) setExaminer(saved);
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [ielts.settings]);
 
   useEffect(() => {
     if (route !== 'analysis') return;
-    const ieltsId = ielts.generated?.ieltsId;
+    const ieltsId = generatedIeltsId;
     if (!ieltsId || !activeSessionId) {
-      const timer = setInterval(() => setProgress((current) => Math.min(100, current + 14)), 220);
-      return () => clearInterval(timer);
+      const errorTimer = setTimeout(
+        () => setEvaluationError('缺少真实会话信息，无法生成评分'),
+        0,
+      );
+      return () => clearTimeout(errorTimer);
     }
     let cancelled = false;
-    setProgress(12);
-    void ielts.finalizeEvaluation(ieltsId, activeSessionId)
+    void finalizeEvaluation(ieltsId, activeSessionId)
       .then(() => {
-        if (!cancelled) setProgress(100);
+        if (!cancelled) setRoute('report');
       })
       .catch((error: unknown) => {
         if (!cancelled) {
           setEvaluationError(error instanceof Error ? error.message : '评估生成失败');
-          setProgress(100);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [route, ielts.finalizeEvaluation, ielts.generated?.ieltsId, activeSessionId]);
-
-  useEffect(() => {
-    if (route === 'analysis' && progress >= 100) {
-      const timer = setTimeout(() => setRoute('report'), 300);
-      return () => clearTimeout(timer);
-    }
-  }, [progress, route]);
+  }, [route, finalizeEvaluation, generatedIeltsId, activeSessionId]);
 
   if (route === 'intake') {
+    if (ielts.settingsLoading || shouldSkipIntake) {
+      return (
+        <View style={styles.ieltsEvaluationRoot}>
+          <EvaluationPendingOverlay copy="正在读取你的 IELTS 学习设置…" />
+        </View>
+      );
+    }
     const isTargetStep = intakeStep === 0;
     const selected = isTargetStep ? target : startingLevel;
     const options = isTargetStep ? ieltsTargetOptions : levels;
@@ -686,7 +720,10 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
                 }
                 setIntakeSaving(true);
                 setIntakeError(null);
-                void ielts.saveTargetScore(target)
+                void Promise.all([
+                  ielts.saveTargetScore(target),
+                  saveLevel(startingLevel),
+                ])
                   .then(() => setRoute('home'))
                   .catch((error: unknown) => {
                     setIntakeError(error instanceof Error ? error.message : '目标分数保存失败');
@@ -923,7 +960,7 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
                 </View>
                 <View style={styles.topicColumnResult}>
                   <Text style={styles.topicResult}>{recentScore}</Text>
-                  <Text style={styles.topicResultNote}>{item.latestPerformanceSummary ?? (practiced ? '已练习' : '未练习')}</Text>
+                  <Text numberOfLines={1} style={styles.topicResultNote}>{practiced ? compactPerformanceSummary(item.latestPerformanceSummary) : '未练习'}</Text>
                 </View>
                 <View style={styles.topicColumnArrow}>
                   <AppIcon name="chevron-right" size={18} color={ieltsPalette.text} />
@@ -949,7 +986,7 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
             <AppIcon name="arrow-left" size={18} color={topicPage <= 1 ? colors.subtle : ieltsPalette.purpleDark} />
           </Pressable>
           <View style={styles.topicPaginationPages}>
-            {Array.from({ length: totalTopicPages }, (_, index) => index + 1).map((page) => (
+            {compactPageNumbers(topicPage, totalTopicPages).map((page) => (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`第 ${page} 页`}
@@ -978,8 +1015,76 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
     );
   }
 
+  if (route === 'examiner') {
+    const selectedPart = pendingSession?.nextPart ?? part;
+    const partMeta = ieltsParts.find((item) => item.id === selectedPart) ?? ieltsParts[0];
+    return (
+      <AppScreen
+        contentStyle={styles.examinerScreen}
+        fixedHeader={(
+          <MainModuleHeader
+            englishTitle="CHOOSE YOUR EXAMINER"
+            title="选择本次考官"
+            style={styles.ieltsHeader}
+            action={(
+              <HeaderIconButton
+                accessibilityLabel="返回话题选择"
+                icon="close"
+                color={ieltsPalette.purpleDark}
+                onPress={() => setRoute('topics')}
+              />
+            )}
+          />
+        )}
+      >
+        <View style={styles.examinerIntro}>
+          <Text style={styles.examinerPart}>{partMeta.label} · {pendingSession?.topicItem?.title ?? '随机话题'}</Text>
+          <Text style={styles.examinerIntroCopy}>选择一位考官。你的选择会保存，并用于本次实时口语训练。</Text>
+        </View>
+        <View style={styles.examinerGrid} accessibilityRole="radiogroup">
+          {examiners.map((item) => {
+            const selected = item.id === examiner.id;
+            return (
+              <Pressable
+                key={item.id}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: selected }}
+                onPress={() => setExaminer(item)}
+                style={({ pressed }) => [
+                  styles.examinerCard,
+                  selected && styles.examinerCardSelected,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Image source={item.image} style={styles.examinerImage} contentFit="contain" />
+                <Text style={styles.examinerName}>{item.name}</Text>
+                <Text style={styles.examinerAccent}>{item.accent}口音</Text>
+                {selected ? <View style={styles.examinerSelected}><AppIcon name="check" size={15} color={colors.white} /></View> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+        <Card style={styles.examinerDetail}>
+          <Text style={styles.examinerDetailTitle}>{examiner.name} · {examiner.accent}口音</Text>
+          <Text style={styles.examinerDetailCopy}>{examiner.description}</Text>
+        </Card>
+        <AppButton
+          title={ielts.sessionBusy ? '正在准备…' : '确认考官并开始'}
+          icon="arrow-right"
+          disabled={!pendingSession || ielts.sessionBusy}
+          onPress={() => {
+            if (!pendingSession) return;
+            void beginSession({ ...pendingSession, selectedExaminer: examiner }).catch(() => undefined);
+          }}
+        />
+        {ielts.sessionError ? <Text style={styles.intakeError}>{ielts.sessionError}</Text> : null}
+      </AppScreen>
+    );
+  }
+
   if (route === 'session') {
-    const ieltsId = ielts.generated?.ieltsId;
+    const generatedScene = ielts.generated;
+    const ieltsId = generatedScene?.ieltsId;
     const voiceId = examiner.voiceId;
     const finishSession = (sessionId: string | null) => {
       if (sessionId) setActiveSessionId(sessionId);
@@ -990,7 +1095,6 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
         void beginSession({ nextPart, topicItem: null, random: true });
         return;
       }
-      setProgress(0);
       setEvaluationError(null);
       setRoute('analysis');
     };
@@ -1004,7 +1108,7 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
     if (part === 'p2') {
       const question = ielts.training?.questions[0];
       const cueCard = {
-        title: question?.questionText ?? ielts.generated.title,
+        title: question?.questionText ?? generatedScene?.title ?? 'IELTS Part 2',
         points: question?.cuePoints?.length
           ? question.cuePoints
           : ['What it is', 'When or where you experienced it', 'Who was involved', 'And explain why it is important to you'],
@@ -1032,13 +1136,18 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
 
   if (route === 'analysis') {
     return (
-      <AppScreen contentStyle={[styles.analysis, styles.ieltsStageScreen]} stickyHeader={false}>
-        <AppIcon name="sliders" size={32} />
-        <Text style={styles.analysisTitle}>正在分析你的口语表现</Text>
-        <Text style={uiStyles.muted}>{evaluationError ?? '评估流利度、词汇、语法和发音，并生成可复练的表达。'}</Text>
-        <ProgressBar value={progress} />
-        <Text style={styles.progressText}>{progress}%</Text>
-      </AppScreen>
+      <View style={styles.ieltsEvaluationRoot}>
+        {evaluationError ? (
+          <View style={styles.ieltsEvaluationError}>
+            <AppIcon name="sliders" size={32} color={ieltsPalette.purpleDark} />
+            <Text style={styles.analysisTitle}>评分生成失败</Text>
+            <Text style={styles.intakeError}>{evaluationError}</Text>
+            <AppButton title="返回主页" variant="secondary" onPress={() => setRoute('home')} />
+          </View>
+        ) : (
+          <EvaluationPendingOverlay copy="正在整理本次对话与四项能力表现…" />
+        )}
+      </View>
     );
   }
 
@@ -1046,22 +1155,44 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
   const bandScore = evaluation ? ielts.formatBand(evaluation.overallBandScore) : '—';
 
   const saveReport = () => {
-    if (!evaluation) return;
+    if (!evaluation) return null;
+    const recordId = activeSessionId ?? `ielts-${Date.now()}`;
     addIeltsRecord({
-      id: activeSessionId ?? `ielts-${Date.now()}`,
+      id: recordId,
       type: fullMock ? '完整模考' : part === 'p1' ? 'Part 1' : part === 'p3' ? 'Part 3' : 'Part 2',
       title: fullMock ? '完整口语模拟' : topic || ielts.generated?.title || 'IELTS 专项练习',
       date: '刚刚',
       duration: fullMock ? '14 分钟' : '4 分钟',
       result: `预估 ${bandScore}`,
-      estimatedBand: Number(evaluation.overallBandScore),
+      estimatedBand: evaluation.overallBandScore == null ? null : Number(evaluation.overallBandScore),
       scores: [
-        Math.round((evaluation.fluencyCoherenceScore / 9) * 100),
-        Math.round((evaluation.lexicalResourceScore / 9) * 100),
-        Math.round((evaluation.grammaticalRangeAccuracyScore / 9) * 100),
-        Math.round((evaluation.pronunciationScore / 9) * 100),
+        Math.round(((evaluation.fluencyCoherenceScore ?? 0) / 9) * 100),
+        Math.round(((evaluation.lexicalResourceScore ?? 0) / 9) * 100),
+        Math.round(((evaluation.grammaticalRangeAccuracyScore ?? 0) / 9) * 100),
+        Math.round(((evaluation.pronunciationScore ?? 0) / 9) * 100),
       ],
+      bandScores: [
+        evaluation.fluencyCoherenceScore,
+        evaluation.lexicalResourceScore,
+        evaluation.grammaticalRangeAccuracyScore,
+        evaluation.pronunciationScore,
+      ],
+      summary: evaluation.summary,
+      strengths: evaluation.strengths,
+      improvements: evaluation.improvements,
+      recommendedExpressions: evaluation.recommendedExpressions,
+      scoreReasons: [
+        evaluation.fluencyCoherenceReason ?? null,
+        evaluation.lexicalResourceReason ?? null,
+        evaluation.grammaticalRangeAccuracyReason ?? null,
+        evaluation.pronunciationReason ?? null,
+      ],
+      mode: fullMock ? 'MOCK_TEST' : 'PART_PRACTICE',
+      part: fullMock ? null : toApiPart(part),
+      endedAt: new Date().toISOString(),
+      partEvaluations: evaluation.partEvaluations,
     });
+    return recordId;
   };
 
   return (
@@ -1092,10 +1223,10 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
         <AppButton
           title="查看详情"
           onPress={() => {
-            saveReport();
+            const recordId = saveReport();
             if (onViewDetails) {
               setImmersiveLearning(false);
-              onViewDetails();
+              if (recordId) onViewDetails(recordId);
             } else {
               onExit();
             }
@@ -1137,7 +1268,6 @@ function InterviewSession({ question, questionIndex, onNext }: { question: strin
 
 export function InterviewFlow({ onExit, onViewDetails }: { onExit: () => void; onViewDetails?: () => void }) {
   const { addInterviewRecord } = useAppModel();
-  const { setImmersiveLearning } = useLearningStage();
   const [route, setRoute] = useState<InterviewRoute>('input');
   const [resume, setResume] = useState(false);
   const [jobDescription, setJobDescription] = useState('');
@@ -1148,10 +1278,8 @@ export function InterviewFlow({ onExit, onViewDetails }: { onExit: () => void; o
   const canStart = Boolean(jobDescription.trim() && difficulty);
 
   useEffect(() => {
-    setImmersiveLearning(route !== 'input');
-  }, [route, setImmersiveLearning]);
-
-  useEffect(() => () => setImmersiveLearning(false), [setImmersiveLearning]);
+    void rememberSpecialty('interview');
+  }, []);
 
   useEffect(() => {
     if (route !== 'finalizing') return;
@@ -1343,7 +1471,6 @@ export function InterviewFlow({ onExit, onViewDetails }: { onExit: () => void; o
             saveReport();
             closeReport();
             if (onViewDetails) {
-              setImmersiveLearning(false);
               onViewDetails();
             } else {
               onExit();
@@ -1368,26 +1495,29 @@ const styles = StyleSheet.create({
   ieltsCallScreen: { flex: 1, paddingHorizontal: 22, paddingTop: 24, paddingBottom: 22, backgroundColor: ieltsPalette.canvas },
   part2Screen: { flex: 1, backgroundColor: ieltsPalette.canvas },
   part2KeyboardView: { flex: 1 },
-  part2Content: { paddingHorizontal: 22, paddingTop: 18, paddingBottom: 16, gap: 14 },
-  part2Presence: { alignItems: 'center', gap: 3 },
-  part2ExaminerImage: { width: 72, height: 82 },
-  part2Timer: { color: ieltsPalette.text, fontSize: 25, lineHeight: 31, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  part2ExaminerName: { color: ieltsPalette.muted, fontSize: 12, lineHeight: 17, fontWeight: '500' },
-  part2Instruction: { maxWidth: 330, marginTop: 4, color: ieltsPalette.text, fontSize: 13, lineHeight: 19, fontWeight: '400', textAlign: 'center' },
-  part2CueCard: { padding: 18, gap: 10, borderWidth: 1, borderColor: ieltsPalette.border, borderRadius: 18, backgroundColor: ieltsPalette.paper, shadowColor: ieltsPalette.purple, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.08, shadowRadius: 14, elevation: 2, boxShadow: '0px 5px 16px rgba(128, 96, 232, 0.08)' },
+  part2Content: { flexGrow: 1, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 120, gap: 12 },
+  part2Presence: { minHeight: 82, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 11 },
+  part2PresenceCopy: { minWidth: 0, flex: 1 },
+  part2ExaminerImage: { width: 54, height: 64 },
+  part2Timer: { marginTop: 2, color: ieltsPalette.text, fontSize: 18, lineHeight: 24, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  part2ExaminerName: { color: ieltsPalette.muted, fontSize: 10, lineHeight: 14, fontWeight: '600' },
+  part2Instruction: { marginTop: 3, color: ieltsPalette.muted, fontSize: 11, lineHeight: 16, fontWeight: '400' },
+  part2Workspace: { width: '100%', gap: 10 },
+  part2CueCard: { width: '100%', padding: 14, gap: 8, borderWidth: 1, borderColor: ieltsPalette.border, borderRadius: 8, backgroundColor: ieltsPalette.paper, shadowColor: ieltsPalette.purple, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.08, shadowRadius: 14, elevation: 2, boxShadow: '0px 5px 16px rgba(128, 96, 232, 0.08)' },
   part2Eyebrow: { color: ieltsPalette.muted, fontSize: 10, lineHeight: 14, fontWeight: '600', letterSpacing: 1.5 },
-  part2CueTitle: { color: ieltsPalette.text, fontSize: 21, lineHeight: 28, fontWeight: '600', letterSpacing: -0.4 },
+  part2CueTitle: { color: ieltsPalette.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
   part2ShouldSay: { marginTop: 2, color: ieltsPalette.text, fontSize: 13, lineHeight: 18, fontWeight: '600' },
   part2CuePoints: { gap: 7 },
   part2CuePointRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
   part2Bullet: { width: 5, height: 5, marginTop: 7, borderRadius: 3, backgroundColor: ieltsPalette.purple },
-  part2CuePoint: { flex: 1, color: ieltsPalette.muted, fontSize: 13, lineHeight: 19, fontWeight: '400' },
-  part2NoteCard: { minHeight: 180, padding: 16, gap: 10, borderWidth: 1, borderColor: ieltsPalette.border, borderRadius: 18, backgroundColor: ieltsPalette.paper, shadowColor: ieltsPalette.purple, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.06, shadowRadius: 14, elevation: 2, boxShadow: '0px 5px 16px rgba(128, 96, 232, 0.06)' },
+  part2CuePoint: { flex: 1, color: ieltsPalette.muted, fontSize: 11, lineHeight: 16, fontWeight: '400' },
+  part2NoteCard: { width: '100%', minHeight: 220, padding: 12, gap: 9, borderWidth: 1, borderColor: ieltsPalette.border, borderRadius: 8, backgroundColor: ieltsPalette.paper, shadowColor: ieltsPalette.purple, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.06, shadowRadius: 14, elevation: 2, boxShadow: '0px 5px 16px rgba(128, 96,232,0.06)' },
   part2NoteHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   part2NoteTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   part2NoteTitle: { color: ieltsPalette.text, fontSize: 14, lineHeight: 20, fontWeight: '600' },
   part2NoteHint: { color: ieltsPalette.muted, fontSize: 10, lineHeight: 15, fontWeight: '400' },
-  part2NoteInput: { minHeight: 116, paddingHorizontal: 13, paddingVertical: 11, color: ieltsPalette.text, fontSize: 14, lineHeight: 21, fontWeight: '400', borderRadius: 13, backgroundColor: ieltsPalette.purpleSoft, outlineWidth: 0 },
+  part2NoteInput: { minHeight: 166, paddingHorizontal: 11, paddingVertical: 10, color: ieltsPalette.text, fontSize: 14, lineHeight: 21, fontWeight: '400', borderRadius: 6, backgroundColor: ieltsPalette.purpleSoft, outlineWidth: 0 },
+  part2LockedNote: { minHeight: 166, paddingHorizontal: 11, paddingVertical: 10, color: ieltsPalette.text, fontSize: 14, lineHeight: 21, borderRadius: 6, backgroundColor: ieltsPalette.purpleSoft },
   part2Footer: { paddingHorizontal: 22, paddingTop: 10, paddingBottom: 6, alignItems: 'center', backgroundColor: ieltsPalette.canvas },
   part2EndButton: { width: 58, height: 58, alignItems: 'center', justifyContent: 'center', borderRadius: 29, backgroundColor: colors.ink },
   ieltsHeader: { backgroundColor: ieltsPalette.canvas, borderBottomColor: ieltsPalette.border },
@@ -1503,10 +1633,20 @@ const styles = StyleSheet.create({
   topicPaginationPageTextActive: { color: colors.white, fontWeight: '700' },
   topicPageCount: { minWidth: 38, color: ieltsPalette.muted, fontSize: 12, textAlign: 'center' },
   topicCount: { color: ieltsPalette.muted, fontSize: 11, fontWeight: '400' },
+  examinerScreen: { gap: 18, paddingBottom: 130, backgroundColor: ieltsPalette.canvas },
+  examinerIntro: { gap: 6 },
+  examinerPart: { color: ieltsPalette.text, fontSize: 20, lineHeight: 27, fontWeight: '700' },
+  examinerIntroCopy: { color: ieltsPalette.muted, fontSize: 13, lineHeight: 20, fontWeight: '400' },
   examinerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
-  examinerCard: { width: '48%', minHeight: 142, padding: 12, alignItems: 'center', gap: 5, borderWidth: 1, borderColor: colors.line, borderRadius: 14 },
+  examinerCard: { position: 'relative', width: '48%', minHeight: 158, padding: 12, alignItems: 'center', gap: 5, borderWidth: 1, borderColor: ieltsPalette.border, borderRadius: 14, backgroundColor: colors.white },
+  examinerCardSelected: { borderWidth: 2, borderColor: ieltsPalette.purple, backgroundColor: ieltsPalette.purpleSoft },
   examinerImage: { width: 72, height: 82 },
   examinerName: { color: colors.ink, fontSize: 14, fontWeight: '500' },
+  examinerAccent: { color: ieltsPalette.muted, fontSize: 11, fontWeight: '400' },
+  examinerSelected: { position: 'absolute', top: 9, right: 9, width: 24, height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: ieltsPalette.purple },
+  examinerDetail: { gap: 6, borderColor: ieltsPalette.border, backgroundColor: colors.white },
+  examinerDetailTitle: { color: ieltsPalette.text, fontSize: 17, lineHeight: 23, fontWeight: '600' },
+  examinerDetailCopy: { color: ieltsPalette.muted, fontSize: 13, lineHeight: 20, fontWeight: '400' },
   deviceCheck: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.greenSoft },
   sessionExaminer: { alignItems: 'center', gap: 6 },
   examinerLarge: { width: 112, height: 132 },
@@ -1518,6 +1658,8 @@ const styles = StyleSheet.create({
   roundControl: { width: 60, height: 60, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 30 },
   roundControlOn: { backgroundColor: '#E9E9E5' },
   analysis: { alignItems: 'center', justifyContent: 'center', paddingBottom: 80 },
+  ieltsEvaluationRoot: { flex: 1, position: 'relative', backgroundColor: colors.white },
+  ieltsEvaluationError: { flex: 1, paddingHorizontal: 28, alignItems: 'center', justifyContent: 'center', gap: 14, backgroundColor: colors.white },
   analysisTitle: { color: colors.ink, fontSize: 25, lineHeight: 34, fontWeight: '600', textAlign: 'center' },
   progressText: { color: colors.subtle, fontSize: 12, fontWeight: '300', fontVariant: ['tabular-nums'] },
   reportScreen: { paddingTop: 32, paddingBottom: 44, justifyContent: 'center', gap: 14 },

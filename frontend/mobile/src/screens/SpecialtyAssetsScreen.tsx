@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ArrowLeftIcon } from 'phosphor-react-native/src/icons/ArrowLeft';
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
@@ -63,13 +63,37 @@ function themedCard(palette: AssetPalette) {
   return { borderColor: palette.border, backgroundColor: palette.paper, shadowColor: palette.accent };
 }
 
-const weeklyTrainingData = {
-  ielts: { values: [8, 16, 0, 24, 12, 21, 15], total: '96', completed: '6', coverage: '3' },
-  interview: { values: [6, 7, 0, 12, 5, 8, 4], total: '42', completed: '3', coverage: '2' },
-} as const;
+function buildIeltsWeeklyTraining(records: readonly IeltsLearningRecord[]) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const values = Array.from({ length: 7 }, () => 0);
+  const activeParts = new Set<string>();
+  let completed = 0;
+  for (const record of records) {
+    if (!record.startedAt) continue;
+    const startedAt = new Date(record.startedAt);
+    if (Number.isNaN(startedAt.getTime())) continue;
+    const day = new Date(startedAt.getFullYear(), startedAt.getMonth(), startedAt.getDate());
+    const daysAgo = Math.round((today.getTime() - day.getTime()) / 86_400_000);
+    if (daysAgo < 0 || daysAgo > 6) continue;
+    const endedAt = record.endedAt ? new Date(record.endedAt) : null;
+    const duration = endedAt && !Number.isNaN(endedAt.getTime())
+      ? Math.max(1, Math.round((endedAt.getTime() - startedAt.getTime()) / 60_000))
+      : 0;
+    values[6 - daysAgo] += duration;
+    completed += 1;
+    if (record.part) activeParts.add(record.part);
+    for (const evaluation of record.partEvaluations ?? []) activeParts.add(evaluation.part);
+  }
+  const total = values.reduce((sum, value) => sum + value, 0);
+  const activeDays = values.filter((value) => value > 0).length;
+  return { values, total, completed, activeDays, dailyAverage: activeDays ? Math.round(total / activeDays) : 0, coverage: activeParts.size };
+}
 
-function WeeklyTrainingChart({ kind, palette }: { kind: SpecialtyAssetKind; palette: AssetPalette }) {
-  const chart = weeklyTrainingData[kind];
+function WeeklyTrainingChart({ kind, palette, records = [] }: { kind: SpecialtyAssetKind; palette: AssetPalette; records?: readonly IeltsLearningRecord[] }) {
+  const chart = kind === 'ielts'
+    ? buildIeltsWeeklyTraining(records)
+    : { values: [6, 7, 0, 12, 5, 8, 4], total: 42, completed: 3, activeDays: 6, dailyAverage: 7, coverage: 2 };
   const maxValue = Math.max(...chart.values, 1);
   const dayLabels = ['周四', '周五', '周六', '周日', '周一', '周二', '今天'];
   return (
@@ -82,8 +106,8 @@ function WeeklyTrainingChart({ kind, palette }: { kind: SpecialtyAssetKind; pale
         </View>
         <Text style={[styles.weeklyCopy, { color: palette.muted }]}>共完成 {chart.completed} 次训练</Text>
         <View style={styles.weeklyStats}>
-          <View style={styles.weeklyStat}><Text style={[styles.weeklyStatValue, { color: palette.text }]}>4</Text><Text style={[styles.weeklyStatLabel, { color: palette.muted }]}>活跃天数</Text></View>
-          <View style={styles.weeklyStat}><Text style={[styles.weeklyStatValue, { color: palette.text }]}>{kind === 'ielts' ? '16' : '7'}</Text><Text style={[styles.weeklyStatLabel, { color: palette.muted }]}>日均分钟</Text></View>
+          <View style={styles.weeklyStat}><Text style={[styles.weeklyStatValue, { color: palette.text }]}>{chart.activeDays}</Text><Text style={[styles.weeklyStatLabel, { color: palette.muted }]}>活跃天数</Text></View>
+          <View style={styles.weeklyStat}><Text style={[styles.weeklyStatValue, { color: palette.text }]}>{chart.dailyAverage}</Text><Text style={[styles.weeklyStatLabel, { color: palette.muted }]}>日均分钟</Text></View>
           <View style={styles.weeklyStat}><Text style={[styles.weeklyStatValue, { color: palette.text }]}>{chart.coverage}</Text><Text style={[styles.weeklyStatLabel, { color: palette.muted }]}>专项覆盖</Text></View>
         </View>
       </View>
@@ -103,15 +127,15 @@ function WeeklyTrainingChart({ kind, palette }: { kind: SpecialtyAssetKind; pale
 }
 
 function IeltsOverview({ palette, onOpenRecord }: { palette: AssetPalette; onOpenRecord: (id: string) => void }) {
-  const { ieltsRecords } = useAppModel();
   const ielts = useIeltsFlowController();
+  const refreshHistory = ielts.refreshHistory;
 
   useEffect(() => {
-    void ielts.refreshHistory();
-  }, [ielts.refreshHistory]);
+    void refreshHistory();
+  }, [refreshHistory]);
 
-  const records = ielts.historyRecords.length > 0 ? ielts.historyRecords : ieltsRecords;
-  const latest = records[0];
+  const records = ielts.historyRecords;
+  const latest = records.find((record) => record.mode === 'MOCK_TEST');
   const targetScore = ielts.settings?.targetScore ?? 7.0;
   const latestBand = latest?.estimatedBand ?? ielts.settings?.latestEstimatedScore;
 
@@ -123,7 +147,7 @@ function IeltsOverview({ palette, onOpenRecord }: { palette: AssetPalette; onOpe
         <Text style={[styles.heroCopy, { color: palette.muted }]}>合理波动范围以 AI 训练评估为准，并非官方考试成绩</Text>
         <View style={[styles.targetRow, { borderTopColor: palette.border }]}><Text style={[styles.targetLabel, { color: palette.muted }]}>目标分数</Text><Text style={[styles.targetValue, { color: palette.accent }]}>{targetScore}</Text><Text style={[styles.targetNote, { color: palette.muted }]}>{latestBand != null ? `当前预估 ${latestBand.toFixed(1)}` : '暂无评估'}</Text></View>
       </Card>
-      <WeeklyTrainingChart kind="ielts" palette={palette} />
+      <WeeklyTrainingChart kind="ielts" palette={palette} records={records} />
       <SectionTitle title="最近训练" />
       <Card style={[styles.listCard, themedCard(palette)]}>{records.slice(0, 3).map((item) => <AssetListRow key={item.id} title={item.title} subtitle={`${item.type} · ${item.date} · ${item.duration}`} meta={item.result} onPress={() => onOpenRecord(item.id)} />)}</Card>
     </View>
@@ -173,15 +197,15 @@ function RecordPagination({ page, pageCount, palette, onPageChange }: { page: nu
 }
 
 function IeltsHistory({ palette, onOpenRecord }: { palette: AssetPalette; onOpenRecord: (id: string) => void }) {
-  const { ieltsRecords } = useAppModel();
   const ielts = useIeltsFlowController();
+  const refreshHistory = ielts.refreshHistory;
   const [page, setPage] = useState(0);
 
   useEffect(() => {
-    void ielts.refreshHistory();
-  }, [ielts.refreshHistory]);
+    void refreshHistory();
+  }, [refreshHistory]);
 
-  const records = ielts.historyRecords.length > 0 ? ielts.historyRecords : ieltsRecords;
+  const records = ielts.historyRecords;
   const pageCount = Math.max(1, Math.ceil(records.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
   const visibleRecords = records.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
@@ -220,10 +244,12 @@ function IeltsTrendLineChart({ values, palette }: { values: number[]; palette: A
   const padding = { top: 14, right: 14, bottom: 31, left: 14 };
   const chartWidthInner = chartWidth - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const min = 5;
-  const max = 7;
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const min = Math.max(0, Math.floor((minValue - 0.5) * 2) / 2);
+  const max = Math.min(9, Math.max(min + 1, Math.ceil((maxValue + 0.5) * 2) / 2));
   const points = values.map((value, index) => ({
-    x: padding.left + (chartWidthInner * index) / (values.length - 1),
+    x: values.length === 1 ? chartWidth / 2 : padding.left + (chartWidthInner * index) / (values.length - 1),
     y: padding.top + ((max - value) / (max - min)) * chartHeight,
   }));
   const linePath = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
@@ -245,24 +271,76 @@ function IeltsTrendLineChart({ values, palette }: { values: number[]; palette: A
 }
 
 function IeltsTrends({ palette }: { palette: AssetPalette }) {
-  const values = [5.5, 6, 6, 6.5, 6.5];
-  const averages = [78, 72, 76, 84];
-  const statuses = ['稳定', '优先提升', '稳定', '优势'];
+  const ielts = useIeltsFlowController();
+  const refreshHistory = ielts.refreshHistory;
+  useEffect(() => {
+    void refreshHistory();
+  }, [refreshHistory]);
+
+  const records = ielts.historyRecords;
+  const mockValues = records
+    .filter((record) => record.mode === 'MOCK_TEST' && record.estimatedBand != null)
+    .slice(0, 5)
+    .reverse()
+    .map((record) => Number(record.estimatedBand));
+  const latest = mockValues.at(-1) ?? null;
+  const change = mockValues.length >= 2
+    ? Number((mockValues[mockValues.length - 1] - mockValues[0]).toFixed(1))
+    : null;
+  const recent = records.slice(0, 10);
+  const dimensions = scoreLabels.ielts.map((label, index) => {
+    const scores = recent
+      .map((record) => record.bandScores?.[index])
+      .filter((score): score is number => score != null && Number.isFinite(Number(score)))
+      .map(Number);
+    const band = scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null;
+    return { label, percent: band == null ? 0 : Math.round((band / 9) * 100) };
+  });
+  const available = dimensions.map((item) => item.percent).filter((value) => value > 0);
+  const highest = available.length ? Math.max(...available) : 0;
+  const lowest = available.length ? Math.min(...available) : 0;
+  const average = available.length ? available.reduce((sum, value) => sum + value, 0) / available.length : 0;
+  const dimensionRows = dimensions.map((item) => ({
+    ...item,
+    status: item.percent === 0
+      ? '暂无数据'
+      : highest > lowest && item.percent === highest
+        ? '相对优势'
+        : highest > lowest && item.percent === lowest
+          ? '重点提升'
+          : item.percent >= average
+            ? '表现稳定'
+            : '继续提升',
+  }));
+  const evaluatedParts = new Set(
+    records.flatMap((record) => [
+      ...(record.part ? [record.part] : []),
+      ...(record.partEvaluations ?? []).map((evaluation) => evaluation.part),
+    ]),
+  );
+  const partAdvice = [
+    { part: 'PART_1', label: 'Part 1', title: '回答长度更稳定', detail: '保持完整作答，减少过短回答。' },
+    { part: 'PART_2', label: 'Part 2', title: '内容组织正在改善', detail: '加强要点展开与句间连接。' },
+    { part: 'PART_3', label: 'Part 3', title: '观点深度需要加强', detail: '增加原因、影响与对比结构。' },
+  ] as const;
   return (
     <View style={styles.sectionStack}>
       <Card style={[styles.trendSummaryCard, themedCard(palette)]}>
         <View style={styles.trendSummaryTop}>
-          <View style={styles.trendMetric}><Text style={[styles.cardLabel, { color: palette.muted }]}>模考趋势</Text><Text style={[styles.trendValue, { color: palette.accent }]}>6.5</Text><Text style={[styles.trendNote, { color: palette.muted }]}>最近 5 次模考提升 1.0 分</Text></View>
-          <View style={[styles.trendGoal, { borderLeftColor: palette.border }]}><Text style={[styles.cardLabel, { color: palette.muted }]}>目标进度</Text><Text style={[styles.trendGoalValue, { color: palette.text }]}>7.0</Text><Text style={[styles.trendNote, { color: palette.muted }]}>已连续打卡 12 天</Text></View>
+          <View style={styles.trendMetric}><Text style={[styles.cardLabel, { color: palette.muted }]}>模考趋势</Text><Text style={[styles.trendValue, { color: palette.accent }]}>{latest == null ? '—' : latest.toFixed(1)}</Text><Text style={[styles.trendNote, { color: palette.muted }]}>{change == null ? '至少完成两次模考后显示趋势' : `最近 ${mockValues.length} 次变化 ${change >= 0 ? '+' : ''}${change.toFixed(1)} 分`}</Text></View>
+          <View style={[styles.trendGoal, { borderLeftColor: palette.border }]}><Text style={[styles.cardLabel, { color: palette.muted }]}>目标进度</Text><Text style={[styles.trendGoalValue, { color: palette.text }]}>{ielts.settings?.targetScore == null ? '—' : Number(ielts.settings.targetScore).toFixed(1)}</Text><Text style={[styles.trendNote, { color: palette.muted }]}>已连续打卡 {ielts.settings?.currentStreakDays ?? 0} 天</Text></View>
         </View>
-        <IeltsTrendLineChart values={values} palette={palette} />
+        {mockValues.length > 0
+          ? <IeltsTrendLineChart values={mockValues} palette={palette} />
+          : <View style={styles.trendEmpty}><Text style={[styles.partTitle, { color: palette.text }]}>暂无模考趋势</Text><Text style={[styles.partCopy, { color: palette.muted }]}>完成完整模考后生成折线图。</Text></View>}
       </Card>
-      <View style={styles.trendSectionHeading}><Text style={[styles.trendSectionTitle, { color: palette.text }]}>四项能力平均分</Text></View>
-      <Card style={[styles.reportCard, themedCard(palette)]}>{scoreLabels.ielts.map((label, index) => <View key={label} style={styles.dimensionRow}><Text style={[styles.dimensionLabel, { color: palette.text }]}>{label}</Text><Text style={[styles.dimensionValue, { color: palette.text }]}>{averages[index]}<Text style={[styles.dimensionSuffix, { color: palette.muted }]}>/100</Text></Text><View style={styles.dimensionProgress}><ProgressBar value={averages[index]} /></View><Text style={[styles.dimensionStatus, { color: palette.text }]}>{statuses[index]}</Text></View>)}</Card>
+      <View style={styles.trendSectionHeading}><Text style={[styles.trendSectionTitle, { color: palette.text }]}>四项能力平均分 · 最近 {recent.length} 次训练</Text></View>
+      <Card style={[styles.reportCard, themedCard(palette)]}>{dimensionRows.map((item) => <View key={item.label} style={styles.dimensionRow}><Text style={[styles.dimensionLabel, { color: palette.text }]}>{item.label}</Text><Text style={[styles.dimensionValue, { color: palette.text }]}>{item.percent || '—'}{item.percent ? <Text style={[styles.dimensionSuffix, { color: palette.muted }]}>/100</Text> : null}</Text><View style={styles.dimensionProgress}><ProgressBar value={item.percent} /></View><Text style={[styles.dimensionStatus, { color: palette.text }]}>{item.status}</Text></View>)}</Card>
       <View style={styles.trendPartGrid}>
-        <Card style={[styles.partFeedbackCard, themedCard(palette)]}><Text style={[styles.partLabel, { color: palette.muted }]}>Part 1</Text><Text style={[styles.partTitle, { color: palette.text }]}>回答长度更稳定</Text><Text style={[styles.partCopy, { color: palette.muted }]}>近 4 次练习中，过短回答减少 38%。</Text></Card>
-        <Card style={[styles.partFeedbackCard, themedCard(palette)]}><Text style={[styles.partLabel, { color: palette.muted }]}>Part 2</Text><Text style={[styles.partTitle, { color: palette.text }]}>内容组织正在改善</Text><Text style={[styles.partCopy, { color: palette.muted }]}>仍需减少重复并加强细节连接。</Text></Card>
-        <Card style={[styles.partFeedbackCard, themedCard(palette)]}><Text style={[styles.partLabel, { color: palette.muted }]}>Part 3</Text><Text style={[styles.partTitle, { color: palette.text }]}>观点深度不足</Text><Text style={[styles.partCopy, { color: palette.muted }]}>建议增加原因、影响与对比结构。</Text></Card>
+        {partAdvice.map((item) => {
+          const availablePart = evaluatedParts.has(item.part);
+          return <Card key={item.part} style={[styles.partFeedbackCard, themedCard(palette)]}><Text style={[styles.partLabel, { color: palette.muted }]}>{item.label}</Text><Text style={[styles.partTitle, { color: palette.text }]}>{availablePart ? item.title : '暂无专项评分'}</Text><Text style={[styles.partCopy, { color: palette.muted }]}>{availablePart ? item.detail : '完成有效训练后生成建议。'}</Text></Card>;
+        })}
       </View>
     </View>
   );
@@ -335,19 +413,22 @@ export function SpecialtyAssetsScreen({ kind, tab, onTabChange, onScenes, onIelt
 export function IeltsAssetReport({ record, onBack }: { record: IeltsLearningRecord; onBack: () => void }) {
   const palette = assetPalettes.ielts;
   const playback = useRecordingPlayback(record.recordingUrls ?? []);
+  const reportHeading = record.type === '完整模考'
+    ? `完整模考 · ${record.title}`
+    : `${record.type} · ${record.title}`;
   return (
     <AppScreen
       contentStyle={[styles.assetsContent, { backgroundColor: palette.canvas }]}
       fixedHeader={<PageHeader fixed onBack={onBack} title="雅思报告" style={{ backgroundColor: palette.canvas, borderBottomColor: palette.border }} />}
     >
       <View style={styles.detailHeading}>
-        <Text style={[styles.reportTitle, { color: palette.text }]}>{record.title}</Text>
-        <Text style={[styles.reportCopy, { color: palette.muted }]}>{record.type} · {record.date} · {record.duration}</Text>
+        <Text style={[styles.reportTitle, { color: palette.text }]}>{reportHeading}</Text>
+        <Text style={[styles.reportCopy, { color: palette.muted }]}>{record.date} · {record.duration}</Text>
       </View>
       <Card style={[styles.heroCard, themedCard(palette)]}>
-        <Text style={[styles.cardLabel, { color: palette.muted }]}>总体报告</Text>
-        <Text style={[styles.heroScore, { color: palette.accent }]}>{record.result}</Text>
-        <Text style={[styles.heroCopy, { color: palette.muted }]}>本次表达整体清楚，优先改善观点之间的过渡，并在回答中保持稳定、完整的展开。</Text>
+        <Text style={[styles.reportTitle, { color: palette.text }]}>总体报告</Text>
+        {record.estimatedBand != null ? <Text style={[styles.heroScore, { color: palette.accent }]}>{record.estimatedBand.toFixed(1)}</Text> : null}
+        <Text style={[styles.heroCopy, { color: palette.muted }]}>{record.summary || '本次报告已生成，下面展示四项能力诊断和针对性建议。'}</Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={playback.playing ? '暂停录音' : '播放原始录音'}
@@ -370,15 +451,36 @@ export function IeltsAssetReport({ record, onBack }: { record: IeltsLearningReco
         </Pressable>
         {playback.error ? <Text style={[styles.recordingError, { color: palette.muted }]}>{playback.error}</Text> : null}
       </Card>
+      <Card style={themedCard(palette)}>
+        <Text style={[styles.reportTitle, { color: palette.text }]}>表达优势</Text>
+        {(record.strengths?.length ? record.strengths : ['本次报告暂无单独保存的优势说明。']).map((item, index) => (
+          <Text key={`${item}-${index}`} style={[styles.reportBullet, { color: palette.muted }]}>• {item}</Text>
+        ))}
+      </Card>
       <Card style={[styles.reportCard, themedCard(palette)]}>
         <Text style={[styles.reportTitle, { color: palette.text }]}>四项能力评分</Text>
-        {scoreLabels.ielts.map((label, index) => <ScoreRow key={label} label={label} value={record.scores[index]} />)}
+        {scoreLabels.ielts.map((label, index) => (
+          <View key={label} style={styles.bandDetailRow}>
+            <View style={styles.bandDetailHeader}>
+              <Text style={[styles.dimensionLabel, { color: palette.text }]}>{label}</Text>
+              <Text style={[styles.bandDetailValue, { color: palette.accent }]}>{record.bandScores?.[index] == null ? '—' : Number(record.bandScores[index]).toFixed(1)}<Text style={[styles.dimensionSuffix, { color: palette.muted }]}>/9</Text></Text>
+            </View>
+            {record.scoreReasons?.[index] ? <Text style={[styles.reportCopy, { color: palette.muted }]}>{record.scoreReasons[index]}</Text> : null}
+          </View>
+        ))}
       </Card>
       <Card style={themedCard(palette)}>
-        <Text style={[styles.reportTitle, { color: palette.text }]}>下一次重点</Text>
-        <Text style={[styles.reportCopy, { color: palette.muted }]}>优先练习观点展开与段落衔接，让长回答更加稳定。</Text>
+        <Text style={[styles.reportTitle, { color: palette.text }]}>优化改进</Text>
+        {(record.improvements?.length ? record.improvements : ['本次报告暂无单独保存的改进建议。']).map((item, index) => (
+          <Text key={`${item}-${index}`} style={[styles.reportBullet, { color: palette.muted }]}>{index + 1}. {item}</Text>
+        ))}
       </Card>
-      <AppButton title="快速复练" icon="arrow-right" />
+      <Card style={themedCard(palette)}>
+        <Text style={[styles.reportTitle, { color: palette.text }]}>推荐表达</Text>
+        {(record.recommendedExpressions?.length ? record.recommendedExpressions : ['本次报告暂无推荐表达。']).map((item, index) => (
+          <Text key={`${item}-${index}`} style={[styles.reportBullet, { color: palette.muted }]}>• {item}</Text>
+        ))}
+      </Card>
     </AppScreen>
   );
 }
@@ -419,6 +521,10 @@ const styles = StyleSheet.create({
   cardLabel: { color: colors.subtle, fontSize: 11, fontWeight: '500', letterSpacing: 1.2 },
   heroScore: { color: colors.ink, fontSize: 50, lineHeight: 57, fontWeight: '600', letterSpacing: -2 },
   heroCopy: { color: colors.muted, fontSize: 13, lineHeight: 20, fontWeight: '300' },
+  reportBullet: { marginTop: 8, fontSize: 13, lineHeight: 21, fontWeight: '300' },
+  bandDetailRow: { paddingVertical: 13, gap: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
+  bandDetailHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  bandDetailValue: { fontSize: 22, lineHeight: 28, fontWeight: '600', fontVariant: ['tabular-nums'] },
   targetRow: { marginTop: 5, paddingTop: 15, flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   targetLabel: { color: colors.muted, fontSize: 12, fontWeight: '300' },
   targetValue: { color: colors.ink, fontSize: 23, fontWeight: '600' },
@@ -466,6 +572,7 @@ const styles = StyleSheet.create({
   trendGoal: { minWidth: 102, paddingLeft: 16, borderLeftWidth: StyleSheet.hairlineWidth },
   trendGoalValue: { marginTop: 4, fontSize: 30, lineHeight: 34, fontWeight: '600' },
   trendChartFrame: { width: '100%', minHeight: 154, overflow: 'hidden' },
+  trendEmpty: { minHeight: 154, alignItems: 'center', justifyContent: 'center', gap: 5 },
   trendSectionHeading: { marginTop: 2 },
   trendSectionTitle: { fontSize: 17, lineHeight: 23, fontWeight: '600' },
   dimensionRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },

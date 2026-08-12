@@ -6,6 +6,7 @@ import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
 
 type NativeAudioPlayer = {
   play(): void;
+  pause(): void;
   remove(): void;
 };
 
@@ -24,11 +25,16 @@ export function useRecordingPlayback(urls: readonly string[]) {
   const [error, setError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
   const playerRef = useRef<NativeAudioPlayer | null>(null);
-  const cacheRef = useRef<Array<{ remove(): void }>>([]);
+  const cacheRef = useRef<{ remove(): void }[]>([]);
 
   const cleanup = useCallback(() => {
-    playerRef.current?.remove();
+    const player = playerRef.current;
     playerRef.current = null;
+    try {
+      player?.pause();
+    } finally {
+      player?.remove();
+    }
     for (const file of cacheRef.current) file.remove();
     cacheRef.current = [];
   }, []);

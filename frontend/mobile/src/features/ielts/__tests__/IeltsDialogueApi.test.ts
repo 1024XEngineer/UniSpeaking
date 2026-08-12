@@ -41,7 +41,10 @@ describe('IeltsDialogueApi', () => {
   });
 
   it('evaluates a learner turn with transcript only', async () => {
-    const client = { request: jest.fn(async () => ({ score: 7 })) };
+    const request = jest.fn<Promise<unknown>, [string, { method?: string; body?: FormData }?]>(
+      async () => ({ score: 7 }),
+    );
+    const client = { request };
     const api = new IeltsDialogueApi(client, 'ielts-1');
 
     await api.evaluateTurn('session-1', 1, 'My hometown is Shanghai.');
@@ -50,7 +53,7 @@ describe('IeltsDialogueApi', () => {
       '/api/ielts/ielts-1/sessions/session-1/turns/1/evaluation',
       expect.objectContaining({ method: 'POST' }),
     );
-    const body = client.request.mock.calls[0][1]?.body as FormData;
+    const body = request.mock.calls[0][1]?.body as FormData;
     expect(body.get('transcript')).toBe('My hometown is Shanghai.');
   });
 

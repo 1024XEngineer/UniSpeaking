@@ -74,14 +74,41 @@ export function mapEvaluationToRecord(
     title: topicTitles ? recordTitle({ ...item, mode, part, topicTitles } as IeltsEvaluationHistoryItem) : 'IELTS 专项练习',
     date: formatRelativeDate(endedAt ?? startedAt),
     duration: formatDuration(startedAt, endedAt),
-    result: `预估 ${formatBand(item.overallBandScore)}`,
-    estimatedBand: Number(item.overallBandScore),
+    result: item.overallBandScore == null ? '专项诊断' : `预估 ${formatBand(item.overallBandScore)}`,
+    estimatedBand: item.overallBandScore == null ? null : Number(item.overallBandScore),
     scores: [
       bandToChartScore(item.fluencyCoherenceScore),
       bandToChartScore(item.lexicalResourceScore),
       bandToChartScore(item.grammaticalRangeAccuracyScore),
       bandToChartScore(item.pronunciationScore),
     ],
+    bandScores: [
+      item.fluencyCoherenceScore,
+      item.lexicalResourceScore,
+      item.grammaticalRangeAccuracyScore,
+      item.pronunciationScore,
+    ],
+    summary: item.summary,
+    strengths: item.strengths,
+    improvements: item.improvements,
+    recommendedExpressions: item.recommendedExpressions,
+    scoreReasons: [
+      item.fluencyCoherenceReason ?? null,
+      item.lexicalResourceReason ?? null,
+      item.grammaticalRangeAccuracyReason ?? null,
+      item.pronunciationReason ?? null,
+    ],
+    mode,
+    part,
+    startedAt,
+    endedAt,
+    partEvaluations: item.partEvaluations?.map((evaluation) => ({
+      part: evaluation.part,
+      fluencyCoherenceScore: evaluation.fluencyCoherenceScore,
+      lexicalResourceScore: evaluation.lexicalResourceScore,
+      grammaticalRangeAccuracyScore: evaluation.grammaticalRangeAccuracyScore,
+      pronunciationScore: evaluation.pronunciationScore,
+    })),
     recordingUrls:
       'recordingUrls' in item && item.recordingUrls?.length
         ? item.recordingUrls

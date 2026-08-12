@@ -59,6 +59,7 @@ const initialSnapshot: RealtimeSessionSnapshot = {
   sessionId: null,
   userTranscript: '',
   assistantTranscript: '',
+  transcriptHistory: [],
   error: null,
 };
 

@@ -9,7 +9,7 @@ export default function IeltsRoute() {
   return (
     <IeltsFlow
       onExit={() => void forgetSpecialty().then(() => router.replace('/(app)/(tabs)/(scenes)/scenes'))}
-      onViewDetails={() => router.replace(routes.learning.ielts.history)}
+      onViewDetails={(recordId) => router.replace(routes.learning.ielts.record(recordId))}
     />
   );
 }

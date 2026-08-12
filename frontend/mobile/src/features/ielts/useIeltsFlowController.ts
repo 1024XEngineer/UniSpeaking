@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import type { IeltsLearningRecord } from '@/data/learningAssets';
+
 import { createIeltsService } from './createIeltsService';
 import {
   examinerById,
   formatBand,
   parseTargetScore,
   practiceTypeLabel,
-  toApiCategory,
   toApiPart,
   type IeltsExaminer,
   type MobileIeltsPartId,
@@ -143,7 +144,8 @@ export function useIeltsFlowController() {
   }, [service]);
 
   useEffect(() => {
-    void refreshSettings();
+    const timer = setTimeout(() => void refreshSettings(), 0);
+    return () => clearTimeout(timer);
   }, [refreshSettings]);
 
   return useMemo(

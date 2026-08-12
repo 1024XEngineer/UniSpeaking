@@ -96,15 +96,36 @@ export type IeltsSceneFlow = {
 export type IeltsEvaluationResult = {
   part: IeltsPart | null;
   assessmentType: string;
-  overallBandScore: number;
-  fluencyCoherenceScore: number;
-  lexicalResourceScore: number;
-  grammaticalRangeAccuracyScore: number;
-  pronunciationScore: number;
+  overallBandScore: number | null;
+  fluencyCoherenceScore: number | null;
+  lexicalResourceScore: number | null;
+  grammaticalRangeAccuracyScore: number | null;
+  pronunciationScore: number | null;
   summary: string;
   strengths: string[];
   improvements: string[];
   recommendedExpressions: string[];
+  fluencyCoherenceReason?: string | null;
+  lexicalResourceReason?: string | null;
+  grammaticalRangeAccuracyReason?: string | null;
+  pronunciationReason?: string | null;
+  partEvaluations?: IeltsPartEvaluation[];
+};
+
+export type IeltsPartEvaluation = {
+  part: IeltsPart;
+  fluencyCoherenceScore: number | null;
+  lexicalResourceScore: number | null;
+  grammaticalRangeAccuracyScore: number | null;
+  pronunciationScore: number | null;
+  summary: string;
+  strengths: string[];
+  improvements: string[];
+  recommendedExpressions: string[];
+  fluencyCoherenceReason?: string | null;
+  lexicalResourceReason?: string | null;
+  grammaticalRangeAccuracyReason?: string | null;
+  pronunciationReason?: string | null;
 };
 
 export type IeltsEvaluationHistoryItem = IeltsEvaluationResult & {
