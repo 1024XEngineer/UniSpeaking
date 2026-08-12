@@ -726,7 +726,6 @@ function InterviewSession({ preparation, onFinished }: { preparation: InterviewP
   const { teacher } = useAppModel();
   const session = useInterviewSession({ sceneId: preparation.scene.sceneId, voice: teacher.voiceId });
   const deliveredSession = useRef<string | null>(null);
-  const latestAssistant = [...session.transcripts].reverse().find((item) => item.owner === 0)?.text ?? '';
 
   useEffect(() => {
     if (session.state === 'ended' && session.sessionId && deliveredSession.current !== session.sessionId) {
@@ -751,7 +750,7 @@ function InterviewSession({ preparation, onFinished }: { preparation: InterviewP
         elapsed={session.elapsed}
         endAccessibilityLabel="结束面试"
         initialSubtitles
-        muted={session.muted}
+        muted={false}
         onEnd={() => void session.end().catch(() => undefined)}
         onMutedChange={session.setMuted}
         participant={{ image: examinerAssets.sophia, name: 'AI 面试官' }}
@@ -759,9 +758,9 @@ function InterviewSession({ preparation, onFinished }: { preparation: InterviewP
         statusLabel={statusText}
         statusText={`${preparation.jobTitle ?? '英文面试'} · ${statusText}`}
         tone="navy"
-        transcriptEnglish={latestAssistant || statusText}
+        transcriptEnglish={session.currentQuestion || (session.state === 'starting' ? '正在连接 AI 面试官…' : 'AI 面试官正在提问…')}
         transcriptSpeaker="AI 面试官"
-        userTranscript={session.transcripts.filter((item) => item.owner === 1).at(-1)?.text ?? ''}
+        userTranscript=""
       />
     </SafeAreaView>
   );
