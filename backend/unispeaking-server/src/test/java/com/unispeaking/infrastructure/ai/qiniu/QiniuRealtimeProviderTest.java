@@ -106,6 +106,28 @@ class QiniuRealtimeProviderTest {
 	}
 
 	@Test
+	void mapsLegacyVoiceAndReturnsTheResolvedQiniuVoice() throws Exception {
+		RecordingHttpClient client = successfulConnectionClient("rti-session-voice");
+		QiniuRealtimeProvider provider = provider(client, "server-api-key");
+
+		var result = provider.connect(command("Harvey"), null);
+
+		assertEquals("Ethan", result.voiceId());
+		assertTrue(readBody(client.requests.get(1)).contains("\"voice_profile\":\"Ethan\""));
+	}
+
+	@Test
+	void acceptsAProfileNativeVoiceWithoutMapping() throws Exception {
+		RecordingHttpClient client = successfulConnectionClient("rti-session-native-voice");
+		QiniuRealtimeProvider provider = provider(client, "server-api-key");
+
+		var result = provider.connect(command("Serena"), null);
+
+		assertEquals("Serena", result.voiceId());
+		assertTrue(readBody(client.requests.get(1)).contains("\"voice_profile\":\"Serena\""));
+	}
+
+	@Test
 	void rejectsMissingCredentialsAndUnavailableProfilesBeforeCreatingASession() {
 		RecordingHttpClient missingKeyClient = new RecordingHttpClient();
 		BusinessException missingKey = assertThrows(
@@ -121,6 +143,26 @@ class QiniuRealtimeProviderTest {
 				() -> provider(unavailableClient, "server-api-key").connect(command(), null));
 		assertEquals("QINIU_PROFILE_UNAVAILABLE", unavailable.code());
 		assertEquals(1, unavailableClient.requests.size());
+
+		RecordingHttpClient unsupportedVoiceClient = new RecordingHttpClient(
+				response(200, profiles()));
+		BusinessException unsupportedVoice = assertThrows(
+				BusinessException.class,
+				() -> provider(unsupportedVoiceClient, "server-api-key")
+						.connect(command("LegacyVoice"), null));
+		assertEquals("QINIU_PROFILE_UNAVAILABLE", unsupportedVoice.code());
+		assertEquals(1, unsupportedVoiceClient.requests.size());
+	}
+
+	private RecordingHttpClient successfulConnectionClient(String sessionId) {
+		return new RecordingHttpClient(
+				response(200, profiles()),
+				response(201, """
+						{"session_id":"%s","trace_id":"trace-voice",
+						 "client_endpoint":{"url":"/v1/realtime/sessions/%s/rtc",
+						 "access_token":"short-token"}}
+						""".formatted(sessionId, sessionId)),
+				response(200, "{\"type\":\"answer\",\"sdp\":\"answer-sdp\"}"));
 	}
 
 	private QiniuRealtimeProvider provider(RecordingHttpClient client, String apiKey) {
@@ -128,10 +170,13 @@ class QiniuRealtimeProviderTest {
 				"https://miku-rtic.qiniuapi.com",
 				apiKey,
 				"unispeaking_001",
-				"qwen3.5-omni-plus-realtime",
-				"default_assistant",
-				"Tina",
-				"platform_rtc",
+					"qwen3.5-omni-plus-realtime",
+					"default_assistant",
+					"Tina",
+					Map.of(
+							"Harvey", "Ethan",
+							"Mione", "Cindy"),
+					"platform_rtc",
 				"cn-east",
 				Duration.ofSeconds(20),
 				1_048_576);
@@ -140,6 +185,10 @@ class QiniuRealtimeProviderTest {
 	}
 
 	private RealtimeConnectCommand command() {
+		return command("Tina");
+	}
+
+	private RealtimeConnectCommand command(String voiceId) {
 		return new RealtimeConnectCommand(
 				"qwen3.5-omni-plus-realtime",
 				"offer-sdp",
@@ -147,14 +196,14 @@ class QiniuRealtimeProviderTest {
 				"local-session-1",
 				"freechat-scene-1",
 				SceneType.FREE_CHAT,
-				"Tina");
+				voiceId);
 	}
 
 	private String profiles() {
 		return """
 				{"profiles":[{"model_profile":"qwen3.5-omni-plus-realtime",
 				"role_profiles":["default_assistant","english_coach_default"],
-				"voice_profiles":["default_voice","Tina"],
+					"voice_profiles":["default_voice","Tina","Cherry","Serena","Ethan","Chelsie","Cindy"],
 				"client_transports":["platform_rtc","platform_wss"]}]}
 				""";
 	}

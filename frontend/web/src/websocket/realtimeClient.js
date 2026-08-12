@@ -150,10 +150,11 @@ export function buildProviderSessionBindingFrame(localSessionId, source) {
   };
 }
 
-export function buildRealtimeStartPayload(offerSdp, { ielts = false } = {}) {
+export function buildRealtimeStartPayload(offerSdp, { ielts = false, voice = DEFAULT_VOICE } = {}) {
+  const selectedVoice = String(voice || "").trim() || DEFAULT_VOICE;
   return {
     offerSdp,
-    ...(ielts ? { voiceId: DEFAULT_VOICE } : { voice: DEFAULT_VOICE }),
+    ...(ielts ? { voiceId: selectedVoice } : { voice: selectedVoice }),
     translationEnabled: true,
   };
 }
@@ -857,7 +858,7 @@ export function createRealtimeClient({
     }
   }
 
-  async function postStart({ offerSdp }) {
+  async function postStart({ offerSdp, voice }) {
     const accessToken = getAccessToken();
     const path = customSceneId
       ? `/api/custom-scenes/${encodeURIComponent(customSceneId)}/sessions`
@@ -872,7 +873,10 @@ export function createRealtimeClient({
         "Content-Type": "application/json",
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
-      body: JSON.stringify(buildRealtimeStartPayload(offerSdp, { ielts: Boolean(ieltsSceneId) })),
+      body: JSON.stringify(buildRealtimeStartPayload(offerSdp, {
+        ielts: Boolean(ieltsSceneId),
+        voice,
+      })),
     });
     return unwrapResponse(response);
   }
@@ -1254,6 +1258,7 @@ export function createRealtimeClient({
   }
 
   async function start({
+    voice = DEFAULT_VOICE,
     speechSpeed = DEFAULT_SPEECH_SPEED,
     silenceDurationMs = null,
     turnDetectionType = null,
@@ -1304,6 +1309,7 @@ export function createRealtimeClient({
 
       const backend = await postStart({
         offerSdp: peer.localDescription?.sdp || offer.sdp || "",
+        voice,
       });
       sessionId = backend.sessionId;
       providerSessionId = extractProviderSessionId(backend);

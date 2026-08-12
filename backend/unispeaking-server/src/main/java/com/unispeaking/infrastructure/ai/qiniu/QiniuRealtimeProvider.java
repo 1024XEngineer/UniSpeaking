@@ -59,15 +59,16 @@ public class QiniuRealtimeProvider extends RealtimeProvider {
 			RealtimeCredential ignoredCredential) {
 		validateCommand(command);
 		String requestId = "req_unispeaking_" + UUID.randomUUID().toString().replace("-", "");
-		validateProfile(requestId);
-		CreatedSession session = createSession(command, requestId);
+		String voiceProfile = properties.resolveVoiceProfile(command.voiceId());
+		validateProfile(requestId, voiceProfile);
+		CreatedSession session = createSession(command, voiceProfile, requestId);
 		try {
 			String answerSdp = exchangeSessionSdp(session, command.offerSdp(), requestId);
 			return new RealtimeConnectionResult(
 					session.sessionId(),
 					type(),
 					properties.modelProfile(),
-					properties.voiceProfile(),
+					voiceProfile,
 					session.traceId(),
 					answerSdp,
 					session.expiresAt());
@@ -121,7 +122,7 @@ public class QiniuRealtimeProvider extends RealtimeProvider {
 		}
 	}
 
-	private void validateProfile(String requestId) {
+	private void validateProfile(String requestId, String voiceProfile) {
 		HttpResponse<String> response = send(
 				controlRequest(properties.controlUri(PROFILES_PATH), requestId)
 					.GET()
@@ -132,7 +133,7 @@ public class QiniuRealtimeProvider extends RealtimeProvider {
 		for (JsonNode profile : root.path("profiles")) {
 			if (properties.modelProfile().equals(text(profile, "model_profile"))
 					&& contains(profile.path("role_profiles"), properties.roleProfile())
-					&& contains(profile.path("voice_profiles"), properties.voiceProfile())
+					&& contains(profile.path("voice_profiles"), voiceProfile)
 					&& contains(profile.path("client_transports"), properties.clientTransport())) {
 				return;
 			}
@@ -142,14 +143,17 @@ public class QiniuRealtimeProvider extends RealtimeProvider {
 				"Configured Qiniu realtime model, role, voice, or transport is unavailable");
 	}
 
-	private CreatedSession createSession(RealtimeConnectCommand command, String requestId) {
+	private CreatedSession createSession(
+			RealtimeConnectCommand command,
+			String voiceProfile,
+			String requestId) {
 		var payload = objectMapper.createObjectNode()
 				.put("app_id", properties.appId())
 				.put("user_id", command.userId())
 				.put("client_id", command.clientId())
 				.put("model_profile", properties.modelProfile())
 				.put("role_profile", properties.roleProfile())
-				.put("voice_profile", properties.voiceProfile())
+				.put("voice_profile", voiceProfile)
 				.put("client_transport", properties.clientTransport())
 				.put("region", properties.region());
 		if (command.sceneType() != null) {
@@ -173,7 +177,7 @@ public class QiniuRealtimeProvider extends RealtimeProvider {
 		RealtimeFlowLog.info(
 				"realtime.provider.session.created provider={} providerSessionId={} traceId={} model={} voice={} transport={}",
 				type(), sessionId, text(root, "trace_id"), properties.modelProfile(),
-				properties.voiceProfile(), properties.clientTransport());
+				voiceProfile, properties.clientTransport());
 		return new CreatedSession(
 				sessionId,
 				text(root, "trace_id"),

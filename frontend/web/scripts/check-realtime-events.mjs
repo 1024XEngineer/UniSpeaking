@@ -52,6 +52,22 @@ assert.deepEqual(
     translationEnabled: true,
   },
 );
+assert.deepEqual(
+  buildRealtimeStartPayload("teacher-offer", { voice: "Harvey" }),
+  {
+    offerSdp: "teacher-offer",
+    voice: "Harvey",
+    translationEnabled: true,
+  },
+);
+assert.deepEqual(
+  buildRealtimeStartPayload("examiner-offer", { ielts: true, voice: "Mione" }),
+  {
+    offerSdp: "examiner-offer",
+    voiceId: "Mione",
+    translationEnabled: true,
+  },
+);
 
 assert.deepEqual(
   buildResponseCreateEvent({
