@@ -17,6 +17,7 @@ import com.unispeaking.domain.vo.session.RealtimeConnectionResult;
 import com.unispeaking.domain.vo.session.SessionPrompt;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.realtime.RealtimeSdpExchange;
+import com.unispeaking.infrastructure.realtime.RealtimeSessionTerminator;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 
@@ -26,14 +27,25 @@ public class RealtimeSessionCoordinator {
 	private final ActiveSessionRegistry sessions;
 	private final PracticeSessionRepository practiceSessions;
 	private final RealtimeSdpExchange realtimeSdpExchange;
+	private final RealtimeSessionTerminator realtimeSessionTerminator;
 
 	public RealtimeSessionCoordinator(
 			ActiveSessionRegistry sessions,
 			PracticeSessionRepository practiceSessions,
 			RealtimeSdpExchange realtimeSdpExchange) {
+		this(sessions, practiceSessions, realtimeSdpExchange, null);
+	}
+
+	@org.springframework.beans.factory.annotation.Autowired
+	public RealtimeSessionCoordinator(
+			ActiveSessionRegistry sessions,
+			PracticeSessionRepository practiceSessions,
+			RealtimeSdpExchange realtimeSdpExchange,
+			RealtimeSessionTerminator realtimeSessionTerminator) {
 		this.sessions = sessions;
 		this.practiceSessions = practiceSessions;
 		this.realtimeSdpExchange = realtimeSdpExchange;
+		this.realtimeSessionTerminator = realtimeSessionTerminator;
 	}
 
 	public StartSceneSessionResponse connect(
@@ -52,8 +64,8 @@ public class RealtimeSessionCoordinator {
 			Boolean translationEnabled) {
 		AbstractSceneSession session = sessions.findById(started.sessionId())
 				.orElseThrow(() -> new SessionNotFoundException(started.sessionId()));
-		ProviderType providerType = provider == null ? ProviderType.QWEN : provider;
-		String voiceId = voice == null || voice.isBlank() ? "Katerina" : voice.trim();
+		ProviderType providerType = provider;
+		String voiceId = voice == null || voice.isBlank() ? "Tina" : voice.trim();
 		session.setSceneId(sceneId);
 		session.setSceneType(sceneType);
 		session.setProviderType(providerType);
@@ -78,14 +90,23 @@ public class RealtimeSessionCoordinator {
 					session,
 					session.getPrompt(),
 					command);
+			session.setProviderType(connection.providerType());
+			session.setModel(connection.modelId());
+			if (connection.voiceId() != null && !connection.voiceId().isBlank()) {
+				session.setVoiceId(connection.voiceId());
+			}
+			session.setProviderTraceId(connection.traceId());
 			if (connection.providerSessionId() != null
 					&& !connection.providerSessionId().isBlank()) {
 				session.bindProviderSession(connection.providerSessionId());
-				practiceSessions.bindProviderSession(
-						started.sessionId(),
-						UUID.fromString(session.getUserId()),
-						connection.providerSessionId());
 			}
+			practiceSessions.updateRealtimeProvider(
+					started.sessionId(),
+					UUID.fromString(session.getUserId()),
+					connection.providerSessionId(),
+					connection.providerType(),
+					connection.modelId(),
+					connection.traceId());
 			session.setCredentialExpiresAt(connection.credentialExpiresAt());
 			session.waitForClient();
 			sessions.save(session);
@@ -108,6 +129,9 @@ public class RealtimeSessionCoordinator {
 					session.getPrompt().systemPrompt());
 		}
 		catch (RuntimeException exception) {
+			if (realtimeSessionTerminator != null) {
+				realtimeSessionTerminator.stopBestEffort(session, "local_start_failed");
+			}
 			session.fail("REALTIME_CONNECTION_FAILED", exception.getMessage());
 			practiceSessions.fail(
 					started.sessionId(),

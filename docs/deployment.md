@@ -3,7 +3,7 @@
 The local deploy stack contains five services:
 
 - `postgres`: local PostgreSQL database for development;
-- `backend`: Spring Boot API and Qwen signaling integration;
+- `backend`: Spring Boot API with Qiniu RTI primary and Qwen fallback signaling;
 - `frontend`: React client;
 - `admin`: React/Vite governance console served at `/admin/`;
 - `nginx`: reverse proxy for both frontends and `/backend/`/`/api/` API routes.
@@ -20,6 +20,8 @@ session or using profile avatars:
 DASHSCOPE_API_KEY=replace-with-your-real-key
 BAILIAN_WORKSPACE_ID=replace-with-your-workspace-id
 BAILIAN_MODEL=qwen3.5-omni-flash-realtime
+QINIU_RTI_API_KEY=replace-with-your-qiniu-rti-api-key
+QINIU_RTI_APP_ID=unispeaking_001
 QINIU_ACCESS_KEY=replace-with-your-access-key
 QINIU_SECRET_KEY=replace-with-your-secret-key
 QINIU_BUCKET=replace-with-your-private-bucket
@@ -143,6 +145,17 @@ and machine-specific values live in `deploy/env/.env`.
 
 ```yaml
 realtime:
+  qiniu:
+    base-url: ${QINIU_RTI_BASE_URL:https://miku-rtic.qiniuapi.com}
+    api-key: ${QINIU_RTI_API_KEY:}
+    app-id: ${QINIU_RTI_APP_ID:unispeaking_001}
+    model-profile: ${QINIU_RTI_MODEL_PROFILE:qwen3.5-omni-plus-realtime}
+    role-profile: ${QINIU_RTI_ROLE_PROFILE:default_assistant}
+    voice-profile: ${QINIU_RTI_VOICE_PROFILE:Tina}
+    client-transport: ${QINIU_RTI_CLIENT_TRANSPORT:platform_rtc}
+    region: ${QINIU_RTI_REGION:cn-east}
+    read-timeout: ${QINIU_RTI_READ_TIMEOUT:20s}
+    max-response-bytes: ${QINIU_RTI_MAX_RESPONSE_BYTES:1048576}
   qwen:
     api-key: ${DASHSCOPE_API_KEY:}
     workspace-id: ${BAILIAN_WORKSPACE_ID:}
@@ -167,7 +180,20 @@ object-storage:
     signed-url-ttl: ${QINIU_SIGNED_URL_TTL:1h}
 ```
 
-The WebRTC SDP endpoint is derived automatically:
+The default realtime route is:
+
+```properties
+AI_PROVIDER_ROUTE_REALTIME=qwen3.5-omni-plus-realtime,qwen3.5-omni-flash-realtime
+```
+
+For Qiniu RTI, the backend validates the configured model, role, voice, and
+transport against Profiles, creates an RTI Session, and submits the browser SDP
+as JSON to the returned HTTPS media endpoint. It stores only the provider
+`session_id`, model, provider, and `trace_id`; neither the permanent API key nor
+the short-lived media token is persisted or returned to the client. Terminal
+session paths call Qiniu Stop on a best-effort basis.
+
+The fallback Qwen WebRTC SDP endpoint is derived automatically:
 
 ```text
 https://{BAILIAN_WORKSPACE_ID}.{BAILIAN_REGION}.maas.aliyuncs.com/api/v1/webrtc/realtime?model={BAILIAN_MODEL}
@@ -178,7 +204,7 @@ response size during startup. The API key and workspace may remain empty while
 running non-realtime tests or development features. Starting a realtime session
 without them returns `QWEN_CREDENTIAL_MISSING` or `QWEN_SIGNALING_URL_MISSING`.
 
-The backend requests a short-lived DashScope token with `DASHSCOPE_API_KEY`,
+For the fallback route, the backend requests a short-lived DashScope token with `DASHSCOPE_API_KEY`,
 then uses that temporary Bearer credential for the Qwen Offer SDP to Answer SDP
 exchange.
 

@@ -183,12 +183,17 @@
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `offerSdp` | string | 是 | 客户端 WebRTC SDP |
-| `provider` | `ProviderType` | 否 | AI 供应商 |
-| `model` | string | 否 | 模型标识 |
-| `voice` | string | 否 | 音色标识 |
+| `provider` | `ProviderType` | 否 | AI 供应商提示；省略时由后端路由选择 |
+| `model` | string | 否 | 模型标识；省略时默认七牛 Plus，失败回退百炼 Flash |
+| `voice` | string | 否 | 音色标识；当前七牛 RTC 阶段统一使用 Tina |
 | `translationEnabled` | boolean | 否 | 是否启用翻译 |
 
 `TranslateTextRequest`：`text` 必填，最长 4000。响应字段为 `sourceText`、`translatedText`、`targetLanguage`。
+
+Realtime 默认路由为七牛 RTI `qwen3.5-omni-plus-realtime`，可回退错误切换至百炼
+`qwen3.5-omni-flash-realtime`。七牛长期 API Key 与 Session 短期媒体 token 均不会返回
+客户端；响应中的 `providerSessionId` 是可持久化的七牛 RTI Session ID。结束接口会同步
+完成本地业务会话，并尽最大努力调用供应商 Stop 释放并发额度。
 
 ## 6. 自定义场景
 
@@ -212,9 +217,9 @@
 | `userPreference` | string | 否 | 最长 1000 |
 | `sceneInput` | string | 是 | 也兼容别名 `prompt`，最长 500 |
 | `offerSdp` | string | 否 | 可选实时连接信息 |
-| `provider` | `ProviderType` | 否 | AI 供应商 |
-| `model` | string | 否 | 模型 |
-| `voice` | string | 否 | 音色 |
+| `provider` | `ProviderType` | 否 | AI 供应商提示；省略时由后端路由选择 |
+| `model` | string | 否 | 模型；省略时使用默认 Realtime 路由 |
+| `voice` | string | 否 | 音色；当前七牛 RTC 阶段统一使用 Tina |
 | `translationEnabled` | boolean | 否 | 是否启用翻译 |
 
 `CustomSceneGenerationResponse`：`sceneId`、`title`、`background`、`aiRole`、`userRole`、`learningGoal`、`estimatedMinutes`、`wordList`、`phraseList`、`sentenceList`、`scenePrompt`。
