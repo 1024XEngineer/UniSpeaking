@@ -1,4 +1,4 @@
-import type { AudioDataEvent, RecordingConfig } from '@siteed/audio-studio';
+import type { AudioDataEvent, AudioRecording, RecordingConfig, StartRecordingResult } from '@siteed/audio-studio';
 import { Directory, File, Paths } from 'expo-file-system';
 
 const SAMPLE_RATE = 16_000;
@@ -11,8 +11,8 @@ const WAV_HEADER_BYTES = 44;
 
 type StreamRecorderPort = {
   requestPermissionsAsync(): Promise<{ granted: boolean }>;
-  startRecording(config: RecordingConfig): Promise<unknown>;
-  stopRecording(): Promise<unknown>;
+  startRecording(config: RecordingConfig): Promise<StartRecordingResult | void>;
+  stopRecording(): Promise<AudioRecording | null | void>;
 };
 
 type OutputFile = {
@@ -27,6 +27,7 @@ type RecorderStorage = {
   prepare(runId: string): void;
   createFile(name: string): OutputFile;
   remove(uri: string): void;
+  cleanup(): void;
 };
 
 type ActiveTurn = {
@@ -57,6 +58,10 @@ function createStorage(): RecorderStorage {
     remove(uri) {
       const file = new File(uri);
       if (file.exists) file.delete();
+    },
+    cleanup() {
+      if (directory?.exists) directory.delete();
+      directory = null;
     },
   };
 }
@@ -133,7 +138,8 @@ export class ContinuousTurnRecorder {
   private sawInitialHeader = false;
   private preRoll = new Uint8Array();
   private active: ActiveTurn | null = null;
-  private readonly runId = `interview-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  private runId = '';
+  private nativeRecordingUri: string | null = null;
 
   constructor(
     private readonly recorder: StreamRecorderPort,
@@ -146,8 +152,12 @@ export class ContinuousTurnRecorder {
       this.starting = (async () => {
         const permission = await this.recorder.requestPermissionsAsync();
         if (!permission.granted) throw new Error('请允许麦克风权限后再开始面试');
+        this.runId = `interview-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        this.sawInitialHeader = false;
+        this.preRoll = new Uint8Array();
+        this.active = null;
         this.storage.prepare(this.runId);
-        await this.recorder.startRecording({
+        const started = await this.recorder.startRecording({
           sampleRate: SAMPLE_RATE,
           channels: CHANNELS,
           encoding: 'pcm_16bit',
@@ -158,6 +168,7 @@ export class ContinuousTurnRecorder {
           android: { audioFocusStrategy: 'none' },
           onAudioStream: async (event) => this.ingest(event),
         });
+        this.nativeRecordingUri = started?.fileUri ?? null;
         this.started = true;
       })().finally(() => {
         this.starting = null;
@@ -220,11 +231,22 @@ export class ContinuousTurnRecorder {
     if (!this.stopping) {
       this.stopping = (async () => {
         this.finalizeActive();
-        if (this.started) await this.recorder.stopRecording();
-        this.started = false;
-        this.inputEnabled = false;
-        this.preRoll = new Uint8Array();
-      })();
+        try {
+          const stopped = this.started ? await this.recorder.stopRecording() : null;
+          const nativeUri = stopped?.fileUri ?? this.nativeRecordingUri;
+          if (nativeUri) this.storage.remove(nativeUri);
+        } finally {
+          this.started = false;
+          this.inputEnabled = false;
+          this.sawInitialHeader = false;
+          this.preRoll = new Uint8Array();
+          this.active = null;
+          this.nativeRecordingUri = null;
+          this.storage.cleanup();
+        }
+      })().finally(() => {
+        this.stopping = null;
+      });
     }
     return this.stopping;
   }
