@@ -8,7 +8,7 @@ import type {
   InterviewTurnState,
   StartInterviewSessionResponse,
 } from './InterviewSessionApi';
-import type { ContinuousTurnRecorder, TurnWav } from '@/features/audio/ContinuousTurnRecorder';
+import type { ContinuousTurnRecorder } from '@/features/audio/ContinuousTurnRecorder';
 
 export type InterviewTranscript = Readonly<{
   owner: 0 | 1;
@@ -135,7 +135,6 @@ export class InterviewSessionController {
       this.publish();
       return { sessionId: backend.sessionId };
     } catch (cause) {
-      await this.cleanupNative();
       return this.fail(cause);
     }
   }
@@ -192,7 +191,7 @@ export class InterviewSessionController {
           this.applyInput();
           this.publish();
         } else if (this.closingRequested) {
-          await this.performEnd();
+          await this.end();
         }
         return;
       case 'user.speech.started':
@@ -298,6 +297,7 @@ export class InterviewSessionController {
     this.error = failure;
     this.state = 'error';
     this.publish();
+    await this.cleanupNative();
     throw failure;
   }
 

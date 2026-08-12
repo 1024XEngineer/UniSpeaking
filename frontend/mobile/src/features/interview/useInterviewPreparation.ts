@@ -59,8 +59,9 @@ export function useInterviewPreparation(
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<InterviewPreparationResult | null>(null);
   const submitting = useRef(false);
-  const serviceRef = useRef<InterviewPreparationService | null>(null);
-  const service = injectedService ?? (serviceRef.current ?? (serviceRef.current = createInterviewService()));
+  const [service] = useState<InterviewPreparationService>(
+    () => injectedService ?? createInterviewService(),
+  );
 
   const pickResume = useCallback(async () => {
     try {

@@ -13,7 +13,10 @@ import {
   ProgressBar,
   uiStyles,
 } from '@/components/ui';
-import { ieltsParts, ieltsTopics, interviewQuestions } from '@/data/content';
+import { ieltsParts, ieltsTopics } from '@/data/content';
+import { InterviewReportView } from '@/features/interview/InterviewReportView';
+import { type InterviewSessionApi } from '@/features/interview/InterviewSessionApi';
+import { createInterviewApi, useInterviewSession } from '@/features/interview/useInterviewSession';
 import { useInterviewPreparation, type InterviewDifficultyOption, type InterviewPreparationResult } from '@/features/interview/useInterviewPreparation';
 import { useAppModel } from '@/model/AppModel';
 import { useLearningStage } from '@/navigation/learningStage';
@@ -719,35 +722,56 @@ const interviewDifficulties: readonly { id: InterviewDifficulty; title: string; 
   { id: 'hard', title: '困难', note: '深入追问' },
 ];
 
-function InterviewSession({ question, questionIndex, onNext, preparation }: { question: string; questionIndex: number; onNext: () => void; preparation: InterviewPreparationResult }) {
+function InterviewSession({ preparation, onFinished }: { preparation: InterviewPreparationResult; onFinished: (sessionId: string, api: InterviewSessionApi) => void }) {
+  const { teacher } = useAppModel();
+  const session = useInterviewSession({ sceneId: preparation.scene.sceneId, voice: teacher.voiceId });
+  const latestAssistant = [...session.transcripts].reverse().find((item) => item.owner === 0)?.text ?? '';
+
+  useEffect(() => {
+    if (session.state === 'ended' && session.sessionId) {
+      onFinished(session.sessionId, createInterviewApi(preparation.scene.sceneId));
+    }
+  }, [onFinished, preparation.scene.sceneId, session.sessionId, session.state]);
+
+  const statusText = session.error?.message
+    ?? (session.state === 'starting'
+      ? '正在连接 AI 面试官'
+      : session.state === 'ending'
+        ? '正在结束面试并生成报告'
+        : session.interviewState?.currentTopic
+          ? `正在面试 · ${session.interviewState.currentTopic}`
+          : '正在聆听你的回答');
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.interviewCallScreen}>
       <CallExperience
-        endAccessibilityLabel={questionIndex === interviewQuestions.length - 1 ? '结束面试' : '进入下一题'}
-        endControlIcon="arrow"
-        initialSubtitles={false}
-        onEnd={onNext}
+        allowSubtitleToggle={false}
+        compactTranscriptLayout
+        elapsed={session.elapsed}
+        endAccessibilityLabel="结束面试"
+        initialSubtitles
+        muted={session.muted}
+        onEnd={() => void session.end().catch(() => undefined)}
+        onMutedChange={session.setMuted}
         participant={{ image: examinerAssets.sophia, name: 'AI 面试官' }}
-        showMuteControl={false}
         showTranslationControl={false}
-        statusText={`${preparation.jobTitle ?? '英文面试'} · 正在聆听你的回答`}
+        statusLabel={statusText}
+        statusText={`${preparation.jobTitle ?? '英文面试'} · ${statusText}`}
         tone="navy"
-        transcriptEnglish={question}
+        transcriptEnglish={latestAssistant || statusText}
+        transcriptSpeaker="AI 面试官"
+        userTranscript={session.transcripts.filter((item) => item.owner === 1).at(-1)?.text ?? ''}
       />
     </SafeAreaView>
   );
 }
 
-export function InterviewFlow({ onExit, onViewDetails }: { onExit: () => void; onViewDetails?: () => void }) {
-  const { addInterviewRecord } = useAppModel();
+export function InterviewFlow({ onExit }: { onExit: () => void; onViewDetails?: () => void }) {
   const { setImmersiveLearning } = useLearningStage();
   const [route, setRoute] = useState<InterviewRoute>('input');
   const [jobDescription, setJobDescription] = useState('');
   const [difficulty, setDifficulty] = useState<InterviewDifficulty | null>(null);
-  const [question, setQuestion] = useState(0);
-  const [progress, setProgress] = useState(0);
   const [preparation, setPreparation] = useState<InterviewPreparationResult | null>(null);
-  const difficultyLabel = interviewDifficulties.find((item) => item.id === difficulty)?.title ?? '标准';
+  const [completedSession, setCompletedSession] = useState<{ sessionId: string; api: InterviewSessionApi } | null>(null);
   const { resumeFileName, isPreparing, error, pickResume, start } = useInterviewPreparation();
   const canStart = Boolean(jobDescription.trim() && difficulty && !isPreparing);
 
@@ -757,34 +781,9 @@ export function InterviewFlow({ onExit, onViewDetails }: { onExit: () => void; o
 
   useEffect(() => () => setImmersiveLearning(false), [setImmersiveLearning]);
 
-  useEffect(() => {
-    if (route !== 'finalizing') return;
-    const timer = setInterval(() => setProgress((current) => Math.min(100, current + 16)), 230);
-    return () => clearInterval(timer);
-  }, [route]);
-
-  useEffect(() => {
-    if (route !== 'finalizing' || progress < 100) return;
-    const timer = setTimeout(() => setRoute('report'), 300);
-    return () => clearTimeout(timer);
-  }, [progress, route]);
-
-  const saveReport = () => {
-    addInterviewRecord({
-      id: `interview-${Date.now()}`,
-      role: '英文面试',
-      company: `${difficultyLabel}难度`,
-      date: '刚刚',
-      duration: '15 分钟',
-      score: 82,
-      summary: '回答结构清楚，下一步要让结果和影响更具体。',
-      scores: [84, 86, 76, 81],
-    });
-  };
-
   const closeReport = () => {
-    setQuestion(0);
-    setProgress(0);
+    setPreparation(null);
+    setCompletedSession(null);
     setRoute('input');
   };
 
@@ -886,7 +885,6 @@ export function InterviewFlow({ onExit, onViewDetails }: { onExit: () => void; o
               if (!prepared) return;
               // Keep the real scene/material/job title attached to live state until coordinator integration lands.
               setPreparation(prepared);
-              setQuestion(0);
               setRoute('live');
             });
           }}
@@ -902,68 +900,25 @@ export function InterviewFlow({ onExit, onViewDetails }: { onExit: () => void; o
         <AppIcon name="document" size={34} color={interviewPalette.accentBright} />
         <Text style={styles.interviewAnalysisTitle}>正在生成面试复盘</Text>
         <Text style={styles.interviewAnalysisCopy}>整理回答亮点、风险点和更好的表达方式。</Text>
-        <ProgressBar value={progress} />
-        <Text style={styles.interviewProgressText}>{progress}%</Text>
+        {completedSession ? <InterviewReportView api={completedSession.api} sessionId={completedSession.sessionId} /> : null}
+        <AppButton title="返回面试首页" variant="secondary" onPress={closeReport} />
       </AppScreen>
     );
   }
 
   if (route === 'live') {
-    const next = () => {
-      if (question >= interviewQuestions.length - 1) {
-        setProgress(0);
-        setRoute('finalizing');
-      } else {
-        setQuestion((current) => current + 1);
-      }
-    };
     if (!preparation) return null;
-    return <InterviewSession preparation={preparation} question={interviewQuestions[question]} questionIndex={question} onNext={next} />;
+    return (
+      <InterviewSession
+        preparation={preparation}
+        onFinished={(sessionId, api) => {
+          setCompletedSession({ sessionId, api });
+          setRoute('finalizing');
+        }}
+      />
+    );
   }
-
-  return (
-    <AppScreen contentStyle={styles.interviewReportScreen} stickyHeader={false}>
-      <View style={styles.scoreHero}>
-        <Text style={styles.interviewScore}>82</Text>
-        <Text style={styles.interviewReportMuted}>综合表现 · {difficultyLabel}难度</Text>
-      </View>
-      <View style={styles.interviewMetrics}>
-        {[['岗位匹配', '84'], ['表达清晰', '86'], ['回答深度', '76']].map(([label, value]) => (
-          <View key={label} style={styles.interviewMetric}>
-            <Text style={styles.interviewMetricLabel}>{label}</Text>
-            <Text style={styles.interviewMetricValue}>{value}</Text>
-          </View>
-        ))}
-      </View>
-      <View style={styles.interviewReportCard}><Text style={styles.interviewReportTitle}>更好的表达方式</Text><Text style={styles.interviewReportBody}>I validated the riskiest assumption first, aligned the team on a reversible test, and used the result to decide whether to scale.</Text></View>
-      <View style={styles.interviewReportCard}><Text style={styles.interviewReportTitle}>下一次重点</Text><Text style={styles.interviewReportBody}>用数字说明决策带来的业务影响，并在回答结尾明确总结你的个人贡献。</Text></View>
-      <View style={styles.interviewReportActions}>
-        <AppButton
-          title="返回主页"
-          variant="secondary"
-          onPress={() => {
-            saveReport();
-            closeReport();
-          }}
-          style={styles.interviewReportSecondaryButton}
-        />
-        <AppButton
-          title="查看详情"
-          onPress={() => {
-            saveReport();
-            closeReport();
-            if (onViewDetails) {
-              setImmersiveLearning(false);
-              onViewDetails();
-            } else {
-              onExit();
-            }
-          }}
-          style={styles.interviewReportPrimaryButton}
-        />
-      </View>
-    </AppScreen>
-  );
+  return null;
 }
 
 const styles = StyleSheet.create({
