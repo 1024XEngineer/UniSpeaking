@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { ContinuousTurnRecorder } from '@/features/audio/ContinuousTurnRecorder';
 import { ReactNativeWebRTCTransport } from '@/features/realtime/ReactNativeWebRTCTransport';
@@ -47,7 +47,7 @@ export function useInterviewSession({
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { AudioStudioModule, useAudioRecorder } = require('@siteed/audio-studio') as typeof import('@siteed/audio-studio');
   const nativeRecorder = useAudioRecorder();
-  const controller = useMemo(() => {
+  const [controller] = useState(() => {
     const tokenStore = new SecureTokenStore();
     const { backendUrl } = getRuntimeConfig();
     const client = new ApiClient({ baseUrl: backendUrl, tokenStore });
@@ -64,18 +64,19 @@ export function useInterviewSession({
       },
       { sceneId, voice, model },
     );
-  }, [AudioStudioModule, model, nativeRecorder, sceneId, voice]);
+  });
   const [snapshot, setSnapshot] = useState<InterviewSessionSnapshot>(initialSnapshot);
   const [elapsed, setElapsed] = useState(0);
+  const end = useCallback(() => controller.end(), [controller]);
 
   useEffect(() => {
     const unsubscribe = controller.subscribe(setSnapshot);
     void controller.start().catch(() => undefined);
     return () => {
       unsubscribe();
-      void controller.end().catch(() => undefined);
+      void end().catch(() => undefined);
     };
-  }, [controller]);
+  }, [controller, end]);
 
   useEffect(() => {
     if (snapshot.state !== 'active') return;
@@ -87,6 +88,6 @@ export function useInterviewSession({
     ...snapshot,
     elapsed,
     setMuted: (muted: boolean) => controller.setMuted(muted),
-    end: () => controller.end(),
+    end,
   };
 }

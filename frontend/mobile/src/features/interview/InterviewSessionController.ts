@@ -41,7 +41,6 @@ type InterviewDependencies = {
   transport: RealtimeTransport;
   sessionApi: Pick<InterviewSessionApi, 'startSession' | 'submitTurn' | 'end'>;
   sessionSocket: InterviewSocket;
-  now?: () => Date;
   createEventId?: () => string;
 };
 
@@ -57,7 +56,6 @@ const CLOSING_INSTRUCTION = 'The interview is complete. Give a brief, natural cl
 
 export class InterviewSessionController {
   private readonly listeners = new Set<(snapshot: InterviewSessionSnapshot) => void>();
-  private readonly now: () => Date;
   private readonly createEventId: () => string;
   private readonly unsubscribeTransport: () => void;
   private state: InterviewControllerState = 'idle';
@@ -80,7 +78,6 @@ export class InterviewSessionController {
     private readonly dependencies: InterviewDependencies,
     private readonly options: InterviewSessionOptions,
   ) {
-    this.now = dependencies.now ?? (() => new Date());
     this.createEventId = dependencies.createEventId ?? (() => `event_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
     this.unsubscribeTransport = dependencies.transport.subscribe((event) => {
       if (event.type === 'provider.message') void this.handleProviderMessage(event.data);

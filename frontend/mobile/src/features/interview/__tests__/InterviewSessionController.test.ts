@@ -27,7 +27,7 @@ function fixture() {
   };
   const sessionSocket = { connect: jest.fn(async () => undefined), persistMessage: jest.fn(async () => undefined), close: jest.fn() };
   const controller = new InterviewSessionController(
-    { recorder, transport, sessionApi, sessionSocket, createEventId: () => 'event-1', now: () => new Date('2026-08-12T00:00:00.000Z') },
+    { recorder, transport, sessionApi, sessionSocket, createEventId: () => 'event-1' },
     { sceneId: 'scene-1', voice: 'voice', model: 'qwen3.5-omni-flash-realtime' },
   );
   return { controller, transport, recorder, sessionApi, sessionSocket, calls };

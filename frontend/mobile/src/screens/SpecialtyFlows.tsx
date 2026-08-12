@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -713,7 +713,7 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
   );
 }
 
-type InterviewRoute = 'input' | 'live' | 'finalizing' | 'report';
+type InterviewRoute = 'input' | 'live' | 'finalizing';
 type InterviewDifficulty = InterviewDifficultyOption;
 
 const interviewDifficulties: readonly { id: InterviewDifficulty; title: string; note: string; recommended?: boolean }[] = [
@@ -725,10 +725,12 @@ const interviewDifficulties: readonly { id: InterviewDifficulty; title: string; 
 function InterviewSession({ preparation, onFinished }: { preparation: InterviewPreparationResult; onFinished: (sessionId: string, api: InterviewSessionApi) => void }) {
   const { teacher } = useAppModel();
   const session = useInterviewSession({ sceneId: preparation.scene.sceneId, voice: teacher.voiceId });
+  const deliveredSession = useRef<string | null>(null);
   const latestAssistant = [...session.transcripts].reverse().find((item) => item.owner === 0)?.text ?? '';
 
   useEffect(() => {
-    if (session.state === 'ended' && session.sessionId) {
+    if (session.state === 'ended' && session.sessionId && deliveredSession.current !== session.sessionId) {
+      deliveredSession.current = session.sessionId;
       onFinished(session.sessionId, createInterviewApi(preparation.scene.sceneId));
     }
   }, [onFinished, preparation.scene.sceneId, session.sessionId, session.state]);
