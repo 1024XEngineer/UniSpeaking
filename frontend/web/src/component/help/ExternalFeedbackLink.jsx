@@ -1,4 +1,5 @@
-const configuredFeedbackUrl = (import.meta.env?.VITE_FEEDBACK_URL || "").trim();
+const defaultFeedbackUrl = "https://wj.qq.com/s2/27565116/i1wq/";
+const configuredFeedbackUrl = (import.meta.env?.VITE_FEEDBACK_URL || defaultFeedbackUrl).trim();
 
 function validExternalUrl(value) {
   if (!value) return "";
