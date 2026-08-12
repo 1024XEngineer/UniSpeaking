@@ -713,7 +713,7 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
   );
 }
 
-type InterviewRoute = 'input' | 'live' | 'finalizing';
+type InterviewRoute = 'input' | 'review' | 'live' | 'finalizing';
 type InterviewDifficulty = InterviewDifficultyOption;
 
 const interviewDifficulties: readonly { id: InterviewDifficulty; title: string; note: string; recommended?: boolean }[] = [
@@ -722,7 +722,7 @@ const interviewDifficulties: readonly { id: InterviewDifficulty; title: string; 
   { id: 'hard', title: '困难', note: '深入追问' },
 ];
 
-function InterviewSession({ preparation, onFinished }: { preparation: InterviewPreparationResult; onFinished: (sessionId: string, api: InterviewSessionApi) => void }) {
+function InterviewSession({ preparation, onFinished }: { preparation: InterviewPreparationResult & { scene: NonNullable<InterviewPreparationResult['scene']> }; onFinished: (sessionId: string, api: InterviewSessionApi) => void }) {
   const { teacher } = useAppModel();
   const session = useInterviewSession({ sceneId: preparation.scene.sceneId, voice: teacher.voiceId });
   const deliveredSession = useRef<string | null>(null);
@@ -774,7 +774,8 @@ export function InterviewFlow({ onExit }: { onExit: () => void; onViewDetails?: 
   const [difficulty, setDifficulty] = useState<InterviewDifficulty | null>(null);
   const [preparation, setPreparation] = useState<InterviewPreparationResult | null>(null);
   const [completedSession, setCompletedSession] = useState<{ sessionId: string; api: InterviewSessionApi } | null>(null);
-  const { resumeFileName, isPreparing, error, pickResume, start } = useInterviewPreparation();
+  const { resumeFileName, resumeText, resumeMode, setResumeText, setResumeMode, isPreparing, error, pickResume, start, confirm } = useInterviewPreparation();
+  const [draft, setDraft] = useState<InterviewPreparationResult['material'] | null>(null);
   const canStart = Boolean(jobDescription.trim() && difficulty && !isPreparing);
 
   useEffect(() => {
@@ -813,22 +814,41 @@ export function InterviewFlow({ onExit }: { onExit: () => void; onViewDetails?: 
           </View>
         }
       >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={resumeFileName ? '重新选择简历' : '添加简历'}
-          onPress={() => void pickResume()}
-          style={({ pressed }) => [styles.interviewPanel, styles.interviewUploadPanel, resumeFileName && styles.interviewPanelSelected, pressed && styles.pressed]}
-        >
-          <Image source={interviewAssets.resume} style={styles.interviewResumeAsset} contentFit="contain" />
-          <View style={styles.interviewPanelCopy}>
-            <View style={styles.interviewTitleRow}>
-              <Text style={styles.interviewPanelTitle}>{resumeFileName ? '简历已添加' : '添加简历（可选）'}</Text>
-              {resumeFileName ? <AppIcon name="check-circle" size={19} color={interviewPalette.accentBright} /> : null}
+        <View style={styles.interviewPanel}>
+          <View style={styles.interviewPanelHeader}>
+            <View style={styles.interviewPanelCopy}>
+              <Text style={styles.interviewPanelTitle}>填写简历（可选）</Text>
+              <Text style={styles.interviewPanelNote}>选择一种材料来源，AI 会先整理后让你确认</Text>
             </View>
-            <Text style={styles.interviewPanelNote}>{resumeFileName ?? '支持 PDF / DOCX，用于生成更贴合的面试问题'}</Text>
+            <Image source={interviewAssets.resume} style={styles.interviewResumeAsset} contentFit="contain" />
           </View>
-          <AppIcon name="chevron-right" size={20} color={interviewPalette.muted} />
-        </Pressable>
+          <View style={styles.interviewResumeModeTabs} accessibilityRole="tablist">
+            <Pressable accessibilityRole="tab" accessibilityState={{ selected: resumeMode === 'text' }} onPress={() => setResumeMode('text')} style={[styles.interviewResumeModeTab, resumeMode === 'text' && styles.interviewResumeModeTabSelected]}>
+              <Text style={[styles.interviewResumeModeText, resumeMode === 'text' && styles.interviewResumeModeTextSelected]}>粘贴文本</Text>
+            </Pressable>
+            <Pressable accessibilityRole="tab" accessibilityState={{ selected: resumeMode === 'file' }} onPress={() => setResumeMode('file')} style={[styles.interviewResumeModeTab, resumeMode === 'file' && styles.interviewResumeModeTabSelected]}>
+              <Text style={[styles.interviewResumeModeText, resumeMode === 'file' && styles.interviewResumeModeTextSelected]}>上传文件</Text>
+            </Pressable>
+          </View>
+          {resumeMode === 'text' ? <TextInput
+            accessibilityLabel="简历文本"
+            multiline
+            onChangeText={(value) => { setResumeMode('text'); setResumeText(value); }}
+            placeholder="粘贴简历中的教育、工作与项目经历……（可留空）"
+            placeholderTextColor={interviewPalette.subtle}
+            style={styles.interviewResumeInput}
+            textAlignVertical="top"
+            value={resumeText}
+          /> : <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={resumeFileName ? '重新选择简历文件' : '上传简历文件'}
+            onPress={() => void pickResume()}
+            style={({ pressed }) => [styles.interviewResumeFileButton, pressed && styles.pressed]}
+          >
+            <AppIcon name="upload" size={18} color={interviewPalette.accentBright} />
+            <Text style={styles.interviewResumeFileText}>{resumeFileName ?? '上传 PDF / DOCX（可选）'}</Text>
+          </Pressable>}
+        </View>
 
         <View style={styles.interviewPanel}>
           <View style={styles.interviewPanelHeader}>
@@ -879,19 +899,63 @@ export function InterviewFlow({ onExit }: { onExit: () => void; onViewDetails?: 
 
         {error ? <Text accessibilityRole="alert" style={styles.interviewError}>{error}</Text> : null}
         <AppButton
-          title={isPreparing ? '正在准备面试…' : '开始模拟面试'}
+          title={isPreparing ? '正在整理材料…' : '整理面试材料'}
           icon="arrow-right"
           disabled={!canStart}
           onPress={() => {
             void start({ jobDescription, difficulty }).then((prepared) => {
               if (!prepared) return;
-              // Keep the real scene/material/job title attached to live state until coordinator integration lands.
-              setPreparation(prepared);
-              setRoute('live');
+              setDraft(prepared.material);
+              setRoute('review');
             });
           }}
           style={styles.interviewStartButton}
         />
+      </AppScreen>
+    );
+  }
+
+  if (route === 'review' && draft) {
+    const listFields: readonly { key: keyof typeof draft; label: string; required?: boolean }[] = [
+      { key: 'responsibilities', label: '岗位职责', required: true },
+      { key: 'qualificationRequirements', label: '任职要求', required: true },
+      { key: 'requiredSkills', label: '必备技能' },
+      { key: 'education', label: '教育经历' },
+      { key: 'workExperiences', label: '工作经历' },
+      { key: 'projectExperiences', label: '项目经历' },
+      { key: 'skillsAndAbilities', label: '技能与能力' },
+      { key: 'interviewableExperienceClues', label: '可深挖经历线索' },
+    ];
+    const missing = listFields.filter((field) => field.required && !(draft[field.key] as string[]).some((item) => item.trim()));
+    return (
+      <AppScreen contentStyle={styles.interviewInputScreen} fixedHeader={(
+        <View style={styles.interviewHeroHeader}>
+          <Image source={interviewAssets.hero} style={styles.interviewHero} contentFit="contain" />
+          <MainModuleHeader englishTitle="MATERIAL REVIEW" light title="确认面试材料" style={styles.interviewHeader} action={<HeaderIconButton accessibilityLabel="退出英文面试" color="#F4F8FF" icon="close" onPress={onExit} />} />
+        </View>
+      )}>
+        <Text style={styles.interviewReviewLead}>AI 已从 JD 与简历中整理出结构化材料。请核对并修改后，再确认生成面试。</Text>
+        <View style={styles.interviewPanel}>
+          <Text style={styles.interviewPanelTitle}>岗位信息</Text>
+          <TextInput accessibilityLabel="岗位名称" onChangeText={(value) => setDraft({ ...draft, jobTitle: value })} placeholder="岗位名称" placeholderTextColor={interviewPalette.subtle} style={styles.interviewReviewInput} value={draft.jobTitle ?? ''} />
+          <TextInput accessibilityLabel="其他岗位信息" multiline onChangeText={(value) => setDraft({ ...draft, otherJobInformation: value })} placeholder="其他岗位信息（可选）" placeholderTextColor={interviewPalette.subtle} style={styles.interviewReviewInput} textAlignVertical="top" value={draft.otherJobInformation ?? ''} />
+        </View>
+        {listFields.map((field) => (
+          <View key={field.key} style={styles.interviewPanel}>
+            <Text style={styles.interviewPanelTitle}>{field.label}{field.required ? ' *' : ''}</Text>
+            <TextInput accessibilityLabel={field.label} multiline onChangeText={(value) => setDraft({ ...draft, [field.key]: value.split('\n').map((item) => item.trim()).filter(Boolean) })} placeholder={`每行填写一项${field.required ? '（必填）' : ''}`} placeholderTextColor={interviewPalette.subtle} style={styles.interviewReviewTextarea} textAlignVertical="top" value={(draft[field.key] as string[]).join('\n')} />
+          </View>
+        ))}
+        {error ? <Text accessibilityRole="alert" style={styles.interviewError}>{error}</Text> : null}
+        {missing.length ? <Text accessibilityRole="alert" style={styles.interviewError}>请补充：{missing.map((item) => item.label).join('、')}</Text> : null}
+        <View style={styles.interviewReviewActions}>
+          <AppButton title="返回修改输入" variant="secondary" onPress={() => setRoute('input')} style={styles.interviewReviewSecondaryButton} />
+          <AppButton title={isPreparing ? '正在生成…' : '确认并生成面试'} disabled={Boolean(missing.length) || isPreparing} onPress={() => void confirm({ material: draft, difficulty }).then((prepared) => {
+            if (!prepared?.scene) return;
+            setPreparation({ scene: prepared.scene, material: prepared.material, jobTitle: prepared.jobTitle });
+            setRoute('live');
+          })} style={styles.interviewReviewPrimaryButton} />
+        </View>
       </AppScreen>
     );
   }
@@ -909,10 +973,11 @@ export function InterviewFlow({ onExit }: { onExit: () => void; onViewDetails?: 
   }
 
   if (route === 'live') {
-    if (!preparation) return null;
+    if (!preparation?.scene) return null;
+    const livePreparation = preparation as InterviewPreparationResult & { scene: NonNullable<InterviewPreparationResult['scene']> };
     return (
       <InterviewSession
-        preparation={preparation}
+        preparation={livePreparation}
         onFinished={(sessionId, api) => {
           setCompletedSession({ sessionId, api });
           setRoute('finalizing');
@@ -1146,6 +1211,15 @@ const styles = StyleSheet.create({
   interviewTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   interviewPanelTitle: { color: interviewPalette.text, fontSize: 17, lineHeight: 23, fontWeight: '600' },
   interviewPanelNote: { color: interviewPalette.muted, fontSize: 12, lineHeight: 18, fontWeight: '400' },
+  interviewReviewLead: { color: interviewPalette.muted, fontSize: 14, lineHeight: 21, fontWeight: '400' },
+  interviewResumeInput: { minHeight: 132, paddingHorizontal: 14, paddingVertical: 12, color: interviewPalette.text, fontSize: 14, lineHeight: 21, borderWidth: 1, borderColor: interviewPalette.border, borderRadius: 14, backgroundColor: '#FFFFFF', outlineWidth: 0 },
+  interviewResumeModeTabs: { flexDirection: 'row', padding: 3, gap: 4, borderRadius: 12, backgroundColor: interviewPalette.paperStrong },
+  interviewResumeModeTab: { flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 9 },
+  interviewResumeModeTabSelected: { backgroundColor: interviewPalette.accent },
+  interviewResumeModeText: { color: interviewPalette.muted, fontSize: 13, fontWeight: '500' },
+  interviewResumeModeTextSelected: { color: colors.white },
+  interviewResumeFileButton: { minHeight: 48, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: interviewPalette.border, borderRadius: 13, backgroundColor: interviewPalette.paperStrong },
+  interviewResumeFileText: { flex: 1, color: interviewPalette.accent, fontSize: 13, lineHeight: 18, fontWeight: '500' },
   interviewPanelHeader: { minHeight: 74, flexDirection: 'row', alignItems: 'center', gap: 12 },
   interviewCompanyAsset: { width: 72, height: 84, marginRight: -4 },
   interviewJdInput: {
@@ -1162,6 +1236,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     outlineWidth: 0,
   },
+  interviewReviewInput: { minHeight: 50, paddingHorizontal: 13, paddingVertical: 11, color: interviewPalette.text, fontSize: 14, lineHeight: 20, borderWidth: 1, borderColor: interviewPalette.border, borderRadius: 13, backgroundColor: '#FFFFFF', outlineWidth: 0 },
+  interviewReviewTextarea: { minHeight: 100, paddingHorizontal: 13, paddingVertical: 11, color: interviewPalette.text, fontSize: 14, lineHeight: 21, borderWidth: 1, borderColor: interviewPalette.border, borderRadius: 13, backgroundColor: '#FFFFFF', outlineWidth: 0 },
+  interviewReviewActions: { flexDirection: 'row', gap: 10, paddingBottom: 20 },
+  interviewReviewSecondaryButton: { flex: 1, borderColor: interviewPalette.borderStrong, backgroundColor: interviewPalette.paper },
+  interviewReviewPrimaryButton: { flex: 1, borderColor: interviewPalette.accent, backgroundColor: interviewPalette.accent },
   interviewError: { color: '#B42318', fontSize: 13, lineHeight: 19, fontWeight: '500' },
   interviewBriefcaseAsset: { width: 72, height: 84, marginRight: -4 },
   interviewDifficultyOptions: { flexDirection: 'row', gap: 8 },

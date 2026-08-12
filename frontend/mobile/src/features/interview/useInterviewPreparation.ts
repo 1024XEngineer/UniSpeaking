@@ -9,7 +9,7 @@ import { ApiClient } from '@/infrastructure/http/ApiClient';
 export type InterviewDifficultyOption = 'easy' | 'standard' | 'hard';
 
 export type InterviewPreparationResult = {
-  scene: InterviewScene;
+  scene: InterviewScene | null;
   material: InterviewMaterial;
   jobTitle: string | null;
 };
@@ -19,12 +19,20 @@ export type InterviewPreparationService = Pick<InterviewService, 'prepareMateria
 export type InterviewPreparationState = {
   resumeFile: ExpoFile | null;
   resumeFileName: string | null;
+  resumeText: string;
+  resumeMode: 'text' | 'file';
+  setResumeText: (value: string) => void;
+  setResumeMode: (value: 'text' | 'file') => void;
   isPreparing: boolean;
   error: string | null;
   result: InterviewPreparationResult | null;
   pickResume: () => Promise<void>;
   start: (input: {
     jobDescription: string;
+    difficulty: InterviewDifficultyOption | null;
+  }) => Promise<InterviewPreparationResult | null>;
+  confirm: (input: {
+    material: InterviewMaterial;
     difficulty: InterviewDifficultyOption | null;
   }) => Promise<InterviewPreparationResult | null>;
   clearError: () => void;
@@ -55,6 +63,8 @@ export function useInterviewPreparation(
   injectedService?: InterviewPreparationService,
 ): InterviewPreparationState {
   const [resumeFile, setResumeFile] = useState<ExpoFile | null>(null);
+  const [resumeText, setResumeText] = useState('');
+  const [resumeMode, setResumeMode] = useState<'text' | 'file'>('text');
   const [isPreparing, setIsPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<InterviewPreparationResult | null>(null);
@@ -70,6 +80,8 @@ export function useInterviewPreparation(
       });
       if (picked.canceled || !picked.result) return;
       setResumeFile(picked.result);
+      setResumeMode('file');
+      setResumeText('');
       setError(null);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -96,10 +108,10 @@ export function useInterviewPreparation(
     try {
       const draft = await service.prepareMaterials({
         jobDescriptionText: jobDescription,
-        resumeFile: resumeFile ?? undefined,
+        resumeText: resumeMode === 'text' ? resumeText : undefined,
+        resumeFile: resumeMode === 'file' ? (resumeFile ?? undefined) : undefined,
       });
-      const scene = await service.generateScene(draft.material, mapInterviewDifficulty(difficulty));
-      const nextResult = { scene, material: draft.material, jobTitle: draft.material.jobTitle };
+      const nextResult = { scene: null, material: draft.material, jobTitle: draft.material.jobTitle };
       setResult(nextResult);
       return nextResult;
     } catch (cause) {
@@ -109,16 +121,47 @@ export function useInterviewPreparation(
       submitting.current = false;
       setIsPreparing(false);
     }
-  }, [resumeFile, service]);
+  }, [resumeFile, resumeMode, resumeText, service]);
+
+  const confirm = useCallback(async ({ material, difficulty }: {
+    material: InterviewMaterial;
+    difficulty: InterviewDifficultyOption | null;
+  }) => {
+    if (submitting.current) return null;
+    if (!difficulty) {
+      setError('请选择面试难度');
+      return null;
+    }
+    submitting.current = true;
+    setIsPreparing(true);
+    setError(null);
+    try {
+      const scene = await service.generateScene(material, mapInterviewDifficulty(difficulty));
+      const nextResult = { scene, material, jobTitle: material.jobTitle };
+      setResult(nextResult);
+      return nextResult;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      return null;
+    } finally {
+      submitting.current = false;
+      setIsPreparing(false);
+    }
+  }, [service]);
 
   return {
     resumeFile,
     resumeFileName: resumeFile?.name ?? null,
+    resumeText,
+    resumeMode,
+    setResumeText,
+    setResumeMode,
     isPreparing,
     error,
     result,
     pickResume,
     start,
+    confirm,
     clearError: () => setError(null),
   };
 }
