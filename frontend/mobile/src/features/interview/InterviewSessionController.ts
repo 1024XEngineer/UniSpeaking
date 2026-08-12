@@ -201,7 +201,7 @@ export class InterviewSessionController {
               // Interview answers commonly contain thinking pauses. Keep the microphone
               // open through natural pauses and never let a new user turn cancel an
               // interviewer response while the candidate is still speaking.
-              turn_detection: { type: 'semantic_vad', threshold: 0.65, prefix_padding_ms: 800, silence_duration_ms: 2_500, create_response: false, interrupt_response: false },
+              turn_detection: { type: 'semantic_vad', threshold: 0.65, prefix_padding_ms: 800, silence_duration_ms: 2_500, create_response: false, interrupt_response: true },
             },
           });
           this.configured = true;
@@ -214,7 +214,10 @@ export class InterviewSessionController {
         }
         return;
       case 'assistant.response.started':
-        this.muted = true;
+        // Keep the candidate microphone live while the interviewer is speaking so
+        // Qwen can detect a deliberate barge-in and stop its response.
+        this.muted = false;
+        this.dependencies.recorder.setInputEnabled(true);
         this.applyInput();
         this.publish();
         return;
