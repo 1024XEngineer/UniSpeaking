@@ -66,14 +66,38 @@ export class SceneTrainingController {
     };
   }
 
-  async start(scene: GeneratedScene) {
+  async start(scene: GeneratedScene, initialStage: 'learn' | 'read' | 'speak' = 'learn') {
     this.update({
       ...initialSnapshot,
       status: 'loading',
       scene,
     });
     try {
+      if (initialStage === 'speak') {
+        this.update({
+          ...this.snapshot,
+          status: 'ready',
+          stage: 'speak',
+          unlockedStage: 2,
+        });
+        return;
+      }
       await this.service.createFlow(scene.sceneId);
+      if (initialStage === 'read') {
+        await this.service.advanceStage(scene.sceneId, 'WORD_LEARNING');
+        const flow = await this.service.advanceStage(scene.sceneId, 'PHRASE_LEARNING');
+        if (flow.stage !== 'SENTENCE_LEARNING') throw new Error('后端未进入句子学习阶段');
+        const items = await this.requireContent(scene.sceneId, 'SENTENCE_LEARNING');
+        this.update({
+          ...this.snapshot,
+          status: 'ready',
+          stage: 'read',
+          items,
+          currentItem: items[0],
+          unlockedStage: 1,
+        });
+        return;
+      }
       const items = await this.requireContent(scene.sceneId, 'WORD_LEARNING');
       this.update({
         ...this.snapshot,

@@ -2,14 +2,14 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import type { SceneLearningRecord } from '@/data/learningAssets';
 
-import { AssetsScreen, SceneAssetDetailLoader } from '../AssetsScreen';
+import { AssetsScreen, SceneAssetDetail, SceneAssetDetailLoader } from '../AssetsScreen';
 
 const summaryRecord: SceneLearningRecord = {
   id: 'scene/airport',
   title: '机场行李托运',
   date: '2026-08-05',
   status: '已完成',
-  score: 88,
+  score: 88.6,
   practiceCount: 2,
   expressions: [],
   conversation: [],
@@ -50,6 +50,7 @@ describe('AssetsScreen backend binding', () => {
     expect(screen.getByText('正在同步场景学习资产…')).toBeTruthy();
     resolveRecords([summaryRecord]);
     await waitFor(() => expect(screen.getByText('机场行李托运')).toBeTruthy());
+    expect(screen.getByText('89 分')).toBeTruthy();
     expect(screen.queryByText('咖啡店点单')).toBeNull();
     await fireEvent.press(screen.getByText('机场行李托运'));
     expect(onOpenRecord).toHaveBeenCalledWith(summaryRecord);
@@ -96,5 +97,23 @@ describe('SceneAssetDetailLoader', () => {
     await waitFor(() => expect(screen.getByText('baggage')).toBeTruthy());
     expect(service.getRecord).toHaveBeenCalledWith('scene/airport');
     expect(screen.getByText('行李')).toBeTruthy();
+  });
+
+  it('plays and stops a saved expression through backend TTS', async () => {
+    const ttsPlayer = { play: jest.fn(async () => undefined), stop: jest.fn() };
+    const screen = await render(
+      <SceneAssetDetail
+        record={detailRecord}
+        onBack={jest.fn()}
+        onPractice={jest.fn()}
+        onDelete={jest.fn()}
+        ttsPlayer={ttsPlayer}
+      />,
+    );
+
+    await fireEvent.press(screen.getByLabelText('播放 baggage'));
+    expect(ttsPlayer.play).toHaveBeenCalledWith(detailRecord.id, 'baggage');
+    await fireEvent.press(screen.getByLabelText('停止播放 baggage'));
+    expect(ttsPlayer.stop).toHaveBeenCalled();
   });
 });

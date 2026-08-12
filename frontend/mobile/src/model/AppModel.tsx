@@ -68,6 +68,7 @@ type AppModelValue = {
   setSpeed: (value: string) => void;
   level: string;
   setLevel: (value: string) => void;
+  saveLevel: (value: string) => Promise<void>;
   teacher: Teacher;
   setTeacher: (value: Teacher) => void;
   sceneRecords: SceneLearningRecord[];
@@ -172,6 +173,14 @@ export function AppModelProvider({
     });
   }, [authController, level, teacher]);
 
+  const saveLevel = useCallback(async (value: string) => {
+    const selectedLevel = levels.find((option) => option.id === value) ?? levels[0];
+    const preference = await authController.updatePreference({
+      cefrLevel: cefrLevelForLevel(selectedLevel),
+    });
+    setLevel(levelForCefrLevel(preference.cefrLevel, levels).id);
+  }, [authController]);
+
   const signOut = useCallback(() => authController.logout(), [authController]);
 
   const isModelReady = authState.status !== 'booting';
@@ -197,6 +206,7 @@ export function AppModelProvider({
       setSpeed,
       level,
       setLevel,
+      saveLevel,
       teacher,
       setTeacher,
       sceneRecords,
@@ -225,6 +235,7 @@ export function AppModelProvider({
       ieltsRecords,
       interviewRecords,
       removeSceneRecord,
+      saveLevel,
       sceneRecords,
       signIn,
       signOut,

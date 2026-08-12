@@ -99,6 +99,24 @@ describe('SceneTrainingController', () => {
     );
   });
 
+  it('reuses the normal dialogue stage for repractice without replaying learning transitions', async () => {
+    const service = createService();
+    const controller = new SceneTrainingController(service);
+
+    await controller.start(scene, 'speak');
+
+    expect(controller.getSnapshot()).toEqual(
+      expect.objectContaining({
+        status: 'ready',
+        stage: 'speak',
+        unlockedStage: 2,
+      }),
+    );
+    expect(service.createFlow).not.toHaveBeenCalled();
+    expect(service.advanceStage).not.toHaveBeenCalled();
+    expect(service.getContent).not.toHaveBeenCalled();
+  });
+
   it('advances words to phrases and phrases to the reading stage', async () => {
     const service = createService();
     const controller = new SceneTrainingController(service);

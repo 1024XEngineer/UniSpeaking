@@ -159,4 +159,22 @@ describe('LearningAssetService', () => {
       }),
     );
   });
+
+  it('restores the complete generated scene needed by backend repractice', async () => {
+    const client = createClient([detail]);
+    const service = new LearningAssetService(client);
+
+    await expect(service.getScene('scene/airport')).resolves.toEqual(
+      expect.objectContaining({
+        sceneId: 'scene/airport',
+        background: '在机场柜台办理行李托运。',
+        aiRole: '航空公司工作人员',
+        userRole: '乘客',
+        learningGoal: '确认行李重量和登机信息。',
+        wordList: detail.wordList,
+        phraseList: detail.phraseList,
+        sentenceList: detail.sentenceList,
+      }),
+    );
+  });
 });

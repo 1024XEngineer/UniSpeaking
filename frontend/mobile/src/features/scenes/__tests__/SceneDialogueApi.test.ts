@@ -16,7 +16,7 @@ describe('SceneDialogueApi', () => {
     const api = new SceneDialogueApi(client, 'scene/1');
 
     await api.advanceState('session 1', 2, 'I need a window seat.');
-    await api.evaluateTurn('session 1', 2, 'I need a window seat.');
+    await api.evaluateTurn('session 1', 2, 'I need a window seat.', 'file:///turn.wav');
 
     expect(client.request.mock.calls[0]).toEqual([
       '/api/custom-scenes/scene%2F1/sessions/session%201/turns/2/state',
@@ -32,6 +32,10 @@ describe('SceneDialogueApi', () => {
     expect(evaluationOptions).toEqual(
       expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
     );
+    expect((evaluationOptions?.body as FormData).get('transcript')).toBe(
+      'I need a window seat.',
+    );
+    expect((evaluationOptions?.body as FormData).get('audio')).toBeTruthy();
   });
 
   it('completes a dialogue with the stop time and can recover its report', async () => {
@@ -47,7 +51,7 @@ describe('SceneDialogueApi', () => {
         {
           method: 'POST',
           body: JSON.stringify({ stopTime: '2026-08-05T10:00:00.000Z' }),
-          timeoutMs: 25_000,
+          timeoutMs: 90_000,
         },
       ],
       [

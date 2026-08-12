@@ -15,7 +15,7 @@ export default function TabsLayout() {
   const pathname = usePathname();
   const router = useRouter();
   const [immersiveLearning, setImmersiveLearning] = useState(false);
-  const hideTabBar = immersiveLearning && (pathname === '/ielts' || pathname === '/interview');
+  const hideTabBar = immersiveLearning;
 
   return (
     <LearningStageProvider immersiveLearning={immersiveLearning} setImmersiveLearning={setImmersiveLearning}>
@@ -47,7 +47,7 @@ export default function TabsLayout() {
             event.preventDefault();
             void (async () => {
               if (pathname === '/ielts' || pathname === '/interview') await rememberSpecialty(pathname === '/ielts' ? 'ielts' : 'interview');
-              router.navigate('/(app)/(tabs)/conversation');
+              router.replace('/(app)/(tabs)/conversation');
             })();
           },
         }}
@@ -69,7 +69,7 @@ export default function TabsLayout() {
             } else if (pathname !== '/scenes') {
               event.preventDefault();
               void readRememberedSpecialty().then((saved) => {
-                router.navigate(
+                router.replace(
                   saved === 'ielts'
                     ? '/(app)/(tabs)/(scenes)/ielts'
                     : saved === 'interview'
@@ -92,23 +92,37 @@ export default function TabsLayout() {
         }}
         listeners={{
           tabPress: (event) => {
-            const specialtyScene = pathname === '/ielts' || pathname === '/interview';
+            const currentSpecialty = pathname === '/ielts'
+              ? 'ielts'
+              : pathname === '/interview'
+                ? 'interview'
+                : null;
+            const specialtyScene = currentSpecialty !== null;
             const specialtyAssets = pathname.startsWith('/ielts/assets') || pathname.startsWith('/interview/assets');
             if (!specialtyScene && !specialtyAssets && pathname === '/learning') return;
             event.preventDefault();
             void (async () => {
-              if (specialtyScene) {
-                const specialty = pathname === '/ielts' ? 'ielts' : 'interview';
+              if (currentSpecialty) {
+                await rememberSpecialty(currentSpecialty);
+                router.replace(
+                  currentSpecialty === 'ielts'
+                    ? '/(app)/(tabs)/(learning)/ielts/assets'
+                    : '/(app)/(tabs)/(learning)/interview/assets',
+                );
+                return;
+              }
+              const remembered = await readRememberedSpecialty();
+              if (remembered) {
+                const specialty = remembered;
                 await rememberSpecialty(specialty);
-                router.navigate(
+                router.replace(
                   specialty === 'ielts'
                     ? '/(app)/(tabs)/(learning)/ielts/assets'
                     : '/(app)/(tabs)/(learning)/interview/assets',
                 );
                 return;
               }
-              await forgetSpecialty();
-              router.navigate('/(app)/(tabs)/(learning)/learning');
+              router.replace('/(app)/(tabs)/(learning)/learning');
             })();
           },
         }}
@@ -127,7 +141,7 @@ export default function TabsLayout() {
             event.preventDefault();
             void (async () => {
               if (pathname === '/ielts' || pathname === '/interview') await rememberSpecialty(pathname === '/ielts' ? 'ielts' : 'interview');
-              router.navigate('/(app)/(tabs)/profile');
+              router.replace('/(app)/(tabs)/profile');
             })();
           },
         }}

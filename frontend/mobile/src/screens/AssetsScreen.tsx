@@ -4,6 +4,7 @@ import { ArrowLeftIcon } from 'phosphor-react-native/src/icons/ArrowLeft';
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
 import { BookOpenTextIcon } from 'phosphor-react-native/src/icons/BookOpenText';
 import { CheckCircleIcon } from 'phosphor-react-native/src/icons/CheckCircle';
+import { PauseIcon } from 'phosphor-react-native/src/icons/Pause';
 import { PlayIcon } from 'phosphor-react-native/src/icons/Play';
 import { TranslateIcon } from 'phosphor-react-native/src/icons/Translate';
 
@@ -12,6 +13,7 @@ import { AppButton, AppScreen, Card, HeaderIconButton, PageHeader, Pill } from '
 import { SceneCategoryTag } from '@/components/SceneCategoryTag';
 import type { LearningExpression, SceneLearningRecord } from '@/data/learningAssets';
 import { LearningAssetService } from '@/features/scenes/LearningAssetService';
+import { SceneSpeechClient, TtsPlayer } from '@/features/audio/TtsPlayer';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
 import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
 import { ApiClient } from '@/infrastructure/http/ApiClient';
@@ -43,7 +45,7 @@ function SceneRecordRow({ record, onPress }: { record: SceneLearningRecord; onPr
         </View>
         <Text style={styles.recordMeta}>{record.date} · {record.status}</Text>
       </View>
-      <Text style={styles.recordScore}>{record.score === null ? '待练习' : `${record.score} 分`}</Text>
+      <Text style={styles.recordScore}>{record.score === null ? '待练习' : `${Math.round(record.score)} 分`}</Text>
       <ArrowRightIcon color={colors.subtle} size={18} weight="bold" />
     </Pressable>
   );
@@ -154,7 +156,17 @@ export function AssetsScreen({
   );
 }
 
-function ExpressionRow({ item }: { item: LearningExpression }) {
+function createAssetTtsPlayer() {
+  const tokenStore = new SecureTokenStore();
+  return new TtsPlayer({
+    speechClient: new SceneSpeechClient({
+      baseUrl: getRuntimeConfig().backendUrl,
+      tokenStore,
+    }),
+  });
+}
+
+function ExpressionRow({ item, playing, onPlay }: { item: LearningExpression; playing: boolean; onPlay: () => void }) {
   return (
     <View style={styles.expressionRow}>
       <Pill>{item.type}</Pill>
@@ -162,8 +174,12 @@ function ExpressionRow({ item }: { item: LearningExpression }) {
         <Text style={styles.expressionText}>{item.englishText}</Text>
         <Text style={styles.expressionTranslation}>{item.chineseText}</Text>
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel={`播放 ${item.englishText}`} style={styles.playButton}>
-        <PlayIcon color={colors.subtle} size={17} weight="fill" />
+      <Pressable accessibilityRole="button" accessibilityLabel={`${playing ? '停止播放' : '播放'} ${item.englishText}`} onPress={onPlay} style={[styles.playButton, playing && styles.playButtonActive]}>
+        {playing ? (
+          <PauseIcon color={colors.ink} size={17} weight="fill" />
+        ) : (
+          <PlayIcon color={colors.subtle} size={17} weight="fill" />
+        )}
       </Pressable>
     </View>
   );
@@ -192,9 +208,33 @@ function ConversationThread({ record }: { record: SceneLearningRecord }) {
   );
 }
 
-export function SceneAssetDetail({ record, onBack, onPractice, onDelete }: { record: SceneLearningRecord; onBack: () => void; onPractice: () => void; onDelete: () => void }) {
+export function SceneAssetDetail({ record, onBack, onPractice, onDelete, ttsPlayer: injectedTtsPlayer }: { record: SceneLearningRecord; onBack: () => void; onPractice: () => void; onDelete: () => void; ttsPlayer?: Pick<TtsPlayer, 'play' | 'stop'> }) {
   const [view, setView] = useState<'expressions' | 'conversation'>('expressions');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [playingExpressionId, setPlayingExpressionId] = useState<string | null>(null);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [ttsPlayer] = useState<Pick<TtsPlayer, 'play' | 'stop'>>(
+    () => injectedTtsPlayer ?? createAssetTtsPlayer(),
+  );
+
+  useEffect(() => () => ttsPlayer.stop(), [ttsPlayer]);
+
+  const toggleExpression = async (item: LearningExpression) => {
+    if (playingExpressionId === item.id) {
+      ttsPlayer.stop();
+      setPlayingExpressionId(null);
+      return;
+    }
+    ttsPlayer.stop();
+    setPlayingExpressionId(item.id);
+    setAudioError(null);
+    try {
+      await ttsPlayer.play(record.id, item.englishText);
+    } catch (error) {
+      setPlayingExpressionId(null);
+      setAudioError(error instanceof Error ? error.message : '发音播放失败');
+    }
+  };
   return (
     <>
       <AppScreen
@@ -210,7 +250,7 @@ export function SceneAssetDetail({ record, onBack, onPractice, onDelete }: { rec
         <View style={styles.detailHeading}>
           <Text style={styles.eyebrow}>普通场景</Text>
           <Text style={styles.detailTitle}>{record.title}</Text>
-          <Text style={styles.detailMeta}>{record.date} · 已完成 {record.practiceCount} 次模拟 · {record.score ?? '—'} 分</Text>
+          <Text style={styles.detailMeta}>{record.date} · 已完成 {record.practiceCount} 次模拟 · {record.score == null ? '—' : Math.round(record.score)} 分</Text>
           <AppButton title="复练场景" variant="secondary" icon="play" onPress={onPractice} style={styles.practiceButton} />
         </View>
         <View style={styles.segmented}>
@@ -218,7 +258,10 @@ export function SceneAssetDetail({ record, onBack, onPractice, onDelete }: { rec
           <Pressable onPress={() => setView('conversation')} style={[styles.segment, view === 'conversation' && styles.segmentActive]}><Text style={[styles.segmentText, view === 'conversation' && styles.segmentTextActive]}>最近对话与评价</Text></Pressable>
         </View>
         {view === 'expressions' ? (
-          <Card style={styles.expressionsCard}>{record.expressions.map((item) => <ExpressionRow key={item.id} item={item} />)}</Card>
+          <Card style={styles.expressionsCard}>
+            {record.expressions.map((item) => <ExpressionRow key={item.id} item={item} playing={playingExpressionId === item.id} onPlay={() => void toggleExpression(item)} />)}
+            {audioError ? <Text style={styles.audioError}>{audioError}</Text> : null}
+          </Card>
         ) : <ConversationThread record={record} />}
       </AppScreen>
       <Modal transparent visible={confirmDelete} animationType="fade" onRequestClose={() => setConfirmDelete(false)}>
@@ -244,12 +287,14 @@ export function SceneAssetDetailLoader({
   onPractice,
   onDelete,
   assetService: injectedAssetService,
+  ttsPlayer,
 }: {
   sceneId: string;
   onBack: () => void;
   onPractice: () => void;
   onDelete: () => void;
   assetService?: LearningAssetServicePort;
+  ttsPlayer?: Pick<TtsPlayer, 'play' | 'stop'>;
 }) {
   const [assetService] = useState<LearningAssetServicePort>(
     () => injectedAssetService ?? createLearningAssetService(),
@@ -288,6 +333,7 @@ export function SceneAssetDetailLoader({
         onBack={onBack}
         onPractice={onPractice}
         onDelete={onDelete}
+        ttsPlayer={ttsPlayer}
       />
     );
   }
@@ -340,6 +386,8 @@ const styles = StyleSheet.create({
   expressionText: { color: colors.ink, fontSize: 16, lineHeight: 22, fontWeight: '500' },
   expressionTranslation: { marginTop: 5, color: colors.muted, fontSize: 12, lineHeight: 18, fontWeight: '300' },
   playButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 20, backgroundColor: colors.white },
+  playButtonActive: { borderColor: colors.ink, backgroundColor: colors.soft },
+  audioError: { paddingVertical: 12, color: '#B94D44', fontSize: 12, lineHeight: 18 },
   conversationCard: { padding: 18, gap: 22 },
   conversationLabel: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   message: { maxWidth: '92%', gap: 7 },

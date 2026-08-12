@@ -5,7 +5,7 @@ import type {
 } from '@/data/learningAssets';
 import type { ApiRequestOptions } from '@/infrastructure/http/ApiClient';
 
-import type { LearningContentItem } from './SceneService';
+import type { GeneratedScene, LearningContentItem } from './SceneService';
 
 type ApiRequester = {
   request(path: string, options?: ApiRequestOptions): Promise<unknown>;
@@ -41,6 +41,9 @@ type LearningAssetDetail = {
   sceneId: string;
   title: string;
   aiRole: string;
+  background: string;
+  userRole: string;
+  learningGoal: string;
   wordList: LearningContentItem[];
   phraseList: LearningContentItem[];
   sentenceList: LearningContentItem[];
@@ -136,10 +139,7 @@ export class LearningAssetService {
   }
 
   async getRecord(sceneId: string): Promise<SceneLearningRecord> {
-    const value = await this.client.request(
-      `/api/custom-scenes/${encodeURIComponent(sceneId)}/assets`,
-    );
-    if (!isDetail(value)) throw new Error('学习资产详情格式不正确');
+    const value = await this.getDetail(sceneId);
     const latestHistory = value.reportHistory[value.reportHistory.length - 1];
     return {
       id: value.sceneId,
@@ -156,5 +156,30 @@ export class LearningAssetService {
       ],
       conversation: mapConversation(value),
     };
+  }
+
+  async getScene(sceneId: string): Promise<GeneratedScene> {
+    const value = await this.getDetail(sceneId);
+    return {
+      sceneId: value.sceneId,
+      title: value.title,
+      background: value.background,
+      aiRole: value.aiRole,
+      userRole: value.userRole,
+      learningGoal: value.learningGoal,
+      estimatedMinutes: 8,
+      wordList: value.wordList,
+      phraseList: value.phraseList,
+      sentenceList: value.sentenceList,
+      scenePrompt: '',
+    };
+  }
+
+  private async getDetail(sceneId: string): Promise<LearningAssetDetail> {
+    const value = await this.client.request(
+      `/api/custom-scenes/${encodeURIComponent(sceneId)}/assets`,
+    );
+    if (!isDetail(value)) throw new Error('学习资产详情格式不正确');
+    return value;
   }
 }

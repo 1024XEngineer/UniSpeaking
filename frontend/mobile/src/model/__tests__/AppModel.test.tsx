@@ -101,6 +101,7 @@ function OnboardingProbe() {
   return (
     <View>
       <Pressable accessibilityLabel="choose-level" onPress={() => model.setLevel('basic')} />
+      <Pressable accessibilityLabel="save-ielts-level" onPress={() => void model.saveLevel('independent')} />
       <Pressable accessibilityLabel="choose-teacher" onPress={() => model.setTeacher(teachers[1])} />
       <Pressable
         accessibilityLabel="complete-onboarding"
@@ -182,6 +183,23 @@ describe('AppModelProvider authentication binding', () => {
       expect(controller.updatePreference).toHaveBeenCalledWith({
         cefrLevel: 'B',
         preferredVoice: 'Harvey',
+      }),
+    );
+  });
+
+  it('persists a changed IELTS intake level in the user preference', async () => {
+    const controller = createController(authenticatedState);
+    const screen = await render(
+      <AppModelProvider authController={controller}>
+        <OnboardingProbe />
+      </AppModelProvider>,
+    );
+
+    await fireEvent.press(screen.getByLabelText('save-ielts-level'));
+
+    await waitFor(() =>
+      expect(controller.updatePreference).toHaveBeenCalledWith({
+        cefrLevel: 'C',
       }),
     );
   });
