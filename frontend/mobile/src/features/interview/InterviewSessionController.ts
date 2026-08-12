@@ -54,6 +54,13 @@ export type InterviewSessionOptions = {
 type StartResult = Pick<StartInterviewSessionResponse, 'sessionId' | 'answerSdp' | 'voiceId' | 'systemPrompt'>;
 
 const CLOSING_INSTRUCTION = 'The interview is complete. Give a brief, natural closing and thank the candidate for their time. Do not ask more questions.';
+const CONTINUE_AFTER_CUTOFF_INSTRUCTION = 'The candidate may have been cut off while answering. Ask them to continue their answer naturally from where they stopped. Do not advance to a new topic yet.';
+
+function looksLikeCutoffTranscript(value: string) {
+  const text = value.trim();
+  if (!text || /[.!?。！？]$/.test(text)) return false;
+  return text.split(/\s+/).length <= 2 && text.length < 16;
+}
 
 export class InterviewSessionController {
   private readonly listeners = new Set<(snapshot: InterviewSessionSnapshot) => void>();
@@ -253,6 +260,27 @@ export class InterviewSessionController {
     this.muted = true;
     this.dependencies.recorder.setInputEnabled(false);
     this.applyInput();
+    // Qwen can occasionally finalize a transcript after a brief pause. Do not
+    // persist or submit a fragment as a complete interview turn: doing so would
+    // advance the backend topic state (and could trigger an early end). Ask for
+    // continuation and keep the same interview turn open instead.
+    if (looksLikeCutoffTranscript(transcript)) {
+      const fragmentAudio = await this.dependencies.recorder.takeTurn(this.turnNo + 1);
+      this.dependencies.recorder.discard(fragmentAudio);
+      this.muted = false;
+      this.dependencies.recorder.setInputEnabled(true);
+      this.applyInput();
+      this.dependencies.transport.sendProviderEvent({
+        event_id: this.createEventId(),
+        type: 'response.create',
+        response: {
+          instructions: CONTINUE_AFTER_CUTOFF_INSTRUCTION,
+          modalities: ['text', 'audio'],
+        },
+      });
+      this.publish();
+      return;
+    }
     await this.persistTranscript(1, transcript, itemId);
     const wav = await this.dependencies.recorder.takeTurn(++this.turnNo);
     try {
