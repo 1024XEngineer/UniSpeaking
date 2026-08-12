@@ -295,6 +295,35 @@ function IeltsTrendLineChart({ values, palette }: { values: number[]; palette: A
   );
 }
 
+function InterviewTrendLineChart({ values, palette }: { values: number[]; palette: AssetPalette }) {
+  const [width, setWidth] = useState(0);
+  const chartWidth = Math.max(width, 270);
+  const height = 154;
+  const padding = { top: 14, right: 14, bottom: 31, left: 14 };
+  const innerWidth = chartWidth - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const points = values.map((value, index) => ({
+    x: values.length <= 1 ? padding.left + innerWidth / 2 : padding.left + (innerWidth * index) / (values.length - 1),
+    y: padding.top + ((100 - Math.max(0, Math.min(100, value))) / 100) * innerHeight,
+  }));
+  const linePath = points.length ? points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ') : '';
+  const areaPath = points.length ? `${linePath} L ${points[points.length - 1].x} ${padding.top + innerHeight} L ${points[0].x} ${padding.top + innerHeight} Z` : '';
+  return (
+    <View style={styles.trendChartFrame} onLayout={(event) => setWidth(event.nativeEvent.layout.width)}>
+      {points.length ? <Svg accessibilityLabel={`最近面试评分：${values.join('、')}`} width={chartWidth} height={height}>
+        {[0, 0.5, 1].map((progress) => {
+          const y = padding.top + innerHeight * progress;
+          return <Line key={progress} x1={padding.left} x2={chartWidth - padding.right} y1={y} y2={y} stroke={palette.border} strokeWidth={1} />;
+        })}
+        <Path d={areaPath} fill={palette.soft} opacity={0.8} />
+        <Path d={linePath} fill="none" stroke={palette.text} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+        {points.map((point, index) => <Circle key={index} cx={point.x} cy={point.y} r={4} fill={palette.paper} stroke={palette.text} strokeWidth={2.5} />)}
+        {values.map((value, index) => <SvgText key={`label-${index}`} x={points[index].x} y={height - 6} fill={palette.muted} fontSize="10" fontWeight="600" textAnchor="middle">{Math.round(value)}</SvgText>)}
+      </Svg> : <View style={styles.trendEmptyInline}><Text style={[styles.reportCopy, { color: palette.muted }]}>完成面试并生成报告后显示评分趋势。</Text></View>}
+    </View>
+  );
+}
+
 function IeltsTrends({ palette }: { palette: AssetPalette }) {
   const values = [5.5, 6, 6, 6.5, 6.5];
   const averages = [78, 72, 76, 84];
@@ -323,9 +352,18 @@ function InterviewRemoteTrends({ palette }: { palette: AssetPalette }) {
   const { records, reports, loading, error } = useInterviewAssets();
   const completed = records.filter((item) => item.latestOverallScore !== null).sort((a, b) => new Date(a.latestPracticedAt ?? a.createdAt).getTime() - new Date(b.latestPracticedAt ?? b.createdAt).getTime());
   const average = completed.length ? Math.round(completed.reduce((sum, item) => sum + Number(item.latestOverallScore), 0) / completed.length) : null;
+  const trendValues = completed.slice(-5).map((item) => Number(item.latestOverallScore));
+  const latestScore = trendValues.at(-1);
+  const change = trendValues.length >= 2 && latestScore !== undefined ? latestScore - trendValues[0] : null;
   return (
     <View style={styles.sectionStack}>
-      <Card style={[styles.trendHero, themedCard(palette)]}><Text style={[styles.cardLabel, { color: palette.muted }]}>真实面试表现</Text><Text style={[styles.trendValue, { color: palette.accent }]}>{loading ? '读取中…' : average === null ? '—' : `${average} / 100`}</Text><Text style={[styles.heroCopy, { color: palette.muted }]}>{error ?? (completed.length ? `基于 ${completed.length} 个岗位的最新报告。` : '完成面试并生成报告后显示真实趋势。')}</Text></Card>
+      <Card style={[styles.trendSummaryCard, themedCard(palette)]}>
+        <View style={styles.trendSummaryTop}>
+          <View style={styles.trendMetric}><Text style={[styles.cardLabel, { color: palette.muted }]}>面试评分趋势</Text><Text style={[styles.trendValue, { color: palette.accent }]}>{loading ? '读取中…' : latestScore === undefined ? '—' : `${Math.round(latestScore)} / 100`}</Text><Text style={[styles.trendNote, { color: palette.muted }]}>{error ?? (change === null ? '至少完成两次面试后显示变化' : `最近 ${trendValues.length} 次变化 ${change >= 0 ? '+' : ''}${Math.round(change)} 分`)}</Text></View>
+          <View style={[styles.trendGoal, { borderLeftColor: palette.border }]}><Text style={[styles.cardLabel, { color: palette.muted }]}>报告平均</Text><Text style={[styles.trendGoalValue, { color: palette.text }]}>{average ?? '—'}</Text><Text style={[styles.trendNote, { color: palette.muted }]}>基于有效报告</Text></View>
+        </View>
+        <InterviewTrendLineChart values={trendValues} palette={palette} />
+      </Card>
       <Card style={[styles.reportCard, themedCard(palette)]}><Text style={[styles.reportTitle, { color: palette.text }]}>五项能力平均表现</Text>{Object.keys(interviewDimensionLabels).map((dimension) => { const values = Object.values(reports).filter((item): item is Extract<InterviewReportResponse, { status: 'COMPLETED' }> => item.status === 'COMPLETED').flatMap((item) => item.report.dimensions.filter((entry) => entry.dimension === dimension && entry.score !== null).map((entry) => entry.score as number)); const averageValue = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0; return <ScoreRow key={dimension} label={interviewDimensionLabels[dimension]} value={averageValue} />; })}</Card>
       <Card style={[styles.reportCard, themedCard(palette)]}><Text style={[styles.reportTitle, { color: palette.text }]}>数据范围</Text><Text style={[styles.reportCopy, { color: palette.muted }]}>岗位覆盖 {records.length} 个 · 已完成报告 {completed.length} 个 · 累计练习 {records.reduce((sum, item) => sum + item.practiceCount, 0)} 次</Text></Card>
     </View>
@@ -469,7 +507,7 @@ export function InterviewAssetRemoteReport({ asset, onBack }: { asset: Interview
       {error ? <Text style={[styles.assetError, { color: palette.accent }]}>{error}</Text> : null}
       {!completed ? <Card style={[styles.heroCard, themedCard(palette)]}><Text style={[styles.cardLabel, { color: palette.muted }]}>报告状态</Text><Text style={[styles.heroCopy, { color: palette.muted }]}>{report?.status === 'FAILED' ? report.failureReason : report?.status === 'PROCESSING' ? '报告生成中，请稍后刷新。' : asset.latestSessionId ? '正在读取报告…' : '尚未完成面试'}</Text></Card> : <>
         <Card style={[styles.heroCard, themedCard(palette)]}><Text style={[styles.cardLabel, { color: palette.muted }]}>综合表现</Text><Text style={[styles.heroScore, { color: palette.accent }]}>{Math.round(completed.overallScore)}</Text><Text style={[styles.heroCopy, { color: palette.muted }]}>{completed.summary}</Text></Card>
-        <Card style={[styles.reportCard, themedCard(palette)]}><Text style={[styles.reportTitle, { color: palette.text }]}>五项能力评分</Text>{completed.dimensions.map((item) => <ScoreRow key={item.dimension} label={interviewDimensionLabels[item.dimension] ?? item.dimension} value={item.score ?? 0} />)}</Card>
+        <Card style={[styles.reportCard, themedCard(palette)]}><Text style={[styles.reportTitle, { color: palette.text }]}>五维能力反馈</Text>{completed.dimensions.map((item) => <View key={item.dimension} style={styles.dimensionFeedback}><View style={styles.dimensionFeedbackHeading}><Text style={[styles.dimensionFeedbackLabel, { color: palette.text }]}>{interviewDimensionLabels[item.dimension] ?? item.dimension}</Text><Text style={[styles.dimensionFeedbackScore, { color: palette.accent }]}>{item.score === null ? '—' : Math.round(item.score)}</Text></View><Text style={[styles.dimensionFeedbackCopy, { color: palette.muted }]}>{item.evaluation || '暂无评估说明。'}</Text>{item.advice ? <Text style={[styles.dimensionFeedbackAdvice, { color: palette.text }]}>建议：{item.advice}</Text> : null}</View>)}</Card>
       </>}
     </AppScreen>
   );
@@ -526,6 +564,13 @@ const styles = StyleSheet.create({
   reportCard: { gap: 13 },
   reportTitle: { color: colors.ink, fontSize: 19, lineHeight: 25, fontWeight: '500' },
   reportCopy: { marginTop: 7, color: colors.muted, fontSize: 13, lineHeight: 21, fontWeight: '300' },
+  trendEmptyInline: { minHeight: 154, alignItems: 'center', justifyContent: 'center' },
+  dimensionFeedback: { paddingVertical: 12, gap: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
+  dimensionFeedbackHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  dimensionFeedbackLabel: { flex: 1, fontSize: 14, lineHeight: 20, fontWeight: '500' },
+  dimensionFeedbackScore: { fontSize: 19, lineHeight: 24, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  dimensionFeedbackCopy: { fontSize: 12, lineHeight: 19, fontWeight: '300' },
+  dimensionFeedbackAdvice: { padding: 9, fontSize: 12, lineHeight: 18, fontWeight: '500', borderRadius: 9, backgroundColor: '#EAF4FF' },
   assetError: { fontSize: 13, lineHeight: 19, fontWeight: '500' },
   scoreRow: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 10 },
   scoreLabel: { width: 68, color: colors.muted, fontSize: 11, fontWeight: '300' },

@@ -86,6 +86,23 @@ describe('InterviewSessionController', () => {
     expect(test.recorder.discard).toHaveBeenCalledTimes(1);
   });
 
+  it('does not advance the interview for a likely cut-off transcript fragment', async () => {
+    const test = fixture();
+    await test.controller.start();
+    await provider(test, { type: 'session.created' });
+    await provider(test, { type: 'session.updated' });
+    await provider(test, { type: 'response.done', response: { status: 'completed' } });
+    await provider(test, { type: 'input_audio_buffer.speech_started', item_id: 'short-1' });
+    await provider(test, { type: 'input_audio_buffer.speech_stopped', item_id: 'short-1' });
+    await provider(test, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'short-1', transcript: 'I led' });
+    expect(test.sessionSocket.persistMessage).not.toHaveBeenCalled();
+    expect(test.sessionApi.submitTurn).not.toHaveBeenCalled();
+    expect(test.transport.sendProviderEvent).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'response.create',
+      response: expect.objectContaining({ instructions: expect.stringContaining('cut off') }),
+    }));
+  });
+
   it('mutes once shouldEnd is returned, sends one closing response, and ends after response.done', async () => {
     const test = fixture();
     await test.controller.start();
