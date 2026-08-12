@@ -24,12 +24,14 @@ function base64(bytes: Uint8Array) {
 
 function fixture() {
   let onAudioStream: ((event: { data: string; eventDataSize: number }) => Promise<void>) | undefined;
+  const startResults: any[] = [];
   const recorder = {
     requestPermissionsAsync: jest.fn(async () => ({ granted: true })),
-    startRecording: jest.fn(async (config) => {
+    startRecording: jest.fn(async (config): Promise<any> => {
       onAudioStream = config.onAudioStream;
+      return startResults.shift();
     }),
-    stopRecording: jest.fn(async () => undefined),
+    stopRecording: jest.fn(async () => null),
   };
   const written = new Map<string, Uint8Array>();
   const deleted: string[] = [];
@@ -46,8 +48,9 @@ function fixture() {
       delete: jest.fn(),
     })),
     remove: jest.fn((uri: string) => deleted.push(uri)),
+    cleanup: jest.fn(),
   };
-  return { recorder, storage, written, deleted, emit: async (bytes: Uint8Array) => onAudioStream?.({ data: base64(bytes), eventDataSize: bytes.length }) };
+  return { recorder, storage, written, deleted, startResults, emit: async (bytes: Uint8Array) => onAudioStream?.({ data: base64(bytes), eventDataSize: bytes.length }) };
 }
 
 describe('ContinuousTurnRecorder', () => {
@@ -92,6 +95,39 @@ describe('ContinuousTurnRecorder', () => {
     expect(test.recorder.startRecording).toHaveBeenCalledTimes(1);
     expect(test.recorder.stopRecording).toHaveBeenCalledTimes(1);
     expect(test.deleted).toEqual(['file:///cache/interview-turn-2.wav']);
+    expect(test.storage.cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('can start again after close with a fresh native recording and header state', async () => {
+    const test = fixture();
+    test.startResults.push(
+      { fileUri: 'file:///cache/native-1.wav', mimeType: 'audio/wav' },
+      { fileUri: 'file:///cache/native-2.wav', mimeType: 'audio/wav' },
+    );
+    const recorder = new ContinuousTurnRecorder(test.recorder, test.storage);
+
+    await recorder.start();
+    await recorder.close();
+    await recorder.start();
+    recorder.setInputEnabled(true);
+    await test.emit(wavChunk([1, 0]));
+    recorder.speechStarted();
+    await test.emit(new Uint8Array([2, 0]));
+    recorder.speechStopped();
+    const turnPromise = recorder.takeTurn(1);
+    await test.emit(new Uint8Array(16_000));
+    const turn = await turnPromise;
+    await recorder.close();
+
+    expect(test.recorder.startRecording).toHaveBeenCalledTimes(2);
+    expect(test.recorder.stopRecording).toHaveBeenCalledTimes(2);
+    expect(test.storage.prepare).toHaveBeenCalledTimes(2);
+    expect(test.storage.cleanup).toHaveBeenCalledTimes(2);
+    expect(test.deleted).toEqual(expect.arrayContaining([
+      'file:///cache/native-1.wav',
+      'file:///cache/native-2.wav',
+    ]));
+    expect(turn).not.toBeNull();
   });
 
   it('rejects microphone denial before opening native capture', async () => {
