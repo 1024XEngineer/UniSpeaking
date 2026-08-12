@@ -264,11 +264,12 @@ public class EvaluationProcessor {
 						sessions.get(index),
 						partByIndex(index)));
 			}
-			IeltsEvaluationResult finalResult = evaluateCompleteIeltsTest(
-					sessions,
-					partEvaluations);
-			ieltsEvaluationRepository.saveFinal(ieltsId, finalResult);
-			return finalResult;
+				IeltsEvaluationResult finalResult = evaluateCompleteIeltsTest(
+						sessions,
+						partEvaluations);
+				ieltsEvaluationRepository.saveFinal(ieltsId, finalResult);
+				ieltsPracticeRepository.incrementCompletedCount(practice.userId());
+				return finalResult;
 		}
 		var cachedPart = ieltsEvaluationRepository.findPart(sessionId);
 		if (cachedPart.isPresent()
@@ -281,8 +282,9 @@ public class EvaluationProcessor {
 						practice.selectedPart() != null
 								? practice.selectedPart()
 								: partByIndex(sessionIndex));
-		ieltsEvaluationRepository.savePart(ieltsId, sessionId, result);
-		return result;
+			ieltsEvaluationRepository.savePart(ieltsId, sessionId, result);
+			ieltsPracticeRepository.incrementCompletedCount(practice.userId());
+			return result;
 	}
 
 	public BigDecimal getLatestIeltsEstimatedScore() {
@@ -1178,10 +1180,29 @@ public class EvaluationProcessor {
 
 		PcmWavValidator.validate(command.audio());
 		PronunciationAssessmentResult assessment =
-				pronunciationClient.evaluate(command.transcript(), command.audio());
+					pronunciationClient.evaluate(command.transcript(), command.audio());
 		TurnSpeechScoreCalculator.calculate(assessment);
-		TurnLanguageFeedback feedback = llmClient.assessTurn(
-				buildIeltsTurnPrompt(session, command));
+		DialogueTurnEvaluationPromptInput prompt = buildIeltsTurnPrompt(
+				session,
+				command);
+		TurnLanguageFeedback feedback;
+		try {
+			feedback = llmClient.assessTurn(prompt);
+		}
+		catch (EvaluationException exception) {
+			if (!isProviderFeedbackFailure(exception)) {
+				throw exception;
+			}
+			LOGGER.warn(
+					"IELTS language feedback unavailable; preserving pronunciation "
+							+ "sessionId={} turnNo={} code={}",
+					session.getId(),
+					command.turnNo(),
+					exception.errorCode().code());
+			feedback = new TurnLanguageFeedback(
+					"本轮发音评分已完成，语言反馈暂不可用。",
+					"");
+		}
 		DialogueTurnEvaluationResult result = new DialogueTurnEvaluationResult(
 				command.turnNo(),
 				command.transcript(),
@@ -1544,6 +1565,18 @@ public class EvaluationProcessor {
 					AUDIO_UNSUPPORTED,
 					AUDIO_INVALID,
 					PROVIDER_NOT_CONFIGURED,
+					PROVIDER_CALL_FAILED,
+					PROVIDER_REJECTED,
+					PROVIDER_RESPONSE_INVALID,
+					PROVIDER_RESPONSE_INCOMPLETE,
+					PROMPT_TEMPLATE_INVALID -> true;
+			default -> false;
+		};
+	}
+
+	private boolean isProviderFeedbackFailure(EvaluationException exception) {
+		return switch (exception.errorCode()) {
+			case PROVIDER_NOT_CONFIGURED,
 					PROVIDER_CALL_FAILED,
 					PROVIDER_REJECTED,
 					PROVIDER_RESPONSE_INVALID,
