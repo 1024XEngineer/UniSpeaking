@@ -14,8 +14,8 @@ import {
 import { createPcmWavSegmentRecorder } from "../infrastructure/audio/audioRecorder.js";
 
 const DEFAULT_API_BASE = "";
-const DEFAULT_VOICE = "Katerina";
-const DEFAULT_MODEL = "qwen3.5-omni-flash-realtime";
+const DEFAULT_VOICE = "Tina";
+const DEFAULT_MODEL = "qwen3.5-omni-plus-realtime";
 const DATA_CHANNEL_LABEL = "oai-events";
 const DEFAULT_SPEECH_SPEED = "NATURAL";
 const DEFAULT_ICE_SERVERS = [
@@ -136,13 +136,25 @@ export function websocketUrl(
   return url.toString();
 }
 
-export function buildProviderSessionBindingFrame(localSessionId, event) {
-  const providerSessionId = String(event?.session?.id || "").trim();
+export function extractProviderSessionId(source) {
+  return String(source?.providerSessionId || source?.session?.id || "").trim() || null;
+}
+
+export function buildProviderSessionBindingFrame(localSessionId, source) {
+  const providerSessionId = extractProviderSessionId(source);
   if (!String(localSessionId || "").trim() || !providerSessionId) return null;
   return {
     type: "bind",
     sessionId: String(localSessionId).trim(),
     providerSessionId,
+  };
+}
+
+export function buildRealtimeStartPayload(offerSdp, { ielts = false } = {}) {
+  return {
+    offerSdp,
+    ...(ielts ? { voiceId: DEFAULT_VOICE } : { voice: DEFAULT_VOICE }),
+    translationEnabled: true,
   };
 }
 
@@ -267,6 +279,19 @@ export function isActiveResponseConflict(event) {
   if (event?.type !== "error") return false;
   const message = event.error?.message || event.message || "";
   return /conversation already has an active response/i.test(message);
+}
+
+export function normalizeProviderEvent(event) {
+  if (event?.type !== "rtid.error") return event;
+  const error = event.error && typeof event.error === "object"
+    ? event.error
+    : { message: String(event.error || event.message || "七牛实时服务返回错误") };
+  return {
+    ...event,
+    type: "error",
+    providerEventType: "rtid.error",
+    error,
+  };
 }
 
 export function buildRealtimeSessionConfig({
@@ -832,7 +857,7 @@ export function createRealtimeClient({
     }
   }
 
-  async function postStart({ offerSdp, voice, model }) {
+  async function postStart({ offerSdp }) {
     const accessToken = getAccessToken();
     const path = customSceneId
       ? `/api/custom-scenes/${encodeURIComponent(customSceneId)}/sessions`
@@ -847,15 +872,7 @@ export function createRealtimeClient({
         "Content-Type": "application/json",
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
-      body: JSON.stringify({
-        offerSdp,
-        provider: "QWEN",
-        model: model || DEFAULT_MODEL,
-        ...(ieltsSceneId
-          ? { voiceId: voice || DEFAULT_VOICE }
-          : { voice: voice || DEFAULT_VOICE }),
-        translationEnabled: true,
-      }),
+      body: JSON.stringify(buildRealtimeStartPayload(offerSdp, { ielts: Boolean(ieltsSceneId) })),
     });
     return unwrapResponse(response);
   }
@@ -863,7 +880,9 @@ export function createRealtimeClient({
   async function handleProviderEvent(raw) {
     let event;
     try {
-      event = typeof raw === "string" ? JSON.parse(raw) : raw;
+      event = normalizeProviderEvent(
+        typeof raw === "string" ? JSON.parse(raw) : raw,
+      );
     } catch {
       emit({ type: "local.error", message: "收到无法解析的模型事件" });
       return;
@@ -895,9 +914,8 @@ export function createRealtimeClient({
     }
 
     if (event.type === "session.created") {
-      started = true;
       const binding = buildProviderSessionBindingFrame(sessionId, event);
-      if (binding) {
+      if (binding && !providerSessionBound) {
         const operation = ensureProviderSessionBinding(binding.providerSessionId);
         pendingOperations.add(operation);
         try {
@@ -905,21 +923,9 @@ export function createRealtimeClient({
         } finally {
           pendingOperations.delete(operation);
         }
-      } else {
+      } else if (!providerSessionId) {
         emit({ type: "local.backend_warning", message: "服务商未返回 session.created 会话标识，用量无法归属" });
       }
-      const audioTrack = localStream?.getAudioTracks?.()[0];
-      if (audioTrack && audioSender?.track !== audioTrack) {
-        await audioSender?.replaceTrack(audioTrack);
-      }
-      setTrackEnabled();
-      sendSessionUpdate();
-      sessionUpdateRetryTimer = window.setTimeout(() => {
-        sessionUpdateRetryTimer = null;
-        if (!sessionUpdateAcknowledged && channel?.readyState === "open") {
-          sendSessionUpdate();
-        }
-      }, 2_000);
       return;
     }
 
@@ -1248,8 +1254,6 @@ export function createRealtimeClient({
   }
 
   async function start({
-    voice = DEFAULT_VOICE,
-    model = DEFAULT_MODEL,
     speechSpeed = DEFAULT_SPEECH_SPEED,
     silenceDurationMs = null,
     turnDetectionType = null,
@@ -1300,10 +1304,10 @@ export function createRealtimeClient({
 
       const backend = await postStart({
         offerSdp: peer.localDescription?.sdp || offer.sdp || "",
-        voice,
-        model,
       });
       sessionId = backend.sessionId;
+      providerSessionId = extractProviderSessionId(backend);
+      providerSessionBound = Boolean(providerSessionId);
       ieltsActivePart = backend.currentStage || null;
       ieltsPreparedQuestions = Array.isArray(
         backend.content?.[ieltsActivePart === "PART_1" ? "part1" : "part3"],
@@ -1320,7 +1324,7 @@ export function createRealtimeClient({
       sessionConfig = buildRealtimeSessionConfig({
         systemPrompt: finalSystemPrompt,
         voice: backend.voiceId || DEFAULT_VOICE,
-        model,
+        model: DEFAULT_MODEL,
         speechSpeed,
         automaticTurnResponses: !manualTurnResponses,
         // 场景覆盖：Interview 由调用方显式传 1500；IELTS 保持确定性 3000；其余回落 600
@@ -1333,6 +1337,19 @@ export function createRealtimeClient({
       await connectSessionSocket();
       await peer.setRemoteDescription({ type: "answer", sdp: normalizeSdp(backend.answerSdp) });
       await waitForChannel(channel, peer);
+      started = true;
+      const connectedAudioTrack = localStream?.getAudioTracks?.()[0];
+      if (connectedAudioTrack && audioSender?.track !== connectedAudioTrack) {
+        await audioSender?.replaceTrack(connectedAudioTrack);
+      }
+      setTrackEnabled();
+      sendSessionUpdate();
+      sessionUpdateRetryTimer = window.setTimeout(() => {
+        sessionUpdateRetryTimer = null;
+        if (!sessionUpdateAcknowledged && channel?.readyState === "open") {
+          sendSessionUpdate();
+        }
+      }, 2_000);
       emit({ type: "local.connected", sessionId, backend });
       return { sessionId, backend };
     } catch (error) {
