@@ -20,6 +20,18 @@ export function InterviewReportView({
 }) {
   const reportState = useInterviewReport(sessionId, api);
 
+  if (reportState.error) {
+    return (
+      <View style={styles.stack}>
+        <Text style={styles.title}>网络错误</Text>
+        <Text style={styles.muted}>报告加载暂时失败，正在自动重试。</Text>
+        <Pressable accessibilityRole="button" onPress={() => void reportState.refresh()} style={styles.button}>
+          <Text style={styles.buttonText}>立即刷新</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   if (reportState.status === 'PROCESSING' || reportState.status === 'IDLE') {
     return <Text style={styles.muted}>报告生成中，请稍候…</Text>;
   }
