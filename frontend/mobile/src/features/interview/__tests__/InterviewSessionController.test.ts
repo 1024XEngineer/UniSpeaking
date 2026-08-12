@@ -25,7 +25,12 @@ function fixture() {
     submitTurn: jest.fn(async () => ({ state: { shouldEnd: true, completedTopicCount: 1, coveredTopicCount: 1, currentTopic: 'done', controlInstruction: 'next' }, reportStatus: 'PROCESSING' as const })),
     end: jest.fn(async () => ({ sessionId: 'session-1', reportStatus: 'PROCESSING' as const })),
   };
-  const sessionSocket = { connect: jest.fn(async () => undefined), persistMessage: jest.fn(async () => undefined), close: jest.fn() };
+  const sessionSocket = {
+    connect: jest.fn(async () => undefined),
+    bindProviderSession: jest.fn(async () => undefined),
+    persistMessage: jest.fn(async () => undefined),
+    close: jest.fn(),
+  };
   const controller = new InterviewSessionController(
     { recorder, transport, sessionApi, sessionSocket, createEventId: () => 'event-1' },
     { sceneId: 'scene-1', voice: 'voice', model: 'qwen3.5-omni-flash-realtime' },
@@ -42,9 +47,10 @@ describe('InterviewSessionController', () => {
     const test = fixture();
     await test.controller.start();
     expect(test.calls.slice(0, 4)).toEqual(['recorder.start', 'webrtc.prepare', 'webrtc.offer', 'webrtc.answer']);
-    await provider(test, { type: 'session.created' });
+    await provider(test, { type: 'session.created', session: { id: 'provider-1' } });
     await provider(test, { type: 'session.updated' });
     expect(test.transport.sendProviderEvent).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'response.create' }));
+    expect(test.sessionSocket.bindProviderSession).toHaveBeenCalledWith('provider-1');
     expect(test.transport.setAudioEnabled).toHaveBeenLastCalledWith(false);
     await provider(test, { type: 'response.done', response: { status: 'completed' } });
     expect(test.transport.setAudioEnabled).toHaveBeenLastCalledWith(true);

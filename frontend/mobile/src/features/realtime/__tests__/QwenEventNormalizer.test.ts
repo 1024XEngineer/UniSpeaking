@@ -2,8 +2,8 @@ import { normalizeQwenEvent } from '../QwenEventNormalizer';
 
 describe('normalizeQwenEvent', () => {
   it('normalizes session and speech lifecycle events', () => {
-    expect(normalizeQwenEvent({ type: 'session.created' })).toEqual([
-      { type: 'session.created' },
+    expect(normalizeQwenEvent({ type: 'session.created', session: { id: 'provider-1' } })).toEqual([
+      { type: 'session.created', providerSessionId: 'provider-1' },
     ]);
     expect(normalizeQwenEvent({ type: 'session.updated' })).toEqual([
       { type: 'session.updated' },

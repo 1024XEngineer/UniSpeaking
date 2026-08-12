@@ -79,6 +79,7 @@ describe('SessionMessageSocket', () => {
       sessionId: 'session-1',
       message: { owner: 1, content: 'Hello there.', audio: null },
       stopTime: null,
+      providerSessionId: null,
     });
     nativeSocket.message({
       type: 'session.message.accepted',
@@ -106,6 +107,7 @@ describe('SessionMessageSocket', () => {
       sessionId: 'session-1',
       message: null,
       stopTime: '2026-08-05T08:00:00.000Z',
+      providerSessionId: null,
     });
     nativeSocket.message({
       type: 'session.end.failed',
@@ -115,6 +117,37 @@ describe('SessionMessageSocket', () => {
     });
 
     await expect(pending).rejects.toThrow('session already ended');
+  });
+
+  it('binds the provider session and waits for the accepted ACK', async () => {
+    const nativeSocket = new FakeWebSocket();
+    const socket = new SessionMessageSocket({
+      baseUrl: 'http://127.0.0.1:8080',
+      tokenStore: { get: async () => 'jwt-token' },
+      webSocketFactory: () => nativeSocket,
+    });
+    const connecting = socket.connect('session-1');
+    await Promise.resolve();
+    nativeSocket.open();
+    await connecting;
+
+    const pending = socket.bindProviderSession(' provider-1 ');
+    expect(JSON.parse(nativeSocket.sent[0])).toEqual({
+      type: 'bind',
+      sessionId: 'session-1',
+      message: null,
+      stopTime: null,
+      providerSessionId: 'provider-1',
+    });
+    nativeSocket.message({
+      type: 'session.bind.accepted',
+      success: true,
+      sessionId: 'session-1',
+    });
+    await expect(pending).resolves.toEqual(expect.objectContaining({
+      type: 'session.bind.accepted',
+      success: true,
+    }));
   });
 
   it('rejects pending acknowledgements when the socket closes', async () => {

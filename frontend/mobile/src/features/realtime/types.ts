@@ -33,7 +33,7 @@ export type RealtimeError = Readonly<{
 }>;
 
 export type RealtimeDomainEvent =
-  | { type: 'session.created' }
+  | { type: 'session.created'; providerSessionId?: string }
   | { type: 'session.updated' }
   | { type: 'user.speech.started' }
   | { type: 'user.speech.stopped' }
