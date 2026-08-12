@@ -53,7 +53,7 @@ describe('useInterviewPreparation', () => {
     expect(service.prepareMaterials).not.toHaveBeenCalled();
   });
 
-  it('prepares materials before generating the scene and maps difficulty', async () => {
+  it('prepares editable materials before the confirmation step', async () => {
     const service = createService();
     const { result } = await renderHook(() => useInterviewPreparation(service));
     const order: string[] = [];
@@ -68,11 +68,26 @@ describe('useInterviewPreparation', () => {
 
     await act(async () => result.current.start({ jobDescription: 'JD', difficulty: 'hard' }));
 
-    expect(order).toEqual(['prepare', 'generate:HARD']);
+    expect(order).toEqual(['prepare']);
     expect(result.current.result).toEqual(expect.objectContaining({
       jobTitle: 'Product Manager',
-      scene: expect.objectContaining({ sceneId: 'scene-123' }),
+      scene: null,
     }));
+
+    await act(async () => result.current.confirm({ material: result.current.result!.material, difficulty: 'hard' }));
+    expect(order).toEqual(['prepare', 'generate:HARD']);
+  });
+
+  it('sends pasted resume text without a file', async () => {
+    const service = createService();
+    const { result } = await renderHook(() => useInterviewPreparation(service));
+    await act(async () => result.current.setResumeText(' Led a team of five. '));
+    await act(async () => result.current.start({ jobDescription: 'JD', difficulty: 'standard' }));
+    expect(service.prepareMaterials).toHaveBeenCalledWith({
+      jobDescriptionText: 'JD',
+      resumeText: ' Led a team of five. ',
+      resumeFile: undefined,
+    });
   });
 
   it('ignores a second start while the first request is pending', async () => {
