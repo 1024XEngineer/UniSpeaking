@@ -33,12 +33,29 @@ nano deploy/env/.env
 Replace every credential placeholder. Keep `DATABASE_URL` pointed at the
 Compose service name `postgres`, not `localhost`.
 
-The environment template selects the official Debian, Maven Central, PyPI, and
-npm sources for the Singapore server. These values affect image builds only
-and can be overridden when another deployment region needs different mirrors.
-The Docker daemon registry mirror remains configured separately in
-`/etc/docker/daemon.json` on the server. PaddleOCR uses its supported `bos`
-model source by default.
+The environment template selects mirrors reachable from mainland China for
+Docker images, Debian packages, Maven, PyPI, and npm. The committed defaults
+use DaoCloud for Docker images, Alibaba Cloud for Debian/Maven/PyPI, and
+npmmirror for npm. Override an individual value in `deploy/env/.env` only when
+that mirror is unavailable. PaddleOCR uses its supported `bos` model source.
+
+The image prefix in Compose avoids direct Docker Hub access. A Docker daemon
+registry mirror can additionally be configured in `/etc/docker/daemon.json`
+for ad-hoc `docker pull` commands that still use Docker Hub image names:
+
+```json
+{
+  "registry-mirrors": ["https://docker.m.daocloud.io"]
+}
+```
+
+After changing the daemon configuration, validate and restart Docker:
+
+```bash
+sudo dockerd --validate --config-file=/etc/docker/daemon.json
+sudo systemctl restart docker
+docker info | sed -n '/Registry Mirrors/,+3p'
+```
 
 ## Initialize a new database
 

@@ -1,7 +1,9 @@
-FROM eclipse-temurin:21-jdk AS build
+ARG DOCKER_IMAGE_REGISTRY=docker.m.daocloud.io
+
+FROM ${DOCKER_IMAGE_REGISTRY}/library/eclipse-temurin:21-jdk AS build
 WORKDIR /workspace
 
-ARG MAVEN_REPO_URL=https://repo.maven.apache.org/maven2
+ARG MAVEN_REPO_URL=https://maven.aliyun.com/repository/public
 ENV MAVEN_REPO_URL=${MAVEN_REPO_URL}
 ENV MVNW_REPOURL=${MAVEN_REPO_URL}
 
@@ -13,14 +15,14 @@ RUN ./mvnw --settings docker/maven/settings.xml \
     -DskipIntegrationTests \
     package
 
-FROM eclipse-temurin:21-jre AS java-runtime
+FROM ${DOCKER_IMAGE_REGISTRY}/library/eclipse-temurin:21-jre AS java-runtime
 
-FROM python:3.11-slim-bookworm AS ocr-base
+FROM ${DOCKER_IMAGE_REGISTRY}/library/python:3.11-slim-bookworm AS ocr-base
 WORKDIR /app
 
-ARG DEBIAN_MIRROR=https://deb.debian.org/debian
-ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
-ARG PYPI_INDEX_URL=https://pypi.org/simple
+ARG DEBIAN_MIRROR=https://mirrors.aliyun.com/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.aliyun.com/debian-security
+ARG PYPI_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 ARG PADDLE_PDX_MODEL_SOURCE=bos
 
 RUN sed -i \
@@ -66,11 +68,11 @@ RUN python /app/ocr/paddle_ocr_runner.py \
     --disable-doc-unwarping \
     --disable-textline-orientation
 
-FROM python:3.11-slim-bookworm
+FROM ${DOCKER_IMAGE_REGISTRY}/library/python:3.11-slim-bookworm
 WORKDIR /app
 
-ARG DEBIAN_MIRROR=https://deb.debian.org/debian
-ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
+ARG DEBIAN_MIRROR=https://mirrors.aliyun.com/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.aliyun.com/debian-security
 ARG PADDLE_PDX_MODEL_SOURCE=bos
 
 RUN sed -i \
