@@ -101,4 +101,92 @@ describe('InterviewSessionController', () => {
     expect(second.recorder.close).toHaveBeenCalledTimes(1);
     expect(second.transport.close).toHaveBeenCalledTimes(1);
   });
+
+  it('cancels an in-flight start without leaving a backend session active', async () => {
+    const test = fixture();
+    let resolveStart!: (value: any) => void;
+    test.sessionApi.startSession.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveStart = resolve;
+    }));
+
+    const starting = test.controller.start();
+    while (!resolveStart) await Promise.resolve();
+    const ending = test.controller.end();
+    resolveStart({ sessionId: 'session-1', answerSdp: 'answer', voiceId: 'voice', systemPrompt: 'prompt' });
+
+    await expect(starting).rejects.toThrow('面试启动已取消');
+    await ending;
+    expect(test.sessionApi.end).toHaveBeenCalledWith('session-1');
+    expect(test.transport.applyAnswer).not.toHaveBeenCalled();
+    expect(test.controller.getSnapshot().state).toBe('ended');
+  });
+
+  it('ends the backend even when an in-flight turn fails after the user ends', async () => {
+    const test = fixture();
+    let rejectTurn!: (cause: Error) => void;
+    test.sessionApi.submitTurn.mockImplementationOnce(() => new Promise((_, reject) => {
+      rejectTurn = reject;
+    }));
+    await test.controller.start();
+    await provider(test, { type: 'session.created' });
+    await provider(test, { type: 'session.updated' });
+    await provider(test, { type: 'response.done', response: { status: 'completed' } });
+    await provider(test, { type: 'input_audio_buffer.speech_started', item_id: 'item-1' });
+    await provider(test, { type: 'input_audio_buffer.speech_stopped', item_id: 'item-1' });
+
+    const turn = test.controller.handleProviderMessage(JSON.stringify({
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'item-1',
+      transcript: 'answer',
+    }));
+    while (!rejectTurn) await Promise.resolve();
+    const ending = test.controller.end();
+    rejectTurn(new Error('turn failed'));
+
+    await expect(turn).rejects.toThrow('turn failed');
+    await ending;
+    expect(test.sessionApi.end).toHaveBeenCalledTimes(1);
+    expect(test.transport.sendProviderEvent).toHaveBeenCalledTimes(2);
+    expect(test.controller.getSnapshot().state).toBe('ended');
+  });
+
+  it('allows a duplicate provider item to retry after persistence fails', async () => {
+    const test = fixture();
+    test.sessionSocket.persistMessage
+      .mockRejectedValueOnce(new Error('ack failed'))
+      .mockResolvedValueOnce(undefined);
+    await test.controller.start();
+    await provider(test, { type: 'session.created' });
+    await provider(test, { type: 'session.updated' });
+    await provider(test, { type: 'response.done', response: { status: 'completed' } });
+    const event = {
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'item-retry',
+      transcript: 'answer',
+    };
+
+    await expect(test.controller.handleProviderMessage(JSON.stringify(event))).rejects.toThrow('ack failed');
+    await test.controller.handleProviderMessage(JSON.stringify(event));
+
+    expect(test.sessionSocket.persistMessage).toHaveBeenCalledTimes(2);
+    expect(test.sessionApi.submitTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('ends the backend when the realtime provider fails', async () => {
+    const test = fixture();
+    await test.controller.start();
+    await provider(test, { type: 'session.created' });
+    test.transport.emit({ type: 'connection.failed', message: 'peer failed' });
+
+    for (let attempt = 0; attempt < 10 && test.sessionApi.end.mock.calls.length === 0; attempt += 1) {
+      await Promise.resolve();
+    }
+    expect(test.sessionApi.end).toHaveBeenCalledTimes(1);
+    for (let attempt = 0; attempt < 10 && test.controller.getSnapshot().state !== 'ended'; attempt += 1) {
+      await Promise.resolve();
+    }
+    expect(test.recorder.close).toHaveBeenCalledTimes(1);
+    expect(test.controller.getSnapshot().state).toBe('ended');
+    expect(test.controller.getSnapshot().error?.message).toBe('peer failed');
+  });
 });

@@ -68,6 +68,9 @@ export class InterviewSessionController {
   private reportStatus: InterviewReportStatus | null = null;
   private readonly transcripts: InterviewTranscript[] = [];
   private readonly seenTranscriptIds = new Set<string>();
+  private readonly pendingTranscriptIds = new Set<string>();
+  private providerQueue: Promise<void> = Promise.resolve();
+  private startPromise: Promise<{ sessionId: string }> | null = null;
   private turnOperation: Promise<void> | null = null;
   private endRequested = false;
   private closingRequested = false;
@@ -81,8 +84,13 @@ export class InterviewSessionController {
   ) {
     this.createEventId = dependencies.createEventId ?? (() => `event_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
     this.unsubscribeTransport = dependencies.transport.subscribe((event) => {
-      if (event.type === 'provider.message') void this.handleProviderMessage(event.data);
-      else void this.fail(new Error(event.message ?? '实时连接失败'));
+      if (event.type === 'provider.message') {
+        this.providerQueue = this.providerQueue
+          .then(() => this.handleProviderMessage(event.data))
+          .catch((cause) => this.handleFailure(cause));
+      } else {
+        void this.handleFailure(new Error(event.message ?? '实时连接失败'));
+      }
     });
   }
 
@@ -106,18 +114,29 @@ export class InterviewSessionController {
     return () => this.listeners.delete(listener);
   }
 
-  async start() {
-    if (this.state === 'active') return { sessionId: this.backend!.sessionId };
+  start() {
+    if (this.state === 'active') return Promise.resolve({ sessionId: this.backend!.sessionId });
+    if (this.startPromise) return this.startPromise;
     if (this.state === 'ended' || this.state === 'error') this.reset();
+    this.startPromise = this.performStart().finally(() => {
+      this.startPromise = null;
+    });
+    return this.startPromise;
+  }
+
+  private async performStart() {
     this.state = 'starting';
     this.publish();
     try {
       // Audio Studio owns the continuous capture and must be ready before WebRTC.
       await this.dependencies.recorder.start();
+      this.assertStartActive();
       this.dependencies.recorder.setInputEnabled(false);
       await this.dependencies.transport.prepare();
+      this.assertStartActive();
       this.dependencies.transport.setAudioEnabled(false);
       const offerSdp = await this.dependencies.transport.createOffer();
+      this.assertStartActive();
       const backend = await this.dependencies.sessionApi.startSession({
         offerSdp,
         provider: 'QWEN',
@@ -127,13 +146,18 @@ export class InterviewSessionController {
       });
       if (!backend.answerSdp?.trim() || !backend.systemPrompt?.trim()) throw new Error('面试实时会话参数不完整');
       this.backend = backend;
+      this.assertStartActive();
       await this.dependencies.sessionSocket.connect(backend.sessionId);
+      this.assertStartActive();
       await this.dependencies.transport.applyAnswer(backend.answerSdp);
+      this.assertStartActive();
       await this.dependencies.transport.waitForDataChannel();
+      this.assertStartActive();
       this.publish();
       return { sessionId: backend.sessionId };
     } catch (cause) {
-      return this.fail(cause);
+      if (!this.endRequested) await this.handleStartFailure(cause);
+      throw cause instanceof Error ? cause : new Error(String(cause));
     }
   }
 
@@ -203,20 +227,20 @@ export class InterviewSessionController {
         this.dependencies.recorder.speechStopped();
         return;
       case 'user.transcript.completed':
-        if (this.closingRequested || !event.text.trim()) return;
-        if (event.itemId && this.seenTranscriptIds.has(`1:${event.itemId}`)) return;
-        if (event.itemId) this.seenTranscriptIds.add(`1:${event.itemId}`);
-        this.turnOperation = this.processTurn(event.text.trim(), event.itemId).finally(() => { this.turnOperation = null; });
-        await this.turnOperation;
+        if (this.closingRequested || this.endRequested || !event.text.trim()) return;
+        await this.processTranscriptOnce(1, event, () => {
+          this.turnOperation = this.processTurn(event.text.trim(), event.itemId)
+            .finally(() => { this.turnOperation = null; });
+          return this.turnOperation;
+        });
         return;
       case 'assistant.transcript.completed':
-        if (!event.text.trim() || (event.itemId && this.seenTranscriptIds.has(`0:${event.itemId}`))) return;
-        if (event.itemId) this.seenTranscriptIds.add(`0:${event.itemId}`);
-        await this.persistTranscript(0, event.text.trim(), event.itemId);
+        if (!event.text.trim()) return;
+        await this.processTranscriptOnce(0, event, () =>
+          this.persistTranscript(0, event.text.trim(), event.itemId));
         return;
       case 'provider.error':
-        await this.fail(new Error(event.message));
-        return;
+        throw new Error(event.message);
       default:
         return;
     }
@@ -233,6 +257,7 @@ export class InterviewSessionController {
       this.interviewState = result.state;
       this.reportStatus = result.reportStatus;
       this.publish();
+      if (this.endRequested) return;
       if (result.state.shouldEnd) {
         this.closingRequested = true;
         this.muted = true;
@@ -266,12 +291,20 @@ export class InterviewSessionController {
     this.muted = true;
     this.dependencies.recorder.setInputEnabled(false);
     this.applyInput();
+    let turnFailure: unknown = null;
     try {
-      // The peer is stopped before Audio Studio so no more provider audio can open a turn.
+      if (this.startPromise) {
+        try { await this.startPromise; } catch { /* Cancellation/failure is finalized below. */ }
+      }
+      if (this.turnOperation) {
+        try { await this.turnOperation; } catch (cause) { turnFailure = cause; }
+      }
+      // Keep the data channel alive until the active turn has finished; endRequested
+      // prevents it from requesting another provider response.
       this.dependencies.transport.close();
-      if (this.turnOperation) await this.turnOperation;
       const result = this.backend ? await this.dependencies.sessionApi.end(this.backend.sessionId) : null;
       if (result) this.reportStatus = result.reportStatus;
+      if (turnFailure) this.error = turnFailure instanceof Error ? turnFailure : new Error(String(turnFailure));
       return result;
     } finally {
       await this.dependencies.recorder.close();
@@ -293,18 +326,70 @@ export class InterviewSessionController {
     this.dependencies.transport.setAudioEnabled(this.state === 'active' && !this.muted && !this.closingRequested && !this.endRequested);
   }
 
-  private async fail(cause: unknown): Promise<never> {
+  private assertStartActive() {
+    if (this.endRequested) throw new Error('面试启动已取消');
+  }
+
+  private async processTranscriptOnce(
+    owner: 0 | 1,
+    event: { itemId?: string },
+    operation: () => Promise<unknown>,
+  ) {
+    const key = event.itemId ? `${owner}:${event.itemId}` : null;
+    if (key && (this.seenTranscriptIds.has(key) || this.pendingTranscriptIds.has(key))) return;
+    if (key) this.pendingTranscriptIds.add(key);
+    try {
+      await operation();
+      if (key) this.seenTranscriptIds.add(key);
+    } finally {
+      if (key) this.pendingTranscriptIds.delete(key);
+    }
+  }
+
+  private async handleStartFailure(cause: unknown) {
     const failure = cause instanceof Error ? cause : new Error(String(cause));
     this.error = failure;
     this.state = 'error';
     this.publish();
+    if (this.backend) {
+      try {
+        const result = await this.dependencies.sessionApi.end(this.backend.sessionId);
+        this.reportStatus = result.reportStatus;
+      } catch { /* Preserve the startup failure shown to the user. */ }
+    }
     await this.cleanupNative();
-    throw failure;
+  }
+
+  private async handleFailure(cause: unknown) {
+    if (this.state === 'ending' || this.state === 'ended') return;
+    const failure = cause instanceof Error ? cause : new Error(String(cause));
+    this.error = failure;
+    this.endRequested = true;
+    this.state = 'error';
+    this.publish();
+    if (this.startPromise) {
+      try { await this.startPromise; } catch { /* Expected after cancellation. */ }
+    }
+    if (this.turnOperation) {
+      try { await this.turnOperation; } catch { /* The original failure is retained. */ }
+    }
+    let ended = false;
+    if (this.backend) {
+      try {
+        const result = await this.dependencies.sessionApi.end(this.backend.sessionId);
+        this.reportStatus = result.reportStatus;
+        ended = true;
+      } catch { /* Keep the error screen so the user can explicitly end again. */ }
+    }
+    await this.cleanupNative();
+    this.unsubscribeTransport();
+    if (ended) this.state = 'ended';
+    this.publish();
   }
 
   private reset() {
     this.state = 'idle'; this.error = null; this.backend = null; this.turnNo = 0; this.interviewState = null; this.reportStatus = null;
-    this.transcripts.length = 0; this.seenTranscriptIds.clear(); this.endRequested = false; this.closingRequested = false; this.configured = false; this.openingRequested = false; this.endPromise = null;
+    this.transcripts.length = 0; this.seenTranscriptIds.clear(); this.pendingTranscriptIds.clear(); this.endRequested = false; this.closingRequested = false; this.configured = false; this.openingRequested = false; this.endPromise = null;
   }
 
   private publish() { const snapshot = this.getSnapshot(); this.listeners.forEach((listener) => listener(snapshot)); }
