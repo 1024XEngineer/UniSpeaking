@@ -61,29 +61,37 @@ export function useInterviewReport(
     }
   }, []);
 
-  const fetchReport = useCallback(async (method: 'getReport' | 'retryReport') => {
-    if (!sessionId) return;
+  const fetchReport = useCallback(async (method: 'getReport' | 'retryReport'): Promise<number | null> => {
+    if (!sessionId) return null;
     const requestId = ++requestRef.current;
     clearTimer();
+
+    const scheduleNextPoll = () => {
+      const delay = INTERVIEW_REPORT_POLL_DELAYS_MS[Math.min(
+        pollIndexRef.current,
+        INTERVIEW_REPORT_POLL_DELAYS_MS.length - 1,
+      )];
+      pollIndexRef.current += 1;
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        void fetchReport('getReport');
+      }, delay);
+    };
+
     try {
       const response = await api[method](sessionId);
-      if (!mountedRef.current || requestId !== requestRef.current) return;
+      if (!mountedRef.current || requestId !== requestRef.current) return requestId;
       setState(stateFromResponse(response));
       if (response.status === 'PROCESSING') {
-        const delay = INTERVIEW_REPORT_POLL_DELAYS_MS[Math.min(
-          pollIndexRef.current,
-          INTERVIEW_REPORT_POLL_DELAYS_MS.length - 1,
-        )];
-        pollIndexRef.current += 1;
-        timerRef.current = setTimeout(() => {
-          timerRef.current = null;
-          void fetchReport('getReport');
-        }, delay);
+        scheduleNextPoll();
       }
+      return requestId;
     } catch (error) {
       if (mountedRef.current && requestId === requestRef.current) {
         setState((current) => ({ ...current, error }));
+        scheduleNextPoll();
       }
+      return requestId;
     }
   }, [api, clearTimer, sessionId]);
 
@@ -110,8 +118,10 @@ export function useInterviewReport(
     if (state.status !== 'FAILED' || !sessionId) return;
     pollIndexRef.current = 0;
     setState((current) => ({ ...current, isRetrying: true, error: null }));
-    await fetchReport('retryReport');
-    if (mountedRef.current) setState((current) => ({ ...current, isRetrying: false }));
+    const requestId = await fetchReport('retryReport');
+    if (mountedRef.current && requestId === requestRef.current) {
+      setState((current) => ({ ...current, isRetrying: false }));
+    }
   }, [fetchReport, sessionId, state.status]);
 
   return { ...state, retry, refresh };
