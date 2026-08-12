@@ -44,6 +44,9 @@ assert.equal(route("/ielts-assets").canonicalPath, paths.ielts.assets.root);
 assert.equal(route("/unknown").canonicalPath, paths.root);
 assert.equal(route(paths.assets.latest).assetView, "detail");
 assert.equal(route("/assets", "?view=detail").assetView, "detail");
+assert.equal(route(paths.auth.login, "?voice=Tina").selectedVoice, "Tina");
+assert.equal(route(paths.auth.signup, "?voice=Harvey").selectedVoice, "Harvey");
+assert.equal(route(paths.auth.login).selectedVoice, null);
 assert.equal(route(paths.conversation.session("free chat/1")).conversationSessionId, "free chat/1");
 assert.equal(route(paths.scenes.word("custom scene/1")).sceneId, "custom scene/1");
 assert.equal(route(paths.scenes.phrase("custom_1")).training.stage, "phrase");
@@ -88,4 +91,4 @@ assert.equal(sidebarPageTarget("interview-assets", "scenes"), "interview");
 assert.equal(sidebarPageTarget("scenes", "assets"), "assets");
 assert.equal(sidebarPageTarget("assets", "scenes"), "scenes");
 
-console.log(`Route contract passed: ${cases.length + 38} assertions`);
+console.log(`Route contract passed: ${cases.length + 41} assertions`);

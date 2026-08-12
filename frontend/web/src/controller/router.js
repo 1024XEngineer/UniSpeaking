@@ -8,6 +8,7 @@ const baseRoute = {
   assetSceneId: null,
   helpRoute: null,
   aboutRoute: null,
+  selectedVoice: null,
   publicAccess: false,
 };
 
@@ -324,12 +325,15 @@ function previewRoute(preview) {
 export function resolveRoute(locationLike = window.location) {
   const pathname = normalizePath(locationLike.pathname);
   const search = locationLike.search || "";
-  const preview = previewRoute(new URLSearchParams(search).get("preview"));
+  const searchParams = new URLSearchParams(search);
+  const selectedVoice = searchParams.get("voice") || null;
+  const withSelectedVoice = (route) => ({ ...route, selectedVoice });
+  const preview = previewRoute(searchParams.get("preview"));
   if (preview) return preview;
 
   if (pathname === paths.root) return { ...baseRoute, flow: "splash", page: "conversation" };
-  if (pathname === paths.auth.login) return { ...baseRoute, flow: "auth", page: "conversation", authMode: "login" };
-  if (pathname === paths.auth.signup) return { ...baseRoute, flow: "auth", page: "conversation", authMode: "signup" };
+  if (pathname === paths.auth.login) return withSelectedVoice({ ...baseRoute, flow: "auth", page: "conversation", authMode: "login" });
+  if (pathname === paths.auth.signup) return withSelectedVoice({ ...baseRoute, flow: "auth", page: "conversation", authMode: "signup" });
   if (pathname === paths.auth.level) return { ...baseRoute, flow: "level", page: "conversation" };
   if (pathname === paths.auth.teacher) return { ...baseRoute, flow: "teacher", page: "conversation" };
 
