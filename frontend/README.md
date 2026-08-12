@@ -49,9 +49,9 @@ http://localhost:5173
 `VITE_BACKEND_URL` 同时用于 REST 和认证 WebSocket。留空时请求会发送到前端源，
 只有经过 Nginx 同源代理的生产部署才应使用 `/backend`。
 
-`VITE_FEEDBACK_URL` 用于配置外部腾讯问卷地址。留空时所有反馈入口显示为待配置且
-不可点击；配置有效的 HTTP(S) 地址后，入口会在新窗口打开问卷。反馈数据不经过
-UniSpeaking 后端，也不提供处理进度查询。
+反馈入口默认打开 `https://wj.qq.com/s2/27565116/i1wq/`。如需替换问卷，可通过
+`VITE_FEEDBACK_URL` 配置其他有效的 HTTP(S) 地址；入口会在新窗口打开问卷。反馈数据
+不经过 UniSpeaking 后端，也不提供处理进度查询。
 
 浏览器麦克风需要 `localhost` 或 HTTPS，并需要用户授权。
 
