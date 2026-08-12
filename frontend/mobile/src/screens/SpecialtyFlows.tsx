@@ -14,6 +14,7 @@ import {
   uiStyles,
 } from '@/components/ui';
 import { ieltsParts, ieltsTopics, interviewQuestions } from '@/data/content';
+import { useInterviewPreparation, type InterviewDifficultyOption, type InterviewPreparationResult } from '@/features/interview/useInterviewPreparation';
 import { useAppModel } from '@/model/AppModel';
 import { useLearningStage } from '@/navigation/learningStage';
 import { colors, examinerAssets, ieltsAssets, interviewAssets, levels } from '@/theme/tokens';
@@ -710,7 +711,7 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
 }
 
 type InterviewRoute = 'input' | 'live' | 'finalizing' | 'report';
-type InterviewDifficulty = 'easy' | 'standard' | 'hard';
+type InterviewDifficulty = InterviewDifficultyOption;
 
 const interviewDifficulties: readonly { id: InterviewDifficulty; title: string; note: string; recommended?: boolean }[] = [
   { id: 'easy', title: '简单', note: '基础问答' },
@@ -718,7 +719,7 @@ const interviewDifficulties: readonly { id: InterviewDifficulty; title: string; 
   { id: 'hard', title: '困难', note: '深入追问' },
 ];
 
-function InterviewSession({ question, questionIndex, onNext }: { question: string; questionIndex: number; onNext: () => void }) {
+function InterviewSession({ question, questionIndex, onNext, preparation }: { question: string; questionIndex: number; onNext: () => void; preparation: InterviewPreparationResult }) {
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.interviewCallScreen}>
       <CallExperience
@@ -729,7 +730,7 @@ function InterviewSession({ question, questionIndex, onNext }: { question: strin
         participant={{ image: examinerAssets.sophia, name: 'AI 面试官' }}
         showMuteControl={false}
         showTranslationControl={false}
-        statusText="正在聆听你的回答"
+        statusText={`${preparation.jobTitle ?? '英文面试'} · 正在聆听你的回答`}
         tone="navy"
         transcriptEnglish={question}
       />
@@ -741,13 +742,14 @@ export function InterviewFlow({ onExit, onViewDetails }: { onExit: () => void; o
   const { addInterviewRecord } = useAppModel();
   const { setImmersiveLearning } = useLearningStage();
   const [route, setRoute] = useState<InterviewRoute>('input');
-  const [resume, setResume] = useState(false);
   const [jobDescription, setJobDescription] = useState('');
   const [difficulty, setDifficulty] = useState<InterviewDifficulty | null>(null);
   const [question, setQuestion] = useState(0);
   const [progress, setProgress] = useState(0);
+  const [preparation, setPreparation] = useState<InterviewPreparationResult | null>(null);
   const difficultyLabel = interviewDifficulties.find((item) => item.id === difficulty)?.title ?? '标准';
-  const canStart = Boolean(jobDescription.trim() && difficulty);
+  const { resumeFileName, isPreparing, error, pickResume, start } = useInterviewPreparation();
+  const canStart = Boolean(jobDescription.trim() && difficulty && !isPreparing);
 
   useEffect(() => {
     setImmersiveLearning(route !== 'input');
@@ -812,18 +814,17 @@ export function InterviewFlow({ onExit, onViewDetails }: { onExit: () => void; o
       >
         <Pressable
           accessibilityRole="button"
-            accessibilityLabel={resume ? '移除已添加的简历' : '添加简历'}
-          accessibilityState={{ selected: resume }}
-          onPress={() => setResume((current) => !current)}
-          style={({ pressed }) => [styles.interviewPanel, styles.interviewUploadPanel, resume && styles.interviewPanelSelected, pressed && styles.pressed]}
+          accessibilityLabel={resumeFileName ? '重新选择简历' : '添加简历'}
+          onPress={() => void pickResume()}
+          style={({ pressed }) => [styles.interviewPanel, styles.interviewUploadPanel, resumeFileName && styles.interviewPanelSelected, pressed && styles.pressed]}
         >
           <Image source={interviewAssets.resume} style={styles.interviewResumeAsset} contentFit="contain" />
           <View style={styles.interviewPanelCopy}>
             <View style={styles.interviewTitleRow}>
-              <Text style={styles.interviewPanelTitle}>{resume ? '简历已添加' : '添加简历（可选）'}</Text>
-              {resume ? <AppIcon name="check-circle" size={19} color={interviewPalette.accentBright} /> : null}
+              <Text style={styles.interviewPanelTitle}>{resumeFileName ? '简历已添加' : '添加简历（可选）'}</Text>
+              {resumeFileName ? <AppIcon name="check-circle" size={19} color={interviewPalette.accentBright} /> : null}
             </View>
-            <Text style={styles.interviewPanelNote}>{resume ? 'resume-yufan.pdf · 已用于本次问题生成' : '支持 PDF / DOCX，用于生成更贴合的面试问题'}</Text>
+            <Text style={styles.interviewPanelNote}>{resumeFileName ?? '支持 PDF / DOCX，用于生成更贴合的面试问题'}</Text>
           </View>
           <AppIcon name="chevron-right" size={20} color={interviewPalette.muted} />
         </Pressable>
@@ -875,13 +876,19 @@ export function InterviewFlow({ onExit, onViewDetails }: { onExit: () => void; o
           </View>
         </View>
 
+        {error ? <Text accessibilityRole="alert" style={styles.interviewError}>{error}</Text> : null}
         <AppButton
-          title="开始模拟面试"
+          title={isPreparing ? '正在准备面试…' : '开始模拟面试'}
           icon="arrow-right"
           disabled={!canStart}
           onPress={() => {
-            setQuestion(0);
-            setRoute('live');
+            void start({ jobDescription, difficulty }).then((prepared) => {
+              if (!prepared) return;
+              // Keep the real scene/material/job title attached to live state until coordinator integration lands.
+              setPreparation(prepared);
+              setQuestion(0);
+              setRoute('live');
+            });
           }}
           style={styles.interviewStartButton}
         />
@@ -910,7 +917,8 @@ export function InterviewFlow({ onExit, onViewDetails }: { onExit: () => void; o
         setQuestion((current) => current + 1);
       }
     };
-    return <InterviewSession question={interviewQuestions[question]} questionIndex={question} onNext={next} />;
+    if (!preparation) return null;
+    return <InterviewSession preparation={preparation} question={interviewQuestions[question]} questionIndex={question} onNext={next} />;
   }
 
   return (
@@ -1197,6 +1205,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     outlineWidth: 0,
   },
+  interviewError: { color: '#B42318', fontSize: 13, lineHeight: 19, fontWeight: '500' },
   interviewBriefcaseAsset: { width: 72, height: 84, marginRight: -4 },
   interviewDifficultyOptions: { flexDirection: 'row', gap: 8 },
   interviewDifficulty: {
