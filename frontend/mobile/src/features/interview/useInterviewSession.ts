@@ -22,6 +22,7 @@ const initialSnapshot: InterviewSessionSnapshot = {
   turnNo: 0,
   interviewState: null,
   reportStatus: null,
+  currentQuestion: '',
   error: null,
 };
 

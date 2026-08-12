@@ -27,6 +27,7 @@ export type InterviewSessionSnapshot = Readonly<{
   turnNo: number;
   interviewState: InterviewTurnState | null;
   reportStatus: InterviewReportStatus | null;
+  currentQuestion: string;
   error: Error | null;
 }>;
 
@@ -55,6 +56,7 @@ type StartResult = Pick<StartInterviewSessionResponse, 'sessionId' | 'answerSdp'
 
 const CLOSING_INSTRUCTION = 'The interview is complete. Give a brief, natural closing and thank the candidate for their time. Do not ask more questions.';
 const CONTINUE_AFTER_CUTOFF_INSTRUCTION = 'The candidate may have been cut off while answering. Ask them to continue their answer naturally from where they stopped. Do not advance to a new topic yet.';
+const REPEAT_AFTER_MISSING_AUDIO_INSTRUCTION = 'The candidate audio was not captured reliably. Briefly apologize and ask them to repeat the same answer. Do not advance to a new topic yet.';
 
 function looksLikeCutoffTranscript(value: string) {
   const text = value.trim();
@@ -73,6 +75,7 @@ export class InterviewSessionController {
   private turnNo = 0;
   private interviewState: InterviewTurnState | null = null;
   private reportStatus: InterviewReportStatus | null = null;
+  private currentQuestion = '';
   private readonly transcripts: InterviewTranscript[] = [];
   private readonly seenTranscriptIds = new Set<string>();
   private readonly pendingTranscriptIds = new Set<string>();
@@ -111,6 +114,7 @@ export class InterviewSessionController {
       turnNo: this.turnNo,
       interviewState: this.interviewState,
       reportStatus: this.reportStatus,
+      currentQuestion: this.currentQuestion,
       error: this.error,
     };
   }
@@ -208,6 +212,8 @@ export class InterviewSessionController {
         }
         return;
       case 'session.updated':
+        this.state = 'active';
+        this.publish();
         if (!this.openingRequested) {
           this.dependencies.transport.sendProviderEvent({ event_id: this.createEventId(), type: 'response.create' });
           this.openingRequested = true;
@@ -218,6 +224,7 @@ export class InterviewSessionController {
         // Qwen can detect a deliberate barge-in and stop its response.
         this.muted = false;
         this.dependencies.recorder.setInputEnabled(true);
+        this.currentQuestion = '';
         this.applyInput();
         this.publish();
         return;
@@ -249,6 +256,8 @@ export class InterviewSessionController {
         return;
       case 'assistant.transcript.completed':
         if (!event.text.trim()) return;
+        this.currentQuestion = event.text.trim();
+        this.publish();
         await this.processTranscriptOnce(0, event, () =>
           this.persistTranscript(0, event.text.trim(), event.itemId));
         return;
@@ -286,6 +295,19 @@ export class InterviewSessionController {
     }
     await this.persistTranscript(1, transcript, itemId);
     const wav = await this.dependencies.recorder.takeTurn(++this.turnNo);
+    if (!wav || wav.durationMs < 300) {
+      this.turnNo -= 1;
+      this.muted = false;
+      this.dependencies.recorder.setInputEnabled(true);
+      this.applyInput();
+      this.dependencies.transport.sendProviderEvent({
+        event_id: this.createEventId(),
+        type: 'response.create',
+        response: { instructions: REPEAT_AFTER_MISSING_AUDIO_INSTRUCTION, modalities: ['text', 'audio'] },
+      });
+      this.publish();
+      return;
+    }
     try {
       const result = await this.dependencies.sessionApi.submitTurn(this.backend!.sessionId, this.turnNo, transcript, wav?.uri);
       this.interviewState = result.state;
