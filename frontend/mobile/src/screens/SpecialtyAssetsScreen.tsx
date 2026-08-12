@@ -193,13 +193,33 @@ function InterviewOverview({ palette, onOpenRecord }: { palette: AssetPalette; o
 
 function InterviewTrainingChart({ palette, records }: { palette: AssetPalette; records: InterviewAssetRecord[] }) {
   const total = records.reduce((sum, item) => sum + item.practiceCount, 0);
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (6 - index));
+    return date;
+  });
+  const values = days.map((day) => records.reduce((sum, item) => {
+    const practicedAt = item.latestPracticedAt ? new Date(item.latestPracticedAt) : null;
+    if (!practicedAt || Number.isNaN(practicedAt.getTime())) return sum;
+    const next = new Date(day);
+    next.setDate(next.getDate() + 1);
+    return practicedAt >= day && practicedAt < next ? sum + item.practiceCount : sum;
+  }, 0));
+  const maxValue = Math.max(...values, 1);
+  const dayLabels = days.map((day, index) => index === 6 ? '今天' : `${day.getMonth() + 1}/${day.getDate()}`);
+  const activeDays = values.filter((value) => value > 0).length;
+  const weeklyTotal = values.reduce((sum, value) => sum + value, 0);
   return (
     <Card style={[styles.weeklyChartCard, themedCard(palette)]}>
       <View style={styles.weeklyChartSummary}>
-        <Text style={[styles.cardLabel, { color: palette.muted }]}>面试训练积累</Text>
-        <View style={styles.weeklyTotalRow}><Text style={[styles.weeklyTotal, { color: palette.accent }]}>{total}</Text><Text style={[styles.weeklyTotalSuffix, { color: palette.muted }]}>次</Text></View>
-        <Text style={[styles.weeklyCopy, { color: palette.muted }]}>覆盖 {records.length} 个岗位</Text>
-        <View style={styles.weeklyStats}><View style={styles.weeklyStat}><Text style={[styles.weeklyStatValue, { color: palette.text }]}>{records.filter((item) => item.latestSessionId).length}</Text><Text style={[styles.weeklyStatLabel, { color: palette.muted }]}>已实践岗位</Text></View><View style={styles.weeklyStat}><Text style={[styles.weeklyStatValue, { color: palette.text }]}>{records.filter((item) => item.latestReportStatus === 'COMPLETED').length}</Text><Text style={[styles.weeklyStatLabel, { color: palette.muted }]}>有效报告</Text></View></View>
+        <Text style={[styles.cardLabel, { color: palette.muted }]}>近七天面试训练</Text>
+        <View style={styles.weeklyTotalRow}><Text style={[styles.weeklyTotal, { color: palette.accent }]}>{weeklyTotal}</Text><Text style={[styles.weeklyTotalSuffix, { color: palette.muted }]}>次</Text></View>
+        <Text style={[styles.weeklyCopy, { color: palette.muted }]}>累计练习 {total} 次</Text>
+        <View style={styles.weeklyStats}><View style={styles.weeklyStat}><Text style={[styles.weeklyStatValue, { color: palette.text }]}>{activeDays}</Text><Text style={[styles.weeklyStatLabel, { color: palette.muted }]}>活跃天数</Text></View><View style={styles.weeklyStat}><Text style={[styles.weeklyStatValue, { color: palette.text }]}>{records.length}</Text><Text style={[styles.weeklyStatLabel, { color: palette.muted }]}>岗位覆盖</Text></View><View style={styles.weeklyStat}><Text style={[styles.weeklyStatValue, { color: palette.text }]}>{records.filter((item) => item.latestReportStatus === 'COMPLETED').length}</Text><Text style={[styles.weeklyStatLabel, { color: palette.muted }]}>有效报告</Text></View></View>
+      </View>
+      <View style={styles.weeklyBars}>
+        {values.map((value, index) => <View key={dayLabels[index]} style={styles.weeklyBarColumn}><View style={styles.weeklyBarTrack}><View style={[styles.weeklyBar, { height: Math.max((value / maxValue) * 100, 6), backgroundColor: palette.accent, opacity: value === 0 ? 0.2 : 0.82 }]} /></View><Text style={[styles.weeklyBarValue, { color: palette.muted }]}>{value}</Text><Text style={[styles.weeklyBarLabel, { color: palette.muted }]}>{dayLabels[index]}</Text></View>)}
       </View>
     </Card>
   );
