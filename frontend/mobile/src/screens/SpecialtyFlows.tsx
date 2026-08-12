@@ -750,7 +750,7 @@ function InterviewSession({ preparation, onFinished }: { preparation: InterviewP
         elapsed={session.elapsed}
         endAccessibilityLabel="结束面试"
         initialSubtitles
-        muted={false}
+        muted={session.userMuted}
         onEnd={() => void session.end().catch(() => undefined)}
         onMutedChange={session.setMuted}
         participant={{ image: examinerAssets.sophia, name: 'AI 面试官' }}

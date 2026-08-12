@@ -51,6 +51,10 @@ export class InterviewRecordingClient {
   ) {}
 
   async download(sceneId: string, sessionId: string): Promise<InterviewRecordingAsset> {
+    const local = new File(Paths.document, `interview-full-${sessionId}.wav`);
+    if (local.exists && local.size >= 44) {
+      return { uri: local.uri, remove: () => undefined };
+    }
     const token = await this.tokenStore.get();
     const response = await this.fetchImpl(`${this.baseUrl.replace(/\/+$/, '')}/api/interview-scenes/${encodeURIComponent(sceneId)}/sessions/${encodeURIComponent(sessionId)}/recording`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},

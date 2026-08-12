@@ -111,6 +111,10 @@ export function normalizeQwenEvent(raw: unknown): RealtimeDomainEvent[] {
     }
     case 'response.created':
       return [{ type: 'assistant.response.started' }];
+    case 'response.audio.delta': {
+      const audio = nonEmptyString(raw.delta);
+      return audio ? [{ type: 'assistant.audio.delta', audio }] : [];
+    }
     case 'response.audio_transcript.delta':
     case 'response.text.delta': {
       const text = nonEmptyString(raw.delta);

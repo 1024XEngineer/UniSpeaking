@@ -8,6 +8,7 @@ const BYTES_PER_MS = (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE) / 1_000;
 const PRE_ROLL_BYTES = 200 * BYTES_PER_MS;
 const POST_ROLL_BYTES = 500 * BYTES_PER_MS;
 const WAV_HEADER_BYTES = 44;
+const PROVIDER_SAMPLE_RATE = 24_000;
 
 type StreamRecorderPort = {
   requestPermissionsAsync(): Promise<{ granted: boolean }>;
@@ -140,6 +141,8 @@ export class ContinuousTurnRecorder {
   private active: ActiveTurn | null = null;
   private runId = '';
   private nativeRecordingUri: string | null = null;
+  private readonly sessionSegments: Uint8Array[] = [];
+  private assistantChunks: Uint8Array[] = [];
 
   constructor(
     private readonly recorder: StreamRecorderPort,
@@ -156,6 +159,8 @@ export class ContinuousTurnRecorder {
         this.sawInitialHeader = false;
         this.preRoll = new Uint8Array();
         this.active = null;
+        this.sessionSegments.length = 0;
+        this.assistantChunks = [];
         this.storage.prepare(this.runId);
         const started = await this.recorder.startRecording({
           sampleRate: SAMPLE_RATE,
@@ -210,6 +215,7 @@ export class ContinuousTurnRecorder {
     if (this.active === turn) this.active = null;
     if (pcm.length === 0) return null;
     const wav = buildWav(pcm);
+    this.sessionSegments.push(pcm.slice());
     const name = `interview-turn-${turnNo}.wav`;
     const file = this.storage.createFile(name);
     file.create({ overwrite: true, intermediates: true });
@@ -225,6 +231,36 @@ export class ContinuousTurnRecorder {
 
   discard(turn: TurnWav | null) {
     if (turn) this.storage.remove(turn.uri);
+  }
+
+  appendAssistantAudio(base64Pcm: string) {
+    const pcm24k = alignPcm(decodeBase64(base64Pcm));
+    if (pcm24k.length) this.assistantChunks.push(pcm24k);
+  }
+
+  finishAssistantAudio() {
+    if (!this.assistantChunks.length) return;
+    const source = concat(this.assistantChunks);
+    const sourceView = new DataView(source.buffer, source.byteOffset, source.byteLength);
+    const sourceSamples = source.length / BYTES_PER_SAMPLE;
+    const outputSamples = Math.floor(sourceSamples * SAMPLE_RATE / PROVIDER_SAMPLE_RATE);
+    const output = new Uint8Array(outputSamples * BYTES_PER_SAMPLE);
+    const outputView = new DataView(output.buffer);
+    for (let index = 0; index < outputSamples; index += 1) {
+      const sourceIndex = Math.min(sourceSamples - 1, Math.floor(index * PROVIDER_SAMPLE_RATE / SAMPLE_RATE));
+      outputView.setInt16(index * BYTES_PER_SAMPLE, sourceView.getInt16(sourceIndex * BYTES_PER_SAMPLE, true), true);
+    }
+    this.sessionSegments.push(output);
+    this.assistantChunks = [];
+  }
+
+  saveSessionRecording(sessionId: string) {
+    this.finishAssistantAudio();
+    if (!this.sessionSegments.length) return null;
+    const file = new File(Paths.document, `interview-full-${sessionId}.wav`);
+    file.create({ overwrite: true, intermediates: true });
+    file.write(buildWav(concat(this.sessionSegments)));
+    return file.uri;
   }
 
   close() {

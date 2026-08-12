@@ -41,6 +41,7 @@ export type RealtimeDomainEvent =
   | { type: 'user.transcript.preview'; itemId?: string; text: string }
   | { type: 'user.transcript.completed'; itemId?: string; text: string }
   | { type: 'assistant.response.started' }
+  | { type: 'assistant.audio.delta'; audio: string }
   | { type: 'assistant.transcript.delta'; text: string }
   | { type: 'assistant.transcript.completed'; itemId?: string; text: string }
   | { type: 'assistant.response.completed'; cancelled: boolean }

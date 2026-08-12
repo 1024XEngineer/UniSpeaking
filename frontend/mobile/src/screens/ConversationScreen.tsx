@@ -240,8 +240,8 @@ export function CallExperience({
           </Animated.View>
           <Animated.View style={[styles.listeningState, listeningTransitionStyle]}>
             <VoiceWaveform active={!muted} compact={subtitles} tone={tone} />
-            <Text style={[styles.timer, tone === 'navy' && styles.timerNavy]}>{muted ? `已暂停 · ${formatDuration(elapsed)}` : formatDuration(elapsed)}</Text>
-            {!subtitles ? <Text style={[styles.callStatus, tone === 'navy' && styles.callStatusNavy]}>{muted ? '会话已暂停' : statusLabel ?? statusText}</Text> : null}
+            <Text style={[styles.timer, tone === 'navy' && styles.timerNavy]}>{muted ? `麦克风已关闭 · ${formatDuration(elapsed)}` : formatDuration(elapsed)}</Text>
+            {!subtitles ? <Text style={[styles.callStatus, tone === 'navy' && styles.callStatusNavy]}>{muted ? '麦克风已关闭' : statusLabel ?? statusText}</Text> : null}
           </Animated.View>
         </Animated.View>
         <Animated.View
@@ -275,7 +275,7 @@ export function CallExperience({
       </View>
       <View style={[styles.callControls, compactTranscriptLayout && styles.callControlsCompact]}>
         {showMuteControl ? (
-          <Pressable accessibilityRole="button" accessibilityLabel={muted ? '恢复会话' : '暂停会话'} onPress={() => {
+          <Pressable accessibilityRole="button" accessibilityLabel={muted ? '打开麦克风' : '关闭麦克风'} accessibilityState={{ checked: muted }} onPress={() => {
             const nextMuted = !muted;
             if (onMutedChange) onMutedChange(nextMuted);
             else setInternalMuted(nextMuted);

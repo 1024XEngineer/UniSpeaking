@@ -19,6 +19,7 @@ const initialSnapshot: InterviewSessionSnapshot = {
   sessionId: null,
   transcripts: [],
   muted: true,
+  userMuted: false,
   turnNo: 0,
   interviewState: null,
   reportStatus: null,
