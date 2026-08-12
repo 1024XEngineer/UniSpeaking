@@ -230,6 +230,9 @@ export class ContinuousTurnRecorder {
   close() {
     if (!this.stopping) {
       this.stopping = (async () => {
+        if (this.starting) {
+          try { await this.starting; } catch { /* Startup failure still needs storage cleanup. */ }
+        }
         this.finalizeActive();
         try {
           const stopped = this.started ? await this.recorder.stopRecording() : null;
