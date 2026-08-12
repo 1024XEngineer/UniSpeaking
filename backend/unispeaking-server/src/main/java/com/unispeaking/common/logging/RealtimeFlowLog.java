@@ -16,6 +16,10 @@ public final class RealtimeFlowLog {
 		LOG.info("[realtime-flow] " + message, arguments);
 	}
 
+	public static void warn(String message, Object... arguments) {
+		LOG.warn("[realtime-flow] " + message, arguments);
+	}
+
 	public static String maskSecret(String value) {
 		if (value == null || value.isBlank()) {
 			return "";

@@ -6,6 +6,7 @@ public enum ProviderType {
 	DEEPSEEK,
 	IFLYTEK,
 	ALIYUN,
+	QINIU,
 	MINIMAX,
 	DOUBAO
 }

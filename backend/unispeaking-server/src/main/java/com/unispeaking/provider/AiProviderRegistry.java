@@ -36,7 +36,7 @@ public class AiProviderRegistry {
 	}
 
 	public static final String QWEN_REALTIME_FLASH = "qwen3.5-omni-flash-realtime";
-	public static final String QWEN_REALTIME_PLUS = "qwen3.5-omni-plus-realtime";
+	public static final String QINIU_REALTIME_PLUS = "qwen3.5-omni-plus-realtime";
 	public static final String QWEN_LLM_PLUS = "qwen3.5-plus";
 	public static final String DEEPSEEK_CHAT = "deepseek-v4-flash";
 	public static final String QWEN_ASR = "qwen3-asr-flash";
@@ -47,14 +47,14 @@ public class AiProviderRegistry {
 	public static final String MINIMAX_TTS = "speech-2.8-hd";
 
 	private static final Map<AiCapability, List<String>> DEFAULT_MODEL_ROUTES = Map.of(
-			AiCapability.REALTIME, List.of(QWEN_REALTIME_FLASH),
+			AiCapability.REALTIME, List.of(QINIU_REALTIME_PLUS, QWEN_REALTIME_FLASH),
 			AiCapability.LLM, List.of(QWEN_LLM_PLUS, DEEPSEEK_CHAT),
 			AiCapability.SCORING, List.of(IFLYTEK_PRONUNCIATION_SCORING),
 			AiCapability.TTS, List.of(QWEN_TTS, ALIYUN_TTS, MINIMAX_TTS),
 			AiCapability.TRANSCRIPTION, List.of(QWEN_ASR, DOUBAO_ASR));
 
 	private static final Map<AiCapability, List<String>> DEFAULT_PROVIDER_ROUTES = Map.of(
-			AiCapability.REALTIME, List.of("qwen"),
+			AiCapability.REALTIME, List.of("qiniu", "qwen"),
 			AiCapability.LLM, List.of("qwen", "deepseek"),
 			AiCapability.SCORING, List.of("iflytek"),
 			AiCapability.TTS, List.of("qwen", "aliyun", "minimax"),

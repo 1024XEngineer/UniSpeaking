@@ -3,6 +3,7 @@ package com.unispeaking.component.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.domain.dto.session.StartSessionResponse;
@@ -31,11 +32,16 @@ class RealtimeSessionCoordinatorTest {
 		when(exchange.exchangeSdp(any(), any(), any(), any())).thenReturn(
 				new RealtimeConnectionResult(
 						"provider-session",
+						ProviderType.QINIU,
+						"qwen3.5-omni-plus-realtime",
+						"Tina",
+						"trace-1",
 						"answer-sdp",
 						Instant.parse("2026-08-05T08:00:00Z")));
+		PracticeSessionRepository practices = mock(PracticeSessionRepository.class);
 		RealtimeSessionCoordinator coordinator = new RealtimeSessionCoordinator(
 				sessions,
-				mock(PracticeSessionRepository.class),
+				practices,
 				exchange);
 
 		coordinator.connectIelts(
@@ -56,5 +62,18 @@ class RealtimeSessionCoordinatorTest {
 		assertEquals(
 				IeltsPart.PART_2,
 				sessions.findById("session-part-2").orElseThrow().getIeltsPart());
+		assertEquals(
+				ProviderType.QINIU,
+				sessions.findById("session-part-2").orElseThrow().getProviderType());
+		assertEquals(
+				"Tina",
+				sessions.findById("session-part-2").orElseThrow().getVoiceId());
+		verify(practices).updateRealtimeProvider(
+				"session-part-2",
+				java.util.UUID.fromString("3d8f80be-6390-4db9-a6cf-c10a0145d4c3"),
+				"provider-session",
+				ProviderType.QINIU,
+				"qwen3.5-omni-plus-realtime",
+				"trace-1");
 	}
 }
