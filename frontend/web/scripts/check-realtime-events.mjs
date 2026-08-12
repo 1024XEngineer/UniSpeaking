@@ -177,6 +177,11 @@ const slowerTina = buildRealtimeSessionConfig({
   model: "qwen3.5-omni-plus-realtime",
   speechSpeed: "SLOWER",
 });
+const managedCherry = buildRealtimeSessionConfig({
+  systemPrompt: "Coach the learner.",
+  voice: "Cherry",
+  includeVoice: false,
+});
 const fasterHarvey = buildRealtimeSessionConfig({
   systemPrompt: "Coach the learner.",
   voice: "Harvey",
@@ -199,6 +204,8 @@ const partTwoSession = buildRealtimeSessionConfig({
 });
 
 assert.equal(slowerTina.voice, "Tina");
+assert.equal("voice" in managedCherry, false);
+assert.match(managedCherry.instructions, /Coach the learner/);
 assert.match(slowerTina.instructions, /70 English words per minute/);
 assert.equal(fasterHarvey.voice, "Harvey");
 assert.match(fasterHarvey.instructions, /210 English words per minute/);
