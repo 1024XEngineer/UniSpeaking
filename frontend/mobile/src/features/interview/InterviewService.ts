@@ -50,6 +50,34 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
+function stringList(value: unknown) {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean);
+  if (typeof value === 'string' && value.trim()) return value.split(/\r?\n|[；;]/).map((item) => item.trim()).filter(Boolean);
+  return [];
+}
+
+function normalizeMaterialDraft(value: unknown): InterviewMaterialDraft | null {
+  if (!value || typeof value !== 'object' || !(value as { material?: unknown }).material || typeof (value as { material: unknown }).material !== 'object') return null;
+  const raw = (value as { material: Record<string, unknown> }).material;
+  const responsibilities = stringList(raw.responsibilities);
+  const qualificationRequirements = stringList(raw.qualificationRequirements);
+  const finalText = typeof raw.finalText === 'string' ? raw.finalText.trim() : '';
+  if (!responsibilities.length || !qualificationRequirements.length || !finalText) return null;
+  return { material: {
+    jobTitle: typeof raw.jobTitle === 'string' ? raw.jobTitle.trim() || null : null,
+    responsibilities,
+    qualificationRequirements,
+    requiredSkills: stringList(raw.requiredSkills),
+    otherJobInformation: typeof raw.otherJobInformation === 'string' ? raw.otherJobInformation.trim() || null : null,
+    education: stringList(raw.education),
+    workExperiences: stringList(raw.workExperiences),
+    projectExperiences: stringList(raw.projectExperiences),
+    skillsAndAbilities: stringList(raw.skillsAndAbilities),
+    interviewableExperienceClues: stringList(raw.interviewableExperienceClues),
+    finalText,
+  } };
+}
+
 function isInterviewMaterial(value: unknown): value is InterviewMaterial {
   if (!value || typeof value !== 'object') return false;
   const material = value as Partial<InterviewMaterial>;
@@ -110,10 +138,12 @@ export class InterviewService {
       body,
       timeoutMs: 60_000,
     });
-    if (!isMaterialDraft(draft)) {
+    if (isMaterialDraft(draft)) return draft;
+    const normalized = normalizeMaterialDraft(draft);
+    if (!normalized) {
       throw new Error('面试材料响应不完整，请重新准备');
     }
-    return draft;
+    return normalized;
   }
 
   async generateScene(material: InterviewMaterial, difficulty: InterviewDifficulty): Promise<InterviewScene> {
