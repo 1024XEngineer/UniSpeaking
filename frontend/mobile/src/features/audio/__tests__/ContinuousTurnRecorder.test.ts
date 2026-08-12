@@ -130,6 +130,28 @@ describe('ContinuousTurnRecorder', () => {
     expect(turn).not.toBeNull();
   });
 
+  it('waits for an in-flight native start before closing it', async () => {
+    const test = fixture();
+    let resolveStart!: (value: any) => void;
+    test.recorder.startRecording.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { resolveStart = resolve; });
+      return { fileUri: 'file:///cache/native-delayed.wav', mimeType: 'audio/wav' };
+    });
+    const recorder = new ContinuousTurnRecorder(test.recorder, test.storage);
+
+    const starting = recorder.start();
+    while (!resolveStart) await Promise.resolve();
+    const closing = recorder.close();
+    expect(test.recorder.stopRecording).not.toHaveBeenCalled();
+    resolveStart(undefined);
+    await starting;
+    await closing;
+
+    expect(test.recorder.stopRecording).toHaveBeenCalledTimes(1);
+    expect(test.deleted).toContain('file:///cache/native-delayed.wav');
+    expect(test.storage.cleanup).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects microphone denial before opening native capture', async () => {
     const test = fixture();
     test.recorder.requestPermissionsAsync.mockResolvedValue({ granted: false });
