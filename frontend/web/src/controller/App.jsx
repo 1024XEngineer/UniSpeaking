@@ -112,6 +112,8 @@ const chineseCharacterPattern = /[\u3400-\u9fff]/;
 const sceneCachePrefix = "unispeaking.scene.";
 const authReturnPathKey = "unispeaking.authReturnPath";
 
+const teacherForVoice = (voiceId) => teachers.find((item) => item.voiceId === voiceId) || null;
+
 function cacheGeneratedScene(scene) {
   if (!scene?.sceneId) return;
   const { scenePrompt: _scenePrompt, ...cacheableScene } = scene;
@@ -2709,7 +2711,8 @@ export function App() {
   const [authMode, setAuthMode] = useState(initialRoute.authMode);
   const [level, setLevel] = useState("");
   const [conversationSpeed, setConversationSpeed] = useState("自然");
-  const [teacher, setTeacher] = useState(teachers[0]);
+  const [teacher, setTeacher] = useState(() => teacherForVoice(initialRoute.selectedVoice) || teachers[0]);
+  const [pendingVoice, setPendingVoice] = useState(() => teacherForVoice(initialRoute.selectedVoice)?.voiceId || null);
   const [page, setPage] = useState(initialRoute.page);
   const [sceneTitle, setSceneTitle] = useState("咖啡店点单");
   const [generatedScene, setGeneratedScene] = useState(
@@ -2740,6 +2743,11 @@ export function App() {
     setHelpRoute(route.helpRoute || null);
     setAboutRoute(route.aboutRoute || null);
     setPaywall(null);
+    const routeTeacher = teacherForVoice(route.selectedVoice);
+    if (routeTeacher) {
+      setPendingVoice(routeTeacher.voiceId);
+      setTeacher(routeTeacher);
+    }
     const routeSceneId = route.sceneId || route.assetSceneId;
     if (routeSceneId) {
       const cachedScene = cachedGeneratedScene(routeSceneId);
@@ -2845,9 +2853,51 @@ export function App() {
   }, []);
 
   const goSplash = () => navigate(paths.root);
-  const goAuth = (mode) => navigate(mode === "login" ? paths.auth.login : paths.auth.signup);
-  const openLandingStart = () => user ? setMainPage("conversation") : goAuth("signup");
+  const goAuth = (mode, requestedVoice = null) => {
+    const selectedTeacher = teacherForVoice(requestedVoice);
+    setPendingVoice(selectedTeacher?.voiceId || null);
+    if (selectedTeacher) setTeacher(selectedTeacher);
+    const targetPath = mode === "login" ? paths.auth.login : paths.auth.signup;
+    const query = selectedTeacher ? `?voice=${encodeURIComponent(selectedTeacher.voiceId)}` : "";
+    navigate(`${targetPath}${query}`);
+  };
+  const openLandingStart = async (requestedVoice) => {
+    const selectedTeacher = typeof requestedVoice === "string" ? teacherForVoice(requestedVoice) : null;
+    if (!selectedTeacher) {
+      if (user) setMainPage("conversation");
+      else goAuth("signup");
+      return;
+    }
+    setPendingVoice(selectedTeacher.voiceId);
+    setTeacher(selectedTeacher);
+    if (!user) {
+      goAuth("signup", selectedTeacher.voiceId);
+      return;
+    }
+    try {
+      const preference = await updateUserPreference({ preferredVoice: selectedTeacher.voiceId });
+      applyPreference(preference);
+      setPendingVoice(null);
+      setMainPage("conversation");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "AI 老师保存失败");
+    }
+  };
   const openWebApp = () => user ? setMainPage("conversation") : goAuth("login");
+  const openLandingSpecialty = (specialty) => {
+    const targetPath = specialty === "ielts"
+      ? paths.ielts.root
+      : specialty === "interview"
+        ? paths.interview.root
+        : null;
+    if (!targetPath) return;
+    if (user) {
+      navigate(targetPath);
+      return;
+    }
+    try { window.sessionStorage.setItem(authReturnPathKey, targetPath); } catch { /* Authentication can still continue without storage. */ }
+    goAuth("signup");
+  };
   const goLevel = () => navigate(paths.auth.level, { authMode });
   const goTeacher = () => navigate(paths.auth.teacher, { authMode });
   const enterApp = () => {
@@ -2870,12 +2920,22 @@ export function App() {
     ]);
     setProfileOverview(profile);
     applyPreference(preference);
+    const landingTeacher = teacherForVoice(pendingVoice);
+    if (landingTeacher) setTeacher(landingTeacher);
     await synchronizeAchievements();
     if (mode === "signup" || !preference.cefrLevel) {
       goLevel();
+    } else if (landingTeacher) {
+      if (landingTeacher.voiceId !== preference.preferredVoice) {
+        const updatedPreference = await updateUserPreference({ preferredVoice: landingTeacher.voiceId });
+        applyPreference(updatedPreference);
+      }
+      setPendingVoice(null);
+      enterApp();
     } else if (!preference.preferredVoice) {
       goTeacher();
     } else {
+      setPendingVoice(null);
       enterApp();
     }
   };
@@ -2894,6 +2954,7 @@ export function App() {
     try {
       const preference = await updateUserPreference({ preferredVoice: teacher.voiceId });
       applyPreference(preference);
+      setPendingVoice(null);
       enterApp();
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "AI 老师保存失败");
@@ -3077,7 +3138,7 @@ export function App() {
   };
 
   if (!authReady) return <main className="splash" aria-busy="true" />;
-  if (flow === "splash") return <LandingPage onStart={openLandingStart} onLogin={() => goAuth("login")} onWeb={openWebApp} />;
+  if (flow === "splash") return <LandingPage onStart={openLandingStart} onLogin={() => goAuth("login")} onWeb={openWebApp} onSpecialty={openLandingSpecialty} />;
   if (flow === "auth") return <Auth mode={authMode} onBack={goSplash} onSuccess={completeAuthentication} />;
   if (flow === "level") return <LevelSetup selected={level} onSelect={setLevel} onNext={saveLevelAndContinue} />;
   if (flow === "teacher") return <TeacherSetup selectedId={teacher.id} onSelect={(id) => setTeacher(teachers.find((item) => item.id === id))} onFinish={saveTeacherAndEnter} />;
