@@ -299,6 +299,7 @@ export function buildRealtimeSessionConfig({
   systemPrompt = "",
   topic = "",
   voice = DEFAULT_VOICE,
+  includeVoice = true,
   model = DEFAULT_MODEL,
   speechSpeed = DEFAULT_SPEECH_SPEED,
   automaticTurnResponses = true,
@@ -307,9 +308,8 @@ export function buildRealtimeSessionConfig({
   interruptResponse = true,
 } = {}) {
   const selectedSpeechSpeed = normalizedSpeechSpeed(speechSpeed);
-  return {
+  const config = {
     modalities: ["text", "audio"],
-    voice: voice || DEFAULT_VOICE,
     instructions: [
       systemPrompt || topic || "",
       SPEECH_SPEED_INSTRUCTIONS[selectedSpeechSpeed],
@@ -328,6 +328,8 @@ export function buildRealtimeSessionConfig({
       interrupt_response: Boolean(interruptResponse),
     },
   };
+  if (includeVoice) config.voice = voice || DEFAULT_VOICE;
+  return config;
 }
 
 export function createTurnAudioCaptureController(recorder) {
@@ -1330,6 +1332,7 @@ export function createRealtimeClient({
       sessionConfig = buildRealtimeSessionConfig({
         systemPrompt: finalSystemPrompt,
         voice: backend.voiceId || DEFAULT_VOICE,
+        includeVoice: backend.voiceId !== "Cherry",
         model: DEFAULT_MODEL,
         speechSpeed,
         automaticTurnResponses: !manualTurnResponses,
