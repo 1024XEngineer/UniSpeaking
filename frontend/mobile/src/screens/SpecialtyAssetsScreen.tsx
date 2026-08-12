@@ -7,7 +7,7 @@ import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 import { LearningAssetsHeader } from '@/components/LearningAssetsHeader';
 import { AppButton, AppScreen, Card, PageHeader, ProgressBar, SectionTitle } from '@/components/ui';
 import type { IeltsLearningRecord } from '@/data/learningAssets';
-import { InterviewAssetService, type InterviewAssetRecord } from '@/features/interview/InterviewAssetService';
+import { InterviewAssetService, InterviewRecordingClient, type InterviewAssetRecord, type InterviewRecordingAsset } from '@/features/interview/InterviewAssetService';
 import type { InterviewReportResponse } from '@/features/interview/InterviewSessionApi';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
 import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
@@ -503,10 +503,28 @@ export function InterviewAssetReport({ record, onBack }: { record: { role: strin
   );
 }
 
-export function InterviewAssetRemoteReport({ asset, onBack }: { asset: InterviewAssetRecord; onBack: () => void }) {
+export function InterviewAssetRemoteReport({ asset, onBack, onPractice }: { asset: InterviewAssetRecord; onBack: () => void; onPractice: () => void }) {
   const palette = assetPalettes.interview;
   const [report, setReport] = useState<InterviewReportResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [audioStatus, setAudioStatus] = useState<'idle' | 'loading' | 'playing'>('idle');
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [recordingAsset, setRecordingAsset] = useState<InterviewRecordingAsset | null>(null);
+  const [audioPlayer, setAudioPlayer] = useState<{ play(): void; pause(): void; remove(): void } | null>(null);
+  useEffect(() => () => { audioPlayer?.remove(); recordingAsset?.remove(); }, [audioPlayer, recordingAsset]);
+  const toggleRecording = async () => {
+    if (audioStatus === 'playing' && audioPlayer) { audioPlayer.pause(); setAudioStatus('idle'); return; }
+    if (audioPlayer) { audioPlayer.play(); setAudioStatus('playing'); return; }
+    if (!asset.latestSessionId) return;
+    setAudioStatus('loading'); setAudioError(null);
+    try {
+      const downloaded = await new InterviewRecordingClient(getRuntimeConfig().backendUrl, new SecureTokenStore()).download(asset.sceneId, asset.latestSessionId);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { createAudioPlayer } = require('expo-audio') as typeof import('expo-audio');
+      const player = createAudioPlayer(downloaded.uri);
+      setRecordingAsset(downloaded); setAudioPlayer(player); player.play(); setAudioStatus('playing');
+    } catch (cause) { setAudioStatus('idle'); setAudioError(cause instanceof Error ? cause.message : '完整录音播放失败'); }
+  };
   useEffect(() => {
     let active = true;
     if (!asset.latestSessionId) return () => { active = false; };
@@ -534,6 +552,9 @@ export function InterviewAssetRemoteReport({ asset, onBack }: { asset: Interview
         </Card>
         <Card style={[styles.reportCard, themedCard(palette)]}><Text style={[styles.reportTitle, { color: palette.text }]}>五维能力反馈</Text>{completed.dimensions.map((item) => <View key={item.dimension} style={styles.dimensionFeedback}><View style={styles.dimensionFeedbackHeading}><Text style={[styles.dimensionFeedbackLabel, { color: palette.text }]}>{interviewDimensionLabels[item.dimension] ?? item.dimension}</Text><Text style={[styles.dimensionFeedbackScore, { color: palette.accent }]}>{item.score === null ? '暂无法评分' : Math.round(item.score)}</Text></View><Text style={[styles.dimensionFeedbackCopy, { color: palette.muted }]}>{item.score === null ? '本次未获得足够的音频证据，暂不提供该维度的数值评分。' : (item.evaluation || '暂无评估说明。')}</Text>{item.score !== null && item.advice ? <Text style={[styles.dimensionFeedbackAdvice, { color: palette.text }]}>建议：{item.advice}</Text> : null}</View>)}</Card>
       </>}
+      {audioError ? <Text accessibilityRole="alert" style={[styles.assetError, { color: palette.accent }]}>{audioError}</Text> : null}
+      <AppButton title={audioStatus === 'loading' ? '正在读取完整录音…' : audioStatus === 'playing' ? '暂停上一次完整录音' : '播放上一次完整录音'} variant="secondary" disabled={!asset.latestSessionId || audioStatus === 'loading'} onPress={() => void toggleRecording()} />
+      <AppButton title="复练本岗位" icon="arrow-right" onPress={onPractice} />
     </AppScreen>
   );
 }

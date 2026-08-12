@@ -1,4 +1,6 @@
 import type { ApiRequestOptions } from '@/infrastructure/http/ApiClient';
+import type { TokenStore } from '@/infrastructure/auth/SecureTokenStore';
+import { File, Paths } from 'expo-file-system';
 
 import type { InterviewAssetItem, InterviewReportResponse } from './InterviewSessionApi';
 
@@ -36,5 +38,29 @@ export class InterviewAssetService {
       throw new Error('面试报告格式不正确');
     }
     return value as InterviewReportResponse;
+  }
+}
+
+export type InterviewRecordingAsset = { uri: string; remove(): void };
+
+export class InterviewRecordingClient {
+  constructor(
+    private readonly baseUrl: string,
+    private readonly tokenStore: Pick<TokenStore, 'get'>,
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {}
+
+  async download(sceneId: string, sessionId: string): Promise<InterviewRecordingAsset> {
+    const token = await this.tokenStore.get();
+    const response = await this.fetchImpl(`${this.baseUrl.replace(/\/+$/, '')}/api/interview-scenes/${encodeURIComponent(sceneId)}/sessions/${encodeURIComponent(sessionId)}/recording`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error(response.status === 404 ? '上一次面试暂无可播放的完整录音' : `完整录音读取失败（${response.status}）`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length < 44) throw new Error('完整录音文件无效');
+    const file = new File(Paths.cache, `interview-recording-${sessionId}-${Date.now()}.wav`);
+    file.create({ overwrite: true });
+    file.write(bytes);
+    return { uri: file.uri, remove: () => { if (file.exists) file.delete(); } };
   }
 }
