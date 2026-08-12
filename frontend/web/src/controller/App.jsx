@@ -589,7 +589,11 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const registrationDraftRef = useRef({ email: "", password: "" });
-  const captchaButtonId = mode === "reset" ? "reset-email-challenge" : "signup-email-challenge";
+  const captchaButtonId = mode === "login"
+    ? "login-email-auth"
+    : mode === "reset"
+      ? "reset-email-challenge"
+      : "signup-email-challenge";
 
   const clearChallenge = () => {
     setStep("credentials");
@@ -624,18 +628,6 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
 
   const submitCredentials = async (event) => {
     event.preventDefault();
-    if (mode !== "login") return;
-    setSubmitting(true);
-    setError("");
-    setNotice("");
-    try {
-      const auth = await loginWithPassword(email.trim(), password);
-      await onSuccess(auth, "login");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "认证请求失败");
-    } finally {
-      setSubmitting(false);
-    }
   };
 
   const verifyAndIssueChallenge = async (captchaVerifyParam) => {
@@ -646,6 +638,22 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
     if (!emailIsValid) {
       setError("请输入有效邮箱地址。");
       return { captchaResult: true, bizResult: false };
+    }
+    if (mode === "login") {
+      setSubmitting(true);
+      try {
+        const auth = await loginWithPassword(normalizedEmail, password, captchaVerifyParam);
+        await onSuccess(auth, "login");
+        return { captchaResult: true, bizResult: true };
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : "认证请求失败");
+        return {
+          captchaResult: requestError?.code !== "HUMAN_VERIFICATION_REQUIRED",
+          bizResult: false,
+        };
+      } finally {
+        setSubmitting(false);
+      }
     }
     const validationCode = mode === "signup"
       ? validateRegistrationCredentials(normalizedEmail, password)
@@ -769,11 +777,11 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
         <form onSubmit={submitCredentials}>
           <label>邮箱<input type="email" value={email} onChange={(event) => { const nextEmail = event.target.value; setEmail(nextEmail); registrationDraftRef.current.email = nextEmail.trim(); }} placeholder="name@example.com" autoComplete="email" maxLength="254" required disabled={submitting} /></label>
           {mode !== "reset" && <label>密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => { const nextPassword = event.target.value; setPassword(nextPassword); registrationDraftRef.current.password = nextPassword; }} placeholder="至少 12 位字符" autoComplete={mode === "signup" ? "new-password" : "current-password"} minLength="12" maxLength="200" required disabled={submitting} /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>}
-          {mode !== "login" && <HumanVerification buttonId={captchaButtonId} onVerify={verifyAndIssueChallenge} />}
+          <HumanVerification buttonId={captchaButtonId} onVerify={verifyAndIssueChallenge} />
           {mode === "login" && <button type="button" className="forgot-link" onClick={beginPasswordReset}>忘记密码？</button>}
           {notice && <p className="auth-notice" role="status">{notice}</p>}
           {error && <p className="auth-error" role="alert">{error}</p>}
-          <Button id={mode !== "login" ? captchaButtonId : undefined} className="auth-submit" type="submit" disabled={submitting}>{submitting ? "正在处理…" : mode === "login" ? "登录" : "发送邮箱验证码"}</Button>
+          <Button id={captchaButtonId} className="auth-submit" type="submit" disabled={submitting}>{submitting ? "正在处理…" : mode === "login" ? "登录" : "发送邮箱验证码"}</Button>
         </form>
         {mode === "reset"
           ? <p className="auth-switch">想起密码了？<button onClick={returnToLogin}>返回登录</button></p>

@@ -1,5 +1,7 @@
 package com.unispeaking.controller;
 
+import com.unispeaking.auth.EmailAuthService;
+import com.unispeaking.auth.UserAuthController;
 import com.unispeaking.domain.dto.auth.AuthResponse;
 import com.unispeaking.domain.dto.auth.ChangePasswordRequest;
 import com.unispeaking.domain.dto.auth.ChangePasswordResponse;
@@ -8,7 +10,9 @@ import com.unispeaking.domain.dto.auth.RegisterRequest;
 import com.unispeaking.domain.dto.auth.UserAccountResponse;
 import com.unispeaking.common.response.ApiResponse;
 import com.unispeaking.service.auth.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -21,19 +25,46 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
 	private final AuthService authService;
+	private final EmailAuthService emailAuthService;
 
-	public AuthController(AuthService authService) {
+	public AuthController(AuthService authService, EmailAuthService emailAuthService) {
 		this.authService = authService;
+		this.emailAuthService = emailAuthService;
 	}
 
 	@PostMapping("/register")
-	public ApiResponse<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
+	public ApiResponse<AuthResponse> register(
+			@Valid @RequestBody RegisterRequest request,
+			HttpServletRequest servletRequest) {
+		requireVerifiedEmail(request.username(), servletRequest);
 		return ApiResponse.success(authService.register(request));
 	}
 
 	@PostMapping("/login")
-	public ApiResponse<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
+	public ApiResponse<AuthResponse> login(
+			@Valid @RequestBody LoginRequest request,
+			HttpServletRequest servletRequest) {
+		requireVerifiedEmail(request.username(), servletRequest);
 		return ApiResponse.success(authService.login(request));
+	}
+
+	private void requireVerifiedEmail(String username, HttpServletRequest request) {
+		var verifiedUser = emailAuthService.currentUser(readEmailSession(request));
+		if (!verifiedUser.email().equalsIgnoreCase(username.trim())) {
+			throw new EmailAuthService.AuthException("HUMAN_VERIFICATION_REQUIRED");
+		}
+	}
+
+	private static String readEmailSession(HttpServletRequest request) {
+		if (request.getCookies() != null) {
+			for (var cookie : request.getCookies()) {
+				if (UserAuthController.COOKIE_NAME.equals(cookie.getName())
+						&& StringUtils.hasText(cookie.getValue())) {
+					return cookie.getValue();
+				}
+			}
+		}
+		throw new EmailAuthService.AuthException("HUMAN_VERIFICATION_REQUIRED");
 	}
 
 	@GetMapping("/me")

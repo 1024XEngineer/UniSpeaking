@@ -40,7 +40,10 @@ public final class UserAuthController {
             @NotBlank @Pattern(regexp = "[0-9]{6}") String code) {
     }
 
-    public record LoginRequest(@NotBlank @Email String email, @NotBlank String password) {
+    public record LoginRequest(
+            @NotBlank @Email String email,
+            @NotBlank String password,
+            @NotBlank String humanVerificationToken) {
     }
 
     public record ResetPasswordRequest(
@@ -101,7 +104,8 @@ public final class UserAuthController {
     public ResponseEntity<ApiResponse<EmailAuthService.UserView>> login(
             @Valid @RequestBody LoginRequest request,
             HttpServletResponse response) {
-        var login = authService.login(request.email(), request.password());
+        var login = authService.login(
+                request.email(), request.password(), request.humanVerificationToken());
         addSessionCookie(response, login.rawToken());
         return ResponseEntity.ok(ApiResponse.success(login.user()));
     }

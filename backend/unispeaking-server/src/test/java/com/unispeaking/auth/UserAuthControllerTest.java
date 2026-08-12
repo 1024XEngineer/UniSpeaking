@@ -94,11 +94,13 @@ class UserAuthControllerTest {
 
         mvc.perform(post("/api/auth/email/password/login")
                         .contentType("application/json")
-                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-old-password\"}"))
+                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-old-password\","
+                                + "\"humanVerificationToken\":\"local-human-verified\"}"))
                 .andExpect(status().isUnauthorized());
         mvc.perform(post("/api/auth/email/password/login")
                         .contentType("application/json")
-                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-new-password\"}"))
+                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-new-password\","
+                                + "\"humanVerificationToken\":\"local-human-verified\"}"))
                 .andExpect(status().isOk())
                 .andExpect(cookie().exists("us-user-session"));
     }
@@ -112,6 +114,35 @@ class UserAuthControllerTest {
                                 + "\"code\":\"123456\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code", equalTo("VALIDATION_ERROR")));
+    }
+
+    @Test
+    void rejectsPasswordLoginWhenHumanVerificationFails() throws Exception {
+        var registrationChallenge = issueChallenge("/api/auth/email/challenges");
+        mvc.perform(post("/api/auth/email/register")
+                        .contentType("application/json")
+                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-password\","
+                                + "\"challengeId\":\"" + registrationChallenge + "\",\"code\":\""
+                                + emailSender.code + "\"}"))
+                .andExpect(status().isOk());
+
+        mvc.perform(post("/api/auth/email/password/login")
+                        .contentType("application/json")
+                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-password\","
+                                + "\"humanVerificationToken\":\"invalid\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", equalTo("HUMAN_VERIFICATION_REQUIRED")))
+                .andExpect(cookie().doesNotExist("us-user-session"));
+    }
+
+    @Test
+    void rejectsPasswordLoginWhenHumanVerificationTokenIsMissing() throws Exception {
+        mvc.perform(post("/api/auth/email/password/login")
+                        .contentType("application/json")
+                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-password\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", equalTo("VALIDATION_ERROR")))
+                .andExpect(cookie().doesNotExist("us-user-session"));
     }
 
     private UUID issueChallenge(String path) throws Exception {

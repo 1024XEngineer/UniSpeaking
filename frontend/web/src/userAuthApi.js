@@ -98,30 +98,17 @@ async function syncBusinessIdentity(email, password) {
 }
 
 export async function registerWithEmail({ email, password, challengeId, code }) {
-  try {
-    await request("/api/auth/email/register", {
-      method: "POST",
-      body: JSON.stringify({ email, password, challengeId, code }),
-    });
-  } catch (registrationError) {
-    // A one-time challenge can be submitted twice when the first request
-    // already created the account but the browser stayed on a stale tab.
-    // Recover only when the same credentials can perform a real password login;
-    // a wrong code or password still returns the original challenge error.
-    if (registrationError?.code !== "CHALLENGE_INVALID") throw registrationError;
-    try {
-      return await loginWithPassword(email, password);
-    } catch {
-      throw registrationError;
-    }
-  }
+  await request("/api/auth/email/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password, challengeId, code }),
+  });
   return syncBusinessIdentity(email, password);
 }
 
-export async function loginWithPassword(email, password) {
+export async function loginWithPassword(email, password, humanVerificationToken) {
   await request("/api/auth/email/password/login", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, humanVerificationToken }),
   });
   return syncBusinessIdentity(email, password);
 }
