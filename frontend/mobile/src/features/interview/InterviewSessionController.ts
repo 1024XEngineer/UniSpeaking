@@ -205,7 +205,7 @@ export class InterviewSessionController {
               // Interview answers commonly contain thinking pauses. Keep the microphone
               // open through natural pauses and never let a new user turn cancel an
               // interviewer response while the candidate is still speaking.
-              turn_detection: { type: 'semantic_vad', threshold: 0.8, prefix_padding_ms: 1_000, silence_duration_ms: 4_000, create_response: false, interrupt_response: true },
+              turn_detection: { type: 'semantic_vad', threshold: 0.8, prefix_padding_ms: 1_000, silence_duration_ms: 3_000, create_response: false, interrupt_response: true },
             },
           });
           this.configured = true;
