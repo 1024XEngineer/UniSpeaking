@@ -24,6 +24,7 @@ export type InterviewSessionSnapshot = Readonly<{
   sessionId: string | null;
   transcripts: readonly InterviewTranscript[];
   muted: boolean;
+  userMuted: boolean;
   turnNo: number;
   interviewState: InterviewTurnState | null;
   reportStatus: InterviewReportStatus | null;
@@ -39,7 +40,7 @@ type InterviewSocket = {
 };
 
 type InterviewDependencies = {
-  recorder: Pick<ContinuousTurnRecorder, 'start' | 'setInputEnabled' | 'speechStarted' | 'speechStopped' | 'takeTurn' | 'discard' | 'close'>;
+  recorder: Pick<ContinuousTurnRecorder, 'start' | 'setInputEnabled' | 'speechStarted' | 'speechStopped' | 'takeTurn' | 'discard' | 'appendAssistantAudio' | 'finishAssistantAudio' | 'saveSessionRecording' | 'close'>;
   transport: RealtimeTransport;
   sessionApi: Pick<InterviewSessionApi, 'startSession' | 'submitTurn' | 'end'>;
   sessionSocket: InterviewSocket;
@@ -72,6 +73,7 @@ export class InterviewSessionController {
   private error: Error | null = null;
   private backend: StartResult | null = null;
   private muted = true;
+  private userMuted = false;
   private turnNo = 0;
   private interviewState: InterviewTurnState | null = null;
   private reportStatus: InterviewReportStatus | null = null;
@@ -87,6 +89,7 @@ export class InterviewSessionController {
   private endPromise: Promise<InterviewEndResponse | null> | null = null;
   private configured = false;
   private openingRequested = false;
+  private fullRecordingUri: string | null = null;
 
   constructor(
     private readonly dependencies: InterviewDependencies,
@@ -111,6 +114,7 @@ export class InterviewSessionController {
       sessionId: this.backend?.sessionId ?? null,
       transcripts: [...this.transcripts],
       muted: this.muted,
+      userMuted: this.userMuted,
       turnNo: this.turnNo,
       interviewState: this.interviewState,
       reportStatus: this.reportStatus,
@@ -179,7 +183,7 @@ export class InterviewSessionController {
   }
 
   setMuted(muted: boolean) {
-    this.muted = muted;
+    this.userMuted = muted;
     this.applyInput();
     this.publish();
   }
@@ -232,7 +236,11 @@ export class InterviewSessionController {
         this.applyInput();
         this.publish();
         return;
+      case 'assistant.audio.delta':
+        this.dependencies.recorder.appendAssistantAudio(event.audio);
+        return;
       case 'assistant.response.completed':
+        this.dependencies.recorder.finishAssistantAudio();
         if (!this.closingRequested && !this.endRequested) {
           this.muted = false;
           this.dependencies.recorder.setInputEnabled(true);
@@ -365,6 +373,7 @@ export class InterviewSessionController {
       // prevents it from requesting another provider response.
       this.dependencies.transport.close();
       const result = this.backend ? await this.dependencies.sessionApi.end(this.backend.sessionId) : null;
+      if (this.backend) this.fullRecordingUri = this.dependencies.recorder.saveSessionRecording(this.backend.sessionId);
       if (result) this.reportStatus = result.reportStatus;
       if (turnFailure) this.error = turnFailure instanceof Error ? turnFailure : new Error(String(turnFailure));
       return result;
@@ -385,7 +394,7 @@ export class InterviewSessionController {
   }
 
   private applyInput() {
-    this.dependencies.transport.setAudioEnabled(this.state === 'active' && !this.muted && !this.closingRequested && !this.endRequested);
+    this.dependencies.transport.setAudioEnabled(this.state === 'active' && !this.muted && !this.userMuted && !this.closingRequested && !this.endRequested);
   }
 
   private assertStartActive() {

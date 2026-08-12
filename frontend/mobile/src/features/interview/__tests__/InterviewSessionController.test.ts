@@ -18,6 +18,7 @@ function fixture() {
     start: jest.fn(async () => { calls.push('recorder.start'); }),
     setInputEnabled: jest.fn(), speechStarted: jest.fn(), speechStopped: jest.fn(),
     takeTurn: jest.fn(async (turnNo: number) => ({ uri: `turn-${turnNo}.wav`, name: `turn-${turnNo}.wav`, size: 16_044, durationMs: 500 })),
+    appendAssistantAudio: jest.fn(), finishAssistantAudio: jest.fn(), saveSessionRecording: jest.fn(() => 'file:///full.wav'),
     discard: jest.fn(), close: jest.fn(async () => { calls.push('recorder.close'); }),
   };
   const sessionApi = {
