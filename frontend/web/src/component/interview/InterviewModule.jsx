@@ -22,6 +22,7 @@ import { Modal } from "../common/Modal.jsx";
 import {
   generateInterviewScene,
   getInterviewAssets,
+  getInterviewOcrAvailability,
   getInterviewReport,
   prepareInterviewMaterials,
   retryInterviewReport,
@@ -33,7 +34,6 @@ import { SimpleCta, TrendLineChart } from "../ielts/IeltsModule.jsx";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
 
-const JD_IMAGE_OCR_ENABLED = import.meta.env.VITE_OCR_ENABLED === "true";
 const DIFFICULTY_LABELS = { EASY: "简单", STANDARD: "标准", HARD: "困难" };
 
 const speedCodeByLabel = {
@@ -267,6 +267,8 @@ function MaterialEditor({ material, onChange, compact = false }) {
 }
 
 function InterviewHome({ onNavigate, onBack }) {
+  const [ocrAvailable, setOcrAvailable] = useState(false);
+  const [ocrAvailabilityLoading, setOcrAvailabilityLoading] = useState(true);
   const [jdMode, setJdMode] = useState("text");
   const [jdText, setJdText] = useState("");
   const [jdImage, setJdImage] = useState(null);
@@ -280,12 +282,34 @@ function InterviewHome({ onNavigate, onBack }) {
   const [formError, setFormError] = useState("");
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
-  const jdImageUnavailable = !JD_IMAGE_OCR_ENABLED;
+  const jdImageUnavailable = ocrAvailabilityLoading || !ocrAvailable;
+
+  useEffect(() => {
+    let cancelled = false;
+    getInterviewOcrAvailability()
+      .then((result) => {
+        if (cancelled) return;
+        setOcrAvailable(result?.available === true);
+      })
+      .catch(() => {
+        if (!cancelled) setOcrAvailable(false);
+      })
+      .finally(() => {
+        if (!cancelled) setOcrAvailabilityLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const prepareMaterials = async () => {
     if (preparing) return;
     setFormError("");
-    if (jdMode === "image" && jdImageUnavailable) {
+    if (jdMode === "image" && ocrAvailabilityLoading) {
+      setFormError("正在检测 OCR，请稍后再试");
+      return;
+    }
+    if (jdMode === "image" && !ocrAvailable) {
       setFormError("OCR 暂不可用，请使用粘贴文本方式上传 JD");
       return;
     }
@@ -402,12 +426,12 @@ function InterviewHome({ onNavigate, onBack }) {
               <legend>岗位描述（JD）</legend>
               <div className="interview-source-toggle">
                 <button type="button" className={jdMode === "text" ? "is-active" : ""} onClick={() => setJdMode("text")}>粘贴文本</button>
-                <button type="button" className={jdMode === "image" ? "is-active" : ""} disabled={jdImageUnavailable} title={jdImageUnavailable ? "OCR 暂不可用，请粘贴 JD 文本" : "上传岗位描述图片，由 OCR 识别文字"} onClick={() => setJdMode("image")}>上传图片</button>
+                <button type="button" className={jdMode === "image" ? "is-active" : ""} disabled={jdImageUnavailable} title={ocrAvailabilityLoading ? "正在检测 OCR" : jdImageUnavailable ? "OCR 暂不可用，请粘贴 JD 文本" : "上传岗位描述图片，由 OCR 识别文字"} onClick={() => setJdMode("image")}>上传图片</button>
               </div>
               {jdMode === "text"
                 ? <textarea className="interview-form__textarea" value={jdText} maxLength={20000} onChange={(event) => setJdText(event.target.value)} placeholder="粘贴招聘 JD 的职责与任职要求文本…" />
                 : jdImageUnavailable
-                  ? <p className="call-error" role="alert">OCR 暂不可用，请使用“粘贴文本”方式上传 JD。</p>
+                  ? <p className="call-error" role="alert">{ocrAvailabilityLoading ? "正在检测 OCR，请稍候…" : "OCR 暂不可用，请使用“粘贴文本”方式上传 JD。"}</p>
                   : <FilePicker accept="image/*" hint="支持单张图片，将由 OCR 识别文字" file={jdImage} onFile={setJdImage} icon={<Image weight="bold" />} />}
             </fieldset>
 

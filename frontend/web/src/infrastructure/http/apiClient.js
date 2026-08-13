@@ -363,6 +363,12 @@ export function prepareInterviewMaterials(formData) {
   });
 }
 
+export function getInterviewOcrAvailability() {
+  return request("/api/interview-scenes/ocr/availability", {
+    cache: "no-store",
+  });
+}
+
 export function generateInterviewScene({ material, difficulty }) {
   return request("/api/interview-scenes", {
     method: "POST",

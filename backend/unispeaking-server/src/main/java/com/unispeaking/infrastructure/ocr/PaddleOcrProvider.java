@@ -7,8 +7,12 @@ import com.unispeaking.infrastructure.config.OcrProperties;
 import com.unispeaking.provider.OcrProvider;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -25,9 +30,15 @@ import java.util.concurrent.TimeUnit;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
 
 public final class PaddleOcrProvider implements OcrProvider {
+
+	private static final Logger LOGGER = LoggerFactory.getLogger(PaddleOcrProvider.class);
 
 	static final int MAX_IMAGE_COUNT = 5;
 	static final int MAX_TOTAL_BYTES = 10 * 1024 * 1024;
@@ -39,22 +50,52 @@ public final class PaddleOcrProvider implements OcrProvider {
 
 	private final OcrProperties properties;
 	private final ObjectMapper objectMapper;
+	private final Object workerLock = new Object();
+	private volatile Process workerProcess;
+	private volatile BufferedWriter workerWriter;
+	private volatile BufferedReader workerReader;
+	private volatile ExecutorService workerStderrExecutor;
+	private volatile boolean workerReady;
 
 	public PaddleOcrProvider(OcrProperties properties, ObjectMapper objectMapper) {
 		this.properties = Objects.requireNonNull(properties, "OCR properties are required");
 		this.objectMapper = Objects.requireNonNull(objectMapper, "ObjectMapper is required");
 	}
 
+	/** 启动后端时预加载 PaddleOCR，并让 Python Worker 常驻内存。 */
+	@PostConstruct
+	void startWorkerOnApplicationStartup() {
+		if (!baseAvailable()) {
+			LOGGER.info("paddle OCR worker not started because OCR is not configured");
+			return;
+		}
+		try {
+			ensureWorkerStarted();
+		}
+		catch (OcrException exception) {
+			// OCR availability remains observable through the existing endpoint. The
+			// first OCR request will retry the worker start, so one transient startup
+			// failure does not prevent the web application from booting.
+			LOGGER.warn("paddle OCR worker failed to start during application startup");
+		}
+	}
+
+	@PreDestroy
+	void stopWorkerOnApplicationShutdown() {
+		synchronized (workerLock) {
+			stopWorker();
+		}
+	}
+
 	@Override
 	public String recognizeText(List<OcrImage> images) {
-		ensureAvailable();
 		List<ValidatedImage> validatedImages = validateImages(images);
+		ensureAvailable();
 		Path tempDirectory = null;
 		try {
 			tempDirectory = createTempDirectory();
 			List<Path> imagePaths = writeImages(tempDirectory, validatedImages);
-			ProcessResult result = runOcrProcess(imagePaths);
-			return parseRecognizedText(result.stdout(), validatedImages.size());
+			return recognizeWithWorker(imagePaths, validatedImages.size());
 		}
 		catch (OcrException exception) {
 			throw exception;
@@ -69,6 +110,11 @@ public final class PaddleOcrProvider implements OcrProvider {
 
 	@Override
 	public boolean available() {
+		return baseAvailable() && workerReady && workerProcess != null
+				&& workerProcess.isAlive();
+	}
+
+	private boolean baseAvailable() {
 		return properties.configured()
 				&& Files.isRegularFile(properties.runnerPath())
 				&& modelDirectoriesAvailable(properties.modelDirectory());
@@ -81,8 +127,14 @@ public final class PaddleOcrProvider implements OcrProvider {
 	}
 
 	private void ensureAvailable() {
-		if (!available()) {
+		if (!baseAvailable()) {
 			throw new OcrException(OcrErrorCode.UNAVAILABLE);
+		}
+		try {
+			ensureWorkerStarted();
+		}
+		catch (OcrException exception) {
+			throw exception;
 		}
 	}
 
@@ -197,7 +249,78 @@ public final class PaddleOcrProvider implements OcrProvider {
 		return imagePaths;
 	}
 
-	private ProcessResult runOcrProcess(List<Path> imagePaths) throws IOException {
+	private String recognizeWithWorker(List<Path> imagePaths, int expectedCount) {
+		synchronized (workerLock) {
+			ensureWorkerStarted();
+			String requestId = UUID.randomUUID().toString();
+			try {
+				WorkerRequest request = new WorkerRequest(requestId,
+						imagePaths.stream().map(Path::toString).toList());
+				workerWriter.write(objectMapper.writeValueAsString(request));
+				workerWriter.newLine();
+				workerWriter.flush();
+				String responseLine = readWorkerLine(timeoutMillis(properties.getTimeout()));
+				if (responseLine == null || responseLine.length() > MAX_STDOUT_BYTES) {
+					throw new OcrException(OcrErrorCode.RESPONSE_INVALID);
+				}
+				WorkerResponse response = objectMapper.readValue(responseLine, WorkerResponse.class);
+				if (response == null || !requestId.equals(response.id())) {
+					throw new OcrException(OcrErrorCode.RESPONSE_INVALID);
+				}
+				if (response.error() != null && !response.error().isBlank()) {
+					throw new OcrException(OcrErrorCode.PROCESS_FAILED);
+				}
+				return parseRecognizedText(response.results(), expectedCount);
+			}
+			catch (OcrException exception) {
+				if (exception.errorCode() == OcrErrorCode.TIMEOUT
+						|| exception.errorCode() == OcrErrorCode.PROCESS_FAILED
+						|| exception.errorCode() == OcrErrorCode.RESPONSE_INVALID) {
+					stopWorker();
+				}
+				throw exception;
+			}
+			catch (Exception exception) {
+				stopWorker();
+				throw new OcrException(OcrErrorCode.RESPONSE_INVALID);
+			}
+		}
+	}
+
+	private void ensureWorkerStarted() {
+		synchronized (workerLock) {
+			if (workerReady && workerProcess != null && workerProcess.isAlive()) {
+				return;
+			}
+			stopWorker();
+			if (!baseAvailable()) {
+				throw new OcrException(OcrErrorCode.UNAVAILABLE);
+			}
+			try {
+				startWorker();
+				String readyLine = readWorkerLine(timeoutMillis(properties.getTimeout()));
+				if (readyLine == null || readyLine.length() > MAX_STDOUT_BYTES) {
+					throw new OcrException(OcrErrorCode.PROCESS_FAILED);
+				}
+				WorkerReady ready = objectMapper.readValue(readyLine, WorkerReady.class);
+				if (ready == null || !ready.ready()) {
+					throw new OcrException(OcrErrorCode.PROCESS_FAILED);
+				}
+				workerReady = true;
+				LOGGER.info("paddle OCR worker started and model loaded");
+			}
+			catch (OcrException exception) {
+				stopWorker();
+				throw exception;
+			}
+			catch (Exception exception) {
+				stopWorker();
+				throw new OcrException(OcrErrorCode.PROCESS_FAILED);
+			}
+		}
+	}
+
+	private void startWorker() throws IOException {
 		List<String> command = new ArrayList<>();
 		command.add(properties.getPythonExecutable());
 		command.add(properties.getRunnerPath());
@@ -210,46 +333,76 @@ public final class PaddleOcrProvider implements OcrProvider {
 		command.add("--disable-doc-orientation");
 		command.add("--disable-doc-unwarping");
 		command.add("--disable-textline-orientation");
-		command.add("--images");
-		imagePaths.stream().map(Path::toString).forEach(command::add);
+		command.add("--worker");
 
 		ProcessBuilder processBuilder = new ProcessBuilder(command);
 		processBuilder.environment().put("PADDLE_PDX_CACHE_HOME", properties.getModelDirectory());
-		Process process = processBuilder.start();
-		ExecutorService executor = Executors.newFixedThreadPool(2);
+		workerProcess = processBuilder.start();
+		workerWriter = new BufferedWriter(new OutputStreamWriter(
+				workerProcess.getOutputStream(), StandardCharsets.UTF_8));
+		workerReader = new BufferedReader(new InputStreamReader(
+				workerProcess.getInputStream(), StandardCharsets.UTF_8));
+		workerStderrExecutor = Executors.newSingleThreadExecutor(runnable -> {
+			Thread thread = new Thread(runnable, "paddle-ocr-worker-stderr");
+			thread.setDaemon(true);
+			return thread;
+		});
+		workerStderrExecutor.submit(() -> drainWorkerStderr(workerProcess.getErrorStream()));
+	}
+
+	private String readWorkerLine(long timeoutMillis) throws Exception {
+		ExecutorService readerExecutor = Executors.newSingleThreadExecutor(runnable -> {
+			Thread thread = new Thread(runnable, "paddle-ocr-worker-reader");
+			thread.setDaemon(true);
+			return thread;
+		});
 		try {
-			Future<LimitedOutput> stdout =
-					executor.submit(() -> readLimited(process.getInputStream(), MAX_STDOUT_BYTES));
-			Future<LimitedOutput> stderr =
-					executor.submit(() -> readLimited(process.getErrorStream(), MAX_STDERR_BYTES));
-			boolean finished = process.waitFor(
-					timeoutMillis(properties.getTimeout()),
-					TimeUnit.MILLISECONDS);
-			if (!finished) {
-				terminateProcess(process);
+			Future<String> line = readerExecutor.submit(workerReader::readLine);
+			try {
+				return line.get(timeoutMillis, TimeUnit.MILLISECONDS);
+			}
+			catch (java.util.concurrent.TimeoutException exception) {
+				line.cancel(true);
 				throw new OcrException(OcrErrorCode.TIMEOUT);
 			}
-			LimitedOutput stdoutOutput = getOutput(stdout);
-			LimitedOutput stderrOutput = getOutput(stderr);
-			if (stdoutOutput.truncated()) {
-				throw new OcrException(OcrErrorCode.RESPONSE_INVALID);
-			}
-			if (stderrOutput.truncated()) {
-				throw new OcrException(OcrErrorCode.PROCESS_FAILED);
-			}
-			if (process.exitValue() != 0) {
-				throw new OcrException(OcrErrorCode.PROCESS_FAILED);
-			}
-			return new ProcessResult(stdoutOutput.text());
-		}
-		catch (InterruptedException exception) {
-			terminateProcess(process);
-			Thread.currentThread().interrupt();
-			throw new OcrException(OcrErrorCode.PROCESS_FAILED, exception);
 		}
 		finally {
-			executor.shutdownNow();
+			readerExecutor.shutdownNow();
 		}
+	}
+
+	private static void drainWorkerStderr(InputStream input) {
+		try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+				input, StandardCharsets.UTF_8))) {
+			String line;
+			while ((line = reader.readLine()) != null) {
+				LOGGER.debug("paddle OCR worker: {}", line);
+			}
+		}
+		catch (IOException exception) {
+			// The worker lifecycle owns this stream; shutdown is expected to close it.
+		}
+	}
+
+	private void stopWorker() {
+		workerReady = false;
+		if (workerWriter != null) {
+			try {
+				workerWriter.close();
+			}
+			catch (IOException ignored) {
+			}
+		}
+		if (workerProcess != null) {
+			terminateProcess(workerProcess);
+		}
+		if (workerStderrExecutor != null) {
+			workerStderrExecutor.shutdownNow();
+		}
+		workerWriter = null;
+		workerReader = null;
+		workerProcess = null;
+		workerStderrExecutor = null;
 	}
 
 	private static void terminateProcess(Process process) {
@@ -302,21 +455,14 @@ public final class PaddleOcrProvider implements OcrProvider {
 		return new LimitedOutput(output.toString(StandardCharsets.UTF_8), truncated);
 	}
 
-	private String parseRecognizedText(String stdout, int expectedCount) {
-		RunnerResponse response;
-		try {
-			response = objectMapper.readValue(stdout, RunnerResponse.class);
-		}
-		catch (Exception exception) {
+	private String parseRecognizedText(
+			List<RunnerImageResult> results,
+			int expectedCount) {
+		if (results == null || results.size() != expectedCount) {
 			throw new OcrException(OcrErrorCode.RESPONSE_INVALID);
 		}
-		if (response == null
-				|| response.results() == null
-				|| response.results().size() != expectedCount) {
-			throw new OcrException(OcrErrorCode.RESPONSE_INVALID);
-		}
-		List<String> texts = new ArrayList<>(response.results().size());
-		for (RunnerImageResult result : response.results()) {
+		List<String> texts = new ArrayList<>(results.size());
+		for (RunnerImageResult result : results) {
 			if (result == null || result.text() == null) {
 				throw new OcrException(OcrErrorCode.RESPONSE_INVALID);
 			}
@@ -374,12 +520,21 @@ public final class PaddleOcrProvider implements OcrProvider {
 	private record LimitedOutput(String text, boolean truncated) {
 	}
 
-	private record ProcessResult(String stdout) {
-	}
-
 	private record RunnerResponse(List<RunnerImageResult> results) {
 	}
 
 	private record RunnerImageResult(String text) {
+	}
+
+	private record WorkerRequest(String id, List<String> images) {
+	}
+
+	private record WorkerResponse(
+			String id,
+			List<RunnerImageResult> results,
+			String error) {
+	}
+
+	private record WorkerReady(boolean ready) {
 	}
 }
