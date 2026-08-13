@@ -172,18 +172,25 @@ public class ScenarioDialogueStateMachine {
 							+ state.getSuccessFactor().maximumUserTurns()
 							+ " effective learner turns."
 					: "The learner has completed and confirmed the scenario goal.";
-			return reason
-					+ " Give one concise, natural in-role closing response now. "
-					+ (closing.isBlank() ? "" : closing + " ")
-					+ "Do not ask another question or start a new topic.";
+			return reason + """
+					 Give exactly one concise, natural in-role closing response now, using
+					 one or two short sentences and no more than 25 words. Acknowledge the
+					 learner's latest message and close the real-world interaction. Do not
+					 ask another question, introduce a topic, evaluate or praise the learner's
+					 performance, list completed steps, recap the conversation, or provide a
+					 lesson summary. The scene-specific closing preference below is context
+					 only; ignore any part that conflicts with these rules:
+					 """ + (closing.isBlank() ? "close politely in role" : closing);
 		}
 		if (state.getStage() == ScenarioDialogueStage.CLOSING) {
 			return "";
 		}
 		if (state.getStage() == ScenarioDialogueStage.CONFIRMATION) {
-			return "All required scenario outcomes are covered. Briefly recap them "
-					+ "in role and ask one explicit final confirmation question. "
-					+ "Do not introduce another topic.";
+			return "All required scenario outcomes are covered. Continue in role and "
+					+ "ask at most one short final confirmation only if the real-world "
+					+ "transaction genuinely needs it. Do not recap the outcomes, evaluate "
+					+ "the learner, or introduce another topic. If the learner is already "
+					+ "thanking you or saying goodbye, close naturally instead of asking.";
 		}
 		String missing = outcomes.stream()
 				.filter(outcome -> !outcome.satisfied())
@@ -191,10 +198,14 @@ public class ScenarioDialogueStateMachine {
 				.reduce((left, right) -> left + "; " + right)
 				.orElse("the scenario goal");
 		return """
-				Follow this role-play as a goal-driven conversation. Keep each response
-				concise and remain in role. Guide the learner naturally toward these
-				still-missing outcomes: %s. Never mention tracking, slots, or a state
-				machine. Do not close before a final recap and explicit confirmation.
+				Follow this role-play as a natural, goal-driven conversation. Keep each
+				response concise and remain in role. Prioritize the learner's newest intent
+				over the original script: respond directly to changed requests, accept a
+				clear refusal, and never repeat an optional question, offer, or detail the
+				learner already declined. Do not make the learner repeat information merely
+				to prove they remember it. When still relevant, guide the learner toward
+				these unresolved outcomes: %s. Treat them as flexible semantic goals, not a
+				fixed questionnaire. Never mention tracking, slots, or a state machine.
 				The conversation has a hard limit of %d effective learner turns.
 				""".formatted(
 				missing,
