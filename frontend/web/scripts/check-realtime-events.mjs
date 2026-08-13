@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import {
   buildResponseCreateEvent,
   buildRealtimeSessionConfig,
+  buildRealtimeStartPayload,
   createTurnAudioCaptureController,
   buildProviderSessionBindingFrame,
+  extractProviderSessionId,
   extractCompletedAssistantMessage,
   isActiveResponseConflict,
+  normalizeProviderEvent,
   normalizeBaseUrl,
   websocketUrl,
 } from "../src/websocket/realtimeClient.js";
@@ -24,6 +27,46 @@ assert.deepEqual(
 assert.equal(
   buildProviderSessionBindingFrame("local-session-1", { type: "session.created", session: {} }),
   null,
+);
+assert.equal(
+  extractProviderSessionId({ providerSessionId: "rti_qiniu_1" }),
+  "rti_qiniu_1",
+);
+assert.equal(
+  extractProviderSessionId({ type: "session.created", session: { id: "sess_qwen_1" } }),
+  "sess_qwen_1",
+);
+assert.deepEqual(
+  buildRealtimeStartPayload("offer-sdp"),
+  {
+    offerSdp: "offer-sdp",
+    voice: "Tina",
+    translationEnabled: true,
+  },
+);
+assert.deepEqual(
+  buildRealtimeStartPayload("ielts-offer", { ielts: true }),
+  {
+    offerSdp: "ielts-offer",
+    voiceId: "Tina",
+    translationEnabled: true,
+  },
+);
+assert.deepEqual(
+  buildRealtimeStartPayload("teacher-offer", { voice: "Harvey" }),
+  {
+    offerSdp: "teacher-offer",
+    voice: "Harvey",
+    translationEnabled: true,
+  },
+);
+assert.deepEqual(
+  buildRealtimeStartPayload("examiner-offer", { ielts: true, voice: "Mione" }),
+  {
+    offerSdp: "examiner-offer",
+    voiceId: "Mione",
+    translationEnabled: true,
+  },
 );
 
 assert.deepEqual(
@@ -105,11 +148,39 @@ assert.equal(
   false,
 );
 
-const slowerKaterina = buildRealtimeSessionConfig({
+assert.deepEqual(
+  normalizeProviderEvent({
+    type: "rtid.error",
+    message: "upstream realtime failed",
+  }),
+  {
+    type: "error",
+    providerEventType: "rtid.error",
+    message: "upstream realtime failed",
+    error: { message: "upstream realtime failed" },
+  },
+);
+assert.equal(normalizeProviderEvent({ type: "session.updated" }).type, "session.updated");
+assert.equal(
+  normalizeProviderEvent({ type: "rtid.error", error: "quota exhausted" }).error.message,
+  "quota exhausted",
+);
+
+const defaultQiniuSession = buildRealtimeSessionConfig({
   systemPrompt: "Coach the learner.",
-  voice: "Katerina",
-  model: "qwen3.5-omni-flash-realtime",
+});
+assert.equal(defaultQiniuSession.voice, "Tina");
+
+const slowerTina = buildRealtimeSessionConfig({
+  systemPrompt: "Coach the learner.",
+  voice: "Tina",
+  model: "qwen3.5-omni-plus-realtime",
   speechSpeed: "SLOWER",
+});
+const managedCherry = buildRealtimeSessionConfig({
+  systemPrompt: "Coach the learner.",
+  voice: "Cherry",
+  includeVoice: false,
 });
 const fasterHarvey = buildRealtimeSessionConfig({
   systemPrompt: "Coach the learner.",
@@ -132,8 +203,10 @@ const partTwoSession = buildRealtimeSessionConfig({
   interruptResponse: false,
 });
 
-assert.equal(slowerKaterina.voice, "Katerina");
-assert.match(slowerKaterina.instructions, /70 English words per minute/);
+assert.equal(slowerTina.voice, "Tina");
+assert.equal("voice" in managedCherry, false);
+assert.match(managedCherry.instructions, /Coach the learner/);
+assert.match(slowerTina.instructions, /70 English words per minute/);
 assert.equal(fasterHarvey.voice, "Harvey");
 assert.match(fasterHarvey.instructions, /210 English words per minute/);
 assert.equal(fasterHarvey.input_audio_transcription.model, "qwen3-asr-flash-realtime");

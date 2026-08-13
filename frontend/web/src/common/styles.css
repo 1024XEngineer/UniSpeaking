@@ -603,6 +603,11 @@ svg { display: block; }
 .learning-complete-note { display: flex; align-items: center; gap: 8px; color: #317653; }
 .learning-complete-note svg { width: 20px; height: 20px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px; }
+.feedback-invitation { width: min(520px, 90vw); }
+.feedback-invitation__icon { width: 54px; height: 54px; margin-bottom: 24px; display: grid; place-items: center; border-radius: 8px; color: #395e66; background: #e4eff0; }
+.feedback-invitation__icon svg { width: 27px; height: 27px; }
+.feedback-invitation .modal-lead { max-width: 410px; margin-bottom: 0; }
+.feedback-invitation .button { text-decoration: none; }
 
 .training-page { height: 100%; min-height: 760px; display: grid; grid-template-rows: 78px 92px 1fr; overflow: hidden; }
 .training-page--standalone { grid-template-rows: 78px minmax(0, 1fr); }
@@ -1380,6 +1385,8 @@ svg { display: block; }
 }
 
 @media (max-width: 560px) {
+  .feedback-invitation .modal-actions { align-items: stretch; flex-direction: column-reverse; }
+  .feedback-invitation .button { width: 100%; }
   .account-security-header { min-height: 170px; padding-bottom: 30px; }
   .account-security-header__icon { width: 48px; height: 48px; margin-bottom: 24px; }
   .account-security-header h1 { font-size: 32px; }

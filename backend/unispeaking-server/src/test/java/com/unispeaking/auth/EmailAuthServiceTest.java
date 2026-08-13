@@ -61,6 +61,16 @@ class EmailAuthServiceTest {
     }
 
     @Test
+    void humanVerificationIsRequiredBeforePasswordLoginCreatesSession() {
+        var challenge = service.issueChallenge("person@example.com", "verified-human");
+        service.register("person@example.com", "correct-password", challenge.challengeId(), emailSender.lastCode());
+
+        assertThatThrownBy(() -> service.login("person@example.com", "correct-password", "invalid"))
+                .isInstanceOf(EmailAuthService.AuthException.class)
+                .hasMessage("HUMAN_VERIFICATION_REQUIRED");
+    }
+
+    @Test
     void rejectsChallengeBeforeEmailDeliveryWhenHumanVerificationFails() {
         assertThatThrownBy(() -> service.issueChallenge("person@example.com", "invalid"))
                 .isInstanceOf(EmailAuthService.AuthException.class)

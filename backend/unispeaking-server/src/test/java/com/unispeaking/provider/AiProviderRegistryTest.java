@@ -38,15 +38,19 @@ class AiProviderRegistryTest {
 	@Test
 	void selectsProvidersByCapabilityAndModel() {
 		StubRealtimeProvider realtime = new StubRealtimeProvider();
-		AiProviderRegistry registry = registry(realtime);
+		StubQiniuRealtimeProvider qiniu = new StubQiniuRealtimeProvider();
+		AiProviderRegistry registry = realtimeRegistry(qiniu, realtime);
 
 		assertEquals(
-				AiProviderRegistry.QWEN_REALTIME_FLASH,
+				AiProviderRegistry.QINIU_REALTIME_PLUS,
 				registry.defaultModel(AiCapability.REALTIME));
 		assertEquals(AiProviderRegistry.QWEN_LLM_PLUS, registry.defaultModel(AiCapability.LLM));
 		assertSame(
+				qiniu,
+				registry.getRealtimeProvider(AiProviderRegistry.QINIU_REALTIME_PLUS));
+		assertSame(
 				realtime,
-				registry.getRealtimeProvider(AiProviderRegistry.QWEN_REALTIME_PLUS));
+				registry.getRealtimeProvider(AiProviderRegistry.QWEN_REALTIME_FLASH));
 		assertEquals(
 				"answer",
 				registry.exchangeRealtimeSdp(
@@ -108,11 +112,12 @@ class AiProviderRegistryTest {
 	}
 
 	@Test
-	void usesQwenAsThePrimaryModelForEveryCapabilityExceptScoring() {
-		AiProviderRegistry registry = registry(new StubRealtimeProvider());
+	void usesQiniuAsThePrimaryRealtimeModelAndQwenForOtherGenerativeCapabilities() {
+		AiProviderRegistry registry = realtimeRegistry(
+				new StubQiniuRealtimeProvider(), new StubRealtimeProvider());
 
 		assertEquals(
-				AiProviderRegistry.QWEN_REALTIME_FLASH,
+				AiProviderRegistry.QINIU_REALTIME_PLUS,
 				registry.defaultModel(AiCapability.REALTIME));
 		assertEquals(
 				AiProviderRegistry.QWEN_LLM_PLUS,
@@ -213,6 +218,15 @@ class AiProviderRegistryTest {
 				List.of(new StubTranscriptionProvider()));
 	}
 
+	private AiProviderRegistry realtimeRegistry(RealtimeProvider... providers) {
+		return new AiProviderRegistry(
+				List.of(providers),
+				llmProviders(),
+				List.of(new StubScoringProvider()),
+				ttsProviders(),
+				List.of(new StubTranscriptionProvider()));
+	}
+
 	private AiProviderRegistry registry(
 			List<LlmProvider> providers,
 			Map<AiCapability, List<String>> routeOverrides) {
@@ -240,9 +254,7 @@ class AiProviderRegistryTest {
 		private StubRealtimeProvider() {
 			super(
 					ProviderType.QWEN,
-					Set.of(
-							AiProviderRegistry.QWEN_REALTIME_FLASH,
-							AiProviderRegistry.QWEN_REALTIME_PLUS));
+					Set.of(AiProviderRegistry.QWEN_REALTIME_FLASH));
 		}
 
 		@Override
@@ -251,6 +263,20 @@ class AiProviderRegistryTest {
 				String offerSdp,
 				String token) {
 			return "answer";
+		}
+	}
+
+	private static final class StubQiniuRealtimeProvider extends RealtimeProvider {
+		private StubQiniuRealtimeProvider() {
+			super(ProviderType.QINIU, Set.of(AiProviderRegistry.QINIU_REALTIME_PLUS));
+		}
+
+		@Override
+		public String exchangeRealtimeSdp(
+				String modelId,
+				String offerSdp,
+				String token) {
+			return "qiniu-answer";
 		}
 	}
 

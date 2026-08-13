@@ -29,9 +29,7 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 			RealtimeCredentialIssuer credentialIssuer) {
 		super(
 				ProviderType.QWEN,
-				Set.of(
-						AiProviderRegistry.QWEN_REALTIME_FLASH,
-						AiProviderRegistry.QWEN_REALTIME_PLUS));
+				Set.of(AiProviderRegistry.QWEN_REALTIME_FLASH));
 		this.httpClient = realtimeHttpClient;
 		this.properties = properties;
 		this.credentialIssuer = credentialIssuer;

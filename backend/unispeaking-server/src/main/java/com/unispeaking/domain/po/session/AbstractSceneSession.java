@@ -20,6 +20,7 @@ public abstract class AbstractSceneSession {
 	private SceneType sceneType;
 	private IeltsPart ieltsPart;
 	private String providerSessionId;
+	private String providerTraceId;
 	private SessionStatus status = SessionStatus.CREATED;
 	private Instant endedAt;
 	private SessionPrompt prompt;
@@ -104,6 +105,8 @@ public abstract class AbstractSceneSession {
 	public IeltsPart getIeltsPart() { return ieltsPart; }
 	public void setIeltsPart(IeltsPart ieltsPart) { this.ieltsPart = ieltsPart; }
 	public String getProviderSessionId() { return providerSessionId; }
+	public String getProviderTraceId() { return providerTraceId; }
+	public void setProviderTraceId(String providerTraceId) { this.providerTraceId = providerTraceId; }
 	public SessionStatus getStatus() { return status; }
 	public Instant getEndedAt() { return endedAt; }
 	public SessionPrompt getPrompt() { return prompt; }

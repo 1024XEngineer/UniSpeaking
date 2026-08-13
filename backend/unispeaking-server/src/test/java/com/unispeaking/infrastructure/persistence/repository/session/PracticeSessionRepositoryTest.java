@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import com.unispeaking.domain.po.session.PracticeSessionRecord;
 import com.unispeaking.domain.vo.scene.SceneType;
+import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.session.SessionStatus;
 import com.unispeaking.common.exception.BusinessException;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
@@ -150,6 +151,40 @@ class PracticeSessionRepositoryTest {
 		assertTrue(assignments.contains("provider_session_id="), assignments);
 		assertTrue(captor.getValue().getParamNameValuePairs().values().containsAll(List.of(
 				"session_local_1", userId, "sess_provider_1")));
+	}
+
+	@Test
+	void persistsTheActualRealtimeProviderMetadataAfterRouting() {
+		PracticeSessionMapper mapper = mock(PracticeSessionMapper.class);
+		when(mapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(1);
+		PracticeSessionRepository repository = new PracticeSessionRepository(mapper);
+		UUID userId = UUID.randomUUID();
+
+		repository.updateRealtimeProvider(
+				"session_local_1",
+				userId,
+				"rti-session-1",
+				ProviderType.QINIU,
+				"qwen3.5-omni-plus-realtime",
+				"trace-1");
+
+		@SuppressWarnings("unchecked")
+		ArgumentCaptor<LambdaUpdateWrapper<PracticeSessionEntity>> captor =
+				ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+		verify(mapper).update(isNull(), captor.capture());
+		String condition = captor.getValue().getSqlSegment().toLowerCase(java.util.Locale.ROOT);
+		String assignments = captor.getValue().getSqlSet().toLowerCase(java.util.Locale.ROOT);
+		assertTrue(condition.contains("session_id ="), condition);
+		assertTrue(condition.contains("user_id ="), condition);
+		assertTrue(assignments.contains("provider_session_id="), assignments);
+		assertTrue(assignments.contains("provider_type="), assignments);
+		assertTrue(assignments.contains("provider_model="), assignments);
+		assertTrue(assignments.contains("provider_trace_id="), assignments);
+		var values = captor.getValue().getParamNameValuePairs().values();
+		assertTrue(values.contains("rti-session-1"), values.toString());
+		assertTrue(values.contains(ProviderType.QINIU.name()), values.toString());
+		assertTrue(values.contains("qwen3.5-omni-plus-realtime"), values.toString());
+		assertTrue(values.contains("trace-1"), values.toString());
 	}
 
 	@Test

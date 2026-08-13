@@ -52,7 +52,12 @@ export function normalizeQwenEvent(raw: unknown): RealtimeDomainEvent[] {
 
   switch (type) {
     case 'session.created':
-      return [{ type: 'session.created' }];
+      return [{
+        type: 'session.created',
+        providerSessionId: isRecord(raw.session)
+          ? nonEmptyString(raw.session.id)
+          : undefined,
+      }];
     case 'session.updated':
       return [{ type: 'session.updated' }];
     case 'input_audio_buffer.speech_started':
@@ -106,6 +111,10 @@ export function normalizeQwenEvent(raw: unknown): RealtimeDomainEvent[] {
     }
     case 'response.created':
       return [{ type: 'assistant.response.started' }];
+    case 'response.audio.delta': {
+      const audio = nonEmptyString(raw.delta);
+      return audio ? [{ type: 'assistant.audio.delta', audio }] : [];
+    }
     case 'response.audio_transcript.delta':
     case 'response.text.delta': {
       const text = nonEmptyString(raw.delta);

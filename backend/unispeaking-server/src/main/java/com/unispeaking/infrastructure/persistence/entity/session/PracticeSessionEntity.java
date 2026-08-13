@@ -27,6 +27,9 @@ public class PracticeSessionEntity {
 	private OffsetDateTime startedAt;
 	private OffsetDateTime endedAt;
 	private String providerSessionId;
+	private String providerType;
+	private String providerModel;
+	private String providerTraceId;
 	private OffsetDateTime createdAt;
 	private OffsetDateTime updatedAt;
 }

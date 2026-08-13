@@ -20,6 +20,7 @@ import com.unispeaking.domain.vo.session.SpeakerType;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.component.policy.UserEntitlementPolicy;
+import com.unispeaking.infrastructure.realtime.RealtimeSessionTerminator;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -33,12 +34,22 @@ public class SessionLifecycleManager {
 	private final SessionMessageRepository sessionMessageRepository;
 	private final PracticeSessionRepository practiceSessionRepository;
 	private final UserEntitlementPolicy entitlementPolicy;
+	private final RealtimeSessionTerminator realtimeSessionTerminator;
 
 	public SessionLifecycleManager(
 			ActiveSessionRegistry activeSessionRegistry,
 			SessionMessageRepository sessionMessageRepository,
 			PracticeSessionRepository practiceSessionRepository) {
-		this(activeSessionRegistry, sessionMessageRepository, practiceSessionRepository, null);
+		this(activeSessionRegistry, sessionMessageRepository, practiceSessionRepository, null, null);
+	}
+
+	public SessionLifecycleManager(
+			ActiveSessionRegistry activeSessionRegistry,
+			SessionMessageRepository sessionMessageRepository,
+			PracticeSessionRepository practiceSessionRepository,
+			UserEntitlementPolicy entitlementPolicy) {
+		this(activeSessionRegistry, sessionMessageRepository, practiceSessionRepository,
+				entitlementPolicy, null);
 	}
 
 	@Autowired
@@ -46,11 +57,13 @@ public class SessionLifecycleManager {
 			ActiveSessionRegistry activeSessionRegistry,
 			SessionMessageRepository sessionMessageRepository,
 			PracticeSessionRepository practiceSessionRepository,
-			UserEntitlementPolicy entitlementPolicy) {
+			UserEntitlementPolicy entitlementPolicy,
+			RealtimeSessionTerminator realtimeSessionTerminator) {
 		this.activeSessionRegistry = activeSessionRegistry;
 		this.sessionMessageRepository = sessionMessageRepository;
 		this.practiceSessionRepository = practiceSessionRepository;
 		this.entitlementPolicy = entitlementPolicy;
+		this.realtimeSessionTerminator = realtimeSessionTerminator;
 	}
 
 	public StartSessionResponse startSession(StartSessionCommand command) {
@@ -198,6 +211,13 @@ public class SessionLifecycleManager {
 				session.fail(endedAt);
 			}
 			activeSessionRegistry.save(session);
+		}
+		if (realtimeSessionTerminator != null) {
+			realtimeSessionTerminator.stopBestEffort(
+					session,
+					terminalStatus == SessionStatus.COMPLETED
+							? "client_completed"
+							: "session_failed");
 		}
 	}
 

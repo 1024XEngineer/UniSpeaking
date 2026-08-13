@@ -86,6 +86,8 @@ import { IeltsAssets, IeltsTrainingCenter } from "../component/ielts/IeltsModule
 import { InterviewAssets, InterviewModule } from "../component/interview/InterviewModule.jsx";
 import { HelpCenter } from "../component/help/HelpCenter.jsx";
 import { HelpLayout } from "../component/help/HelpLayout.jsx";
+import { feedbackUrl } from "../component/help/ExternalFeedbackLink.jsx";
+import { markFeedbackStarted, recordFeedbackPractice } from "../component/help/feedbackInvitation.js";
 import { LandingPage } from "../component/landing/LandingPage.jsx";
 import { NewtonsCradle } from "../component/common/NewtonsCradle.jsx";
 import { Modal } from "../component/common/Modal.jsx";
@@ -587,7 +589,11 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const registrationDraftRef = useRef({ email: "", password: "" });
-  const captchaButtonId = mode === "reset" ? "reset-email-challenge" : "signup-email-challenge";
+  const captchaButtonId = mode === "login"
+    ? "login-email-auth"
+    : mode === "reset"
+      ? "reset-email-challenge"
+      : "signup-email-challenge";
 
   const clearChallenge = () => {
     setStep("credentials");
@@ -622,18 +628,6 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
 
   const submitCredentials = async (event) => {
     event.preventDefault();
-    if (mode !== "login") return;
-    setSubmitting(true);
-    setError("");
-    setNotice("");
-    try {
-      const auth = await loginWithPassword(email.trim(), password);
-      await onSuccess(auth, "login");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "认证请求失败");
-    } finally {
-      setSubmitting(false);
-    }
   };
 
   const verifyAndIssueChallenge = async (captchaVerifyParam) => {
@@ -644,6 +638,22 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
     if (!emailIsValid) {
       setError("请输入有效邮箱地址。");
       return { captchaResult: true, bizResult: false };
+    }
+    if (mode === "login") {
+      setSubmitting(true);
+      try {
+        const auth = await loginWithPassword(normalizedEmail, password, captchaVerifyParam);
+        await onSuccess(auth, "login");
+        return { captchaResult: true, bizResult: true };
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : "认证请求失败");
+        return {
+          captchaResult: requestError?.code !== "HUMAN_VERIFICATION_REQUIRED",
+          bizResult: false,
+        };
+      } finally {
+        setSubmitting(false);
+      }
     }
     const validationCode = mode === "signup"
       ? validateRegistrationCredentials(normalizedEmail, password)
@@ -767,11 +777,11 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
         <form onSubmit={submitCredentials}>
           <label>邮箱<input type="email" value={email} onChange={(event) => { const nextEmail = event.target.value; setEmail(nextEmail); registrationDraftRef.current.email = nextEmail.trim(); }} placeholder="name@example.com" autoComplete="email" maxLength="254" required disabled={submitting} /></label>
           {mode !== "reset" && <label>密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => { const nextPassword = event.target.value; setPassword(nextPassword); registrationDraftRef.current.password = nextPassword; }} placeholder="至少 12 位字符" autoComplete={mode === "signup" ? "new-password" : "current-password"} minLength="12" maxLength="200" required disabled={submitting} /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>}
-          {mode !== "login" && <HumanVerification buttonId={captchaButtonId} onVerify={verifyAndIssueChallenge} />}
+          <HumanVerification buttonId={captchaButtonId} onVerify={verifyAndIssueChallenge} />
           {mode === "login" && <button type="button" className="forgot-link" onClick={beginPasswordReset}>忘记密码？</button>}
           {notice && <p className="auth-notice" role="status">{notice}</p>}
           {error && <p className="auth-error" role="alert">{error}</p>}
-          <Button id={mode !== "login" ? captchaButtonId : undefined} className="auth-submit" type="submit" disabled={submitting}>{submitting ? "正在处理…" : mode === "login" ? "登录" : "发送邮箱验证码"}</Button>
+          <Button id={captchaButtonId} className="auth-submit" type="submit" disabled={submitting}>{submitting ? "正在处理…" : mode === "login" ? "登录" : "发送邮箱验证码"}</Button>
         </form>
         {mode === "reset"
           ? <p className="auth-switch">想起密码了？<button onClick={returnToLogin}>返回登录</button></p>
@@ -1139,13 +1149,15 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       return;
     }
     if (event.type === "local.ended") {
+      const completedSessionId = sessionIdRef.current;
       setInCall(false);
       setSubtitles(false);
       setPaused(false);
       setCallState("idle");
       setCallStatus("准备开始");
       clientRef.current = null;
-      onSessionEnded?.();
+      sessionIdRef.current = "";
+      onSessionEnded?.(completedSessionId);
       return;
     }
     if (event.type === "local.mic_error") {
@@ -1224,6 +1236,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
 
   const stopConversation = async () => {
     const client = clientRef.current;
+    const completedSessionId = sessionIdRef.current;
     clientRef.current = null;
     sessionIdRef.current = "";
     clientGenerationRef.current += 1;
@@ -1233,7 +1246,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     setCallState("idle");
     setCallStatus("准备开始");
     await client?.stop({ reason: "user_stop" });
-    onSessionEnded?.();
+    onSessionEnded?.(completedSessionId);
   };
 
   useEffect(() => () => {
@@ -2702,6 +2715,23 @@ function Paywall({ title, onClose, onMembership }) {
   return <Modal onClose={onClose}><div className="paywall-icon"><LockKey /></div><p className="eyebrow">SPECIAL TRAINING</p><h2>开始“{title}”需要特训版</h2><p className="modal-lead">你可以自由查看介绍；只有正式开始训练时才会检查权益。</p><ul className="paywall-list"><li><Check />IELTS 全真模拟与预估分数</li><li><Check />上传 PDF / DOCX 或粘贴面试材料</li><li><Check />雅思与面试共用 5 次/天</li></ul><div className="modal-actions"><Button variant="secondary" onClick={onClose}>稍后再说</Button><Button onClick={onMembership}>查看特训版</Button></div></Modal>;
 }
 
+function FeedbackInvitation({ onDismiss, onAccept }) {
+  return (
+    <Modal onClose={onDismiss} className="feedback-invitation">
+      <div className="feedback-invitation__icon"><MessagesSquare /></div>
+      <p className="eyebrow">HELP US IMPROVE</p>
+      <h2>愿意和我们聊聊使用感受吗？</h2>
+      <p className="modal-lead">你的真实反馈会帮助我们把对话和场景练习做得更好。问卷大约需要 2 分钟。</p>
+      <div className="modal-actions">
+        <Button variant="secondary" onClick={onDismiss}>暂时不用</Button>
+        {feedbackUrl
+          ? <a className="button button--primary" href={feedbackUrl} target="_blank" rel="noreferrer" onClick={onAccept}><span>愿意，去填写</span><ArrowRight /></a>
+          : <Button disabled>问卷暂不可用</Button>}
+      </div>
+    </Modal>
+  );
+}
+
 export function App() {
   const initialRoute = useMemo(() => resolveRoute(window.location), []);
   const {
@@ -2731,6 +2761,7 @@ export function App() {
   const [helpRoute, setHelpRoute] = useState(initialRoute.helpRoute || null);
   const [aboutRoute, setAboutRoute] = useState(initialRoute.aboutRoute || null);
   const [paywall, setPaywall] = useState(null);
+  const [feedbackInvitationOpen, setFeedbackInvitationOpen] = useState(false);
   const preferenceWriteChainRef = useRef(Promise.resolve());
   const preferenceWriteVersionRef = useRef(0);
 
@@ -3129,6 +3160,26 @@ export function App() {
     }
     void synchronizeAchievements({ revealNotifications: true });
   };
+  const recordCompletedPractice = (practiceType, sessionId) => {
+    const userId = user?.id || profileOverview?.account?.userId;
+    if (!userId || !sessionId) return;
+    try {
+      if (recordFeedbackPractice(window.localStorage, { userId, practiceType, sessionId })) {
+        setFeedbackInvitationOpen(true);
+      }
+    } catch {
+      // Feedback invitations should never interrupt practice completion.
+    }
+  };
+  const completeScenePractice = (completed, evaluation = null, completedSessionId = null) => {
+    showResult(completed, evaluation, completedSessionId);
+    recordCompletedPractice("scene", completedSessionId || training?.sessionId);
+  };
+  const acceptFeedbackInvitation = () => {
+    const userId = user?.id || profileOverview?.account?.userId;
+    if (userId) markFeedbackStarted(window.localStorage, userId);
+    setFeedbackInvitationOpen(false);
+  };
   const setMainPage = (next) => navigate(hrefForPage(next), { page: next, authMode, training: null, result: null });
   const navigateIelts = (path) => navigate(path, { authMode });
   const navigateInterview = (path) => navigate(path, { authMode });
@@ -3164,8 +3215,8 @@ export function App() {
     );
   }
   let content;
-  if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={showResult} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
-  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={() => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); void synchronizeAchievements({ revealNotifications: true }); }} />;
+  if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={completeScenePractice} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
+  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={(sessionId) => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); recordCompletedPractice("free", sessionId); void synchronizeAchievements({ revealNotifications: true }); }} />;
   else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={() => setMainPage("ielts")} onInterview={() => setMainPage("interview")} />;
   else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => setMainPage("ielts-assets")} onInterview={() => setMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(scene) => startTraining(scene, "learn", { returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
@@ -3173,5 +3224,5 @@ export function App() {
   else if (page === "interview") content = <InterviewModule route={interviewRoute} teacher={teacher} speed={conversationSpeed} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} />;
   else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToIelts={() => setMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} onPractice={(sceneId) => navigateInterview(paths.interview.session(sceneId))} />;
   else content = <Profile section={page} setSection={setMainPage} helpRoute={helpRoute} aboutRoute={aboutRoute} onHelpNavigate={navigateHelp} onAboutNavigate={navigateAbout} user={user} profile={profileOverview} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onMonthChange={loadProfileMonth} onNicknameChange={updateNickname} onAvatarChange={updateAvatar} onPasswordChange={updatePassword} onAssets={() => setMainPage("assets")} onLogout={logout} />;
-  return <AppShell page={page} setPage={setMainPage} teacher={teacher} avatarUrl={profileOverview?.account?.avatarUrl}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}</AppShell>;
+  return <AppShell page={page} setPage={setMainPage} teacher={teacher} avatarUrl={profileOverview?.account?.avatarUrl}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}{feedbackInvitationOpen && <FeedbackInvitation onDismiss={() => setFeedbackInvitationOpen(false)} onAccept={acceptFeedbackInvitation} />}</AppShell>;
 }

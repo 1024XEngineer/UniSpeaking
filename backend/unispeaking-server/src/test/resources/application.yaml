@@ -49,6 +49,17 @@ realtime:
     connect-timeout: 1s
     read-timeout: 1s
     max-answer-bytes: 1048576
+  qiniu:
+    base-url: https://miku-rtic.qiniuapi.com
+    api-key: test-qiniu-key
+    app-id: unispeaking_001
+    model-profile: qwen3.5-omni-plus-realtime
+    role-profile: default_assistant
+    voice-profile: Tina
+    client-transport: platform_rtc
+    region: cn-east
+    read-timeout: 1s
+    max-response-bytes: 1048576
 
 gateway:
   enabled: false

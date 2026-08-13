@@ -33,7 +33,7 @@ export type RealtimeError = Readonly<{
 }>;
 
 export type RealtimeDomainEvent =
-  | { type: 'session.created' }
+  | { type: 'session.created'; providerSessionId?: string }
   | { type: 'session.updated' }
   | { type: 'user.speech.started' }
   | { type: 'user.speech.stopped' }
@@ -41,6 +41,7 @@ export type RealtimeDomainEvent =
   | { type: 'user.transcript.preview'; itemId?: string; text: string }
   | { type: 'user.transcript.completed'; itemId?: string; text: string }
   | { type: 'assistant.response.started' }
+  | { type: 'assistant.audio.delta'; audio: string }
   | { type: 'assistant.transcript.delta'; text: string }
   | { type: 'assistant.transcript.completed'; itemId?: string; text: string }
   | { type: 'assistant.response.completed'; cancelled: boolean }

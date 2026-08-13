@@ -584,17 +584,18 @@ POST /api/scene-sessions
 ```json
 {
   "offerSdp": "浏览器生成的 WebRTC Offer SDP",
-  "provider": "QWEN",
-  "model": "qwen3.5-omni-flash-realtime",
-  "voice": "Katerina",
+  "voice": "Tina",
   "translationEnabled": true
 }
 ```
 
 该接口是自由聊天入口。客户端不传 `userId`、`sceneType`、`prompt`、
-`topic` 或 `userPreference`。后端从 JWT 获取用户 ID，从数据库读取用户
+`topic`、`userPreference`、`provider` 或 `model`。后端从 JWT 获取用户 ID，从数据库读取用户
 Profile 和偏好，固定以 `FREE_CHAT` 调用 `SceneService` 和
 `FiveLayerPromptService` 生成完整五层提示词。
+当前 Web 端首期固定使用 `Tina`；Realtime 供应商与模型由后端路由，
+默认优先七牛 RTI `qwen3.5-omni-plus-realtime`，可回退错误则改用
+阿里云百炼 `qwen3.5-omni-flash-realtime`。
 
 响应：
 
@@ -609,10 +610,10 @@ Profile 和偏好，固定以 `FREE_CHAT` 调用 `SceneService` 和
   "currentStage": "DIALOGUE",
   "scoringEnabled": false,
   "sessionId": "freechat_session_801cca605b3049cebe9c54a55655754a",
-  "providerSessionId": null,
-  "answerSdp": "Qwen 返回的 WebRTC Answer SDP",
+  "providerSessionId": "rti-session-801cca605b3049cebe9c54a55655754a",
+  "answerSdp": "七牛 RTI 返回的 WebRTC Answer SDP",
   "credentialExpiresAt": "2026-07-21T08:20:07Z",
-  "voiceId": "Katerina",
+  "voiceId": "Tina",
   "status": "WAITING_CLIENT",
   "startTime": "2026-07-21T08:15:07Z",
   "systemPrompt": "完整系统提示词"
@@ -627,9 +628,12 @@ DataChannel `session.update.session.instructions`，不得使用客户端默认�
 `SessionService.startSession(sceneType, sceneId, prompt)` 创建业务会话，同时在
 `practice_session` 中保存服务器开始时间。自由对话和自定义场景已经接入该统一入口；
 雅思、面试及后续场景接入时必须复用同一生命周期。
-`RealtimeSessionConnector` 使用 `offerSdp/model/voice` 调用
-`RealtimeConnectionService`，内部申请短期凭证并交换 Answer SDP。`systemPrompt`
-就是 `SceneService` 生成的 `scenePrompt`，启动响应只保留这一个提示词字段。
+后端 Realtime Provider 负责创建供应商会话、使用短期凭证交换 Answer SDP、
+执行失败回退并在会话结束时 Stop。浏览器只接收 `providerSessionId` 和
+Answer SDP，不接收七牛 API Key 或短期媒体 token。DataChannel 名称固定为
+`oai-events`，打开后由前端发送 `session.update`；前端同时兼容 `error` 和
+`rtid.error` 错误事件。`systemPrompt` 就是 `SceneService` 生成的
+`scenePrompt`，启动响应只保留这一个提示词字段。
 
 ### 5.2 追加完整消息
 
@@ -741,9 +745,7 @@ Authorization: Bearer <accessToken>
   "sceneInput": "第一次去健身房，咨询设施、开放时间和会员体验",
   "userPreference": "英语基础一般，喜欢慢速对话",
   "offerSdp": "浏览器生成的 WebRTC Offer SDP",
-  "provider": "QWEN",
-  "model": "qwen3.5-omni-flash-realtime",
-  "voice": "Katerina",
+  "voice": "Tina",
   "translationEnabled": true
 }
 ```

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.domain.po.session.PracticeSessionRecord;
 import com.unispeaking.domain.vo.scene.SceneType;
+import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.session.SessionStatus;
 import com.unispeaking.infrastructure.persistence.entity.session.PracticeSessionEntity;
 import com.unispeaking.infrastructure.persistence.mapper.session.PracticeSessionMapper;
@@ -76,6 +77,42 @@ public class PracticeSessionRepository {
 							.eq(PracticeSessionEntity::getSessionId, sessionId)
 							.eq(PracticeSessionEntity::getUserId, userId)
 							.set(PracticeSessionEntity::getProviderSessionId, providerSessionId)
+							.set(PracticeSessionEntity::getUpdatedAt, OffsetDateTime.now(ZoneOffset.UTC)));
+			if (updated != 1) throw persistenceFailure();
+		}
+		catch (BusinessException exception) {
+			throw exception;
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
+	public void updateRealtimeProvider(
+			String sessionId,
+			UUID userId,
+			String providerSessionId,
+			ProviderType providerType,
+			String providerModel,
+			String providerTraceId) {
+		if (providerType == null || providerModel == null || providerModel.isBlank()) {
+			throw new BusinessException(
+					"REALTIME_PROVIDER_METADATA_REQUIRED",
+					"实时服务商和模型不能为空");
+		}
+		if (providerSessionId != null && providerSessionId.isBlank()) {
+			providerSessionId = null;
+		}
+		try {
+			int updated = mapper.update(
+					null,
+					new LambdaUpdateWrapper<PracticeSessionEntity>()
+							.eq(PracticeSessionEntity::getSessionId, sessionId)
+							.eq(PracticeSessionEntity::getUserId, userId)
+							.set(PracticeSessionEntity::getProviderSessionId, providerSessionId)
+							.set(PracticeSessionEntity::getProviderType, providerType.name())
+							.set(PracticeSessionEntity::getProviderModel, providerModel.trim())
+							.set(PracticeSessionEntity::getProviderTraceId, providerTraceId)
 							.set(PracticeSessionEntity::getUpdatedAt, OffsetDateTime.now(ZoneOffset.UTC)));
 			if (updated != 1) throw persistenceFailure();
 		}
@@ -271,6 +308,9 @@ public class PracticeSessionRepository {
 		entity.setStartedAt(atUtc(record.startedAt()));
 		entity.setEndedAt(record.endedAt() == null ? null : atUtc(record.endedAt()));
 		entity.setProviderSessionId(record.providerSessionId());
+		entity.setProviderType(record.providerType() == null ? null : record.providerType().name());
+		entity.setProviderModel(record.providerModel());
+		entity.setProviderTraceId(record.providerTraceId());
 		return entity;
 	}
 
@@ -285,7 +325,10 @@ public class PracticeSessionRepository {
 					entity.getEndedAt() == null
 							? null
 							: entity.getEndedAt().toInstant(),
-					entity.getProviderSessionId());
+					entity.getProviderSessionId(),
+					entity.getProviderType() == null ? null : ProviderType.valueOf(entity.getProviderType()),
+					entity.getProviderModel(),
+					entity.getProviderTraceId());
 	}
 
 	private OffsetDateTime atUtc(Instant instant) {

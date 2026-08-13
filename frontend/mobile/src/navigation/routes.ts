@@ -28,6 +28,10 @@ export const routes = {
   specialty: {
     ielts: href('/ielts'),
     interview: href('/interview'),
+    interviewPractice: (sceneId: string, jobTitle = '') => ({
+      pathname: '/interview',
+      params: { sceneId, jobTitle, practice: '1' },
+    } as Href),
   },
   learning: {
     sceneDetail: (id: string) => href(`/learning/scenes/${id}`),

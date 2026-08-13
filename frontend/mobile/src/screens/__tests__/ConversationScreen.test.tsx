@@ -104,9 +104,9 @@ describe('CallExperience realtime binding', () => {
       />,
     );
 
-    expect(screen.getByText('已暂停 · 00:42')).toBeTruthy();
+    expect(screen.getByText('麦克风已关闭 · 00:42')).toBeTruthy();
     expect(screen.getByText('Live assistant transcript.')).toBeTruthy();
-    await fireEvent.press(screen.getByLabelText('恢复会话'));
+    await fireEvent.press(screen.getByLabelText('打开麦克风'));
     await fireEvent.press(screen.getByLabelText('结束当前会话'));
 
     expect(onMutedChange).toHaveBeenCalledWith(false);

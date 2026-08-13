@@ -115,8 +115,12 @@ public interface AiProvider {
 }
 ```
 
-职责：定义供应商无关的 AI 能力。业务代码只依赖 Provider 接口或 Registry；Qwen、
-Doubao、DeepSeek、MiniMax、讯飞等供应商差异全部留在 `infrastructure`。
+职责：定义供应商无关的 AI 能力。业务代码只依赖 Provider 接口或 Registry；七牛 RTI、
+Qwen、Doubao、DeepSeek、MiniMax、讯飞等供应商差异全部留在 `infrastructure`。
+Realtime 默认路由为七牛 RTI `qwen3.5-omni-plus-realtime`，百炼
+`qwen3.5-omni-flash-realtime` 仅作为可回退错误的后备。七牛控制面 Session 的创建、
+短期媒体凭证使用和 Stop 均由 Realtime Provider/Component 承担；短期凭证不得返回客户端
+或持久化。
 
 ## 3. 当前实现矩阵
 
@@ -437,6 +441,9 @@ IeltsSceneServiceImpl.generate
 - WebSocket 握手和消息处理必须验证 JWT 与 Session 归属。
 - Session 消息写入统一通过 `SessionService.addMessage` 或其内部组件。
 - Realtime 临时凭证、SDP 和厂商事件属于 `infrastructure/realtime` 或 Provider。
+- 具有独立控制面 Session 的供应商必须持久化外部 `sessionId` 和脱敏 `traceId`，并在正常
+  结束、启动失败和异常结束时尽最大努力调用供应商 Stop；长期 Key 和短期媒体 token 不得
+  进入数据库、响应或日志。
 - 前端与模型 DataChannel 直接完成的暂停、恢复和打断不伪造成新的业务 Service。
 - 进程内 `ActiveSessionRegistry` 可用于活跃连接，但不能作为历史会话的唯一来源。
 - 录音元数据/链接保存在 Session 消息中；录音文件读取仍需校验 Session 所有权。

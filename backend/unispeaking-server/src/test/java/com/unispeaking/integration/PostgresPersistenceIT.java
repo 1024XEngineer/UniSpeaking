@@ -199,7 +199,7 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(List.of("1", "2", "9", "10", "11", "12", "13"), migrationVersions);
+		assertEquals(List.of("1", "2", "9", "10", "11", "12", "13", "14"), migrationVersions);
 		assertEquals(303, topicCount);
 		assertEquals(1771, questionCount);
 		assertEquals(0, questionLikeTitleCount);
@@ -687,7 +687,7 @@ class PostgresPersistenceIT {
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
 		assertEquals(
-				List.of("0", "1", "2", "9", "10", "11", "12", "13"),
+				List.of("0", "1", "2", "9", "10", "11", "12", "13", "14"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version

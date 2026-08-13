@@ -22,7 +22,6 @@ import {
 } from '@/features/auth/preferenceMappings';
 import {
   initialIeltsLearningRecords,
-  initialInterviewLearningRecords,
   initialSceneLearningRecords,
   type IeltsLearningRecord,
   type InterviewLearningRecord,
@@ -115,7 +114,7 @@ export function AppModelProvider({
   const [teacher, setTeacher] = useState(teachers[0]);
   const [sceneRecords, setSceneRecords] = useState(initialSceneLearningRecords);
   const [ieltsRecords, setIeltsRecords] = useState(initialIeltsLearningRecords);
-  const [interviewRecords, setInterviewRecords] = useState(initialInterviewLearningRecords);
+  const [interviewRecords, setInterviewRecords] = useState<InterviewLearningRecord[]>([]);
   const [membership, setMembership] = useState('免费版');
 
   useEffect(() => {

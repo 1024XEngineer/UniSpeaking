@@ -5,6 +5,7 @@ import {
   buildAuthApiUrl,
   issueEmailChallenge,
   issuePasswordResetChallenge,
+  loginWithPassword,
   registerWithEmail,
   resetPasswordWithEmail,
   validateRegistrationCredentials,
@@ -33,50 +34,26 @@ test("turns backend password validation into a user-facing message", async () =>
   }
 });
 
-test("recovers a completed registration when the one-time challenge is submitted again", async () => {
+test("does not turn an invalid registration challenge into a password login", async () => {
   const previousFetch = globalThis.fetch;
-  const previousWindow = globalThis.window;
-  const storage = new Map();
-  globalThis.window = {
-    localStorage: {
-      setItem: (key, value) => storage.set(key, value),
-      removeItem: (key) => storage.delete(key),
-      getItem: (key) => storage.get(key) || null,
-    },
-  };
+  const requests = [];
   globalThis.fetch = async (path) => {
-    if (path === "/api/auth/email/register") {
-      return new Response(JSON.stringify({ success: false, code: "CHALLENGE_INVALID", message: "CHALLENGE_INVALID" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    if (path === "/api/auth/email/password/login") {
-      return new Response(JSON.stringify({ success: true, data: { email: "person@example.com" } }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    if (path === "/api/auth/login") {
-      return new Response(JSON.stringify({ success: true, data: { accessToken: "legacy-token", user: { email: "person@example.com" } } }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    throw new Error(`unexpected request ${path}`);
+    requests.push(path);
+    return new Response(JSON.stringify({ success: false, code: "CHALLENGE_INVALID", message: "CHALLENGE_INVALID" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   };
   try {
-    const result = await registerWithEmail({
+    await assert.rejects(() => registerWithEmail({
       email: "person@example.com",
       password: "correct-password",
       challengeId: "00000000-0000-0000-0000-000000000001",
       code: "123456",
-    });
-    assert.equal(result.user.email, "person@example.com");
-    assert.equal(storage.get("unispeaking.accessToken"), "legacy-token");
+    }));
+    assert.deepEqual(requests, ["/api/auth/email/register"]);
   } finally {
     globalThis.fetch = previousFetch;
-    globalThis.window = previousWindow;
   }
 });
 
@@ -96,6 +73,35 @@ test("email challenge uses the real auth endpoint and same-origin credentials", 
     assert.equal(request.options.credentials, "include");
     assert.match(request.options.body, /humanVerificationToken/);
     assert.equal(result.challengeId, "00000000-0000-0000-0000-000000000001");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("password login sends the human verification token", async () => {
+  const previousFetch = globalThis.fetch;
+  let loginRequest;
+  globalThis.fetch = async (path, options) => {
+    if (path === "/api/auth/email/password/login") {
+      loginRequest = { path, options };
+      return new Response(JSON.stringify({ success: false, code: "INVALID_CREDENTIALS" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw new Error(`unexpected request ${path}`);
+  };
+  try {
+    await assert.rejects(() => loginWithPassword(
+      "person@example.com",
+      "correct-password",
+      "aliyun-login-token",
+    ));
+    assert.deepEqual(JSON.parse(loginRequest.options.body), {
+      email: "person@example.com",
+      password: "correct-password",
+      humanVerificationToken: "aliyun-login-token",
+    });
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -190,4 +196,10 @@ test("login UI exposes the verified email password reset flow", async () => {
   ]) {
     assert.match(source, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
+});
+
+test("login UI routes password login through human verification", async () => {
+  const source = await readFile(new URL("../src/controller/App.jsx", import.meta.url), "utf8");
+  assert.match(source, /<HumanVerification buttonId=\{captchaButtonId\} onVerify=\{verifyAndIssueChallenge\} \/>/);
+  assert.match(source, /loginWithPassword\(normalizedEmail, password, captchaVerifyParam\)/);
 });

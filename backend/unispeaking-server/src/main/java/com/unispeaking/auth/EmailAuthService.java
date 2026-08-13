@@ -104,6 +104,13 @@ public class EmailAuthService {
         return new LoginResult(token, new UserView(user.id(), user.email()));
     }
 
+    public LoginResult login(String rawEmail, String password, String humanVerificationToken) {
+        if (!humanVerificationGateway.verify(humanVerificationToken)) {
+            throw new AuthException("HUMAN_VERIFICATION_REQUIRED");
+        }
+        return login(rawEmail, password);
+    }
+
     @Transactional
     public void resetPassword(String rawEmail, String rawPassword, UUID challengeId, String code) {
         var email = normalizeEmail(rawEmail);
