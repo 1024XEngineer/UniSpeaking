@@ -33,6 +33,7 @@ import {
   updateIeltsSettings,
 } from "../../infrastructure/http/apiClient.js";
 import { createRealtimeClient } from "../../websocket/realtimeClient.js";
+import { analytics } from "../../analytics/analyticsClient.js";
 import { paths } from "../../controller/router.js";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
@@ -495,6 +496,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   const clientRef = useRef(null);
   const finishRef = useRef(null);
   const sessionIdRef = useRef(null);
+  const ieltsAnalyticsRef = useRef(null);
   const partTwoPhaseRef = useRef(isPartTwo ? "INTRODUCTION" : null);
   const partTwoTimerRef = useRef(null);
   const partTwoCompletionTimerRef = useRef(null);
@@ -689,6 +691,8 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   useEffect(() => {
     if (!generated?.ieltsId) return undefined;
     let cancelled = false;
+    ieltsAnalyticsRef.current = analytics.training({ mode: "IELTS", pageCode: "ielts-training" });
+    ieltsAnalyticsRef.current.attempt();
     const client = createRealtimeClient({
       sceneId: generated.ieltsId,
       sceneType: "ielts",
@@ -696,6 +700,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
         if (cancelled) return;
         if (event.type === "local.connecting") setStatus("正在连接考官…");
         else if (event.type === "local.connected") {
+          ieltsAnalyticsRef.current?.started();
           setStatus(isPartTwo ? "考官正在说明 Part 2 准备要求" : "考试进行中");
           if (isPartTwo) client.setMuted(true);
         }
@@ -805,13 +810,23 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
     clientRef.current = client;
     void client.start({ voice: generated.voiceId || examiner.voiceId })
       .then((started) => {
+        if (cancelled) return;
+        ieltsAnalyticsRef.current.started();
         sessionIdRef.current = started?.sessionId || null;
       })
       .catch((startError) => {
-        if (!cancelled) setError(startError?.message || "无法开始 IELTS 实时会话");
+        if (!cancelled) {
+          ieltsAnalyticsRef.current.fail("REALTIME_ERROR");
+          setError(startError?.message || "无法开始 IELTS 实时会话");
+        }
       });
+    const syncVisibility = () => ieltsAnalyticsRef.current?.setVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", syncVisibility);
+    syncVisibility();
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", syncVisibility);
+      ieltsAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
       clearPartTwoTimer();
       clearPartTwoCompletionTimer();
       clearPartTwoSilenceTimer();
@@ -851,6 +866,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
         awaitEvaluations: !deferEvaluation,
       });
       clientRef.current = null;
+      ieltsAnalyticsRef.current?.complete();
       if (deferEvaluation) {
         const completedSessionId = sessionIdRef.current;
         void Promise.resolve(backgroundEvaluationReady)
@@ -891,6 +907,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
     const client = clientRef.current;
     clientRef.current = null;
     await client?.stop({ notifyBackend: false, reason: "user_exit", emitEnded: false });
+    ieltsAnalyticsRef.current?.abandon("USER_EXIT");
     onExit();
   };
 

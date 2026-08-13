@@ -96,6 +96,7 @@ import { AccountSecurity } from "../component/profile/AccountSecurity.jsx";
 import { AboutProduct } from "../component/profile/AboutProduct.jsx";
 import { ProductLegalDocument } from "../component/profile/ProductLegalDocument.jsx";
 import { HumanVerification } from "../HumanVerification.jsx";
+import { analytics } from "../analytics/analyticsClient.js";
 import { hrefForPage, paths, resolveRoute, sidebarPageTarget } from "./router.js";
 import {
   issueEmailChallenge,
@@ -1007,6 +1008,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   const clientRef = useRef(null);
   const sessionIdRef = useRef("");
   const clientGenerationRef = useRef(0);
+  const freeChatAnalyticsRef = useRef(null);
   const remoteAudioRef = useRef(null);
   const { transcriptRef, handleTranscriptScroll } = useTranscriptAutoFollow({
     enabled: subtitles,
@@ -1073,6 +1075,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       return;
     }
     if (event.type === "local.connected") {
+      freeChatAnalyticsRef.current?.started();
       setCallState("connected");
       setCallStatus("正在等待模型会话");
       return;
@@ -1149,6 +1152,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       return;
     }
     if (event.type === "local.ended") {
+      freeChatAnalyticsRef.current?.complete();
       const completedSessionId = sessionIdRef.current;
       setInCall(false);
       setSubtitles(false);
@@ -1197,6 +1201,8 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   };
 
   const startConversation = async () => {
+    freeChatAnalyticsRef.current = analytics.training({ mode: "FREE_CHAT", pageCode: "conversation" });
+    freeChatAnalyticsRef.current.attempt();
     await onBeforeStart?.();
     setInCall(true);
     setPaused(false);
@@ -1207,17 +1213,21 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     setCallState("connecting");
     setCallStatus("正在请求麦克风");
     const client = getClient();
+    const startGeneration = clientGenerationRef.current;
     try {
       const startedSession = await client.start({
         voice: teacher.voiceId,
         speechSpeed: speedCodeByLabel[speed] || "NATURAL",
       });
+      if (clientRef.current !== client || clientGenerationRef.current !== startGeneration) return;
       if (startedSession?.sessionId) {
+        freeChatAnalyticsRef.current.started();
         sessionIdRef.current = startedSession.sessionId;
         onSessionStarted?.(startedSession.sessionId);
       }
     } catch (error) {
       if (clientRef.current !== client) return;
+      freeChatAnalyticsRef.current.fail("REALTIME_ERROR");
       setCallState("error");
       setCallError(realtimeFailureMessage(error));
       setCallStatus("连接失败");
@@ -1230,8 +1240,13 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     if (!client) return;
     const next = !paused;
     setPaused(next);
-    if (next) await client.pause();
-    else await client.resume();
+    if (next) {
+      await client.pause();
+      freeChatAnalyticsRef.current?.pause();
+    } else {
+      await client.resume();
+      freeChatAnalyticsRef.current?.resume();
+    }
   };
 
   const stopConversation = async () => {
@@ -1246,14 +1261,22 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     setCallState("idle");
     setCallStatus("准备开始");
     await client?.stop({ reason: "user_stop" });
+    freeChatAnalyticsRef.current?.complete();
     onSessionEnded?.(completedSessionId);
   };
 
-  useEffect(() => () => {
-    const client = clientRef.current;
-    clientRef.current = null;
-    clientGenerationRef.current += 1;
-    void client?.stop({ notifyBackend: false, reason: "component_unmount" });
+  useEffect(() => {
+    const syncVisibility = () => freeChatAnalyticsRef.current?.setVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", syncVisibility);
+    syncVisibility();
+    return () => {
+      document.removeEventListener("visibilitychange", syncVisibility);
+      freeChatAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
+      const client = clientRef.current;
+      clientRef.current = null;
+      clientGenerationRef.current += 1;
+      void client?.stop({ notifyBackend: false, reason: "component_unmount" });
+    };
   }, []);
 
   if (!inCall) return (
@@ -1550,6 +1573,7 @@ function CustomSceneConversation({
   const remoteAudioRef = useRef(null);
   const endingRef = useRef(false);
   const scenarioCompletedRef = useRef(false);
+  const sceneAnalyticsRef = useRef(null);
   const { transcriptRef, handleTranscriptScroll } = useTranscriptAutoFollow({
     lines,
     translated,
@@ -1580,6 +1604,7 @@ function CustomSceneConversation({
   const handleEvent = (event) => {
     if (event.type === "local.connecting") setStatus("正在连接模型");
     else if (event.type === "local.connected") {
+      sceneAnalyticsRef.current?.started();
       setStatus("正在建立模型会话");
       sessionIdRef.current = event.sessionId || "";
       onSessionStarted?.(event.sessionId);
@@ -1634,6 +1659,7 @@ function CustomSceneConversation({
       endingRef.current = true;
       setEnding(true);
     } else if (event.type === "local.ended" && event.reason === "state_machine") {
+      sceneAnalyticsRef.current?.complete();
       clientRef.current = null;
       onComplete(
         true,
@@ -1641,6 +1667,7 @@ function CustomSceneConversation({
         sessionIdRef.current,
       );
     } else if (event.type === "local.scenario_completion_error") {
+      sceneAnalyticsRef.current?.complete();
       clientRef.current = null;
       setError(event.message || "场景自动结束失败");
       onComplete(true, null, sessionIdRef.current);
@@ -1666,6 +1693,8 @@ function CustomSceneConversation({
       return undefined;
     }
     let cancelled = false;
+    sceneAnalyticsRef.current = analytics.training({ mode: "SCENE", pageCode: "scene-training" });
+    sceneAnalyticsRef.current.attempt();
     const client = createRealtimeClient({
       sceneId,
       sceneType: "custom",
@@ -1682,11 +1711,21 @@ function CustomSceneConversation({
     void client.start({
       voice: teacher.voiceId,
       speechSpeed: speedCodeByLabel[speed] || "NATURAL",
+    }).then(() => {
+      if (!cancelled) sceneAnalyticsRef.current.started();
     }).catch((startError) => {
-      if (!cancelled) setError(startError instanceof Error ? startError.message : "无法开始场景对话");
+      if (!cancelled) {
+        sceneAnalyticsRef.current.fail("REALTIME_ERROR");
+        setError(startError instanceof Error ? startError.message : "无法开始场景对话");
+      }
     });
+    const syncVisibility = () => sceneAnalyticsRef.current?.setVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", syncVisibility);
+    syncVisibility();
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", syncVisibility);
+      sceneAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
       clientRef.current = null;
       void client.stop({ notifyBackend: false, reason: "component_unmount", emitEnded: false });
     };
@@ -1695,8 +1734,13 @@ function CustomSceneConversation({
   const togglePaused = async () => {
     const next = !paused;
     setPaused(next);
-    if (next) await clientRef.current?.pause();
-    else await clientRef.current?.resume();
+    if (next) {
+      await clientRef.current?.pause();
+      sceneAnalyticsRef.current?.pause();
+    } else {
+      await clientRef.current?.resume();
+      sceneAnalyticsRef.current?.resume();
+    }
   };
 
   const endConversation = async (reason = "user_stop") => {
@@ -1707,12 +1751,15 @@ function CustomSceneConversation({
     try {
       const completion = await clientRef.current?.stop({ reason });
       clientRef.current = null;
+      if (reason === "state_machine" || scenarioCompletedRef.current) sceneAnalyticsRef.current?.complete();
+      else sceneAnalyticsRef.current?.abandon("USER_STOP");
       onComplete(
         reason === "state_machine" || scenarioCompletedRef.current,
         completion?.evaluation || null,
         sessionIdRef.current,
       );
     } catch (stopError) {
+      sceneAnalyticsRef.current?.abandon("STOP_ERROR");
       setError(stopError instanceof Error ? stopError.message : "会话结束失败");
       clientRef.current = null;
       onComplete(
@@ -2793,6 +2840,7 @@ export function App() {
     const url = new URL(path, window.location.origin);
     if (window.location.pathname !== url.pathname || window.location.search !== url.search) {
       window.history[replace ? "replaceState" : "pushState"]({}, "", `${url.pathname}${url.search}`);
+      analytics.trackPageView(url.pathname);
     }
     applyRoute({ ...resolveRoute(url), ...overrides, canonicalPath: undefined });
   };
@@ -2812,11 +2860,13 @@ export function App() {
     if (initialRoute.canonicalPath && window.location.pathname !== initialRoute.canonicalPath) {
       window.history.replaceState({}, "", initialRoute.canonicalPath);
     }
+    analytics.trackPageView(window.location.pathname);
     const handlePopState = () => {
       const nextRoute = resolveRoute(window.location);
       if (nextRoute.canonicalPath && window.location.pathname !== nextRoute.canonicalPath) {
         window.history.replaceState({}, "", nextRoute.canonicalPath);
       }
+      analytics.trackPageView(window.location.pathname);
       applyRoute(nextRoute);
     };
     window.addEventListener("popstate", handlePopState);
@@ -2893,6 +2943,7 @@ export function App() {
     navigate(`${targetPath}${query}`);
   };
   const openLandingStart = async (requestedVoice) => {
+    analytics.trackModeSelection({ mode: "FREE_CHAT", pageCode: "conversation" }, "landing");
     const selectedTeacher = typeof requestedVoice === "string" ? teacherForVoice(requestedVoice) : null;
     if (!selectedTeacher) {
       if (user) setMainPage("conversation");
@@ -2914,7 +2965,11 @@ export function App() {
       window.alert(error instanceof Error ? error.message : "AI 老师保存失败");
     }
   };
-  const openWebApp = () => user ? setMainPage("conversation") : goAuth("login");
+  const openWebApp = () => {
+    analytics.trackModeSelection({ mode: "FREE_CHAT", pageCode: "conversation" }, "landing");
+    if (user) setMainPage("conversation");
+    else goAuth("login");
+  };
   const openLandingSpecialty = (specialty) => {
     const targetPath = specialty === "ielts"
       ? paths.ielts.root
@@ -2922,6 +2977,8 @@ export function App() {
         ? paths.interview.root
         : null;
     if (!targetPath) return;
+    if (specialty === "ielts") analytics.trackModeSelection({ mode: "IELTS", pageCode: "ielts-training" }, "landing");
+    if (specialty === "interview") analytics.trackModeSelection({ mode: "INTERVIEW", pageCode: "interview-training" }, "landing");
     if (user) {
       navigate(targetPath);
       return;
@@ -3088,6 +3145,7 @@ export function App() {
     navigate(paths.auth.login, { authMode: "login" }, true);
   };
   const startTraining = (sceneOrTitle, initialStep = "learn", options = {}) => {
+    analytics.trackModeSelection({ mode: "SCENE", pageCode: "scene-training" }, options.returnPage === "assets" ? "learning-assets" : "scene-plaza");
     const scene = typeof sceneOrTitle === "object" ? sceneOrTitle : null;
     const title = scene?.title || sceneOrTitle;
     if (scene?.sceneId) cacheGeneratedScene(scene);
@@ -3177,11 +3235,36 @@ export function App() {
     setFeedbackInvitationOpen(false);
   };
   const setMainPage = (next) => navigate(hrefForPage(next), { page: next, authMode, training: null, result: null });
-  const navigateIelts = (path) => navigate(path, { authMode });
-  const navigateInterview = (path) => navigate(path, { authMode });
+  const selectMainPage = (next) => {
+    if (next === "conversation") analytics.trackModeSelection({ mode: "FREE_CHAT", pageCode: "conversation" }, "sidebar");
+    if (next === "ielts-assets") analytics.trackLearningAsset({ mode: "IELTS", pageCode: "ielts-assets" }, "REPORT");
+    if (next === "interview-assets") analytics.trackLearningAsset({ mode: "INTERVIEW", pageCode: "interview-assets" }, "REPORT");
+    setMainPage(next);
+  };
+  const selectIelts = () => {
+    analytics.trackModeSelection({ mode: "IELTS", pageCode: "ielts-training" }, "scene-plaza");
+    setMainPage("ielts");
+  };
+  const selectInterview = () => {
+    analytics.trackModeSelection({ mode: "INTERVIEW", pageCode: "interview-training" }, "scene-plaza");
+    setMainPage("interview");
+  };
+  const navigateIelts = (path) => {
+    if (page !== "ielts-assets" && path.startsWith(paths.ielts.assets.root)) {
+      analytics.trackLearningAsset({ mode: "IELTS", pageCode: "ielts-assets" }, "REPORT");
+    }
+    navigate(path, { authMode });
+  };
+  const navigateInterview = (path) => {
+    if (page !== "interview-assets" && path.startsWith(paths.interview.assets.root)) {
+      analytics.trackLearningAsset({ mode: "INTERVIEW", pageCode: "interview-assets" }, "REPORT");
+    }
+    navigate(path, { authMode });
+  };
   const navigateHelp = (path) => navigate(path, { authMode });
   const navigateAbout = (path) => navigate(path, { authMode });
   const openCompletedAssetDetail = (requestedSceneId = null) => {
+    analytics.trackLearningAsset({ mode: "SCENE", pageCode: "scene-assets" }, "REPORT");
     const explicitSceneId = typeof requestedSceneId === "string" ? requestedSceneId : null;
     const sceneId = explicitSceneId || training?.sceneId || generatedScene?.sceneId || assetSceneId;
     const targetPath = sceneId ? paths.scenes.assets(sceneId) : paths.assets.latest;
@@ -3213,12 +3296,12 @@ export function App() {
   let content;
   if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={completeScenePractice} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
   else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={(sessionId) => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); recordCompletedPractice("free", sessionId); void synchronizeAchievements({ revealNotifications: true }); }} />;
-  else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={() => setMainPage("ielts")} onInterview={() => setMainPage("interview")} />;
-  else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => setMainPage("ielts-assets")} onInterview={() => setMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(scene) => startTraining(scene, "learn", { returnPage: "assets" })} />;
+  else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={selectIelts} onInterview={selectInterview} />;
+  else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => selectMainPage("ielts-assets")} onInterview={() => selectMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(scene) => startTraining(scene, "learn", { returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
-  else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToInterview={() => setMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
+  else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToInterview={() => selectMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
   else if (page === "interview") content = <InterviewModule route={interviewRoute} teacher={teacher} speed={conversationSpeed} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} />;
-  else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToIelts={() => setMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} onPractice={(sceneId) => navigateInterview(paths.interview.session(sceneId))} />;
+  else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToIelts={() => selectMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} onPractice={(sceneId) => navigateInterview(paths.interview.session(sceneId))} />;
   else content = <Profile section={page} setSection={setMainPage} helpRoute={helpRoute} aboutRoute={aboutRoute} onHelpNavigate={navigateHelp} onAboutNavigate={navigateAbout} user={user} profile={profileOverview} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onMonthChange={loadProfileMonth} onNicknameChange={updateNickname} onAvatarChange={updateAvatar} onPasswordChange={updatePassword} onAssets={() => setMainPage("assets")} onLogout={logout} />;
-  return <AppShell page={page} setPage={setMainPage} teacher={teacher} avatarUrl={profileOverview?.account?.avatarUrl}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}{feedbackInvitationOpen && <FeedbackInvitation onDismiss={() => setFeedbackInvitationOpen(false)} onAccept={acceptFeedbackInvitation} />}</AppShell>;
+  return <AppShell page={page} setPage={selectMainPage} teacher={teacher} avatarUrl={profileOverview?.account?.avatarUrl}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}{feedbackInvitationOpen && <FeedbackInvitation onDismiss={() => setFeedbackInvitationOpen(false)} onAccept={acceptFeedbackInvitation} />}</AppShell>;
 }

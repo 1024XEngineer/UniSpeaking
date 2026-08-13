@@ -33,6 +33,38 @@ nano deploy/env/.env
 Replace every credential placeholder. Keep `DATABASE_URL` pointed at the
 Compose service name `postgres`, not `localhost`.
 
+### Enable Umami Cloud for the migrated Web domain
+
+The Web tracker is disabled by default. For the current migrated frontend at
+`https://unispeaking.qnsdk.com`, verify that the Umami Cloud Website named
+`unispeaking` still uses Website ID
+`3ae2dee9-d585-43a9-93f3-fcafcd14b258`, then set these build-time values in
+`deploy/env/.env`:
+
+```dotenv
+VITE_UMAMI_ENABLED=true
+VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
+VITE_UMAMI_WEBSITE_ID=3ae2dee9-d585-43a9-93f3-fcafcd14b258
+VITE_UMAMI_DOMAINS=unispeaking.qnsdk.com
+```
+
+These values are compiled into the public Web image. Do not put an Umami login
+password, API token, user identifier, or any server credential in a `VITE_`
+variable. Changing any value requires rebuilding the `frontend` image:
+
+```bash
+docker compose --env-file deploy/env/.env \
+  -f deploy/docker-compose.prod.yml build --no-cache frontend
+docker compose --env-file deploy/env/.env \
+  -f deploy/docker-compose.prod.yml up -d frontend nginx
+```
+
+After release, open the migrated site and confirm the visit in Umami Realtime.
+Then verify Pages and Events for the four anonymous training modes: `SCENE`,
+`FREE_CHAT`, `INTERVIEW`, and `IELTS`. Learning assets are reported separately;
+no real user ID, transcript, audio, resume, job description, or credential is
+sent to Umami.
+
 The environment template selects mirrors reachable from mainland China for
 Docker images, Debian packages, Maven, PyPI, and npm. The committed defaults
 use DaoCloud for Docker images, Alibaba Cloud for Debian/Maven/PyPI, and
