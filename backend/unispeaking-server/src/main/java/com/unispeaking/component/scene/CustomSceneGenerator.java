@@ -182,6 +182,15 @@ public class CustomSceneGenerator {
 				and about 3 practical reference sentences. Every reference sentence must reuse
 				at least one exact word or phrase from the generated words and phrases.
 				Required outcomes must contain 3 to 8 observable learner actions.
+				Only make actions required when they are necessary to complete the core
+				real-world interaction. Never require an optional purchase, facility question,
+				add-on, preference, or topic. If practicing an optional choice matters, define
+				the outcome as responding to the offer so either acceptance or refusal resolves
+				it. The role-play must accept changed requests and explicit refusals without
+				repeating or pressuring the learner.
+				closing_instruction must describe one natural in-role farewell of at most two
+				short sentences. It must not request teaching feedback, praise the learner's
+				performance, recap completed steps, or summarize the conversation.
 				minimum_user_turns must be between 3 and 6.
 				maximum_user_turns must be exactly 10.
 				estimated_minutes must be an integer from 3 to 10. This practice is

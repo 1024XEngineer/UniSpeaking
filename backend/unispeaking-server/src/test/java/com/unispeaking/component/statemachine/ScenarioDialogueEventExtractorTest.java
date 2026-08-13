@@ -66,5 +66,9 @@ class ScenarioDialogueEventExtractorTest {
 		assertTrue(prompt.getValue().contains(
 				"\"stop_when\":\"The transaction is logically complete.\""));
 		assertTrue(prompt.getValue().contains("GOAL_COMPLETED"));
+		assertTrue(prompt.getValue().contains(
+				"explicitly declining it resolves that outcome"));
+		assertTrue(prompt.getValue().contains(
+				"changed request is not a"));
 	}
 }

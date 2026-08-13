@@ -89,6 +89,13 @@ public class ScenarioDialogueEventExtractor {
 				USER_CONFIRMED requires an explicit final recap or completion question.
 				For USER_CONFIRMED, include any outcomes clearly satisfied by recent dialogue
 				but still missing from state. Never invent evidence.
+				If an outcome represents an optional question, offer, add-on, preference,
+				or suggested topic, the learner explicitly declining it resolves that outcome
+				for conversation progression. Include its ID with brief evidence such as
+				"learner declined the optional topic" so the role-play never pressures the
+				learner or asks the same optional question again. A changed request is not a
+				digression: classify it as CORRECTION when it revises an earlier choice, or
+				OUTCOME_UPDATE when it adds a relevant preference.
 				Use GOAL_COMPLETED only when effective_user_turns + 1 is at least
 				minimum_user_turns and stop_when is observably true. Required outcomes
 				help guide the conversation, but an optional detail must not keep an

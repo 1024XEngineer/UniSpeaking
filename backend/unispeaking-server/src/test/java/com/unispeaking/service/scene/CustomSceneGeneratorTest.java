@@ -75,6 +75,12 @@ class CustomSceneGeneratorTest {
 		assertTrue(prompt.getValue().contains("MODERATE"));
 		assertTrue(prompt.getValue().contains("learning_goal"));
 		assertTrue(prompt.getValue().contains("餐饮, 购物, 出行, 住宿"));
+		assertTrue(prompt.getValue().contains(
+				"Never require an optional purchase, facility question"));
+		assertTrue(prompt.getValue().contains(
+				"either acceptance or refusal resolves"));
+		assertTrue(prompt.getValue().contains(
+				"must not request teaching feedback"));
 	}
 
 	@Test
