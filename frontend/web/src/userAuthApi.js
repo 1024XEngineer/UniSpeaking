@@ -1,4 +1,4 @@
-import { clearAuthSession, login as loginLegacy, register as registerLegacy } from "./infrastructure/http/apiClient.js";
+import { clearAuthSession, saveAuthSession } from "./infrastructure/http/apiClient.js";
 
 const API_BASE = (import.meta.env?.VITE_BACKEND_URL || "").replace(/\/$/, "");
 
@@ -77,40 +77,22 @@ export function resetPasswordWithEmail({ email, password, challengeId, code }) {
   });
 }
 
-async function syncBusinessIdentity(email, password) {
-  try {
-    return await loginLegacy({ username: email, password });
-  } catch (loginError) {
-    try {
-      return await registerLegacy({ username: email, password });
-    } catch (registerError) {
-      try {
-        return await loginLegacy({ username: email, password });
-      } catch {
-        throw new UserAuthApiError(
-          "AUTH_SESSION_SYNC_FAILED",
-          messages.AUTH_SESSION_SYNC_FAILED,
-          { cause: registerError || loginError },
-        );
-      }
-    }
-  }
-}
-
 export async function registerWithEmail({ email, password, challengeId, code }) {
-  await request("/api/auth/email/register", {
+  const auth = await request("/api/auth/email/register/token", {
     method: "POST",
     body: JSON.stringify({ email, password, challengeId, code }),
   });
-  return syncBusinessIdentity(email, password);
+  saveAuthSession(auth);
+  return auth;
 }
 
 export async function loginWithPassword(email, password, humanVerificationToken) {
-  await request("/api/auth/email/password/login", {
+  const auth = await request("/api/auth/email/password/login/token", {
     method: "POST",
     body: JSON.stringify({ email, password, humanVerificationToken }),
   });
-  return syncBusinessIdentity(email, password);
+  saveAuthSession(auth);
+  return auth;
 }
 
 export async function logoutUser() {

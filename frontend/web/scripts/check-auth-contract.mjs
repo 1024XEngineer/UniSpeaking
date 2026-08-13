@@ -51,7 +51,7 @@ test("does not turn an invalid registration challenge into a password login", as
       challengeId: "00000000-0000-0000-0000-000000000001",
       code: "123456",
     }));
-    assert.deepEqual(requests, ["/api/auth/email/register"]);
+    assert.deepEqual(requests, ["/api/auth/email/register/token"]);
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -82,7 +82,7 @@ test("password login sends the human verification token", async () => {
   const previousFetch = globalThis.fetch;
   let loginRequest;
   globalThis.fetch = async (path, options) => {
-    if (path === "/api/auth/email/password/login") {
+    if (path === "/api/auth/email/password/login/token") {
       loginRequest = { path, options };
       return new Response(JSON.stringify({ success: false, code: "INVALID_CREDENTIALS" }), {
         status: 401,
