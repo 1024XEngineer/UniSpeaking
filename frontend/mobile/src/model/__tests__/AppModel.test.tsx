@@ -29,6 +29,11 @@ function createController(state: AuthSessionState): AppModelAuthController & {
       listener?.(state);
     }),
     login: jest.fn(async () => undefined),
+    issueEmailChallenge: jest.fn(async () => ({
+      challengeId: 'challenge-1',
+      expiresInSeconds: 600,
+      resendAfterSeconds: 60,
+    })),
     register: jest.fn(async () => undefined),
     updatePreference: jest.fn(async (patch: Partial<UserPreference>) => ({
       userId: 'user-1',
@@ -88,7 +93,7 @@ function SessionProbe() {
         onPress={() =>
           void model.signIn({
             username: 'learner@example.com',
-            password: 'password123',
+            password: 'password123456',
           })
         }
       />
@@ -154,7 +159,7 @@ describe('AppModelProvider authentication binding', () => {
     await waitFor(() =>
       expect(controller.login).toHaveBeenCalledWith({
         username: 'learner@example.com',
-        password: 'password123',
+        password: 'password123456',
       }),
     );
   });

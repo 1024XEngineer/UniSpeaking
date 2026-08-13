@@ -40,6 +40,7 @@ function createDependencies(
   };
   authService: AuthSessionDependencies['authService'] & {
     login: jest.Mock;
+    issueEmailChallenge: jest.Mock;
     register: jest.Mock;
     currentUser: jest.Mock;
     getPreference: jest.Mock;
@@ -54,6 +55,11 @@ function createDependencies(
     },
     authService: {
       login: jest.fn(async () => authResponse),
+      issueEmailChallenge: jest.fn(async () => ({
+        challengeId: 'challenge-1',
+        expiresInSeconds: 600,
+        resendAfterSeconds: 60,
+      })),
       register: jest.fn(async () => authResponse),
       currentUser: jest.fn(async () => user),
       getPreference: jest.fn(async () => preference),
@@ -78,7 +84,10 @@ describe('AuthSessionController', () => {
     );
     const notificationCount = listener.mock.calls.length;
     unsubscribe();
-    await controller.login({ username: 'learner@example.com', password: 'password123' });
+    await controller.login({
+      username: 'learner@example.com',
+      password: 'password123456',
+    });
     expect(listener).toHaveBeenCalledTimes(notificationCount);
   });
 
@@ -138,7 +147,10 @@ describe('AuthSessionController', () => {
     const dependencies = createDependencies();
     const controller = new AuthSessionController(dependencies);
 
-    await controller.login({ username: 'learner@example.com', password: 'password123' });
+    await controller.login({
+      username: 'learner@example.com',
+      password: 'password123456',
+    });
 
     expect(dependencies.tokenStore.set).toHaveBeenCalledWith('jwt-token');
     expect(controller.getSnapshot()).toEqual({

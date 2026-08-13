@@ -12,7 +12,11 @@ import {
   AuthSessionController,
   type AuthSessionState,
 } from '@/features/auth/AuthSessionController';
-import { AuthService, type UserPreference } from '@/features/auth/AuthService';
+import {
+  AuthService,
+  type EmailChallenge,
+  type UserPreference,
+} from '@/features/auth/AuthService';
 import {
   cefrLevelForLevel,
   levelForCefrLevel,
@@ -37,10 +41,13 @@ export type AppModelAuthController = {
   subscribe(listener: (state: AuthSessionState) => void): () => void;
   bootstrap(): Promise<void>;
   login(input: { username: string; password: string }): Promise<void>;
+  issueEmailChallenge(input: { email: string }): Promise<EmailChallenge>;
   register(input: {
     username: string;
     password: string;
     nickname: string | null;
+    challengeId: string;
+    code: string;
   }): Promise<void>;
   updatePreference(patch: Partial<UserPreference>): Promise<UserPreference>;
   logout(): Promise<void>;
@@ -54,10 +61,13 @@ type AppModelValue = {
   authStatus: AuthSessionState['status'];
   authError: string | null;
   signIn: (input: { username: string; password: string }) => Promise<void>;
+  issueEmailChallenge: (input: { email: string }) => Promise<EmailChallenge>;
   signUp: (input: {
     username: string;
     password: string;
     nickname: string | null;
+    challengeId: string;
+    code: string;
   }) => Promise<void>;
   completeOnboarding: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -158,8 +168,14 @@ export function AppModelProvider({
     [authController],
   );
 
+  const issueEmailChallenge = useCallback(
+    (input: { email: string }) =>
+      authController.issueEmailChallenge(input),
+    [authController],
+  );
+
   const signUp = useCallback(
-    (input: { username: string; password: string; nickname: string | null }) =>
+    (input: { username: string; password: string; nickname: string | null; challengeId: string; code: string }) =>
       authController.register(input),
     [authController],
   );
@@ -196,6 +212,7 @@ export function AppModelProvider({
       authStatus: authState.status,
       authError: authState.error,
       signIn,
+      issueEmailChallenge,
       signUp,
       completeOnboarding,
       signOut,
@@ -226,6 +243,7 @@ export function AppModelProvider({
       hasCompletedOnboarding,
       isModelReady,
       isAuthenticated,
+      issueEmailChallenge,
       authState.error,
       authState.status,
       level,

@@ -43,20 +43,48 @@ type ApiRequester = {
   request(path: string, options?: RequestInit): Promise<unknown>;
 };
 
+export type EmailChallenge = {
+  challengeId: string;
+  expiresInSeconds: number;
+  resendAfterSeconds: number;
+};
+
 export class AuthService {
   constructor(private readonly client: ApiRequester) {}
 
   login(input: { username: string; password: string }) {
-    return this.client.request('/api/auth/login', {
+    return this.client.request('/api/auth/mobile/email/login', {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: JSON.stringify({
+        email: input.username,
+        password: input.password,
+      }),
     }) as Promise<AuthResponse>;
   }
 
-  register(input: { username: string; password: string; nickname: string | null }) {
-    return this.client.request('/api/auth/register', {
+  issueEmailChallenge(input: { email: string }) {
+    return this.client.request('/api/auth/mobile/email/challenges', {
       method: 'POST',
       body: JSON.stringify(input),
+    }) as Promise<EmailChallenge>;
+  }
+
+  register(input: {
+    username: string;
+    password: string;
+    nickname: string | null;
+    challengeId: string;
+    code: string;
+  }) {
+    return this.client.request('/api/auth/mobile/email/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: input.username,
+        password: input.password,
+        nickname: input.nickname,
+        challengeId: input.challengeId,
+        code: input.code,
+      }),
     }) as Promise<AuthResponse>;
   }
 
