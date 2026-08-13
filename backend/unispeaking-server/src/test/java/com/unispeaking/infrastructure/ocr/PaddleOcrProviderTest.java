@@ -41,24 +41,16 @@ class PaddleOcrProviderTest {
 		Path script = script("""
 				import json, os, pathlib, sys
 				count_file = pathlib.Path(r'%s')
-				current = int(count_file.read_text() if count_file.exists() else '0')
-				count_file.write_text(str(current + 1))
-				required = [
-				    '--text-detection-model-name', 'PP-OCRv5_mobile_det',
-				    '--text-recognition-model-name', 'PP-OCRv5_mobile_rec',
-				    '--device', 'cpu', '--disable-doc-orientation',
-				    '--disable-doc-unwarping', '--disable-textline-orientation', '--images'
-				]
-				for value in required:
-				    if value not in sys.argv:
-				        raise SystemExit(9)
-				if '--model-dir' in sys.argv:
-				    raise SystemExit(10)
 				if os.environ.get('PADDLE_PDX_CACHE_HOME') != r'%s':
 				    raise SystemExit(11)
-				image_index = sys.argv.index('--images') + 1
-				images = sys.argv[image_index:]
-				print(json.dumps({'results': [{'text': pathlib.Path(path).stem} for path in images]}))
+				print(json.dumps({'ready': True}), flush=True)
+				for line in sys.stdin:
+				    request = json.loads(line)
+				    current = int(count_file.read_text() if count_file.exists() else '0')
+				    count_file.write_text(str(current + 1))
+				    print(json.dumps({'id': request['id'], 'results': [
+				        {'text': pathlib.Path(path).stem} for path in request['images']
+				    ]}), flush=True)
 				""".formatted(invocationCounter, cacheHome));
 		PaddleOcrProvider provider = provider(script, Duration.ofSeconds(2));
 
@@ -128,8 +120,10 @@ class PaddleOcrProviderTest {
 	void mapsTimeoutToStableErrorAndCleansTempDirectory() throws IOException {
 		Path processId = tempRoot.resolve("process-id.txt");
 		Path script = script("""
-				import os, pathlib, time
+				import json, os, pathlib, sys, time
 				pathlib.Path(r'%s').write_text(str(os.getpid()))
+				print(json.dumps({'ready': True}), flush=True)
+				sys.stdin.readline()
 				time.sleep(10)
 				""".formatted(processId));
 		PaddleOcrProvider provider = provider(script, Duration.ofMillis(500));
@@ -166,7 +160,10 @@ class PaddleOcrProviderTest {
 	@Test
 	void mapsInvalidJsonToStableErrorWithoutRecognitionText() throws IOException {
 		Path script = script("""
-				print('recognized secret text that must not leak')
+				import json, sys
+				print(json.dumps({'ready': True}), flush=True)
+				request = json.loads(sys.stdin.readline())
+				print('recognized secret text that must not leak', flush=True)
 				""");
 		PaddleOcrProvider provider = provider(script, Duration.ofSeconds(2));
 
@@ -183,7 +180,10 @@ class PaddleOcrProviderTest {
 	@Test
 	void mapsOversizedStdoutToInvalidResponse() throws IOException {
 		Path script = script("""
-				print('x' * %d)
+				import json, sys
+				print(json.dumps({'ready': True}), flush=True)
+				request = json.loads(sys.stdin.readline())
+				print('x' * %d, flush=True)
 				""".formatted(PaddleOcrProvider.MAX_STDOUT_BYTES + 1));
 		PaddleOcrProvider provider = provider(script, Duration.ofSeconds(2));
 

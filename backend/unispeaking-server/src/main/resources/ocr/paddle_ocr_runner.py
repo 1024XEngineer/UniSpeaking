@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--disable-doc-orientation", action="store_true")
     parser.add_argument("--disable-doc-unwarping", action="store_true")
     parser.add_argument("--disable-textline-orientation", action="store_true")
+    parser.add_argument("--worker", action="store_true")
     parser.add_argument("--images", nargs="*")
     return parser
 
@@ -95,6 +96,33 @@ def recognize_batch(ocr: PaddleOCR, image_paths: list[str]) -> dict:
     return {"results": output}
 
 
+def run_worker(ocr: PaddleOCR) -> int:
+    # stdout is a JSON-lines protocol. Paddle/PaddleX diagnostics belong on stderr.
+    print(json.dumps({"ready": True}), flush=True)
+    for line in sys.stdin:
+        request_id = None
+        try:
+            request = json.loads(line)
+            request_id = request.get("id")
+            image_paths = request.get("images")
+            if not isinstance(request_id, str) or not request_id:
+                raise ValueError("invalid request id")
+            if not isinstance(image_paths, list) or not image_paths:
+                raise ValueError("missing images")
+            payload = recognize_batch(ocr, [str(path) for path in image_paths])
+            payload["id"] = request_id
+            print(json.dumps(payload, ensure_ascii=False), flush=True)
+        except Exception:
+            # Do not terminate the resident process for one bad image/request. Java
+            # treats the error response as a failed OCR operation and can restart
+            # the worker if the process itself has become unhealthy.
+            print(json.dumps({
+                "id": request_id,
+                "error": "ocr-request-failed",
+            }), flush=True)
+    return 0
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -105,6 +133,8 @@ def main() -> int:
         args.text_recognition_model_name,
         model_directory,
     )
+    if args.worker:
+        return run_worker(ocr)
     if args.download_models:
         ensure_models_loaded(ocr)
         return 0

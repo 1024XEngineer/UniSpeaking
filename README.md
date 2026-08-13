@@ -191,6 +191,35 @@ openssl rand -base64 32
 使用场景生成、Realtime、TTS、ASR 或评分能力时，还需在 `.env` 中配置对应厂商凭证。
 完整变量及安全默认值见 [`deploy/env/.env.example`](deploy/env/.env.example)。
 
+### 2.1 本地启用 JD 图片 OCR
+
+Web 的“上传图片”入口以服务端探测结果为准，不需要手动设置浏览器端的开关。后端本地运行时，先准备 Python 3.11、PaddleOCR 依赖和模型：
+
+```bash
+./scripts/prepare-local-ocr.sh
+```
+
+然后从 `backend/unispeaking-server` 启动后端，并把 OCR 路径指向仓库内的本地目录：
+
+```bash
+cd backend/unispeaking-server
+OCR_ENABLED=true \
+OCR_PYTHON_EXECUTABLE="$PWD/../../.local/ocr/venv/bin/python" \
+OCR_RUNNER_PATH="$PWD/src/main/resources/ocr/paddle_ocr_runner.py" \
+OCR_MODEL_DIRECTORY="$PWD/../../.local/ocr/models" \
+MAVEN_REPO_URL=https://maven.aliyun.com/repository/public \
+./mvnw --settings docker/maven/settings.xml spring-boot:run
+```
+
+启动后用浏览器访问 Web，在模拟面试页面选择“上传图片”。也可以用登录后的 JWT 进行接口实测：
+
+```bash
+OCR_ACCESS_TOKEN='登录后 localStorage 中的 unispeaking.accessToken' \
+./scripts/check-local-ocr.sh /absolute/path/to/jd.png
+```
+
+脚本先验证 `/api/interview-scenes/ocr/availability`，再提交图片到 `/prepare-materials`；这样可以区分“服务端未装好 OCR”和“图片上传/材料整理链路失败”。
+
 注意：
 
 - 不要提交真实 `.env`。

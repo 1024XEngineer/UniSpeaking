@@ -523,4 +523,4 @@ Interview（英文面试，第 4 场景，逐步实现中）：
 11. `DELETE /api/interview-scenes/{sceneId}` — 后端删除：软删 `interview_scene` + 物理清该 scene 音频；practice_session/session_message/interview_report 保留（审计 + 学习日历），下游访问经软删过滤 404/403。
 12. 失败码补充：`INTERVIEW_REPORT_NOT_FOUND`→404、`INTERVIEW_RECORDING_NOT_FOUND`→404、`INTERVIEW_REPORT_PERSISTENCE_FAILED`→500、`INTERVIEW_AUDIO_INVALID`→400、`INTERVIEW_SESSION_ENDED`→409。
 13. `GET /api/interview-scenes/assets` — 面试学习资产列表：`List<InterviewAssetItem>`（`sceneId/jobTitle/difficulty/latestSessionId/latestReportStatus/latestOverallScore/latestPracticedAt/practiceCount/createdAt`），复练入口。
-14. `GET /api/interview-scenes/ocr/availability` — OCR 可用性探测：`{available: boolean}`（本地未配置 PaddleOCR 时为 false，前端据此禁用 JD 图片上传）。
+14. `GET /api/interview-scenes/ocr/availability` — OCR 可用性探测：`{available: boolean}`（后端检查启用开关、Python runner 和预下载模型目录；Web 面试页启动时调用此接口，据此启用或禁用 JD 图片上传）。
