@@ -155,6 +155,22 @@ describe('CallExperience realtime binding', () => {
     expect(screen.queryByText('I often read books.')).toBeNull();
   });
 
+  it('does not flash the current learner caption when learner subtitles are disabled', async () => {
+    const screen = await render(
+      <CallExperience
+        initialSubtitles
+        onEnd={jest.fn()}
+        showUserTranscript={false}
+        transcriptEnglish="My answer must stay hidden."
+        transcriptSpeaker="你"
+        userTranscript="My answer must stay hidden."
+      />,
+    );
+
+    expect(screen.queryByText('My answer must stay hidden.')).toBeNull();
+    expect(screen.queryByText('你')).toBeNull();
+  });
+
   it('translates an assistant message without replacing the dialogue history', async () => {
     const onTranslate = jest.fn(async () => '欢迎，请问您需要什么？');
     const screen = await render(

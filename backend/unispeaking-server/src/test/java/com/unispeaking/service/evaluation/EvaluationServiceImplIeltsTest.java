@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.AdditionalMatchers.aryEq;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -281,11 +282,13 @@ class EvaluationServiceImplIeltsTest {
 		assertEquals("FINAL", result.assessmentType());
 		assertEquals(new BigDecimal("7.0"), result.pronunciationScore());
 		assertEquals(new BigDecimal("7.0"), result.overallBandScore());
+		assertEquals(new BigDecimal("6.5"), result.lexicalResourceScore());
+		assertEquals(new BigDecimal("6.5"), result.grammaticalRangeAccuracyScore());
 		assertEquals(
-				"三个 Part 均能保持基本连贯。",
+				"流利与连贯分数由三个 Part 已完成的后台评分取平均并按 0.5 分取整，结果为 7.0。",
 				result.fluencyCoherenceReason());
 		assertEquals(
-				"基于本次 2 轮有效原始语音，音频模型的平均发音得分为 80.0/100，按 9 分制折算为 7.0。",
+				"发音分数由三个 Part 已完成的后台评分取平均并按 0.5 分取整，结果为 7.0。",
 				result.pronunciationReason());
 		assertEquals(3, result.partEvaluations().size());
 		assertEquals(
@@ -299,10 +302,20 @@ class EvaluationServiceImplIeltsTest {
 				org.mockito.ArgumentMatchers.anyString(),
 				org.mockito.ArgumentMatchers.nullable(String.class),
 				org.mockito.ArgumentMatchers.anyString());
-		verify(ieltsLlmClient, times(1)).assessFullTest(
+		verify(ieltsLlmClient, never()).assessPart(
+				eq(com.unispeaking.domain.vo.scene.IeltsPart.PART_1),
+				org.mockito.ArgumentMatchers.anyString(),
+				org.mockito.ArgumentMatchers.nullable(String.class),
+				org.mockito.ArgumentMatchers.anyString());
+		verify(ieltsLlmClient, never()).assessPart(
+				eq(com.unispeaking.domain.vo.scene.IeltsPart.PART_2),
+				org.mockito.ArgumentMatchers.anyString(),
+				org.mockito.ArgumentMatchers.nullable(String.class),
+				org.mockito.ArgumentMatchers.anyString());
+		verify(ieltsLlmClient, never()).assessFullTest(
 				org.mockito.ArgumentMatchers.anyString(),
 				org.mockito.ArgumentMatchers.anyString(),
-				eq("7.0"));
+				org.mockito.ArgumentMatchers.anyString());
 		ArgumentCaptor<com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult>
 				captor = ArgumentCaptor.forClass(
 						com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult.class);

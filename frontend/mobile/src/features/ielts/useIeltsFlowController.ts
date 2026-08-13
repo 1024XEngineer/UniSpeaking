@@ -134,6 +134,11 @@ export function useIeltsFlowController() {
     return result;
   }, [service]);
 
+  const scoreCompletedPart = useCallback(
+    (ieltsId: string, sessionId: string) => service.generateEvaluation(ieltsId, sessionId),
+    [service],
+  );
+
   const refreshHistory = useCallback(async () => {
     try {
       const items = await service.getEvaluationHistory();
@@ -170,6 +175,7 @@ export function useIeltsFlowController() {
       loadTopics,
       prepareSession,
       finalizeEvaluation,
+      scoreCompletedPart,
       refreshHistory,
       formatBand,
       practiceTypeLabel,
@@ -196,6 +202,7 @@ export function useIeltsFlowController() {
       loadTopics,
       prepareSession,
       finalizeEvaluation,
+      scoreCompletedPart,
       refreshHistory,
     ],
   );

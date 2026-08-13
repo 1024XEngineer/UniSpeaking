@@ -33,6 +33,7 @@ export type IeltsSessionControllerPort = {
   start(): Promise<unknown>;
   setMuted(muted: boolean): void;
   end(): Promise<unknown>;
+  waitForTurnEvaluations(): Promise<void>;
   transitionPart2(event: IeltsPart2Event): Promise<unknown>;
   forcePart3Timeout(): Promise<unknown>;
   restoreIeltsState(): Promise<unknown>;
@@ -155,12 +156,18 @@ export function useIeltsSession(config: IeltsSessionConfig | null) {
     return controller.restoreIeltsState();
   }, [controller]);
 
+  const waitForTurnEvaluations = useCallback(() => {
+    if (!controller) return Promise.resolve();
+    return controller.waitForTurnEvaluations();
+  }, [controller]);
+
   return {
     snapshot,
     startupError,
     statusLabel: statusLabels[snapshot.state],
     sessionId: snapshot.sessionId,
     end,
+    waitForTurnEvaluations,
     toggleMuted,
     transitionPart2,
     forcePart3Timeout,

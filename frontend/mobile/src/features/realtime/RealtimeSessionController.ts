@@ -140,6 +140,7 @@ export type RealtimeSessionSnapshot = Readonly<{
   ieltsDialogueState?: IeltsDialogueState | null;
   ieltsPart2State?: IeltsPart2State | null;
   ieltsDialogueCompleted?: boolean;
+  ieltsCompletionReady?: boolean;
   ieltsInputReadyTick?: number;
   ieltsPart2CompletionReady?: boolean;
   ieltsStateRestored?: boolean;
@@ -245,6 +246,7 @@ export class RealtimeSessionController {
   private ieltsDialogueState: IeltsDialogueState | null = null;
   private ieltsPart2State: IeltsPart2State | null = null;
   private ieltsDialogueCompleted = false;
+  private ieltsCompletionReady = false;
   private ieltsInputReadyTick = 0;
   private ieltsPart2CompletionReady = false;
   private ieltsTimedOutTurn: { turnNo: number } | null = null;
@@ -278,6 +280,7 @@ export class RealtimeSessionController {
       ieltsDialogueState: this.ieltsDialogueState,
       ieltsPart2State: this.ieltsPart2State,
       ieltsDialogueCompleted: this.ieltsDialogueCompleted,
+      ieltsCompletionReady: this.ieltsCompletionReady,
       ieltsInputReadyTick: this.ieltsInputReadyTick,
       ieltsPart2CompletionReady: this.ieltsPart2CompletionReady,
       ieltsStateRestored: this.ieltsStateRestored,
@@ -410,6 +413,15 @@ export class RealtimeSessionController {
       this.inputEnabled = false;
       this.applyAudioEnabled();
     }
+    if (completing) {
+      this.pendingResponseRequest = null;
+      if (this.responseInFlight) {
+        this.dependencies.transport.sendProviderEvent({
+          event_id: this.createEventId(),
+          type: 'response.cancel',
+        });
+      }
+    }
     this.publish();
     this.sendIeltsControlInstruction(state.controlInstruction);
     this.requestIeltsResponse(state.controlInstruction);
@@ -490,6 +502,10 @@ export class RealtimeSessionController {
       this.endPromise = this.performEnd();
     }
     return this.endPromise;
+  }
+
+  waitForTurnEvaluations() {
+    return this.waitForPendingTurnEvaluations();
   }
 
   private async handleTransportEvent(event: RealtimeTransportEvent) {
@@ -715,7 +731,9 @@ export class RealtimeSessionController {
     let completion: unknown = null;
     try {
       if (this.backendSession) {
-        await this.waitForPendingTurnEvaluations();
+        if (this.options.mode === 'scene') {
+          await this.waitForPendingTurnEvaluations();
+        }
         const stopTime = this.now().toISOString();
         completion =
           this.options.mode === 'scene' && this.dependencies.sceneDialogue
@@ -782,8 +800,9 @@ export class RealtimeSessionController {
     if (this.isDeterministicIeltsPart()) {
       if (this.ieltsDialogueCompleted) {
         this.inputEnabled = false;
+        this.ieltsCompletionReady = true;
         this.applyAudioEnabled();
-        void this.end();
+        this.publish();
         return;
       }
       this.releaseIeltsInput();
@@ -876,10 +895,8 @@ export class RealtimeSessionController {
     this.requestAssistantResponse(
       turnInstructions
         ? {
-            response: {
-              instructions: turnInstructions,
-              modalities: ['text', 'audio'],
-            },
+            instructions: turnInstructions,
+            modalities: ['text', 'audio'],
           }
         : undefined,
     );
@@ -904,14 +921,13 @@ export class RealtimeSessionController {
       this.inputEnabled = false;
       this.applyAudioEnabled();
       const turnNo = ++this.learnerTurnNo;
-      const evaluation = this.evaluateIeltsTurn(sessionId, turnNo, transcript);
+      void this.evaluateIeltsTurn(sessionId, turnNo, transcript);
       let state: IeltsDialogueState | null = null;
       try {
         state = await ieltsDialogue.advanceState(sessionId, turnNo, false);
       } catch {
         state = null;
       }
-      await evaluation;
       if (state) {
         this.ieltsDialogueState = state;
         this.ieltsDialogueCompleted = Boolean(state.completed);
@@ -1051,6 +1067,7 @@ export class RealtimeSessionController {
     this.ieltsDialogueState = null;
     this.ieltsPart2State = null;
     this.ieltsDialogueCompleted = false;
+    this.ieltsCompletionReady = false;
     this.ieltsInputReadyTick = 0;
     this.ieltsPart2CompletionReady = false;
     this.ieltsTimedOutTurn = null;

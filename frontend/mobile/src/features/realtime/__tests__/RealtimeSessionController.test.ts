@@ -701,6 +701,156 @@ describe('RealtimeSessionController', () => {
     );
   });
 
+  it('publishes an IELTS completion-ready signal after the closing response finishes', async () => {
+    const dependencies = createDependencies();
+    const ieltsDialogue: NonNullable<RealtimeSessionDependencies['ieltsDialogue']> = {
+      advanceState: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        part: 'PART_1' as const,
+        openingCompleted: true,
+        answeredQuestions: 4,
+        totalQuestions: 4,
+        completed: true,
+        controlInstruction: 'Thank you. That is the end of Part 1.',
+      })),
+      evaluateTurn: jest.fn(async () => null),
+      advancePart2State: jest.fn(),
+      getDialogueState: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        part: 'PART_1' as const,
+        openingCompleted: true,
+        answeredQuestions: 3,
+        totalQuestions: 4,
+        completed: false,
+        controlInstruction: 'Ask the final Part 1 question.',
+      })),
+      getPart2State: jest.fn(),
+    };
+    dependencies.ieltsDialogue = ieltsDialogue;
+    dependencies.sessionApi.start.mockResolvedValue({
+      sessionId: 'session-1',
+      answerSdp: 'answer-sdp',
+      voiceId: 'Harvey',
+      systemPrompt: 'You are an IELTS examiner.',
+      currentStage: 'PART_1',
+    });
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'ielts',
+      ieltsId: 'ielts-1',
+      ieltsPart: 'PART_1',
+      voice: 'Harvey',
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: 'NATURAL',
+    });
+
+    await controller.start();
+    await controller.handleProviderMessage(JSON.stringify({ type: 'session.updated' }));
+    await controller.handleProviderMessage(JSON.stringify({ type: 'response.created' }));
+    await controller.handleProviderMessage(
+      JSON.stringify({ type: 'response.done', response: { status: 'completed' } }),
+    );
+    await controller.handleProviderMessage(
+      JSON.stringify({
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'final-part-one-answer',
+        transcript: 'That is my final answer.',
+      }),
+    );
+
+    expect(controller.getSnapshot()).toEqual(expect.objectContaining({
+      ieltsDialogueCompleted: true,
+      ieltsCompletionReady: false,
+    }));
+    await controller.handleProviderMessage(JSON.stringify({ type: 'response.created' }));
+    await controller.handleProviderMessage(
+      JSON.stringify({ type: 'response.done', response: { status: 'completed' } }),
+    );
+
+    expect(controller.getSnapshot()).toEqual(expect.objectContaining({
+      ieltsDialogueCompleted: true,
+      ieltsCompletionReady: true,
+    }));
+    expect(dependencies.sessionSocket.end).not.toHaveBeenCalled();
+  });
+
+  it('uses a three-second IELTS Part 1 silence window and asks the next question without waiting for scoring', async () => {
+    const dependencies = createDependencies();
+    let finishEvaluation!: () => void;
+    const pendingEvaluation = new Promise<void>((resolve) => {
+      finishEvaluation = resolve;
+    });
+    const ieltsDialogue: NonNullable<RealtimeSessionDependencies['ieltsDialogue']> = {
+      advanceState: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        part: 'PART_1' as const,
+        openingCompleted: true,
+        answeredQuestions: 1,
+        totalQuestions: 4,
+        completed: false,
+        controlInstruction: 'Ask the next Part 1 question.',
+      })),
+      evaluateTurn: jest.fn(() => pendingEvaluation),
+      advancePart2State: jest.fn(),
+      getDialogueState: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        part: 'PART_1' as const,
+        openingCompleted: true,
+        answeredQuestions: 0,
+        totalQuestions: 4,
+        completed: false,
+        controlInstruction: 'Ask the first Part 1 question.',
+      })),
+      getPart2State: jest.fn(),
+    };
+    dependencies.ieltsDialogue = ieltsDialogue;
+    dependencies.sessionApi.start.mockResolvedValue({
+      sessionId: 'session-1',
+      answerSdp: 'answer-sdp',
+      voiceId: 'Harvey',
+      systemPrompt: 'You are an IELTS examiner.',
+      currentStage: 'PART_1',
+    });
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'ielts',
+      ieltsId: 'ielts-1',
+      ieltsPart: 'PART_1',
+      voice: 'Harvey',
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    await controller.handleProviderMessage(JSON.stringify({ type: 'session.created' }));
+
+    expect(dependencies.transport.sendProviderEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'session.update',
+        session: expect.objectContaining({
+          turn_detection: expect.objectContaining({ silence_duration_ms: 3_000 }),
+        }),
+      }),
+    );
+
+    const transcriptOperation = controller.handleProviderMessage(
+      JSON.stringify({
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'fast-follow-up',
+        transcript: 'I work as a software engineer.',
+      }),
+    );
+    await transcriptOperation;
+
+    expect(ieltsDialogue.evaluateTurn).toHaveBeenCalledTimes(1);
+    expect(dependencies.transport.sendProviderEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'response.create' }),
+    );
+    finishEvaluation();
+    await Promise.resolve();
+  });
+
   it('advances part2 state through the public transition API', async () => {
     const dependencies = createDependencies();
     const ieltsDialogue: NonNullable<RealtimeSessionDependencies['ieltsDialogue']> = {
@@ -749,6 +899,66 @@ describe('RealtimeSessionController', () => {
     expect(controller.getSnapshot().ieltsPart2State).toEqual(
       expect.objectContaining({ phase: 'LONG_TURN' }),
     );
+  });
+
+  it('cancels an old Part 2 response and replaces it with the closing instruction', async () => {
+    const dependencies = createDependencies();
+    const ieltsDialogue: NonNullable<RealtimeSessionDependencies['ieltsDialogue']> = {
+      advanceState: jest.fn(),
+      evaluateTurn: jest.fn(),
+      advancePart2State: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        phase: 'FINISHED',
+        completed: true,
+        controlInstruction: 'Thank you. That is the end of Part 2.',
+      })),
+      getDialogueState: jest.fn(),
+      getPart2State: jest.fn(async () => ({
+        sceneId: 'ielts-1',
+        sessionId: 'session-1',
+        phase: 'PREPARATION',
+        completed: false,
+        controlInstruction: 'You have one minute to prepare.',
+      })),
+    };
+    dependencies.ieltsDialogue = ieltsDialogue;
+    dependencies.sessionApi.start.mockResolvedValue({
+      sessionId: 'session-1',
+      answerSdp: 'answer-sdp',
+      voiceId: 'Harvey',
+      systemPrompt: 'You are an IELTS examiner.',
+      currentStage: 'PART_2',
+    });
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'ielts',
+      ieltsId: 'ielts-1',
+      ieltsPart: 'PART_2',
+      voice: 'Harvey',
+      model: 'qwen3.5-omni-flash-realtime',
+      speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    await controller.handleProviderMessage(JSON.stringify({ type: 'session.updated' }));
+    await controller.handleProviderMessage(JSON.stringify({ type: 'response.created' }));
+
+    await controller.transitionPart2('ANSWER_COMPLETE');
+
+    expect(dependencies.transport.sendProviderEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'response.cancel' }),
+    );
+    await controller.handleProviderMessage(
+      JSON.stringify({ type: 'response.done', response: { status: 'cancelled' } }),
+    );
+    const responseRequests = dependencies.transport.sendProviderEvent.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.type === 'response.create');
+    expect(responseRequests.at(-1)).toEqual(expect.objectContaining({
+      type: 'response.create',
+      response: expect.objectContaining({
+        instructions: 'Thank you. That is the end of Part 2.',
+      }),
+    }));
   });
 
   it('uploads Part 2 turn audio so the report can include pronunciation', async () => {
@@ -813,7 +1023,7 @@ describe('RealtimeSessionController', () => {
     );
   });
 
-  it('waits for the pending Part 2 pronunciation evaluation before ending', async () => {
+  it('ends Part 2 without blocking on pronunciation and still exposes its completion promise', async () => {
     const dependencies = createDependencies();
     let finishEvaluation!: () => void;
     const evaluation = new Promise<void>((resolve) => {
@@ -863,12 +1073,19 @@ describe('RealtimeSessionController', () => {
     await Promise.resolve();
     const endOperation = controller.end();
 
-    expect(dependencies.sessionSocket.end).not.toHaveBeenCalled();
+    await endOperation;
+    expect(dependencies.sessionSocket.end).toHaveBeenCalledTimes(1);
+    let evaluationsCompleted = false;
+    const evaluationOperation = controller.waitForTurnEvaluations().then(() => {
+      evaluationsCompleted = true;
+    });
+    await Promise.resolve();
+    expect(evaluationsCompleted).toBe(false);
     finishEvaluation();
     await transcriptOperation;
-    await endOperation;
+    await evaluationOperation;
 
-    expect(dependencies.sessionSocket.end).toHaveBeenCalledTimes(1);
+    expect(evaluationsCompleted).toBe(true);
   });
 
   it('restores ielts dialogue state after session start', async () => {

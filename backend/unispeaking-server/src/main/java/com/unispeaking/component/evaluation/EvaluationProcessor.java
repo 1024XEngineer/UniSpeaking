@@ -283,7 +283,9 @@ public class EvaluationProcessor {
 								? practice.selectedPart()
 								: partByIndex(sessionIndex));
 			ieltsEvaluationRepository.savePart(ieltsId, sessionId, result);
-			ieltsPracticeRepository.incrementCompletedCount(practice.userId());
+			if (practice.mode() == IeltsMode.PART_PRACTICE) {
+				ieltsPracticeRepository.incrementCompletedCount(practice.userId());
+			}
 			return result;
 	}
 
@@ -585,44 +587,80 @@ public class EvaluationProcessor {
 	private IeltsEvaluationResult evaluateCompleteIeltsTest(
 			List<PracticeSessionRecord> sessions,
 			List<IeltsPartEvaluation> partEvaluations) {
-		StringBuilder transcript = new StringBuilder();
 		List<CustomTurnEvaluation> allTurns = new ArrayList<>();
 		for (int index = 0; index < Math.min(3, sessions.size()); index++) {
 			var session = sessions.get(index);
-			List<Message> messages = sessionMessageRepository.findMessages(
-					session.sessionId());
-			transcript.append('[')
-					.append(partByIndex(index).name())
-					.append("]\n")
-					.append(formatTranscript(messages, false))
-					.append("\n\n");
 			allTurns.addAll(turnEvaluationRepository.findAll(session.sessionId()));
 		}
-		List<CustomTurnEvaluation> scorableTurns = allTurns.stream()
-				.filter(turn -> !isUnscorable(turn))
-				.toList();
-		BigDecimal pronunciation = pronunciationBand(scorableTurns);
-		IeltsTextAssessment text = ieltsLlmClient.assessFullTest(
-				transcript.toString().strip(),
-				formatSpeechMetrics(scorableTurns),
-				pronunciation.toPlainString());
+		BigDecimal fluency = averagePartScore(
+				partEvaluations,
+				IeltsPartEvaluation::fluencyCoherenceScore);
+		BigDecimal lexical = averagePartScore(
+				partEvaluations,
+				IeltsPartEvaluation::lexicalResourceScore);
+		BigDecimal grammar = averagePartScore(
+				partEvaluations,
+				IeltsPartEvaluation::grammaticalRangeAccuracyScore);
+		BigDecimal pronunciation = averagePartScore(
+				partEvaluations,
+				IeltsPartEvaluation::pronunciationScore);
+		BigDecimal overall = averageAvailableBands(java.util.stream.Stream.of(
+					fluency,
+					lexical,
+					grammar,
+					pronunciation)
+				.filter(Objects::nonNull)
+				.toList());
 		return new IeltsEvaluationResult(
 				null,
 				"FINAL",
-				overallBand(text, pronunciation),
-				text.fluencyCoherenceBand(),
-				text.lexicalResourceBand(),
-				text.grammaticalRangeAccuracyBand(),
+				overall,
+				fluency,
+				lexical,
+				grammar,
 				pronunciation,
-				text.summary(),
-				text.strengths(),
-				text.improvements(),
+				"完整模考总评由 Part 1、Part 2 和 Part 3 的四项能力评分汇总生成。",
+				partEvaluations.stream()
+						.flatMap(part -> part.strengths().stream())
+						.distinct()
+						.toList(),
+				partEvaluations.stream()
+						.flatMap(part -> part.improvements().stream())
+						.distinct()
+						.toList(),
 				partEvaluations,
 				recommendedExpressions(allTurns),
-				text.fluencyCoherenceReason(),
-				text.lexicalResourceReason(),
-				text.grammaticalRangeAccuracyReason(),
-				pronunciationReason(pronunciation, scorableTurns));
+				aggregatedPartReason("流利与连贯", fluency),
+				aggregatedPartReason("词汇资源", lexical),
+				aggregatedPartReason("语法范围与准确性", grammar),
+				aggregatedPartReason("发音", pronunciation));
+	}
+
+	private BigDecimal averagePartScore(
+			List<IeltsPartEvaluation> evaluations,
+			Function<IeltsPartEvaluation, BigDecimal> extractor) {
+		List<BigDecimal> values = evaluations.stream()
+				.map(extractor)
+				.filter(Objects::nonNull)
+				.toList();
+		return averageAvailableBands(values);
+	}
+
+	private BigDecimal averageAvailableBands(List<BigDecimal> values) {
+		if (values.isEmpty()) return null;
+		BigDecimal total = values.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+		return roundToHalf(total.divide(
+				BigDecimal.valueOf(values.size()),
+				4,
+				RoundingMode.HALF_UP));
+	}
+
+	private String aggregatedPartReason(String dimension, BigDecimal score) {
+		if (score == null) {
+			return "三个 Part 均缺少有效的" + dimension + "评分。";
+		}
+		return dimension + "分数由三个 Part 已完成的后台评分取平均并按 0.5 分取整，结果为 "
+				+ score.toPlainString() + "。";
 	}
 
 	private IeltsPartEvaluation resolvePartEvaluation(

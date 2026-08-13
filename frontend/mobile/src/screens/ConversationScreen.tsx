@@ -209,9 +209,11 @@ export function CallExperience({
   progressCollapsed = false,
   transcriptSpeaker,
   showMuteControl = true,
+  showEndControl = true,
   showTranslationControl = true,
   showUserTranscript = true,
   statusText = '可以开始说了',
+  timerRunning = true,
   tone = 'light',
   transcriptEnglish = 'Hi there! How are you feeling today?',
   transcriptChinese = '',
@@ -236,9 +238,11 @@ export function CallExperience({
   progressCollapsed?: boolean;
   transcriptSpeaker?: string;
   showMuteControl?: boolean;
+  showEndControl?: boolean;
   showTranslationControl?: boolean;
   showUserTranscript?: boolean;
   statusText?: string;
+  timerRunning?: boolean;
   tone?: 'light' | 'navy';
   transcriptEnglish?: string;
   transcriptChinese?: string;
@@ -265,13 +269,13 @@ export function CallExperience({
     transcriptSpeaker === '你' && transcriptEnglish === userTranscript;
 
   useEffect(() => {
-    if (controlledElapsed !== undefined || muted) return;
+    if (controlledElapsed !== undefined || muted || !timerRunning) return;
     const timer = setInterval(
       () => setInternalElapsed((current) => current + 1),
       1000,
     );
     return () => clearInterval(timer);
-  }, [controlledElapsed, muted]);
+  }, [controlledElapsed, muted, timerRunning]);
 
   useEffect(() => {
     subtitlesProgress.value = withTiming(subtitles ? 1 : 0, {
@@ -363,7 +367,9 @@ export function CallExperience({
             {showUserTranscript && userTranscript && !transcriptHistory.some((entry) => entry.owner === 1 && entry.content === userTranscript.trim()) ? (
               <TranscriptBubble content={userTranscript} owner={1} showTranslation={false} speaker="你" tone={tone} />
             ) : null}
-            {!primaryDuplicatesUser && !transcriptHistory.some((entry) => entry.owner === 0 && entry.content === transcriptEnglish.trim()) ? (
+            {(showUserTranscript || transcriptSpeaker !== '你') &&
+            !primaryDuplicatesUser &&
+            !transcriptHistory.some((entry) => entry.owner === 0 && entry.content === transcriptEnglish.trim()) ? (
               <TranscriptBubble
                 content={transcriptEnglish}
                 fallbackTranslation={transcriptChinese}
@@ -392,9 +398,11 @@ export function CallExperience({
             <SubtitlesIcon size={24} color={tone === 'navy' ? '#123255' : colors.ink} />
           </Pressable>
         ) : null}
-        <Pressable accessibilityRole="button" accessibilityLabel={endAccessibilityLabel} onPress={onEnd} style={[styles.callControl, tone === 'navy' && styles.callControlNavy, styles.endControl, tone === 'navy' && styles.endControlNavy]}>
-          {endControlIcon === 'arrow' ? <AppIcon name="arrow-right" size={25} color={colors.white} /> : <PhoneDisconnectIcon size={24} color={colors.white} weight="fill" />}
-        </Pressable>
+        {showEndControl ? (
+          <Pressable accessibilityRole="button" accessibilityLabel={endAccessibilityLabel} onPress={onEnd} style={[styles.callControl, tone === 'navy' && styles.callControlNavy, styles.endControl, tone === 'navy' && styles.endControlNavy]}>
+            {endControlIcon === 'arrow' ? <AppIcon name="arrow-right" size={25} color={colors.white} /> : <PhoneDisconnectIcon size={24} color={colors.white} weight="fill" />}
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );

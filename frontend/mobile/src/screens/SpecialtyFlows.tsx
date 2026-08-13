@@ -19,6 +19,7 @@ import { CallExperience, selectCallCaption } from '@/screens/ConversationScreen'
 import { useIeltsFlowController } from '@/features/ielts/useIeltsFlowController';
 import { useIeltsSession } from '@/features/ielts/useIeltsSession';
 import { ieltsExaminers, toApiPart, type MobileIeltsPartId } from '@/features/ielts/ieltsMappings';
+import { resolvePart2CueCard } from '@/features/ielts/part2CueCard';
 import type { IeltsTopicSummary } from '@/features/ielts/types';
 import { compactPageNumbers } from '@/features/ielts/compactPagination';
 import { createTranscriptTranslationApi } from '@/features/conversation/TranscriptTranslationApi';
@@ -98,19 +99,26 @@ function IeltsSession({
   part,
   ieltsId,
   voiceId,
+  autoAdvance,
   onFinish,
 }: {
   examiner: (typeof examiners)[number];
   part: 'p1' | 'p3';
   ieltsId: string;
   voiceId: string;
-  onFinish: (sessionId: string | null) => void;
+  autoAdvance: boolean;
+  onFinish: (
+    sessionId: string | null,
+    ending: Promise<unknown>,
+    turnEvaluations: Promise<void>,
+  ) => void;
 }) {
   const session = useIeltsSession({ ieltsId, voiceId, part: toApiPart(part) });
   const partThreeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastInputReadyTick = useRef(0);
   const finishingRef = useRef(false);
   const [translationApi] = useState(createTranscriptTranslationApi);
+  const endSession = session.end;
   const caption = selectCallCaption(
     session.snapshot,
     examiner.name,
@@ -156,15 +164,19 @@ function IeltsSession({
   }, [part, session, session.snapshot.ieltsDialogueCompleted, session.snapshot.ieltsInputReadyTick]);
 
   useEffect(() => {
-    if (!session.snapshot.ieltsDialogueCompleted) return;
+    if (!session.snapshot.ieltsCompletionReady || finishingRef.current) return;
     if (partThreeTimerRef.current) {
       clearInterval(partThreeTimerRef.current);
       partThreeTimerRef.current = null;
     }
-    if (session.snapshot.state !== 'ended' || finishingRef.current) return;
     finishingRef.current = true;
-    onFinish(session.sessionId);
-  }, [onFinish, session.sessionId, session.snapshot.ieltsDialogueCompleted, session.snapshot.state]);
+    const ending = endSession();
+    onFinish(
+      session.sessionId,
+      ending,
+      session.waitForTurnEvaluations(),
+    );
+  }, [endSession, onFinish, session, session.sessionId, session.snapshot.ieltsCompletionReady]);
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.ieltsCallScreen}>
@@ -175,13 +187,16 @@ function IeltsSession({
         onEnd={() => {
           if (finishingRef.current) return;
           finishingRef.current = true;
-          void session.end().finally(() => onFinish(session.sessionId));
+          const ending = endSession();
+          onFinish(session.sessionId, ending, session.waitForTurnEvaluations());
         }}
         participant={examiner}
+        showEndControl={!autoAdvance}
         showMuteControl={false}
         onTranslate={translate}
-        showUserTranscript={part !== 'p1'}
+        showUserTranscript={false}
         statusText={`${part === 'p1' ? 'Part 1' : 'Part 3'} · ${progressLabel}`}
+        timerRunning={!session.snapshot.ieltsDialogueCompleted}
         transcriptEnglish={caption.text}
         transcriptSpeaker={caption.speaker}
         userTranscript={session.snapshot.userTranscript}
@@ -218,7 +233,11 @@ function IeltsPart2Session({
   cueCard: { title: string; points: string[] };
   ieltsId: string;
   voiceId: string;
-  onFinish: (sessionId: string | null) => void;
+  onFinish: (
+    sessionId: string | null,
+    ending: Promise<unknown>,
+    turnEvaluations: Promise<void>,
+  ) => void;
 }) {
   const session = useIeltsSession({ ieltsId, voiceId, part: 'PART_2' });
   const [phase, setPhase] = useState<Part2Phase>('INTRODUCTION');
@@ -271,7 +290,8 @@ function IeltsPart2Session({
   const scheduleFinish = () => {
     clearFinishTimer();
     finishTimerRef.current = setTimeout(() => {
-      void session.end().finally(() => onFinish(session.sessionId));
+      const ending = session.end();
+      onFinish(session.sessionId, ending, session.waitForTurnEvaluations());
     }, 1_800);
   };
 
@@ -305,6 +325,7 @@ function IeltsPart2Session({
     if (phaseRef.current !== 'PREPARATION') return;
     clearPrepTimer();
     clearSilenceTimer();
+    lastInputReadyTick.current = session.snapshot.ieltsInputReadyTick ?? 0;
     setNotesLocked(true);
     setPhase('STARTING');
     void session
@@ -547,6 +568,8 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
   } | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
+  const evaluationReadyRef = useRef<Promise<unknown>>(Promise.resolve());
+  const mockPartEvaluationsRef = useRef<Promise<unknown>[]>([]);
   const loadTopics = ielts.loadTopics;
   const refreshSettings = ielts.refreshSettings;
   const finalizeEvaluation = ielts.finalizeEvaluation;
@@ -594,6 +617,8 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
   const startFullMock = async () => {
     setFullMock(true);
     setPart('p1');
+    mockPartEvaluationsRef.current = [];
+    evaluationReadyRef.current = Promise.resolve();
     const nextExaminer = randomExaminer();
     try {
       await beginSession({ nextPart: 'mock', topicItem: null, random: true, selectedExaminer: nextExaminer });
@@ -645,7 +670,8 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
       return () => clearTimeout(errorTimer);
     }
     let cancelled = false;
-    void finalizeEvaluation(ieltsId, activeSessionId)
+    void evaluationReadyRef.current
+      .then(() => finalizeEvaluation(ieltsId, activeSessionId))
       .then(() => {
         if (!cancelled) setRoute('report');
       })
@@ -1086,15 +1112,37 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
     const generatedScene = ielts.generated;
     const ieltsId = generatedScene?.ieltsId;
     const voiceId = examiner.voiceId;
-    const finishSession = (sessionId: string | null) => {
+    const finishSession = (
+      sessionId: string | null,
+      ending: Promise<unknown>,
+      turnEvaluations: Promise<void>,
+    ) => {
       if (sessionId) setActiveSessionId(sessionId);
       const currentPartIndex = ieltsPartOrder.indexOf(part);
       const nextPart = ieltsPartOrder[currentPartIndex + 1];
-      if (fullMock && nextPart && ielts.generated) {
-        setPart(nextPart);
-        void beginSession({ nextPart, topicItem: null, random: true });
+      if (fullMock && nextPart && generatedScene && sessionId) {
+        const completedSession = ending.then(() => undefined);
+        const backgroundEvaluation = Promise.all([completedSession, turnEvaluations])
+          .then(() => ielts.scoreCompletedPart(generatedScene.ieltsId, sessionId))
+          .catch(() => undefined);
+        mockPartEvaluationsRef.current = [
+          ...mockPartEvaluationsRef.current,
+          backgroundEvaluation,
+        ];
+        void completedSession.then(() => {
+          setActiveSessionId(null);
+          setPart(nextPart);
+        }).catch((error: unknown) => {
+          setEvaluationError(error instanceof Error ? error.message : '无法进入下一部分');
+          setRoute('analysis');
+        });
         return;
       }
+      evaluationReadyRef.current = Promise.all([ending, turnEvaluations]).then(async () => {
+        if (fullMock) {
+          await Promise.all(mockPartEvaluationsRef.current);
+        }
+      });
       setEvaluationError(null);
       setRoute('analysis');
     };
@@ -1106,13 +1154,7 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
       );
     }
     if (part === 'p2') {
-      const question = ielts.training?.questions[0];
-      const cueCard = {
-        title: question?.questionText ?? generatedScene?.title ?? 'IELTS Part 2',
-        points: question?.cuePoints?.length
-          ? question.cuePoints
-          : ['What it is', 'When or where you experienced it', 'Who was involved', 'And explain why it is important to you'],
-      };
+      const cueCard = resolvePart2CueCard(generatedScene, ielts.training);
       return (
         <IeltsPart2Session
           cueCard={cueCard}
@@ -1128,6 +1170,7 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
         examiner={examiner}
         part={part}
         ieltsId={ieltsId}
+        autoAdvance={fullMock}
         voiceId={voiceId}
         onFinish={finishSession}
       />
