@@ -56,14 +56,25 @@ function stringList(value: unknown) {
   return [];
 }
 
+function renderFinalText(material: {
+  jobTitle: string | null;
+  responsibilities: string[];
+  qualificationRequirements: string[];
+}) {
+  return [
+    material.jobTitle,
+    material.responsibilities.slice(0, 3).join('、'),
+    material.qualificationRequirements.slice(0, 3).join('、'),
+  ].filter(Boolean).join(' · ');
+}
+
 function normalizeMaterialDraft(value: unknown): InterviewMaterialDraft | null {
   if (!value || typeof value !== 'object' || !(value as { material?: unknown }).material || typeof (value as { material: unknown }).material !== 'object') return null;
   const raw = (value as { material: Record<string, unknown> }).material;
   const responsibilities = stringList(raw.responsibilities);
   const qualificationRequirements = stringList(raw.qualificationRequirements);
-  const finalText = typeof raw.finalText === 'string' ? raw.finalText.trim() : '';
-  if (!responsibilities.length || !qualificationRequirements.length || !finalText) return null;
-  return { material: {
+  if (!responsibilities.length || !qualificationRequirements.length) return null;
+  const nextMaterial = {
     jobTitle: typeof raw.jobTitle === 'string' ? raw.jobTitle.trim() || null : null,
     responsibilities,
     qualificationRequirements,
@@ -74,7 +85,11 @@ function normalizeMaterialDraft(value: unknown): InterviewMaterialDraft | null {
     projectExperiences: stringList(raw.projectExperiences),
     skillsAndAbilities: stringList(raw.skillsAndAbilities),
     interviewableExperienceClues: stringList(raw.interviewableExperienceClues),
-    finalText,
+    finalText: typeof raw.finalText === 'string' ? raw.finalText.trim() : '',
+  };
+  return { material: {
+    ...nextMaterial,
+    finalText: nextMaterial.finalText || renderFinalText(nextMaterial),
   } };
 }
 

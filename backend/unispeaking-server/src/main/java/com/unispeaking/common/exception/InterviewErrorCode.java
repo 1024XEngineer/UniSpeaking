@@ -4,6 +4,7 @@ package com.unispeaking.common.exception;
 public final class InterviewErrorCode {
 
 	public static final String INTERVIEW_MATERIAL_INVALID = "INTERVIEW_MATERIAL_INVALID";
+	public static final String INTERVIEW_MATERIAL_SOURCE_INSUFFICIENT = "INTERVIEW_MATERIAL_SOURCE_INSUFFICIENT";
 	public static final String INTERVIEW_REQUEST_INVALID = "INTERVIEW_REQUEST_INVALID";
 	public static final String INTERVIEW_SCENE_NOT_FOUND = "INTERVIEW_SCENE_NOT_FOUND";
 	public static final String INTERVIEW_SCENE_ACCESS_DENIED = "INTERVIEW_SCENE_ACCESS_DENIED";

@@ -8,6 +8,8 @@ import com.unispeaking.component.document.MaterialDesensitizer;
 import com.unispeaking.component.document.MaterialTextExtraction;
 import com.unispeaking.component.policy.DailyQuotaPolicy;
 import com.unispeaking.component.recording.RecordingStore;
+import com.unispeaking.component.scene.InterviewMaterialFallbackExtractor;
+import com.unispeaking.component.scene.InterviewMaterialResponseNormalizer;
 import com.unispeaking.component.statemachine.InterviewTopicStateMachine;
 import com.unispeaking.domain.dto.asset.InterviewAssetItem;
 import com.unispeaking.domain.dto.scene.InterviewContext;
@@ -38,6 +40,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -57,8 +60,6 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 	private static final int MIN_TOPICS = 4;
 	private static final int MAX_TOPICS = 5;
 	private static final int TOPIC_MAX_LENGTH = 100;
-	private static final int MAX_LIST_ITEMS = 50;
-	private static final int MAX_ITEM_LENGTH = 2000;
 
 	private final AuthService authService;
 	private final InterviewSceneRepository interviewSceneRepository;
@@ -74,7 +75,10 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 	private final OcrProvider ocrProvider;
 	private final ObjectMapper objectMapper;
 	private final ObjectReader strictReader;
+	private final InterviewMaterialResponseNormalizer materialResponseNormalizer;
+	private final InterviewMaterialFallbackExtractor materialFallbackExtractor;
 
+	@Autowired
 	public InterviewSceneServiceImpl(
 			AuthService authService,
 			InterviewSceneRepository interviewSceneRepository,
@@ -89,7 +93,9 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 			RecordingStore interviewRecordingStore,
 			InterviewReportRepository interviewReportRepository,
 			OcrProvider ocrProvider,
-			ObjectMapper objectMapper) {
+			ObjectMapper objectMapper,
+			InterviewMaterialResponseNormalizer materialResponseNormalizer,
+			InterviewMaterialFallbackExtractor materialFallbackExtractor) {
 		this.authService = authService;
 		this.interviewSceneRepository = interviewSceneRepository;
 		this.promptBuilder = promptBuilder;
@@ -103,10 +109,44 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 		this.interviewReportRepository = interviewReportRepository;
 		this.ocrProvider = ocrProvider;
 		this.objectMapper = objectMapper;
+		this.materialResponseNormalizer = materialResponseNormalizer;
+		this.materialFallbackExtractor = materialFallbackExtractor;
 		this.strictReader = objectMapper.reader()
 				.with(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
 				.with(DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
 				.with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+	}
+
+	public InterviewSceneServiceImpl(
+			AuthService authService,
+			InterviewSceneRepository interviewSceneRepository,
+			InterviewPromptBuilder promptBuilder,
+			AiProviderRegistry providerRegistry,
+			MaterialTextExtraction materialTextExtraction,
+			MaterialDesensitizer materialDesensitizer,
+			DailyQuotaPolicy dailyQuotaPolicy,
+			InterviewTopicStateMachine stateMachine,
+			PracticeSessionRepository practiceSessionRepository,
+			RecordingStore interviewRecordingStore,
+			InterviewReportRepository interviewReportRepository,
+			OcrProvider ocrProvider,
+			ObjectMapper objectMapper) {
+		this(
+				authService,
+				interviewSceneRepository,
+				promptBuilder,
+				providerRegistry,
+				materialTextExtraction,
+				materialDesensitizer,
+				dailyQuotaPolicy,
+				stateMachine,
+				practiceSessionRepository,
+				interviewRecordingStore,
+				interviewReportRepository,
+				ocrProvider,
+				objectMapper,
+				new InterviewMaterialResponseNormalizer(objectMapper),
+				new InterviewMaterialFallbackExtractor());
 	}
 
 	@Override
@@ -298,30 +338,79 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 			String resumeText,
 			boolean resumeAbsent) {
 		String prompt = buildMaterialPrompt(jobDescriptionText, resumeText, resumeAbsent);
-		BusinessException lastFailure = null;
-		for (int attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
-			String attemptPrompt = attempt == 1
-					? prompt
-					: prompt + "\n\nYour previous response did not satisfy the JSON contract. "
-							+ "Return a corrected JSON object only.";
-			try {
-				String content = providerRegistry
-						.executeLlmTaskRouted(attemptPrompt, null)
-						.response();
-				return parseMaterial(content);
-			}
-			catch (BusinessException exception) {
-				if (!InterviewErrorCode.INTERVIEW_MATERIAL_LLM_RESPONSE_INVALID
-						.equals(exception.code())) {
-					throw exception;
-				}
-				LOGGER.warn(
-						"interview material LLM response rejected attempt={}",
-						attempt);
-				lastFailure = exception;
-			}
+		String content = providerRegistry.executeLlmTaskRouted(prompt, null).response();
+		InterviewMaterialResponseNormalizer.ParseResult parsed =
+				materialResponseNormalizer.parse(content);
+		if (parsed.valid()) {
+			return finalizeMaterial(parsed.material());
 		}
-		throw lastFailure == null ? invalidMaterialResponse() : lastFailure;
+
+		LOGGER.warn(
+				"interview material LLM response rejected errors={}",
+				parsed.errors());
+		String repairPrompt = buildMaterialRepairPrompt(
+				prompt,
+				parsed.errors());
+		String repairedContent = providerRegistry
+				.executeLlmTaskRouted(repairPrompt, null)
+				.response();
+		InterviewMaterialResponseNormalizer.ParseResult repaired =
+				materialResponseNormalizer.parse(repairedContent);
+		if (repaired.valid()) {
+			return finalizeMaterial(repaired.material());
+		}
+
+		InterviewMaterial fallback = materialFallbackExtractor.extract(
+				jobDescriptionText,
+				resumeText,
+				resumeAbsent);
+		if (fallback != null) {
+			LOGGER.warn(
+					"interview material fallback extractor used errors={}",
+					repaired.errors());
+			return finalizeMaterial(fallback);
+		}
+		throw new BusinessException(
+				InterviewErrorCode.INTERVIEW_MATERIAL_SOURCE_INSUFFICIENT,
+				"未能从 JD 中识别出岗位职责或任职要求，请补充完整的职位描述");
+	}
+
+	private String buildMaterialRepairPrompt(String originalPrompt, List<String> errors) {
+		return originalPrompt
+				+ "\n\nYour previous response failed the interview material contract."
+				+ " Fix these specific issues:\n- "
+				+ String.join("\n- ", errors)
+				+ "\nThe server generates finalText. It may be omitted."
+				+ " Return exactly one JSON object and no Markdown or explanatory prose.";
+	}
+
+	private InterviewMaterial finalizeMaterial(InterviewMaterial material) {
+		return new InterviewMaterial(
+				material.jobTitle(),
+				material.responsibilities(),
+				material.qualificationRequirements(),
+				material.requiredSkills(),
+				material.otherJobInformation(),
+				material.education(),
+				material.workExperiences(),
+				material.projectExperiences(),
+				material.skillsAndAbilities(),
+				material.interviewableExperienceClues(),
+				renderFinalText(material));
+	}
+
+	private String renderFinalText(InterviewMaterial material) {
+		List<String> parts = new ArrayList<>();
+		if (material.jobTitle() != null && !material.jobTitle().isBlank()) {
+			parts.add(material.jobTitle().strip());
+		}
+		if (!material.responsibilities().isEmpty()) {
+			parts.add(String.join("、", material.responsibilities().stream().limit(3).toList()));
+		}
+		if (!material.qualificationRequirements().isEmpty()) {
+			parts.add(String.join("、", material.qualificationRequirements().stream().limit(3).toList()));
+		}
+		return String.join(" · ", parts);
 	}
 
 	private String buildMaterialPrompt(
@@ -361,96 +450,11 @@ public class InterviewSceneServiceImpl implements InterviewSceneService {
 				  "workExperiences": ["..."],
 				  "projectExperiences": ["..."],
 				  "skillsAndAbilities": ["..."],
-				  "interviewableExperienceClues": ["..."],
-				  "finalText": "one-line rendered summary of the material"
+				  "interviewableExperienceClues": ["..."]
 				}
+
+				The server generates finalText after parsing. Do not include finalText.
 				""".formatted(jsonValue(jobDescriptionText), resumeValue);
-	}
-
-	private InterviewMaterial parseMaterial(String content) {
-		try {
-			JsonNode root = strictReader.readTree(unwrapJsonFence(content));
-			if (root == null || !root.isObject()) {
-				throw invalidMaterialResponse();
-			}
-			String jobTitle = optionalText(root, "jobTitle", 100);
-			List<String> responsibilities = requiredList(
-					root, "responsibilities");
-			List<String> qualificationRequirements = requiredList(
-					root, "qualificationRequirements");
-			List<String> requiredSkills = optionalList(root, "requiredSkills");
-			String otherJobInformation = optionalText(
-					root, "otherJobInformation", 2000);
-			List<String> education = optionalList(root, "education");
-			List<String> workExperiences = optionalList(root, "workExperiences");
-			List<String> projectExperiences = optionalList(
-					root, "projectExperiences");
-			List<String> skillsAndAbilities = optionalList(
-					root, "skillsAndAbilities");
-			List<String> interviewableExperienceClues = optionalList(
-					root, "interviewableExperienceClues");
-			String finalText = requiredText(root, "finalText", 2000);
-			return new InterviewMaterial(
-					jobTitle,
-					responsibilities,
-					qualificationRequirements,
-					requiredSkills,
-					otherJobInformation,
-					education,
-					workExperiences,
-					projectExperiences,
-					skillsAndAbilities,
-					interviewableExperienceClues,
-					finalText);
-		}
-		catch (BusinessException exception) {
-			if (InterviewErrorCode.INTERVIEW_CONTEXT_LLM_RESPONSE_INVALID
-					.equals(exception.code())) {
-				throw invalidMaterialResponse();
-			}
-			throw exception;
-		}
-		catch (RuntimeException exception) {
-			throw invalidMaterialResponse();
-		}
-	}
-
-	private List<String> requiredList(JsonNode node, String field) {
-		List<String> values = parseStringList(node.path(field));
-		if (values.isEmpty()) {
-			throw invalidMaterialResponse();
-		}
-		return values;
-	}
-
-	private List<String> optionalList(JsonNode node, String field) {
-		JsonNode value = node.path(field);
-		if (value.isMissingNode() || value.isNull()) {
-			return List.of();
-		}
-		return parseStringList(value);
-	}
-
-	private List<String> parseStringList(JsonNode array) {
-		if (!array.isArray() || array.size() > MAX_LIST_ITEMS) {
-			throw invalidMaterialResponse();
-		}
-		List<String> values = new ArrayList<>();
-		Set<String> unique = new HashSet<>();
-		for (JsonNode item : array) {
-			if (!item.isString()) {
-				throw invalidMaterialResponse();
-			}
-			String value = item.asString("").strip();
-			if (value.isBlank() || value.length() > MAX_ITEM_LENGTH) {
-				throw invalidMaterialResponse();
-			}
-			if (!unique.add(value.toLowerCase(Locale.ROOT))) {
-				throw invalidMaterialResponse();
-			}
-			values.add(value);
-		}
-		return List.copyOf(values);
 	}
 
 	private InterviewContext generateContext(
