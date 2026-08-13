@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   buildResponseCreateEvent,
+  buildScenarioResponseRequest,
   buildRealtimeSessionConfig,
   buildRealtimeStartPayload,
   createTurnAudioCaptureController,
@@ -81,6 +82,27 @@ assert.deepEqual(
       instructions: "Ask exactly: Where do you live?",
       modalities: ["text", "audio"],
     },
+  },
+);
+
+assert.deepEqual(
+  buildScenarioResponseRequest({
+    completed: false,
+    controlInstruction: "Ask for the payment method.",
+  }),
+  {
+    closing: false,
+    instructions: "Ask for the payment method.",
+  },
+);
+assert.deepEqual(
+  buildScenarioResponseRequest({
+    completed: true,
+    controlInstruction: "Give one concise closing response.",
+  }),
+  {
+    closing: true,
+    instructions: "Give one concise closing response.",
   },
 );
 
