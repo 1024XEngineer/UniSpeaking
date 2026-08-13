@@ -56,8 +56,8 @@ describe('TtsPlayer', () => {
         .mockResolvedValueOnce(firstAsset)
         .mockResolvedValueOnce(secondAsset),
     };
-    const firstPlayer = { play: jest.fn(), pause: jest.fn(), remove: jest.fn() };
-    const secondPlayer = { play: jest.fn(), pause: jest.fn(), remove: jest.fn() };
+    const firstPlayer = { play: jest.fn(), pause: jest.fn(), remove: jest.fn(), volume: 0 };
+    const secondPlayer = { play: jest.fn(), pause: jest.fn(), remove: jest.fn(), volume: 0 };
     const createPlayer = jest
       .fn()
       .mockReturnValueOnce(firstPlayer)
@@ -72,6 +72,7 @@ describe('TtsPlayer', () => {
     expect(firstPlayer.remove).toHaveBeenCalledTimes(1);
     expect(firstAsset.remove).toHaveBeenCalledTimes(1);
     expect(secondPlayer.play).toHaveBeenCalledTimes(1);
+    expect(secondPlayer.volume).toBe(1);
     expect(preparePlayback).toHaveBeenCalledTimes(2);
     player.stop();
     player.stop();

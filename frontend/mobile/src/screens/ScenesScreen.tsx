@@ -833,6 +833,8 @@ export function ScenesHome({
   );
   const [prompt, setPrompt] = useState('');
   const [preview, setPreview] = useState<GeneratedScene | null>(null);
+  const [previewDisplay, setPreviewDisplay] = useState<Partial<GeneratedScene> | null>(null);
+  const [translationApi] = useState(createTranscriptTranslationApi);
   const [generatingSource, setGeneratingSource] = useState<'custom' | string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const generating = generatingSource !== null;
@@ -841,7 +843,33 @@ export function ScenesHome({
     setGeneratingSource(source);
     setGenerationError(null);
     try {
-      setPreview(await sceneService.generate(sceneInput.trim()));
+      const scene = await sceneService.generate(sceneInput.trim());
+      setPreview(scene);
+      setPreviewDisplay(null);
+      const translate = async (value: string, maxLength: number) => {
+        const source = String(value ?? '').trim();
+        if (!source || !/[A-Za-z]/.test(source)) return source;
+        try {
+          const translated = await translationApi.translateScene(scene.sceneId, source);
+          return String(translated || source).slice(0, maxLength);
+        } catch {
+          return source.slice(0, maxLength);
+        }
+      };
+      const display = await Promise.all([
+        translate(scene.title, 18),
+        translate(scene.background, 58),
+        translate(scene.aiRole, 22),
+        translate(scene.userRole, 22),
+        translate(scene.learningGoal, 42),
+      ]);
+      setPreviewDisplay({
+        title: display[0],
+        background: display[1],
+        aiRole: display[2],
+        userRole: display[3],
+        learningGoal: display[4],
+      });
     } catch (error) {
       setPreview(null);
       setGenerationError(
@@ -982,16 +1010,17 @@ export function ScenesHome({
             </Pressable>
             <Text style={styles.previewEyebrow}>场景已准备好</Text>
             <View style={styles.previewTitleRow}>
-              <Text style={styles.previewTitle}>{preview.title}</Text>
+            <Text style={styles.previewTitle}>{previewDisplay?.title || preview.title}</Text>
               <SceneCategoryTag category={sceneCategoryForLabel(preview.label)} />
             </View>
-            <Text style={styles.previewLead}>场景已生成，确认后即可开始练习。</Text>
+            <Text style={styles.previewLead}>确认场景信息，然后开始学习。</Text>
             <View style={styles.previewSummary}>
               {[
-                ['场景', preview.background],
-                ['角色', `AI：${preview.aiRole} · 你：${preview.userRole}`],
-                ['目标', preview.learningGoal],
-                ['时长', `约 ${preview.estimatedMinutes} 分钟`],
+                ['场景简介', previewDisplay?.background || preview.background],
+                ['AI 扮演', previewDisplay?.aiRole || preview.aiRole],
+                ['你将扮演', previewDisplay?.userRole || preview.userRole],
+                ['练习重点', previewDisplay?.learningGoal || preview.learningGoal],
+                ['预计用时', `${preview.estimatedMinutes} 分钟`],
               ].map(([label, value]) => (
                 <View key={label} style={styles.previewSummaryRow}>
                   <Text style={styles.previewSummaryLabel}>{label}</Text>

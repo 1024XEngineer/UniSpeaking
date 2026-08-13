@@ -291,35 +291,16 @@ function StaticAudioToggle({ src, label = "播放试听音频", mini = false }) 
 function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
   const audioRef = useRef(null);
   const objectUrlRef = useRef("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     setFailed(false);
     audioRef.current?.pause();
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     objectUrlRef.current = "";
     audioRef.current = null;
-
-    cachedPronunciationAudio(sceneId, text)
-      .then((blob) => {
-        if (cancelled) return;
-        const objectUrl = URL.createObjectURL(blob);
-        const audio = new Audio(objectUrl);
-        objectUrlRef.current = objectUrl;
-        audioRef.current = audio;
-        setLoading(false);
-        audio.play().catch(() => undefined);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setLoading(false);
-          setFailed(true);
-        }
-      });
 
     return () => {
       cancelled = true;
@@ -328,12 +309,22 @@ function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = "";
     };
-  }, [sceneId, text, reloadKey]);
+  }, [sceneId, text]);
 
   const replay = () => {
     const audio = audioRef.current;
     if (!audio) {
-      setReloadKey((current) => current + 1);
+      setLoading(true);
+      cachedPronunciationAudio(sceneId, text)
+        .then((blob) => {
+          const objectUrl = URL.createObjectURL(blob);
+          const nextAudio = new Audio(objectUrl);
+          objectUrlRef.current = objectUrl;
+          audioRef.current = nextAudio;
+          nextAudio.play().catch(() => setFailed(true));
+        })
+        .catch(() => setFailed(true))
+        .finally(() => setLoading(false));
       return;
     }
     audio.currentTime = 0;

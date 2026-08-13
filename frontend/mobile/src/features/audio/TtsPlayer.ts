@@ -69,6 +69,7 @@ type NativeAudioPlayer = {
   play(): void;
   pause(): void;
   remove(): void;
+  volume?: number;
 };
 
 type TtsPlayerOptions = {
@@ -125,6 +126,8 @@ export class TtsPlayer {
       return;
     }
     const player = this.createPlayer(asset.uri);
+    // Learning-expression playback must be audible through the device speaker.
+    if ('volume' in player) player.volume = 1;
     this.asset = asset;
     this.player = player;
     player.play();
