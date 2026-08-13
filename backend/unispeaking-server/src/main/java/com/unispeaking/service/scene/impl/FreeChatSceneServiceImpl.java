@@ -95,10 +95,7 @@ public class FreeChatSceneServiceImpl implements FreeChatSceneService {
 				%s
 				</source>
 				""".formatted(source);
-		String translated = providerRegistry.executeLlmTask(
-				AiProviderRegistry.QWEN_LLM_PLUS,
-				prompt,
-				null);
+		String translated = providerRegistry.executeLlmTask(prompt, null);
 		if (translated == null || translated.isBlank()) {
 			throw new BusinessException(
 					"TRANSLATION_EMPTY",

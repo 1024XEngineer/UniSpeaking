@@ -44,7 +44,9 @@ class AiProviderRegistryTest {
 		assertEquals(
 				AiProviderRegistry.QINIU_REALTIME_PLUS,
 				registry.defaultModel(AiCapability.REALTIME));
-		assertEquals(AiProviderRegistry.QWEN_LLM_PLUS, registry.defaultModel(AiCapability.LLM));
+		assertEquals(
+				AiProviderRegistry.QINIU_MAAS_DEEPSEEK_FLASH,
+				registry.defaultModel(AiCapability.LLM));
 		assertSame(
 				qiniu,
 				registry.getRealtimeProvider(AiProviderRegistry.QINIU_REALTIME_PLUS));
@@ -95,6 +97,28 @@ class AiProviderRegistryTest {
 	}
 
 	@Test
+	void failsOverBetweenQiniuMaasModelsWithoutUsingLegacyProviders() {
+		FailingQiniuMaasLlmProvider primary = new FailingQiniuMaasLlmProvider();
+		StubQiniuMaasLlmProvider fallback = new StubQiniuMaasLlmProvider(
+				AiProviderRegistry.QINIU_MAAS_QWEN_PLUS);
+		StubQwenLlmProvider legacyQwen = new StubQwenLlmProvider();
+		StubDeepSeekLlmProvider legacyDeepSeek = new StubDeepSeekLlmProvider();
+		AiProviderRegistry registry = registry(
+				List.of(primary, fallback, legacyQwen, legacyDeepSeek),
+				Map.of(
+						AiCapability.LLM,
+						List.of(
+								AiProviderRegistry.QINIU_MAAS_DEEPSEEK_FLASH,
+								AiProviderRegistry.QINIU_MAAS_QWEN_PLUS)));
+
+		String response = registry.executeLlmTask("hello", null);
+
+		assertEquals("qiniu-maas", response);
+		assertEquals(0, legacyQwen.calls);
+		assertEquals(0, legacyDeepSeek.calls);
+	}
+
+	@Test
 	void preservesProviderOrderWhenConfiguredModelsReplaceDefaultModelNames() {
 		LlmProvider qwen = new ConfiguredModelLlmProvider("qwen", "qwen-custom-llm");
 		LlmProvider deepSeek = new ConfiguredModelLlmProvider(
@@ -112,7 +136,7 @@ class AiProviderRegistryTest {
 	}
 
 	@Test
-	void usesQiniuAsThePrimaryRealtimeModelAndQwenForOtherGenerativeCapabilities() {
+	void usesQiniuAsThePrimaryRealtimeAndLlmProvider() {
 		AiProviderRegistry registry = realtimeRegistry(
 				new StubQiniuRealtimeProvider(), new StubRealtimeProvider());
 
@@ -120,7 +144,7 @@ class AiProviderRegistryTest {
 				AiProviderRegistry.QINIU_REALTIME_PLUS,
 				registry.defaultModel(AiCapability.REALTIME));
 		assertEquals(
-				AiProviderRegistry.QWEN_LLM_PLUS,
+				AiProviderRegistry.QINIU_MAAS_DEEPSEEK_FLASH,
 				registry.defaultModel(AiCapability.LLM));
 		assertEquals(
 				StubTranscriptionProvider.MODEL_ID,
@@ -131,6 +155,11 @@ class AiProviderRegistryTest {
 		assertEquals(
 				AiProviderRegistry.IFLYTEK_PRONUNCIATION_SCORING,
 				registry.defaultModel(AiCapability.SCORING));
+		assertEquals(
+				List.of(
+						AiProviderRegistry.QINIU_MAAS_DEEPSEEK_FLASH,
+						AiProviderRegistry.QINIU_MAAS_QWEN_PLUS),
+				registry.route(AiCapability.LLM));
 	}
 
 	@Test
@@ -240,7 +269,11 @@ class AiProviderRegistryTest {
 	}
 
 	private List<LlmProvider> llmProviders() {
-		return List.of(new StubQwenLlmProvider(), new StubDeepSeekLlmProvider());
+		return List.of(
+				new StubQiniuMaasLlmProvider(AiProviderRegistry.QINIU_MAAS_DEEPSEEK_FLASH),
+				new StubQiniuMaasLlmProvider(AiProviderRegistry.QINIU_MAAS_QWEN_PLUS),
+				new StubQwenLlmProvider(),
+				new StubDeepSeekLlmProvider());
 	}
 
 	private List<TtsProvider> ttsProviders() {
@@ -309,6 +342,30 @@ class AiProviderRegistryTest {
 		public String executeLlmTask(String prompt, String token) {
 			calls++;
 			return "deepseek";
+		}
+	}
+
+	private static final class StubQiniuMaasLlmProvider extends LlmProvider {
+
+		private StubQiniuMaasLlmProvider(String model) {
+			super("qiniu-maas", Set.of(model));
+		}
+
+		@Override
+		public String executeLlmTask(String prompt, String token) {
+			return "qiniu-maas";
+		}
+	}
+
+	private static final class FailingQiniuMaasLlmProvider extends LlmProvider {
+
+		private FailingQiniuMaasLlmProvider() {
+			super("qiniu-maas", Set.of(AiProviderRegistry.QINIU_MAAS_DEEPSEEK_FLASH));
+		}
+
+		@Override
+		public String executeLlmTask(String prompt, String token) {
+			throw new BusinessException("QINIU_MAAS_LLM_IO_ERROR", "unavailable");
 		}
 	}
 

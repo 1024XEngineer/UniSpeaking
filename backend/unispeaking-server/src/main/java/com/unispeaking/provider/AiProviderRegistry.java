@@ -39,6 +39,8 @@ public class AiProviderRegistry {
 	public static final String QINIU_REALTIME_PLUS = "qwen3.5-omni-plus-realtime";
 	public static final String QWEN_LLM_PLUS = "qwen3.5-plus";
 	public static final String DEEPSEEK_CHAT = "deepseek-v4-flash";
+	public static final String QINIU_MAAS_DEEPSEEK_FLASH = "deepseek/deepseek-v4-flash";
+	public static final String QINIU_MAAS_QWEN_PLUS = "qwen/qwen3.5-plus";
 	public static final String QWEN_ASR = "qwen3-asr-flash";
 	public static final String DOUBAO_ASR = "volc.bigasr.auc_turbo";
 	public static final String IFLYTEK_PRONUNCIATION_SCORING = "iflytek-suntone";
@@ -48,14 +50,14 @@ public class AiProviderRegistry {
 
 	private static final Map<AiCapability, List<String>> DEFAULT_MODEL_ROUTES = Map.of(
 			AiCapability.REALTIME, List.of(QINIU_REALTIME_PLUS, QWEN_REALTIME_FLASH),
-			AiCapability.LLM, List.of(QWEN_LLM_PLUS, DEEPSEEK_CHAT),
+			AiCapability.LLM, List.of(QINIU_MAAS_DEEPSEEK_FLASH, QINIU_MAAS_QWEN_PLUS),
 			AiCapability.SCORING, List.of(IFLYTEK_PRONUNCIATION_SCORING),
 			AiCapability.TTS, List.of(QWEN_TTS, ALIYUN_TTS, MINIMAX_TTS),
 			AiCapability.TRANSCRIPTION, List.of(QWEN_ASR, DOUBAO_ASR));
 
 	private static final Map<AiCapability, List<String>> DEFAULT_PROVIDER_ROUTES = Map.of(
 			AiCapability.REALTIME, List.of("qiniu", "qwen"),
-			AiCapability.LLM, List.of("qwen", "deepseek"),
+			AiCapability.LLM, List.of("qiniu-maas", "qwen", "deepseek"),
 			AiCapability.SCORING, List.of("iflytek"),
 			AiCapability.TTS, List.of("qwen", "aliyun", "minimax"),
 			AiCapability.TRANSCRIPTION, List.of("qwen", "doubao"));
@@ -365,13 +367,30 @@ public class AiProviderRegistry {
 				route.add(modelId);
 			}
 		}
+		if (qiniuMaasLlmRouteAvailable(capability, route, registeredProviders)) {
+			return List.copyOf(route);
+		}
 		for (String providerId : DEFAULT_PROVIDER_ROUTES.getOrDefault(capability, List.of())) {
 			addProviderModelsIfAbsent(route, registeredProviders, providerId);
+			if (qiniuMaasLlmRouteAvailable(capability, route, registeredProviders)) {
+				return List.copyOf(route);
+			}
 		}
 		for (AbstractAiProvider provider : registeredProviders.values()) {
 			addProviderModelsIfAbsent(route, registeredProviders, provider.providerId());
 		}
 		return List.copyOf(route);
+	}
+
+	private boolean qiniuMaasLlmRouteAvailable(
+			AiCapability capability,
+			Set<String> route,
+			Map<String, ? extends AbstractAiProvider> registeredProviders) {
+		return capability == AiCapability.LLM
+				&& route.stream()
+						.map(registeredProviders::get)
+						.filter(java.util.Objects::nonNull)
+						.anyMatch(provider -> provider.providerId().equals("qiniu-maas"));
 	}
 
 	private void addProviderModelsIfAbsent(

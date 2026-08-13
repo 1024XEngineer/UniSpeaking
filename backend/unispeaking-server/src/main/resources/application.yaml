@@ -126,6 +126,17 @@ realtime:
     read-timeout: ${QINIU_RTI_READ_TIMEOUT:20s}
     max-response-bytes: ${QINIU_RTI_MAX_RESPONSE_BYTES:1048576}
 
+ai:
+  qiniu-maas:
+    base-url: ${QINIU_MAAS_BASE_URL:https://api.qnaigc.com/v1}
+    api-key: ${QINIU_MAAS_API_KEY:}
+    primary-model: ${QINIU_MAAS_PRIMARY_MODEL:deepseek/deepseek-v4-flash}
+    fallback-model: ${QINIU_MAAS_FALLBACK_MODEL:qwen/qwen3.5-plus}
+    connect-timeout: ${QINIU_MAAS_CONNECT_TIMEOUT:10s}
+    read-timeout: ${QINIU_MAAS_READ_TIMEOUT:90s}
+    max-response-bytes: ${QINIU_MAAS_MAX_RESPONSE_BYTES:2097152}
+    max-output-tokens: ${QINIU_MAAS_MAX_OUTPUT_TOKENS:4096}
+
 gateway:
   enabled: ${GATEWAY_ENABLED:false}
   credential-ttl-seconds: ${GATEWAY_CREDENTIAL_TTL_SECONDS:300}
