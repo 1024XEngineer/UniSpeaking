@@ -54,6 +54,7 @@ class LlmTranslationRoutingTest {
 						sceneId,
 						userId,
 						"title",
+						"label",
 						"background",
 						"assistant",
 						"learner",
