@@ -50,14 +50,14 @@ public class AiProviderRegistry {
 
 	private static final Map<AiCapability, List<String>> DEFAULT_MODEL_ROUTES = Map.of(
 			AiCapability.REALTIME, List.of(QINIU_REALTIME_PLUS, QWEN_REALTIME_FLASH),
-			AiCapability.LLM, List.of(QINIU_MAAS_DEEPSEEK_FLASH, QINIU_MAAS_QWEN_PLUS),
+			AiCapability.LLM, List.of(QINIU_MAAS_QWEN_PLUS, QWEN_LLM_PLUS),
 			AiCapability.SCORING, List.of(IFLYTEK_PRONUNCIATION_SCORING),
 			AiCapability.TTS, List.of(QWEN_TTS, ALIYUN_TTS, MINIMAX_TTS),
 			AiCapability.TRANSCRIPTION, List.of(QWEN_ASR, DOUBAO_ASR));
 
 	private static final Map<AiCapability, List<String>> DEFAULT_PROVIDER_ROUTES = Map.of(
 			AiCapability.REALTIME, List.of("qiniu", "qwen"),
-			AiCapability.LLM, List.of("qiniu-maas", "qwen", "deepseek"),
+			AiCapability.LLM, List.of("qiniu-maas", "qwen"),
 			AiCapability.SCORING, List.of("iflytek"),
 			AiCapability.TTS, List.of("qwen", "aliyun", "minimax"),
 			AiCapability.TRANSCRIPTION, List.of("qwen", "doubao"));
@@ -367,30 +367,20 @@ public class AiProviderRegistry {
 				route.add(modelId);
 			}
 		}
-		if (qiniuMaasLlmRouteAvailable(capability, route, registeredProviders)) {
-			return List.copyOf(route);
-		}
 		for (String providerId : DEFAULT_PROVIDER_ROUTES.getOrDefault(capability, List.of())) {
 			addProviderModelsIfAbsent(route, registeredProviders, providerId);
-			if (qiniuMaasLlmRouteAvailable(capability, route, registeredProviders)) {
-				return List.copyOf(route);
-			}
+		}
+		// The LLM default route is intentionally limited to Qiniu MaaS Qwen and
+		// Alibaba Qwen. Do not append unrelated legacy providers after that route
+		// has been established; explicit configured routes still remain untouched.
+		if (capability == AiCapability.LLM
+				&& route.contains(QINIU_MAAS_QWEN_PLUS)) {
+			return List.copyOf(route);
 		}
 		for (AbstractAiProvider provider : registeredProviders.values()) {
 			addProviderModelsIfAbsent(route, registeredProviders, provider.providerId());
 		}
 		return List.copyOf(route);
-	}
-
-	private boolean qiniuMaasLlmRouteAvailable(
-			AiCapability capability,
-			Set<String> route,
-			Map<String, ? extends AbstractAiProvider> registeredProviders) {
-		return capability == AiCapability.LLM
-				&& route.stream()
-						.map(registeredProviders::get)
-						.filter(java.util.Objects::nonNull)
-						.anyMatch(provider -> provider.providerId().equals("qiniu-maas"));
 	}
 
 	private void addProviderModelsIfAbsent(

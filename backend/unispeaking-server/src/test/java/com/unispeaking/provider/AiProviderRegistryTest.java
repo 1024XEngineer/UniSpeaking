@@ -49,7 +49,7 @@ class AiProviderRegistryTest {
 				AiProviderRegistry.QINIU_REALTIME_PLUS,
 				registry.defaultModel(AiCapability.REALTIME));
 		assertEquals(
-				AiProviderRegistry.QINIU_MAAS_DEEPSEEK_FLASH,
+				AiProviderRegistry.QINIU_MAAS_QWEN_PLUS,
 				registry.defaultModel(AiCapability.LLM));
 		assertSame(
 				qiniu,
@@ -101,19 +101,18 @@ class AiProviderRegistryTest {
 	}
 
 	@Test
-	void failsOverBetweenQiniuMaasModelsWithoutUsingLegacyProviders() {
-		FailingQiniuMaasLlmProvider primary = new FailingQiniuMaasLlmProvider();
-		StubQiniuMaasLlmProvider fallback = new StubQiniuMaasLlmProvider(
+	void failsOverFromQiniuQwenToAlibabaQwen() {
+		FailingQiniuMaasLlmProvider primary = new FailingQiniuMaasLlmProvider(
 				AiProviderRegistry.QINIU_MAAS_QWEN_PLUS);
-		StubQwenLlmProvider legacyQwen = new StubQwenLlmProvider();
+		StubQwenLlmProvider alibabaQwen = new StubQwenLlmProvider();
 		StubDeepSeekLlmProvider legacyDeepSeek = new StubDeepSeekLlmProvider();
 		AiProviderRegistry registry = registry(
-				List.of(primary, fallback, legacyQwen, legacyDeepSeek),
+				List.of(primary, alibabaQwen, legacyDeepSeek),
 				Map.of(
 						AiCapability.LLM,
 						List.of(
-								AiProviderRegistry.QINIU_MAAS_DEEPSEEK_FLASH,
-								AiProviderRegistry.QINIU_MAAS_QWEN_PLUS)));
+								AiProviderRegistry.QINIU_MAAS_QWEN_PLUS,
+								AiProviderRegistry.QWEN_LLM_PLUS)));
 
 		Logger logger = (Logger) LoggerFactory.getLogger(AiProviderRegistry.class);
 		ListAppender<ILoggingEvent> appender = new ListAppender<>();
@@ -127,8 +126,8 @@ class AiProviderRegistryTest {
 			logger.detachAppender(appender);
 		}
 
-		assertEquals("qiniu-maas", response);
-		assertEquals(0, legacyQwen.calls);
+		assertEquals("qwen", response);
+		assertEquals(1, alibabaQwen.calls);
 		assertEquals(0, legacyDeepSeek.calls);
 		String logs = appender.list.stream()
 				.map(ILoggingEvent::getFormattedMessage)
@@ -136,7 +135,7 @@ class AiProviderRegistryTest {
 		assertTrue(logs.contains("AI provider attempt capability=LLM"));
 		assertTrue(logs.contains("AI provider failover capability=LLM"));
 		assertTrue(logs.contains("durationMs="));
-		assertTrue(logs.contains("nextModel=qwen/qwen3.5-plus"));
+		assertTrue(logs.contains("nextModel=qwen3.5-plus"));
 	}
 
 	@Test
@@ -165,7 +164,7 @@ class AiProviderRegistryTest {
 				AiProviderRegistry.QINIU_REALTIME_PLUS,
 				registry.defaultModel(AiCapability.REALTIME));
 		assertEquals(
-				AiProviderRegistry.QINIU_MAAS_DEEPSEEK_FLASH,
+				AiProviderRegistry.QINIU_MAAS_QWEN_PLUS,
 				registry.defaultModel(AiCapability.LLM));
 		assertEquals(
 				StubTranscriptionProvider.MODEL_ID,
@@ -178,8 +177,8 @@ class AiProviderRegistryTest {
 				registry.defaultModel(AiCapability.SCORING));
 		assertEquals(
 				List.of(
-						AiProviderRegistry.QINIU_MAAS_DEEPSEEK_FLASH,
-						AiProviderRegistry.QINIU_MAAS_QWEN_PLUS),
+						AiProviderRegistry.QINIU_MAAS_QWEN_PLUS,
+						AiProviderRegistry.QWEN_LLM_PLUS),
 				registry.route(AiCapability.LLM));
 	}
 
@@ -380,8 +379,8 @@ class AiProviderRegistryTest {
 
 	private static final class FailingQiniuMaasLlmProvider extends LlmProvider {
 
-		private FailingQiniuMaasLlmProvider() {
-			super("qiniu-maas", Set.of(AiProviderRegistry.QINIU_MAAS_DEEPSEEK_FLASH));
+		private FailingQiniuMaasLlmProvider(String model) {
+			super("qiniu-maas", Set.of(model));
 		}
 
 		@Override
