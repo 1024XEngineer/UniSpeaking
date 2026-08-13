@@ -3,6 +3,10 @@ import type {
   LearningExpression,
   SceneLearningRecord,
 } from '@/data/learningAssets';
+import {
+  sceneCategoryForLabel,
+  type SceneLabel,
+} from '@/data/sceneCategories';
 import type { ApiRequestOptions } from '@/infrastructure/http/ApiClient';
 
 import type { GeneratedScene, LearningContentItem } from './SceneService';
@@ -14,6 +18,7 @@ type ApiRequester = {
 type LearningAssetSummary = {
   sceneId: string;
   title: string;
+  label: SceneLabel;
   latestSessionId: string | null;
   latestScore: number | null;
   latestPracticedAt: string | null;
@@ -40,6 +45,7 @@ type DialogueReport = {
 type LearningAssetDetail = {
   sceneId: string;
   title: string;
+  label: SceneLabel;
   aiRole: string;
   background: string;
   userRole: string;
@@ -131,7 +137,7 @@ export class LearningAssetService {
       date: displayDate(summary.latestPracticedAt ?? summary.createdAt),
       status: summary.latestSessionId ? '已完成' : '待练习',
       score: summary.latestScore,
-      category: 'other',
+      category: sceneCategoryForLabel(summary.label),
       practiceCount: summary.practiceCount,
       expressions: [],
       conversation: [],
@@ -147,7 +153,7 @@ export class LearningAssetService {
       date: displayDate(latestHistory?.createdAt),
       status: value.latestSessionId ? '已完成' : '待练习',
       score: value.latestReport?.finalScore ?? null,
-      category: 'other',
+      category: sceneCategoryForLabel(value.label),
       practiceCount: value.reportHistory.length,
       expressions: [
         ...mapExpressions(value.wordList, '单词'),
@@ -163,6 +169,7 @@ export class LearningAssetService {
     return {
       sceneId: value.sceneId,
       title: value.title,
+      label: value.label,
       background: value.background,
       aiRole: value.aiRole,
       userRole: value.userRole,

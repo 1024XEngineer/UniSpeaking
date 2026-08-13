@@ -1286,6 +1286,10 @@ function SceneCategoryTag({ category = "other", subtle = true }) {
   return <span className="scene-category-tag" style={{ backgroundColor, color }}>{palette.label}</span>;
 }
 
+function sceneCategoryForLabel(label) {
+  return Object.entries(sceneCategories).find(([, value]) => value.label === label)?.[0] || "other";
+}
+
 function Scenes({ onStartTraining, onIelts, onInterview }) {
   const [prompt, setPrompt] = useState("");
   const promptRef = useRef(null);
@@ -1404,7 +1408,7 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
           </div>
         </section>
       </div>
-      {preview && <Modal onClose={() => { previewSceneIdRef.current = ""; setPreview(null); setPreviewDisplay(null); }}><p className="eyebrow">场景已准备好</p><h2>{previewDisplay?.title || (chineseCharacterPattern.test(preview.title || "") ? compactSceneText(preview.title, 18) : "正在整理场景…")}</h2><p className="modal-lead">确认场景信息，然后开始学习。</p><dl className="scene-summary"><div><dt>场景简介</dt><dd>{previewDisplay?.background || (chineseCharacterPattern.test(preview.background || "") ? compactSceneText(preview.background, 58) : "正在整理中文摘要…" )}</dd></div><div><dt>AI 扮演</dt><dd>{previewDisplay?.aiRole || (chineseCharacterPattern.test(preview.aiRole || "") ? compactSceneText(preview.aiRole, 22) : "正在整理…" )}</dd></div><div><dt>你将扮演</dt><dd>{previewDisplay?.userRole || (chineseCharacterPattern.test(preview.userRole || "") ? compactSceneText(preview.userRole, 22) : "正在整理…" )}</dd></div><div><dt>练习重点</dt><dd>{previewDisplay?.learningGoal || (chineseCharacterPattern.test(preview.learningGoal || "") ? compactSceneText(preview.learningGoal, 42) : "正在整理中文摘要…" )}</dd></div><div><dt>预计用时</dt><dd>{preview.estimatedMinutes} 分钟</dd></div></dl><div className="modal-actions"><Button variant="secondary" disabled={startingTraining} onClick={() => { previewSceneIdRef.current = ""; setPreview(null); setPreviewDisplay(null); }}>返回修改</Button><Button disabled={startingTraining} onClick={() => void startGeneratedTraining()} icon={<ArrowRight />}>{startingTraining ? "正在进入" : "确认进入"}</Button></div></Modal>}
+      {preview && <Modal onClose={() => { previewSceneIdRef.current = ""; setPreview(null); setPreviewDisplay(null); }}><p className="eyebrow">场景已准备好</p><h2>{previewDisplay?.title || (chineseCharacterPattern.test(preview.title || "") ? compactSceneText(preview.title, 18) : "正在整理场景…")}</h2><SceneCategoryTag category={sceneCategoryForLabel(preview.label)} /><p className="modal-lead">确认场景信息，然后开始学习。</p><dl className="scene-summary"><div><dt>场景简介</dt><dd>{previewDisplay?.background || (chineseCharacterPattern.test(preview.background || "") ? compactSceneText(preview.background, 58) : "正在整理中文摘要…" )}</dd></div><div><dt>AI 扮演</dt><dd>{previewDisplay?.aiRole || (chineseCharacterPattern.test(preview.aiRole || "") ? compactSceneText(preview.aiRole, 22) : "正在整理…" )}</dd></div><div><dt>你将扮演</dt><dd>{previewDisplay?.userRole || (chineseCharacterPattern.test(preview.userRole || "") ? compactSceneText(preview.userRole, 22) : "正在整理…" )}</dd></div><div><dt>练习重点</dt><dd>{previewDisplay?.learningGoal || (chineseCharacterPattern.test(preview.learningGoal || "") ? compactSceneText(preview.learningGoal, 42) : "正在整理中文摘要…" )}</dd></div><div><dt>预计用时</dt><dd>{preview.estimatedMinutes} 分钟</dd></div></dl><div className="modal-actions"><Button variant="secondary" disabled={startingTraining} onClick={() => { previewSceneIdRef.current = ""; setPreview(null); setPreviewDisplay(null); }}>返回修改</Button><Button disabled={startingTraining} onClick={() => void startGeneratedTraining()} icon={<ArrowRight />}>{startingTraining ? "正在进入" : "确认进入"}</Button></div></Modal>}
     </main>
   );
 }
@@ -2291,12 +2295,12 @@ function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRe
       <section className="asset-layout">
         <aside className="asset-list asset-list--history" aria-label="场景训练历史">
           <div className="asset-list__heading"><strong>训练记录</strong><span>{visibleRecords.length} 条</span></div>
-          {visibleRecords.map((record) => <button key={record.sceneId} className={selected?.sceneId === record.sceneId ? "is-active" : ""} onClick={() => setSelectedId(record.sceneId)}><small>{record.latestPracticedAt ? new Date(record.latestPracticedAt).toLocaleDateString("zh-CN") : "尚未练习"} · 普通场景</small><strong>{record.title}</strong><em>{record.wordCount + record.phraseCount + record.sentenceCount} 个语言资产 · {record.practiceCount ? `已练习 ${record.practiceCount} 次` : "待练习"}{record.latestScore !== null && record.latestScore !== undefined && ` · ${Math.round(Number(record.latestScore))}`}</em></button>)}
+          {visibleRecords.map((record) => <button key={record.sceneId} className={selected?.sceneId === record.sceneId ? "is-active" : ""} onClick={() => setSelectedId(record.sceneId)}><small>{record.latestPracticedAt ? new Date(record.latestPracticedAt).toLocaleDateString("zh-CN") : "尚未练习"} · {record.label || "其他"}</small><strong>{record.title}</strong><em>{record.wordCount + record.phraseCount + record.sentenceCount} 个语言资产 · {record.practiceCount ? `已练习 ${record.practiceCount} 次` : "待练习"}{record.latestScore !== null && record.latestScore !== undefined && ` · ${Math.round(Number(record.latestScore))}`}</em></button>)}
           {!visibleRecords.length && <div className="asset-list__empty">{loading ? "正在加载学习资产" : "暂无场景学习资产"}</div>}
         </aside>
         <article className="asset-detail">
           {selected && <header>
-            <div><p className="eyebrow">普通场景</p><h2>{selected.title}</h2><p>{selected.latestPracticedAt ? `${new Date(selected.latestPracticedAt).toLocaleDateString("zh-CN")} · 已完成 ${selected.practiceCount} 次模拟` : "尚未完成模拟对话"}</p></div>
+            <div><p className="eyebrow">{selected.label || "其他"}</p><h2>{selected.title}</h2><p>{selected.latestPracticedAt ? `${new Date(selected.latestPracticedAt).toLocaleDateString("zh-CN")} · 已完成 ${selected.practiceCount} 次模拟` : "尚未完成模拟对话"}</p></div>
             <div className="asset-detail__actions"><AnimatedDeleteButton onClick={() => setDeleteOpen(true)} /><ExpandingCta className="teacher-cta asset-open-button" disabled={!selected.latestSessionId} onClick={() => onOpenRecord(selected.sceneId)}>打开当前学习资产</ExpandingCta></div>
           </header>}
           <div className="asset-items" aria-label="已保存的单词、短语和句子">

@@ -6,6 +6,7 @@ import java.time.OffsetDateTime;
 public record LearningAssetSummary(
 		String sceneId,
 		String title,
+		String label,
 		String background,
 		int wordCount,
 		int phraseCount,

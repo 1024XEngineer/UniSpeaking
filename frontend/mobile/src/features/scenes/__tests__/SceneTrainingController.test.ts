@@ -30,6 +30,7 @@ const sentence: LearningContentItem = {
 const scene: GeneratedScene = {
   sceneId: 'scene-1',
   title: '咖啡店点单',
+  label: '餐饮',
   background: 'A coffee shop.',
   aiRole: 'Barista',
   userRole: 'Customer',

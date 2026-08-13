@@ -13,6 +13,7 @@ function createClient(responses: unknown[]) {
 const generatedScene = {
   sceneId: 'scene/1',
   title: 'Coffee order',
+  label: '餐饮',
   background: 'A busy coffee shop.',
   aiRole: 'Barista',
   userRole: 'Customer',

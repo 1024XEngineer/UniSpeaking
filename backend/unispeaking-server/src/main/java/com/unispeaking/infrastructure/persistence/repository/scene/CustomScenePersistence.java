@@ -67,6 +67,7 @@ public class CustomScenePersistence {
 		entity.setId(definition.sceneId());
 		entity.setUserId(UUID.fromString(definition.userId()));
 		entity.setTitle(definition.title());
+		entity.setLabel(definition.label());
 		entity.setBackground(definition.background());
 		entity.setAiRole(definition.aiRole());
 		entity.setUserRole(definition.userRole());

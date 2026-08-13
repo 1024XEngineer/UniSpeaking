@@ -13,6 +13,7 @@ function createClient(responses: unknown[]) {
 const summary = {
   sceneId: 'scene/airport',
   title: '机场行李托运',
+  label: '出行',
   background: '在机场柜台办理行李托运。',
   wordCount: 1,
   phraseCount: 1,
@@ -27,6 +28,7 @@ const summary = {
 const detail = {
   sceneId: summary.sceneId,
   title: summary.title,
+  label: summary.label,
   background: summary.background,
   aiRole: '航空公司工作人员',
   userRole: '乘客',
@@ -110,6 +112,7 @@ describe('LearningAssetService', () => {
         date: '2026-08-05',
         status: '已完成',
         score: 88,
+        category: 'transit',
         practiceCount: 2,
         expressions: [],
         conversation: [],
@@ -130,6 +133,7 @@ describe('LearningAssetService', () => {
     expect(record).toEqual(
       expect.objectContaining({
         id: 'scene/airport',
+        category: 'transit',
         score: 88,
         practiceCount: 1,
         expressions: [
@@ -167,6 +171,7 @@ describe('LearningAssetService', () => {
     await expect(service.getScene('scene/airport')).resolves.toEqual(
       expect.objectContaining({
         sceneId: 'scene/airport',
+        label: '出行',
         background: '在机场柜台办理行李托运。',
         aiRole: '航空公司工作人员',
         userRole: '乘客',

@@ -47,7 +47,7 @@ import { speedCodeForLabel } from '@/features/auth/preferenceMappings';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
 import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
 import { ApiClient } from '@/infrastructure/http/ApiClient';
-import type { SceneCategory } from '@/data/sceneCategories';
+import { sceneCategoryForLabel } from '@/data/sceneCategories';
 import { useAppModel } from '@/model/AppModel';
 import { useLearningStage } from '@/navigation/learningStage';
 import { forgetSpecialty } from '@/navigation/specialtyMemory';
@@ -753,10 +753,6 @@ function createDefaultTtsPlayer() {
   });
 }
 
-function inferSceneCategory(scene: GeneratedScene): SceneCategory {
-  return recommendations.find((item) => item.title === scene.title)?.category ?? 'other';
-}
-
 function ScenePromptInput({
   value,
   onChangeText,
@@ -987,7 +983,7 @@ export function ScenesHome({
             <Text style={styles.previewEyebrow}>场景已准备好</Text>
             <View style={styles.previewTitleRow}>
               <Text style={styles.previewTitle}>{preview.title}</Text>
-              <SceneCategoryTag category={inferSceneCategory(preview)} />
+              <SceneCategoryTag category={sceneCategoryForLabel(preview.label)} />
             </View>
             <Text style={styles.previewLead}>场景已生成，确认后即可开始练习。</Text>
             <View style={styles.previewSummary}>

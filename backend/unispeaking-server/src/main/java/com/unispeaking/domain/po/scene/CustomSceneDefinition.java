@@ -7,6 +7,7 @@ public record CustomSceneDefinition(
 		String sceneId,
 		String userId,
 		String title,
+		String label,
 		String background,
 		String aiRole,
 		String userRole,

@@ -12,3 +12,13 @@ export const sceneCategories = {
 } as const;
 
 export type SceneCategory = keyof typeof sceneCategories;
+
+export type SceneLabel = (typeof sceneCategories)[SceneCategory]['label'];
+
+const categoryByLabel = Object.fromEntries(
+  Object.entries(sceneCategories).map(([category, value]) => [value.label, category]),
+) as Record<SceneLabel, SceneCategory>;
+
+export function sceneCategoryForLabel(label: string | null | undefined): SceneCategory {
+  return categoryByLabel[label as SceneLabel] ?? 'other';
+}

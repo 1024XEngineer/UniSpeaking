@@ -92,6 +92,7 @@ class CustomSessionServiceImplTest {
 				sceneId,
 				userId,
 				"Ordering",
+				"餐饮",
 				null,
 				null,
 				null,

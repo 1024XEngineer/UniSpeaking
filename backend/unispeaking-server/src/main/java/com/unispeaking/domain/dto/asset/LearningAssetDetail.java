@@ -9,6 +9,7 @@ import java.util.Objects;
 public record LearningAssetDetail(
 		String sceneId,
 		String title,
+		String label,
 		String background,
 		String aiRole,
 		String userRole,

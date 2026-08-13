@@ -47,6 +47,7 @@ jest.mock('@/model/AppModel', () => ({
 const scene: GeneratedScene = {
   sceneId: 'generated-scene-1',
   title: '机场行李托运',
+  label: '出行',
   background: '在机场柜台办理行李托运。',
   aiRole: '航空公司工作人员',
   userRole: '乘客',

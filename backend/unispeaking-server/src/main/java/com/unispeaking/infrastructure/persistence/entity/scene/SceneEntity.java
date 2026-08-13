@@ -23,6 +23,7 @@ public class SceneEntity {
 	@TableField(typeHandler = PostgresUuidTypeHandler.class)
 	private UUID userId;
 	private String title;
+	private String label;
 	private String background;
 	private String aiRole;
 	private String userRole;

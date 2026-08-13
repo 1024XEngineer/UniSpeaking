@@ -452,6 +452,11 @@ class PostgresPersistenceIT {
 		assertEquals("phrase_it1", generated.phraseList().getFirst().contentId());
 		assertEquals("sentence_it1", generated.sentenceList().getFirst().contentId());
 		assertEquals(
+				"住宿",
+				sceneRepository.findCustomDefinitionById(definition.sceneId())
+						.orElseThrow()
+						.label());
+		assertEquals(
 				objectMapper.readTree("{\"minimum_user_turns\":2}"),
 				objectMapper.readTree(sceneRepository
 						.findCustomDefinitionById(definition.sceneId())
@@ -728,6 +733,7 @@ class PostgresPersistenceIT {
 				"custom_it1",
 				"11111111-1111-4111-8111-111111111111",
 				"酒店入住",
+				"住宿",
 				"酒店前台",
 				"前台接待员",
 				"住客",
