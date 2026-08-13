@@ -14,7 +14,7 @@ The repository contains `deploy/env/.env.example`. The working copy also uses
 `deploy/env/.env`, which is ignored by Git.
 
 Set the following variables in `deploy/env/.env` before starting a realtime
-session or using profile avatars:
+session, invoking an LLM, or using profile avatars:
 
 ```properties
 DASHSCOPE_API_KEY=replace-with-your-real-key
@@ -22,6 +22,8 @@ BAILIAN_WORKSPACE_ID=replace-with-your-workspace-id
 BAILIAN_MODEL=qwen3.5-omni-flash-realtime
 QINIU_RTI_API_KEY=replace-with-your-qiniu-rti-api-key
 QINIU_RTI_APP_ID=unispeaking_001
+QINIU_MAAS_API_KEY=replace-with-your-qiniu-maas-api-key
+QINIU_MAAS_BASE_URL=https://api.qnaigc.com/v1
 QINIU_ACCESS_KEY=replace-with-your-access-key
 QINIU_SECRET_KEY=replace-with-your-secret-key
 QINIU_BUCKET=replace-with-your-private-bucket
@@ -176,6 +178,17 @@ realtime:
     read-timeout: ${REALTIME_QWEN_READ_TIMEOUT:20s}
     max-answer-bytes: ${REALTIME_QWEN_MAX_ANSWER_BYTES:1048576}
 
+ai:
+  qiniu-maas:
+    base-url: ${QINIU_MAAS_BASE_URL:https://api.qnaigc.com/v1}
+    api-key: ${QINIU_MAAS_API_KEY:}
+    primary-model: ${QINIU_MAAS_PRIMARY_MODEL:deepseek/deepseek-v4-flash}
+    fallback-model: ${QINIU_MAAS_FALLBACK_MODEL:qwen/qwen3.5-plus}
+    connect-timeout: ${QINIU_MAAS_CONNECT_TIMEOUT:10s}
+    read-timeout: ${QINIU_MAAS_READ_TIMEOUT:90s}
+    max-response-bytes: ${QINIU_MAAS_MAX_RESPONSE_BYTES:2097152}
+    max-output-tokens: ${QINIU_MAAS_MAX_OUTPUT_TOKENS:4096}
+
 profile:
   time-zone: ${PROFILE_TIME_ZONE:Asia/Shanghai}
 
@@ -194,6 +207,23 @@ The default realtime route is:
 ```properties
 AI_PROVIDER_ROUTE_REALTIME=qwen3.5-omni-plus-realtime,qwen3.5-omni-flash-realtime
 ```
+
+The default LLM route stays entirely inside Qiniu MaaS:
+
+```properties
+AI_PROVIDER_ROUTE_LLM=deepseek/deepseek-v4-flash,qwen/qwen3.5-plus
+```
+
+The backend sends OpenAI-compatible `POST /v1/chat/completions` requests. It
+accepts only `https://api.qnaigc.com/v1` and `https://openai.sufy.com/v1` as
+MaaS base URLs. Authentication failures (`401` and `403`) stop the route so a
+bad credential is not hidden; rate limits, server failures, I/O failures, and
+invalid or empty responses may fall back to the second Qiniu MaaS model. The
+legacy Qwen and DeepSeek direct providers remain available only when an operator
+explicitly configures their model IDs in `AI_PROVIDER_ROUTE_LLM`.
+
+Keep `QINIU_MAAS_API_KEY` in the backend environment only. It must not use a
+`VITE_` prefix and must not be written to application logs or persisted data.
 
 For Qiniu RTI, the backend maps the selected UniSpeaking teacher or examiner
 voice to a Qiniu profile voice, validates the model, role, resolved voice, and

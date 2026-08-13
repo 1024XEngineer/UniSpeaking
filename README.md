@@ -112,8 +112,9 @@ Infrastructure（AI、Realtime、数据库、存储和配置）
 ### AI 与语音
 
 - 七牛 RTI Realtime（默认）
-- Qwen Realtime（后备）/ LLM / ASR / TTS
-- DeepSeek LLM
+- 七牛 MaaS LLM（DeepSeek V4 Flash 主模型，Qwen 3.5 Plus 后备）
+- Qwen Realtime（后备）/ ASR / TTS
+- Qwen / DeepSeek 官方直连 LLM（显式回滚用）
 - Doubao ASR
 - MiniMax / CosyVoice TTS
 - 科大讯飞发音评分
@@ -122,6 +123,9 @@ Infrastructure（AI、Realtime、数据库、存储和配置）
 Realtime 默认使用七牛 RTI 的 `qwen3.5-omni-plus-realtime`、`default_assistant`、
 `Tina` 和 `platform_rtc`；七牛出现可回退错误时切换到百炼 Flash。七牛长期 API Key
 只保存在后端，创建 Session 返回的短期媒体 token 仅用于服务端 SDP 协商。
+LLM 默认通过七牛 MaaS 调用 `deepseek/deepseek-v4-flash`，可回退错误时在
+七牛 MaaS 内切换到 `qwen/qwen3.5-plus`；默认路由不会调用百炼或 DeepSeek
+官方直连 LLM。`QINIU_MAAS_API_KEY` 只能配置在后端环境中。
 
 ## 本地启动
 

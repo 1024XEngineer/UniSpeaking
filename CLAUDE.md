@@ -116,11 +116,15 @@ public interface AiProvider {
 ```
 
 职责：定义供应商无关的 AI 能力。业务代码只依赖 Provider 接口或 Registry；七牛 RTI、
-Qwen、Doubao、DeepSeek、MiniMax、讯飞等供应商差异全部留在 `infrastructure`。
+七牛 MaaS、Qwen、Doubao、DeepSeek、MiniMax、讯飞等供应商差异全部留在
+`infrastructure`。
 Realtime 默认路由为七牛 RTI `qwen3.5-omni-plus-realtime`，百炼
 `qwen3.5-omni-flash-realtime` 仅作为可回退错误的后备。七牛控制面 Session 的创建、
 短期媒体凭证使用和 Stop 均由 Realtime Provider/Component 承担；短期凭证不得返回客户端
 或持久化。
+LLM 默认路由仅包含七牛 MaaS `deepseek/deepseek-v4-flash` 和
+`qwen/qwen3.5-plus`；百炼与 DeepSeek 官方直连 Provider 仅保留为显式回滚能力。
+七牛 MaaS API Key 不得返回客户端、持久化或写入日志。
 
 ## 3. 当前实现矩阵
 

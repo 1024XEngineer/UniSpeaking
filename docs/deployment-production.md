@@ -33,6 +33,24 @@ nano deploy/env/.env
 Replace every credential placeholder. Keep `DATABASE_URL` pointed at the
 Compose service name `postgres`, not `localhost`.
 
+### Configure Qiniu MaaS LLM
+
+Set the permanent MaaS credential and keep the default two-model route in
+`deploy/env/.env`:
+
+```dotenv
+QINIU_MAAS_BASE_URL=https://api.qnaigc.com/v1
+QINIU_MAAS_API_KEY=replace-with-qiniu-maas-api-key
+QINIU_MAAS_PRIMARY_MODEL=deepseek/deepseek-v4-flash
+QINIU_MAAS_FALLBACK_MODEL=qwen/qwen3.5-plus
+AI_PROVIDER_ROUTE_LLM=deepseek/deepseek-v4-flash,qwen/qwen3.5-plus
+```
+
+The alternative trusted base URL is `https://openai.sufy.com/v1`. Do not put
+the MaaS API key in a `VITE_` variable, command output, image build argument, or
+committed file. Keep the existing DashScope and DeepSeek credentials only when
+their direct providers are needed for an explicit rollback.
+
 ### Enable Umami Cloud for the migrated Web domain
 
 The Web tracker is disabled by default. For the current migrated frontend at
@@ -153,6 +171,19 @@ docker compose --env-file deploy/env/.env \
 
 Visit `https://unispeaking.cn` and verify registration, login, microphone
 permission, WebSocket sessions, IELTS topics, and audio features.
+
+Then verify the LLM migration with one request from each business path:
+
+- translate a FreeChat subtitle;
+- generate and translate a custom scene;
+- generate IELTS text evaluation/report content while confirming that iFlytek
+  pronunciation scoring is unchanged;
+- prepare interview material, advance topics, and generate the report.
+
+Confirm that Qiniu MaaS records the requests, application logs identify
+`capability=LLM provider=qiniu-maas`, and the direct DashScope/DeepSeek accounts
+do not record new LLM calls. Realtime voice sessions, ASR, TTS, and iFlytek
+scoring must continue to use their existing routes.
 
 ## Backups
 
