@@ -92,6 +92,39 @@ const linesToList = (value) => String(value || "")
   .map((line) => line.trim())
   .filter(Boolean);
 
+const materialList = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean).map((item) => String(item).trim()).filter(Boolean);
+  if (typeof value === "string") return linesToList(value.replaceAll("；", "\n").replaceAll(";", "\n"));
+  return [];
+};
+
+const normalizeInterviewMaterial = (value) => {
+  const raw = value?.material && typeof value.material === "object" ? value.material : value;
+  if (!raw || typeof raw !== "object") return null;
+  const material = {
+    jobTitle: typeof raw.jobTitle === "string" ? raw.jobTitle.trim() : "",
+    responsibilities: materialList(raw.responsibilities),
+    qualificationRequirements: materialList(raw.qualificationRequirements),
+    requiredSkills: materialList(raw.requiredSkills),
+    otherJobInformation: typeof raw.otherJobInformation === "string" ? raw.otherJobInformation.trim() : "",
+    education: materialList(raw.education),
+    workExperiences: materialList(raw.workExperiences),
+    projectExperiences: materialList(raw.projectExperiences),
+    skillsAndAbilities: materialList(raw.skillsAndAbilities),
+    interviewableExperienceClues: materialList(raw.interviewableExperienceClues),
+    finalText: typeof raw.finalText === "string" ? raw.finalText.trim() : "",
+  };
+  if (!material.responsibilities.length || !material.qualificationRequirements.length) return null;
+  if (!material.finalText) {
+    material.finalText = [
+      material.jobTitle,
+      material.responsibilities.slice(0, 3).join("、"),
+      material.qualificationRequirements.slice(0, 3).join("、"),
+    ].filter(Boolean).join(" · ");
+  }
+  return material;
+};
+
 function AutoGrowTextarea({ value, invalid = false, onChange, ...rest }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -282,8 +315,8 @@ function InterviewHome({ onNavigate, onBack }) {
     setPreparing(true);
     try {
       const result = await prepareInterviewMaterials(formData);
-      const material = result?.material || result;
-      if (!material || typeof material !== "object") {
+      const material = normalizeInterviewMaterial(result);
+      if (!material) {
         throw new Error("材料整理响应缺少结构化内容");
       }
       setDraft(material);
