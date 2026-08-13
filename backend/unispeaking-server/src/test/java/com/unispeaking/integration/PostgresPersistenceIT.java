@@ -199,7 +199,7 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(List.of("1", "2", "9", "10", "11", "12", "13", "14", "15"), migrationVersions);
+		assertEquals(List.of("1"), migrationVersions);
 		assertEquals(303, topicCount);
 		assertEquals(1771, questionCount);
 		assertEquals(0, questionLikeTitleCount);

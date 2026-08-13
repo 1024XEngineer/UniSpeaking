@@ -1,6 +1,7 @@
 -- Flyway V1: consolidated UniSpeaking database baseline
 --
--- Squashed from the former migrations V1 through V10. This baseline creates
+-- Squashed final schema baseline. This file contains the complete current
+-- schema, including changes formerly delivered by V1-V15.
 -- the complete schema, indexes, comments and IELTS question-bank seed data.
 -- It must be applied to an empty PostgreSQL database.
 
@@ -4157,3 +4158,104 @@ COMMENT ON COLUMN session_message.audio_url IS
 CREATE INDEX IF NOT EXISTS idx_session_message_audio_url
     ON session_message (session_id, message_no)
     WHERE audio_url IS NOT NULL;
+
+-- Final schema additions formerly delivered by V2 and V9-V15.
+ALTER TABLE practice_session DROP CONSTRAINT IF EXISTS practice_session_scene_type_check;
+ALTER TABLE practice_session ADD CONSTRAINT practice_session_scene_type_check
+    CHECK (scene_type IN ('FREE_CHAT', 'CUSTOM_SCENE', 'IELTS_SCENE', 'INTERVIEW_SCENE'));
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS app_users (
+    id UUID PRIMARY KEY, email VARCHAR(320) NOT NULL UNIQUE,
+    password_hash VARCHAR(1000) NOT NULL, created_at TIMESTAMPTZ NOT NULL,
+    email_verified_at TIMESTAMPTZ
+);
+INSERT INTO app_users (id, email, password_hash, created_at, email_verified_at)
+SELECT id, username, password_hash, created_at, email_verified_at FROM "user"
+WHERE position('@' IN username) > 1
+ON CONFLICT (id) DO UPDATE SET email = excluded.email, password_hash = excluded.password_hash,
+    email_verified_at = coalesce(app_users.email_verified_at, excluded.email_verified_at);
+CREATE TABLE IF NOT EXISTS auth_email_challenges (
+    id UUID PRIMARY KEY, email VARCHAR(320) NOT NULL, code_digest BYTEA NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL, consumed_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_email_challenges_email_created ON auth_email_challenges (email, created_at DESC);
+CREATE TABLE IF NOT EXISTS user_sessions (
+    token_digest VARCHAR(128) PRIMARY KEY, user_id UUID NOT NULL REFERENCES app_users(id),
+    created_at TIMESTAMPTZ NOT NULL, last_seen_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
+CREATE TABLE IF NOT EXISTS user_entitlements (
+    user_id UUID PRIMARY KEY REFERENCES app_users(id), plan_code VARCHAR(64) NOT NULL DEFAULT 'free',
+    plan_name VARCHAR(128) NOT NULL DEFAULT 'Free', quota_date DATE NOT NULL DEFAULT current_date,
+    quota_seconds NUMERIC(12,3) NOT NULL DEFAULT 600, used_seconds NUMERIC(12,3) NOT NULL DEFAULT 0,
+    status VARCHAR(32) NOT NULL DEFAULT 'active', updated_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
+);
+INSERT INTO user_entitlements (user_id, plan_code, plan_name, quota_date, quota_seconds, used_seconds, status, updated_at)
+SELECT id, 'free', 'Free', current_date, 600, 0, 'active', current_timestamp FROM app_users
+ON CONFLICT (user_id) DO NOTHING;
+CREATE TABLE IF NOT EXISTS admin_accounts (
+    id UUID PRIMARY KEY, login VARCHAR(320) NOT NULL UNIQUE, password_hash VARCHAR(1000) NOT NULL,
+    role VARCHAR(64) NOT NULL, enabled BOOLEAN NOT NULL, created_at TIMESTAMPTZ NOT NULL
+);
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    token_hash VARCHAR(128) PRIMARY KEY, admin_id UUID NOT NULL REFERENCES admin_accounts(id),
+    created_at TIMESTAMPTZ NOT NULL, last_seen_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL, revoked BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_admin_sessions_admin_id ON admin_sessions(admin_id);
+ALTER TABLE practice_session
+    ADD COLUMN IF NOT EXISTS provider_session_id VARCHAR(128),
+    ADD COLUMN IF NOT EXISTS provider_type VARCHAR(32),
+    ADD COLUMN IF NOT EXISTS provider_model VARCHAR(128),
+    ADD COLUMN IF NOT EXISTS provider_trace_id VARCHAR(128);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_session_provider_session_id
+    ON practice_session (provider_session_id) WHERE provider_session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_practice_session_provider_trace_id
+    ON practice_session (provider_trace_id) WHERE provider_trace_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS official_usage_records (
+    request_id VARCHAR(128) PRIMARY KEY, task_uuid VARCHAR(128) NOT NULL,
+    started_at_epoch_ms BIGINT NOT NULL, duration_ms BIGINT NOT NULL, status_code VARCHAR(64) NOT NULL,
+    model VARCHAR(128) NOT NULL, workspace_id VARCHAR(128) NOT NULL, apikey_id VARCHAR(128) NOT NULL,
+    protocol VARCHAR(16) NOT NULL, requests BIGINT NOT NULL, total_tokens BIGINT NOT NULL,
+    input_tokens BIGINT NOT NULL, output_tokens BIGINT NOT NULL, input_text_tokens BIGINT NOT NULL,
+    input_audio_tokens BIGINT NOT NULL, output_text_tokens BIGINT NOT NULL, output_audio_tokens BIGINT NOT NULL,
+    imported_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
+);
+CREATE INDEX IF NOT EXISTS idx_official_usage_records_task_uuid ON official_usage_records (task_uuid, started_at_epoch_ms DESC);
+ALTER TABLE scene ADD COLUMN IF NOT EXISTS label VARCHAR(16);
+UPDATE scene SET label = '其他' WHERE label IS NULL;
+ALTER TABLE scene ALTER COLUMN label SET NOT NULL;
+ALTER TABLE scene DROP CONSTRAINT IF EXISTS chk_scene_label;
+ALTER TABLE scene ADD CONSTRAINT chk_scene_label CHECK (label IN ('餐饮', '购物', '出行', '住宿', '健康', '职场', '社交', '学习', '服务', '其他'));
+DROP TABLE IF EXISTS interview_report;
+DROP TABLE IF EXISTS interview_question;
+DROP TABLE IF EXISTS interview;
+CREATE TABLE IF NOT EXISTS interview_scene (
+    scene_id VARCHAR(64) PRIMARY KEY, user_id UUID NOT NULL, confirmed_material JSONB NOT NULL,
+    final_text TEXT NOT NULL, interview_context JSONB NOT NULL, difficulty VARCHAR(16) NOT NULL,
+    scene_prompt TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMPTZ,
+    CONSTRAINT interview_scene_id_check CHECK (scene_id ~ '^interview_[A-Za-z0-9]+$'),
+    CONSTRAINT interview_scene_difficulty_check CHECK (difficulty IN ('EASY','STANDARD','HARD')),
+    CONSTRAINT interview_scene_material_check CHECK (JSONB_TYPEOF(confirmed_material) = 'object'),
+    CONSTRAINT interview_scene_context_check CHECK (JSONB_TYPEOF(interview_context) = 'object'),
+    CONSTRAINT interview_scene_final_text_check CHECK (BTRIM(final_text) <> ''),
+    CONSTRAINT interview_scene_prompt_check CHECK (BTRIM(scene_prompt) <> '')
+);
+CREATE INDEX IF NOT EXISTS idx_interview_scene_user_updated ON interview_scene (user_id, updated_at DESC) WHERE deleted_at IS NULL;
+CREATE TABLE IF NOT EXISTS interview_report (
+    session_id VARCHAR(64) PRIMARY KEY, scene_id VARCHAR(64) NOT NULL, user_id UUID NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'PROCESSING', summary TEXT, overall_score NUMERIC(5,2),
+    fluency_score NUMERIC(5,2), fluency_evaluation TEXT, fluency_advice TEXT,
+    pronunciation_intelligibility_score NUMERIC(5,2), pronunciation_intelligibility_evaluation TEXT, pronunciation_intelligibility_advice TEXT,
+    logic_coherence_score NUMERIC(5,2), logic_coherence_evaluation TEXT, logic_coherence_advice TEXT,
+    grammar_control_score NUMERIC(5,2), grammar_control_evaluation TEXT, grammar_control_advice TEXT,
+    vocabulary_expression_score NUMERIC(5,2), vocabulary_expression_evaluation TEXT, vocabulary_expression_advice TEXT,
+    retry_count SMALLINT NOT NULL DEFAULT 0, failure_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT interview_report_status_check CHECK (status IN ('PROCESSING','COMPLETED','FAILED')),
+    CONSTRAINT interview_report_retry_check CHECK (retry_count >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_interview_report_status_updated ON interview_report (updated_at) WHERE status = 'PROCESSING';
+CREATE INDEX IF NOT EXISTS idx_interview_report_scene_created ON interview_report (scene_id, created_at DESC);

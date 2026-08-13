@@ -345,15 +345,8 @@ function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
   );
 }
 
-function ScenePlaybackToggle({ label = "播放发音" }) {
-  const [playing, setPlaying] = useState(false);
-  return (
-    <label className="scene-playback-toggle" title={playing ? "暂停发音" : label}>
-      <input type="checkbox" checked={playing} onChange={(event) => setPlaying(event.target.checked)} />
-      <Play className="play" weight="fill" />
-      <Pause className="pause" weight="fill" />
-    </label>
-  );
+function ScenePlaybackToggle({ sceneId, text, label = "播放发音" }) {
+  return <PronunciationAudioButton sceneId={sceneId} text={text} label={label} />;
 }
 
 function MicrophoneToggle({ label = "麦克风", className, onActivate }) {
@@ -2359,7 +2352,7 @@ function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRe
             <div className="asset-detail__actions"><AnimatedDeleteButton onClick={() => setDeleteOpen(true)} /><ExpandingCta className="teacher-cta asset-open-button" disabled={!selected.latestSessionId} onClick={() => onOpenRecord(selected.sceneId)}>打开当前学习资产</ExpandingCta></div>
           </header>}
           <div className="asset-items" aria-label="已保存的单词、短语和句子">
-            {items.map((item) => <div key={`${item.type}-${item.contentId}`}><span className="tag">{item.type}</span><p><strong>{item.englishText}</strong><small>{item.chineseText}</small></p><ScenePlaybackToggle label={`播放 ${item.englishText} 的发音`} /></div>)}
+            {items.map((item) => <div key={`${item.type}-${item.contentId}`}><span className="tag">{item.type}</span><p><strong>{item.englishText}</strong><small>{item.chineseText}</small></p><ScenePlaybackToggle sceneId={selected.sceneId} text={item.englishText} label={`播放 ${item.englishText} 的发音`} /></div>)}
             {selected && !items.length && <div className="asset-list__empty">正在读取该场景的语言资产</div>}
           </div>
         </article>
