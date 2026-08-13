@@ -67,15 +67,20 @@ describe('InterviewService', () => {
     expect(client.request).not.toHaveBeenCalled();
   });
 
-  it('rejects invalid material and scene responses', async () => {
-    await expect(new InterviewService(createClient([{ material: { ...material, finalText: '' } }])).prepareMaterials({ jobDescriptionText: 'JD' })).rejects.toThrow('面试材料响应不完整');
+  it('derives final text when the server omits it', async () => {
+    const result = await new InterviewService(createClient([{ material: { ...material, finalText: '' } }])).prepareMaterials({ jobDescriptionText: 'JD' });
+    expect(result.material.finalText).toContain('Own product strategy');
+  });
+
+  it('rejects invalid scene responses', async () => {
     await expect(new InterviewService(createClient([{ sceneId: 'scene-1' }])).generateScene(material, 'STANDARD')).rejects.toThrow('面试场景响应不完整');
   });
 
-  it('normalizes harmless model shape drift instead of making the user retry', async () => {
-    const response = { material: { ...material, responsibilities: 'Build APIs\nReview code', requiredSkills: null } };
-    const result = await new InterviewService(createClient([response])).prepareMaterials({ jobDescriptionText: 'JD' });
-    expect(result.material.responsibilities).toEqual(['Build APIs', 'Review code']);
-    expect(result.material.requiredSkills).toEqual([]);
-  });
+	it('normalizes harmless model shape drift instead of making the user retry', async () => {
+		const response = { material: { ...material, responsibilities: 'Build APIs\nReview code', requiredSkills: null, finalText: '' } };
+		const result = await new InterviewService(createClient([response])).prepareMaterials({ jobDescriptionText: 'JD' });
+		expect(result.material.responsibilities).toEqual(['Build APIs', 'Review code']);
+		expect(result.material.requiredSkills).toEqual([]);
+		expect(result.material.finalText).toContain('Build APIs');
+	});
 });
