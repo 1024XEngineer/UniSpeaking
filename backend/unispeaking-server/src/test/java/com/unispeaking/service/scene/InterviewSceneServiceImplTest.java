@@ -22,6 +22,8 @@ import com.unispeaking.component.document.MaterialDesensitizer;
 import com.unispeaking.component.document.MaterialTextExtraction;
 import com.unispeaking.component.policy.DailyQuotaPolicy;
 import com.unispeaking.component.recording.RecordingStore;
+import com.unispeaking.component.scene.InterviewMaterialFallbackExtractor;
+import com.unispeaking.component.scene.InterviewMaterialResponseNormalizer;
 import com.unispeaking.component.statemachine.InterviewTopicStateMachine;
 import com.unispeaking.domain.dto.asset.InterviewAssetItem;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
@@ -74,6 +76,10 @@ class InterviewSceneServiceImplTest {
 	private final InterviewReportRepository interviewReportRepository =
 			mock(InterviewReportRepository.class);
 	private final OcrProvider ocrProvider = mock(OcrProvider.class);
+	private final InterviewMaterialResponseNormalizer materialResponseNormalizer =
+			new InterviewMaterialResponseNormalizer(objectMapper);
+	private final InterviewMaterialFallbackExtractor materialFallbackExtractor =
+			new InterviewMaterialFallbackExtractor();
 	private final InterviewSceneServiceImpl service = new InterviewSceneServiceImpl(
 			authService,
 			repository,
@@ -87,7 +93,9 @@ class InterviewSceneServiceImplTest {
 			interviewRecordingStore,
 			interviewReportRepository,
 			ocrProvider,
-			objectMapper);
+			objectMapper,
+			materialResponseNormalizer,
+			materialFallbackExtractor);
 
 	@Test
 	void generatePersistsSceneAndReturnsSceneIdAndPrompt() {
@@ -264,10 +272,28 @@ class InterviewSceneServiceImplTest {
 				() -> service.prepareMaterials(
 						new InterviewMaterialPreparationInput(null, null, "JD 文本", null)));
 
-		assertEquals(
-				InterviewErrorCode.INTERVIEW_MATERIAL_LLM_RESPONSE_INVALID,
-				exception.code());
+		assertEquals(InterviewErrorCode.INTERVIEW_MATERIAL_SOURCE_INSUFFICIENT, exception.code());
 		verify(providerRegistry, times(2)).executeLlmTaskRouted(anyString(), isNull());
+	}
+
+	@Test
+	void preparesMaterialFromFallbackWhenLlmResponsesAreInvalid() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		when(materialTextExtraction.extract(any()))
+				.thenReturn(new MaterialTextExtraction.MaterialTextResult(
+						"职位：后端工程师\n岗位职责：\n负责服务开发\n任职要求：\n熟悉 Java",
+						null,
+						true));
+		when(materialDesensitizer.desensitize(anyString()))
+				.thenAnswer(invocation -> invocation.getArgument(0));
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+				.thenReturn(completed(invalidMaterial()), completed(invalidMaterial()));
+
+		InterviewMaterial material = service.prepareMaterials(
+				new InterviewMaterialPreparationInput(null, null, "JD", null)).material();
+
+		assertEquals("后端工程师", material.jobTitle());
+		assertEquals("后端工程师 · 负责服务开发 · 熟悉 Java", material.finalText());
 	}
 
 	@Test
