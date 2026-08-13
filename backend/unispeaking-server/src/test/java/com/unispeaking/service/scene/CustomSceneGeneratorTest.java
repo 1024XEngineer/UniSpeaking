@@ -9,6 +9,9 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.component.scene.CustomSceneGenerator;
@@ -18,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -76,19 +80,38 @@ class CustomSceneGeneratorTest {
 	@Test
 	void retriesWhenFirstResponseHasTooFewWords() {
 		AiProviderRegistry registry = mock(AiProviderRegistry.class);
+		String rejectedResponse = validResponse(3);
 		when(registry.executeLlmTask(anyString(), isNull()))
-				.thenReturn(validResponse(3), validResponse(5));
+				.thenReturn(rejectedResponse, validResponse(5));
 		var service = new CustomSceneGenerator(registry, objectMapper);
+		Logger logger = (Logger) LoggerFactory.getLogger(CustomSceneGenerator.class);
+		ListAppender<ILoggingEvent> appender = new ListAppender<>();
+		appender.start();
+		logger.addAppender(appender);
 
-		var scene = service.generate(
-				"custom_retry",
-				"user-1",
-				"餐厅处理点餐错误",
-				null,
-				new UserProfile("user-1", "C", "Katerina", "zh-CN", ""));
+		com.unispeaking.domain.po.scene.CustomSceneDefinition scene;
+		try {
+			scene = service.generate(
+					"custom_retry",
+					"user-1",
+					"餐厅处理点餐错误",
+					null,
+					new UserProfile("user-1", "C", "Katerina", "zh-CN", ""));
+		}
+		finally {
+			logger.detachAppender(appender);
+		}
 
 		assertEquals(5, scene.wordList().size());
 		verify(registry, times(2)).executeLlmTask(anyString(), isNull());
+		String logs = appender.list.stream()
+				.map(ILoggingEvent::getFormattedMessage)
+				.collect(java.util.stream.Collectors.joining("\n"));
+		assertTrue(logs.contains("response rejected sceneId=custom_retry attempt=1"));
+		assertTrue(logs.contains("llmMs="));
+		assertTrue(logs.contains("parseMs="));
+		assertTrue(logs.contains("responseChars=" + rejectedResponse.length()));
+		assertTrue(!logs.contains(rejectedResponse));
 	}
 
 	@Test

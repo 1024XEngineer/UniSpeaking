@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.unispeaking.domain.vo.provider.AiCapability;
 import com.unispeaking.domain.vo.provider.AiModelDefinition;
 import com.unispeaking.domain.vo.provider.ProviderType;
@@ -13,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 class AiProviderRegistryTest {
 
@@ -111,11 +115,28 @@ class AiProviderRegistryTest {
 								AiProviderRegistry.QINIU_MAAS_DEEPSEEK_FLASH,
 								AiProviderRegistry.QINIU_MAAS_QWEN_PLUS)));
 
-		String response = registry.executeLlmTask("hello", null);
+		Logger logger = (Logger) LoggerFactory.getLogger(AiProviderRegistry.class);
+		ListAppender<ILoggingEvent> appender = new ListAppender<>();
+		appender.start();
+		logger.addAppender(appender);
+		String response;
+		try {
+			response = registry.executeLlmTask("hello", null);
+		}
+		finally {
+			logger.detachAppender(appender);
+		}
 
 		assertEquals("qiniu-maas", response);
 		assertEquals(0, legacyQwen.calls);
 		assertEquals(0, legacyDeepSeek.calls);
+		String logs = appender.list.stream()
+				.map(ILoggingEvent::getFormattedMessage)
+				.collect(java.util.stream.Collectors.joining("\n"));
+		assertTrue(logs.contains("AI provider attempt capability=LLM"));
+		assertTrue(logs.contains("AI provider failover capability=LLM"));
+		assertTrue(logs.contains("durationMs="));
+		assertTrue(logs.contains("nextModel=qwen/qwen3.5-plus"));
 	}
 
 	@Test

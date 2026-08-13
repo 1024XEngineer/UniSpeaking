@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.sun.net.httpserver.HttpServer;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.infrastructure.config.QiniuMaasProperties;
@@ -16,6 +19,7 @@ import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
 
 class QiniuMaasLlmProviderTest {
@@ -136,6 +140,52 @@ class QiniuMaasLlmProviderTest {
 
 		assertEquals("QINIU_MAAS_LLM_REQUEST_FAILED", exception.code());
 		assertFalse(exception.getMessage().contains("secret-key"));
+	}
+
+	@Test
+	void logsTimingMetadataWithoutCredentialsOrPromptContent() throws IOException {
+		server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+		server.createContext("/v1/chat/completions", exchange -> {
+			byte[] response = "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}"
+					.getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(200, response.length);
+			exchange.getResponseBody().write(response);
+			exchange.close();
+		});
+		server.start();
+		QiniuMaasProperties properties = properties(
+				"secret-key",
+				"deepseek/deepseek-v4-flash");
+		QiniuMaasLlmProvider provider = new QiniuMaasLlmProvider(
+				new QiniuMaasLlmClient(
+						HttpClient.newHttpClient(),
+						new ObjectMapper(),
+						properties,
+						java.net.URI.create(
+								"http://127.0.0.1:" + server.getAddress().getPort()
+										+ "/v1/chat/completions")),
+				properties.primaryModel());
+		Logger logger = (Logger) LoggerFactory.getLogger(QiniuMaasLlmClient.class);
+		ListAppender<ILoggingEvent> appender = new ListAppender<>();
+		appender.start();
+		logger.addAppender(appender);
+
+		try {
+			provider.executeLlmTask("private prompt content", null);
+		}
+		finally {
+			logger.detachAppender(appender);
+		}
+
+		String logs = appender.list.stream()
+				.map(ILoggingEvent::getFormattedMessage)
+				.collect(java.util.stream.Collectors.joining("\n"));
+		assertTrue(logs.contains("request started model=deepseek/deepseek-v4-flash"));
+		assertTrue(logs.contains("request completed model=deepseek/deepseek-v4-flash"));
+		assertTrue(logs.contains("durationMs="));
+		assertTrue(logs.contains("responseChars=2"));
+		assertFalse(logs.contains("secret-key"));
+		assertFalse(logs.contains("private prompt content"));
 	}
 
 	private QiniuMaasProperties properties(String apiKey, String primaryModel) {

@@ -12,11 +12,15 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 public final class QiniuMaasLlmClient {
+
+	private static final Logger LOGGER = LoggerFactory.getLogger(QiniuMaasLlmClient.class);
 
 	private final HttpClient httpClient;
 	private final ObjectMapper objectMapper;
@@ -58,6 +62,13 @@ public final class QiniuMaasLlmClient {
 					true);
 		}
 
+		long startedAt = System.nanoTime();
+		LOGGER.info(
+				"Qiniu MaaS LLM request started model={} promptChars={} maxOutputTokens={} timeoutMs={}",
+				model,
+				prompt.length(),
+				properties.maxOutputTokens(),
+				properties.readTimeout().toMillis());
 		try {
 			Map<String, Object> body = Map.of(
 					"model", model,
@@ -81,18 +92,22 @@ public final class QiniuMaasLlmClient {
 				responseBody = input.readNBytes(properties.maxResponseBytes() + 1);
 			}
 			if (responseBody.length > properties.maxResponseBytes()) {
-				throw new ProviderFailure(
+				throw failure(
 						"QINIU_MAAS_LLM_RESPONSE_TOO_LARGE",
 						"Qiniu MaaS LLM response exceeds the configured limit",
-						true);
+						true,
+						model,
+						startedAt);
 			}
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
 				boolean retryable = response.statusCode() != 401
 						&& response.statusCode() != 403;
-				throw new ProviderFailure(
+				throw failure(
 						"QINIU_MAAS_LLM_REQUEST_FAILED",
 						"Qiniu MaaS LLM returned HTTP " + response.statusCode(),
-						retryable);
+						retryable,
+						model,
+						startedAt);
 			}
 			JsonNode root = objectMapper.readTree(
 					new String(responseBody, StandardCharsets.UTF_8));
@@ -102,35 +117,68 @@ public final class QiniuMaasLlmClient {
 					.path("content")
 					.asString("");
 			if (content.isBlank()) {
-				throw new ProviderFailure(
+				throw failure(
 						"QINIU_MAAS_LLM_EMPTY_RESPONSE",
 						"Qiniu MaaS LLM returned no message content",
-						true);
+						true,
+						model,
+						startedAt);
 			}
+			LOGGER.info(
+					"Qiniu MaaS LLM request completed model={} status={} durationMs={} responseChars={}",
+					model,
+					response.statusCode(),
+					elapsedMillis(startedAt),
+					content.length());
 			return content;
 		}
 		catch (ProviderFailure exception) {
 			throw exception;
 		}
 		catch (JacksonException exception) {
-			throw new ProviderFailure(
+			throw failure(
 					"QINIU_MAAS_LLM_RESPONSE_INVALID",
 					"Qiniu MaaS LLM response is not valid JSON",
-					true);
+					true,
+					model,
+					startedAt);
 		}
 		catch (IOException exception) {
-			throw new ProviderFailure(
+			throw failure(
 					"QINIU_MAAS_LLM_IO_ERROR",
 					"Failed to call Qiniu MaaS LLM",
-					true);
+					true,
+					model,
+					startedAt);
 		}
 		catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
-			throw new ProviderFailure(
+			throw failure(
 					"QINIU_MAAS_LLM_INTERRUPTED",
 					"Qiniu MaaS LLM call was interrupted",
-					false);
+					false,
+					model,
+					startedAt);
 		}
+	}
+
+	private ProviderFailure failure(
+			String code,
+			String message,
+			boolean retryable,
+			String model,
+			long startedAt) {
+		LOGGER.warn(
+				"Qiniu MaaS LLM request failed model={} durationMs={} errorCode={} retryable={}",
+				model,
+				elapsedMillis(startedAt),
+				code,
+				retryable);
+		return new ProviderFailure(code, message, retryable);
+	}
+
+	private static long elapsedMillis(long startedAt) {
+		return (System.nanoTime() - startedAt) / 1_000_000;
 	}
 
 	private static String trim(String value) {

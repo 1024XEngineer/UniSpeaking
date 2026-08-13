@@ -453,14 +453,23 @@ public class AiProviderRegistry {
 		BusinessException lastFailure = null;
 		for (int index = 0; index < models.size(); index++) {
 			String modelId = models.get(index);
+			AiModelDefinition definition = getModel(modelId);
+			long startedAt = System.nanoTime();
+			LOGGER.info(
+					"AI provider attempt capability={} model={} provider={} attempt={}/{}",
+					capability,
+					definition.modelId(),
+					definition.providerId(),
+					index + 1,
+					models.size());
 			try {
 				T response = operation.apply(modelId);
-				AiModelDefinition definition = getModel(modelId);
 				LOGGER.info(
-						"AI provider selected capability={} model={} provider={}",
+						"AI provider selected capability={} model={} provider={} durationMs={}",
 						capability,
 						definition.modelId(),
-						definition.providerId());
+						definition.providerId(),
+						elapsedMillis(startedAt));
 				return response;
 			}
 			catch (BusinessException exception) {
@@ -470,11 +479,22 @@ public class AiProviderRegistry {
 				lastFailure = exception;
 				if (index + 1 < models.size()) {
 					LOGGER.warn(
-							"AI provider failover capability={} failedModel={} errorCode={} nextModel={}",
+							"AI provider failover capability={} failedModel={} provider={} durationMs={} errorCode={} nextModel={}",
 							capability,
 							modelId,
+							definition.providerId(),
+							elapsedMillis(startedAt),
 							exception.code(),
 							models.get(index + 1));
+				}
+				else {
+					LOGGER.warn(
+							"AI provider route exhausted capability={} failedModel={} provider={} durationMs={} errorCode={}",
+							capability,
+							modelId,
+							definition.providerId(),
+							elapsedMillis(startedAt),
+							exception.code());
 				}
 			}
 		}
@@ -484,6 +504,10 @@ public class AiProviderRegistry {
 		throw new BusinessException(
 				"AI_PROVIDER_ROUTE_EXHAUSTED",
 				"No AI provider completed the " + capability + " request");
+	}
+
+	private static long elapsedMillis(long startedAt) {
+		return (System.nanoTime() - startedAt) / 1_000_000;
 	}
 
 	private boolean shouldFailOver(BusinessException exception) {
