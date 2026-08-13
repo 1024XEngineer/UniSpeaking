@@ -103,6 +103,14 @@ export function buildResponseCreateEvent({ id, instructions = "" } = {}) {
   };
 }
 
+export function buildScenarioResponseRequest(state) {
+  if (!state) return { closing: false, instructions: "" };
+  return {
+    closing: Boolean(state.completed),
+    instructions: String(state.controlInstruction || "").trim(),
+  };
+}
+
 export function normalizeBaseUrl(baseUrl) {
   if (!baseUrl) return "";
   const value = String(baseUrl).trim().replace(/\/$/, "");
@@ -850,14 +858,13 @@ export function createRealtimeClient({
       };
       sendSessionUpdate();
     }
-    if (!state.completed) return;
-    scenarioCompletionPending = true;
-    inputReady = false;
-    setTrackEnabled();
-    turnAudioCapture?.stop();
-    if (!responsePending) {
-      requestTurnResponse({ closing: true });
+    if (state.completed) {
+      scenarioCompletionPending = true;
+      inputReady = false;
+      setTrackEnabled();
+      turnAudioCapture?.stop();
     }
+    requestTurnResponse(buildScenarioResponseRequest(state));
   }
 
   async function postStart({ offerSdp, voice }) {
@@ -1008,9 +1015,6 @@ export function createRealtimeClient({
         transcript,
         event.item_id || event.item?.id || event.event_id,
       );
-      if (customSceneId) {
-        requestTurnResponse();
-      }
       const ieltsTurnNo = ieltsSceneId
         ? timedOutTurn?.turnNo || learnerTurnNo + 1
         : null;
@@ -1144,6 +1148,7 @@ export function createRealtimeClient({
             turnNo,
             message: error instanceof Error ? error.message : "场景状态推进失败",
           });
+          requestTurnResponse();
         } finally {
           pendingOperations.delete(stateOperation);
         }

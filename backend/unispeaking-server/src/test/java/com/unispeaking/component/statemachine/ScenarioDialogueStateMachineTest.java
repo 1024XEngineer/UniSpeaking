@@ -85,12 +85,18 @@ class ScenarioDialogueStateMachineTest {
 		var confirmation = stateMachine.advance("session_1", 2, "By card.");
 		assertEquals(ScenarioDialogueStage.CONFIRMATION, confirmation.stage());
 		assertTrue(confirmation.controlInstruction().contains("final confirmation"));
+		assertTrue(confirmation.controlInstruction().contains("Do not recap"));
 
 		var completed = stateMachine.advance("session_1", 3, "That is correct.");
 		assertTrue(completed.completed());
 		assertEquals(ScenarioDialogueCompletionReason.GOAL_ACHIEVED,
 				completed.completionReason());
 		assertTrue(completed.controlInstruction().contains("Thank the learner."));
+		assertTrue(completed.controlInstruction().contains("exactly one concise"));
+		assertTrue(completed.controlInstruction().contains("no more than 25 words"));
+		assertTrue(completed.controlInstruction().contains("Do not"));
+		assertTrue(completed.controlInstruction().contains("praise the learner's"));
+		assertTrue(completed.controlInstruction().contains("recap the conversation"));
 
 		var closing = stateMachine.beginClosing("session_1");
 		assertEquals(ScenarioDialogueStage.CLOSING, closing.stage());
