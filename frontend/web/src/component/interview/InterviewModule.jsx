@@ -27,6 +27,7 @@ import {
   retryInterviewReport,
 } from "../../infrastructure/http/apiClient.js";
 import { createRealtimeClient } from "../../websocket/realtimeClient.js";
+import { analytics } from "../../analytics/analyticsClient.js";
 import { paths } from "../../controller/router.js";
 import { SimpleCta, TrendLineChart } from "../ielts/IeltsModule.jsx";
 
@@ -449,6 +450,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
   const [exitOpen, setExitOpen] = useState(false);
   const clientRef = useRef(null);
   const sessionIdRef = useRef("");
+  const interviewAnalyticsRef = useRef(null);
   const remoteAudioRef = useRef(null);
   const endingRef = useRef(false);
   const transcriptRef = useRef(null);
@@ -475,6 +477,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
   const handleEvent = (event) => {
     if (event.type === "local.connecting") setStatus("正在连接面试官");
     else if (event.type === "local.connected") {
+      interviewAnalyticsRef.current?.started();
       setStatus("正在建立面试会话");
       sessionIdRef.current = event.sessionId || "";
     } else if (event.type === "session.updated" || event.type === "local.greeting_timeout") {
@@ -520,6 +523,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       setClosing(true);
       setStatus("面试官正在做本次面试的收尾…");
     } else if (event.type === "local.interview_end_requested") {
+      interviewAnalyticsRef.current?.complete();
       endingRef.current = true;
       setEnding(true);
       setClosing(false);
@@ -540,6 +544,8 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
 
   useEffect(() => {
     let cancelled = false;
+    interviewAnalyticsRef.current = analytics.training({ mode: "INTERVIEW", pageCode: "interview-training" });
+    interviewAnalyticsRef.current.attempt();
     const client = createRealtimeClient({
       sceneId,
       sceneType: "interview",
@@ -557,11 +563,21 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       voice: teacher?.voiceId || "Katerina",
       speechSpeed: speedCodeByLabel[speed] || "NATURAL",
       silenceDurationMs: 1_500, // 容忍思考停顿（Custom 600 / IELTS 3000 之间的自然对话档位）
+    }).then(() => {
+      if (!cancelled) interviewAnalyticsRef.current.started();
     }).catch((startError) => {
-      if (!cancelled) setError(startError instanceof Error ? startError.message : "无法开始面试会话");
+      if (!cancelled) {
+        interviewAnalyticsRef.current.fail("REALTIME_ERROR");
+        setError(startError instanceof Error ? startError.message : "无法开始面试会话");
+      }
     });
+    const syncVisibility = () => interviewAnalyticsRef.current?.setVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", syncVisibility);
+    syncVisibility();
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", syncVisibility);
+      interviewAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
       clientRef.current = null;
       void client.stop({ notifyBackend: false, reason: "component_unmount", emitEnded: false });
     };
@@ -578,8 +594,13 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     if (ending) return;
     const next = !paused;
     setPaused(next);
-    if (next) await clientRef.current?.pause();
-    else await clientRef.current?.resume();
+    if (next) {
+      await clientRef.current?.pause();
+      interviewAnalyticsRef.current?.pause();
+    } else {
+      await clientRef.current?.resume();
+      interviewAnalyticsRef.current?.resume();
+    }
   };
 
   const endConversation = async () => {
@@ -591,6 +612,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     try {
       const completion = await clientRef.current?.stop({ reason: "user_stop" });
       clientRef.current = null;
+      interviewAnalyticsRef.current?.complete();
       onEndInterviewRef.current?.(sceneId, sessionIdRef.current, completion?.reportStatus || null);
     } catch (stopError) {
       endingRef.current = false;
@@ -604,6 +626,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     const client = clientRef.current;
     clientRef.current = null;
     await client?.stop({ notifyBackend: false, reason: "user_exit", emitEnded: false });
+    interviewAnalyticsRef.current?.abandon("USER_EXIT");
     onExit();
   };
 
