@@ -12,7 +12,8 @@ public interface EmailAuthStore {
 
     boolean consumeChallenge(UUID id, Instant consumedAt);
 
-    boolean saveUser(UUID id, String email, String passwordHash, Instant createdAt, Instant emailVerifiedAt);
+    boolean saveUser(UUID id, String email, String passwordHash, String nickname,
+            Instant createdAt, Instant emailVerifiedAt);
 
     Optional<UserRecord> findUserByEmail(String email);
 

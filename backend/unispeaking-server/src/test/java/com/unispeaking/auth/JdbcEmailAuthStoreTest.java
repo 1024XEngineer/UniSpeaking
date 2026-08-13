@@ -36,7 +36,7 @@ class JdbcEmailAuthStoreTest {
         store.saveChallenge(challengeId, "person@example.com", new byte[] {1, 2}, now.plusSeconds(600), now);
         assertThat(store.findChallenge(challengeId).orElseThrow().email()).isEqualTo("person@example.com");
 
-        store.saveUser(userId, "person@example.com", "argon-hash", now, now);
+        store.saveUser(userId, "person@example.com", "argon-hash", null, now, now);
         assertThat(store.findUserByEmail("person@example.com").orElseThrow().id()).isEqualTo(userId);
         assertThat(new JdbcTemplate(database).queryForObject(
                 "select plan_code from user_entitlements where user_id = ?", String.class, userId))
@@ -61,12 +61,15 @@ class JdbcEmailAuthStoreTest {
         var userId = UUID.randomUUID();
         var now = Instant.parse("2026-08-06T08:00:00Z");
 
-        assertThat(store.saveUser(userId, "person@example.com", "bcrypt-hash", now, now)).isTrue();
+        assertThat(store.saveUser(userId, "person@example.com", "bcrypt-hash", "Sunny", now, now)).isTrue();
         assertThat(store.findUserByEmail("person@example.com").orElseThrow().id()).isEqualTo(userId);
         assertThat(new JdbcTemplate(database).queryForObject(
                 "select id from \"user\" where username = ?", UUID.class, "person@example.com"))
                 .isEqualTo(userId);
-        assertThat(store.saveUser(UUID.randomUUID(), "person@example.com", "other-hash", now, now)).isFalse();
+        assertThat(new JdbcTemplate(database).queryForObject(
+                "select nickname from \"user\" where id = ?", String.class, userId))
+                .isEqualTo("Sunny");
+        assertThat(store.saveUser(UUID.randomUUID(), "person@example.com", "other-hash", null, now, now)).isFalse();
     }
 
     @Test

@@ -50,7 +50,8 @@ public final class JdbcEmailAuthStore implements EmailAuthStore {
     }
 
     @Override
-    public boolean saveUser(UUID id, String email, String passwordHash, Instant createdAt, Instant emailVerifiedAt) {
+    public boolean saveUser(UUID id, String email, String passwordHash, String nickname,
+            Instant createdAt, Instant emailVerifiedAt) {
         try {
             return jdbc.execute((ConnectionCallback<Boolean>) connection -> {
                 var previousAutoCommit = connection.getAutoCommit();
@@ -58,12 +59,13 @@ public final class JdbcEmailAuthStore implements EmailAuthStore {
                     connection.setAutoCommit(false);
                     try (var userStatement = connection.prepareStatement(
                             "insert into \"user\" (id, username, password_hash, nickname, role, status, auth_version, created_at, updated_at) "
-                                    + "values (?, ?, ?, null, 'USER', 'ACTIVE', 0, ?, ?)")) {
+                                    + "values (?, ?, ?, ?, 'USER', 'ACTIVE', 0, ?, ?)")) {
                         userStatement.setObject(1, id);
                         userStatement.setString(2, email);
                         userStatement.setString(3, passwordHash);
-                        userStatement.setTimestamp(4, Timestamp.from(createdAt));
+                        userStatement.setString(4, nickname);
                         userStatement.setTimestamp(5, Timestamp.from(createdAt));
+                        userStatement.setTimestamp(6, Timestamp.from(createdAt));
                         userStatement.executeUpdate();
                     }
                     try (var identityStatement = connection.prepareStatement(
