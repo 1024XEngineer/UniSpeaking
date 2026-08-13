@@ -157,6 +157,8 @@ const speechSpeedInstructions = {
     'Voice delivery rule: speak quickly but clearly, around 210 English words per minute, without dropping or slurring words.',
 } as const;
 
+const SCENE_AUDIO_DRAIN_MS = 1_200;
+
 function buildSessionUpdate(
   eventId: string,
   response: RealtimeSessionStartResponse,
@@ -242,6 +244,7 @@ export class RealtimeSessionController {
   private sceneState: ScenarioDialogueState | null = null;
   private completion: DialogueCompletion | null = null;
   private sceneCompletionPending = false;
+  private sceneAudioDrainTimer: ReturnType<typeof setTimeout> | null = null;
   private ieltsActivePart: IeltsPart | null = null;
   private ieltsDialogueState: IeltsDialogueState | null = null;
   private ieltsPart2State: IeltsPart2State | null = null;
@@ -482,7 +485,12 @@ export class RealtimeSessionController {
         this.ieltsDialogueState = state;
         this.learnerTurnNo = state.answeredQuestions;
         this.ieltsDialogueCompleted = Boolean(state.completed);
-        this.applyRestoredInstruction(state.controlInstruction);
+        // A fresh Part 1 session must use the prompt's introduction first. The
+        // backend state already points at question one, which is only valid
+        // after the candidate has introduced themselves.
+        if (state.part !== 'PART_1' || state.openingCompleted) {
+          this.applyRestoredInstruction(state.controlInstruction);
+        }
         if (state.completed) {
           this.inputEnabled = false;
           this.applyAudioEnabled();
@@ -564,6 +572,7 @@ export class RealtimeSessionController {
         this.publish();
         return;
       case 'user.speech.started':
+        if (this.options.mode === 'scene' && !this.inputEnabled) return;
         if (
           this.machine.state === 'ready' ||
           this.machine.state === 'assistant_speaking'
@@ -576,20 +585,32 @@ export class RealtimeSessionController {
         }
         return;
       case 'user.speech.stopped':
+        if (this.options.mode === 'scene' && !this.inputEnabled) return;
         if (this.machine.state === 'user_speaking') {
           this.transition({ type: 'USER_SPEECH_STOPPED' });
           this.dependencies.turnAudioCapture?.stop();
         }
         return;
       case 'user.transcript.delta':
+        if (this.options.mode === 'scene' && !this.inputEnabled) return;
         this.userTranscript += event.text;
         this.publish();
         return;
       case 'user.transcript.preview':
+        if (this.options.mode === 'scene' && !this.inputEnabled) return;
         this.userTranscript = event.text;
         this.publish();
         return;
       case 'user.transcript.completed':
+        if (this.options.mode === 'scene') {
+          if (!this.inputEnabled || this.sceneCompletionPending) {
+            this.dependencies.turnAudioCapture?.stop();
+            return;
+          }
+          this.inputEnabled = false;
+          this.applyAudioEnabled();
+          this.dependencies.turnAudioCapture?.stop();
+        }
         this.userTranscript = event.text;
         this.captureTranscript(1, event.text, event.itemId);
         this.publish();
@@ -612,6 +633,7 @@ export class RealtimeSessionController {
         }
         return;
       case 'assistant.response.started':
+        this.clearSceneAudioDrain();
         this.responseInFlight = true;
         if (
           this.machine.state === 'ready' ||
@@ -639,11 +661,7 @@ export class RealtimeSessionController {
         }
         if (this.flushPendingResponse()) return;
         if (this.options.mode === 'scene') {
-          this.inputEnabled = true;
-          this.applyAudioEnabled();
-          if (this.sceneCompletionPending) {
-            await this.end();
-          }
+          this.scheduleSceneAfterAudioDrain();
         } else if (this.options.mode === 'ielts') {
           this.handleIeltsAssistantResponseCompleted();
         }
@@ -719,6 +737,7 @@ export class RealtimeSessionController {
   }
 
   private async performEnd() {
+    this.clearSceneAudioDrain();
     if (this.machine.state === 'ended') return null;
     if (this.machine.state === 'idle') {
       this.dependencies.transport.close();
@@ -921,7 +940,12 @@ export class RealtimeSessionController {
       this.inputEnabled = false;
       this.applyAudioEnabled();
       const turnNo = ++this.learnerTurnNo;
-      void this.evaluateIeltsTurn(sessionId, turnNo, transcript);
+      const isPartOneIntroduction =
+        this.ieltsActivePart === 'PART_1' &&
+        this.ieltsDialogueState?.openingCompleted === false;
+      if (!isPartOneIntroduction) {
+        void this.evaluateIeltsTurn(sessionId, turnNo, transcript);
+      }
       let state: IeltsDialogueState | null = null;
       try {
         state = await ieltsDialogue.advanceState(sessionId, turnNo, false);
@@ -961,12 +985,15 @@ export class RealtimeSessionController {
     const evaluation = sceneDialogue
       .evaluateTurn(sessionId, turnNo, transcript, wavUri)
       .catch(() => null);
+    this.pendingTurnEvaluations.add(evaluation);
+    void evaluation.finally(() => {
+      this.pendingTurnEvaluations.delete(evaluation);
+    });
     const state = await sceneDialogue.advanceState(
       sessionId,
       turnNo,
       transcript,
     );
-    await evaluation;
     this.sceneState = state;
     this.sceneCompletionPending = state.completed;
     this.publish();
@@ -1032,6 +1059,29 @@ export class RealtimeSessionController {
     return true;
   }
 
+  private clearSceneAudioDrain() {
+    if (!this.sceneAudioDrainTimer) return;
+    clearTimeout(this.sceneAudioDrainTimer);
+    this.sceneAudioDrainTimer = null;
+  }
+
+  private scheduleSceneAfterAudioDrain() {
+    this.clearSceneAudioDrain();
+    this.inputEnabled = false;
+    this.applyAudioEnabled();
+    this.sceneAudioDrainTimer = setTimeout(() => {
+      this.sceneAudioDrainTimer = null;
+      if (this.sceneCompletionPending) {
+        void this.end();
+        return;
+      }
+      if (this.machine.state !== 'ready' || this.responseInFlight) return;
+      this.inputEnabled = true;
+      this.applyAudioEnabled();
+      this.publish();
+    }, SCENE_AUDIO_DRAIN_MS);
+  }
+
   private transition(event: Parameters<RealtimeStateMachine['dispatch']>[0]) {
     this.machine.dispatch(event);
     this.publish();
@@ -1043,6 +1093,7 @@ export class RealtimeSessionController {
   }
 
   private resetSessionValues() {
+    this.clearSceneAudioDrain();
     this.backendSession = null;
     this.userTranscript = '';
     this.assistantTranscript = '';

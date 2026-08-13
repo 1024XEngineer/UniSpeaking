@@ -595,6 +595,7 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
     : mode === "reset"
       ? "reset-email-challenge"
       : "signup-email-challenge";
+  const developmentCaptcha = import.meta.env.DEV && (import.meta.env.VITE_AUTH_CAPTCHA_PROVIDER || "development") === "development";
 
   const clearChallenge = () => {
     setStep("credentials");
@@ -629,6 +630,9 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
 
   const submitCredentials = async (event) => {
     event.preventDefault();
+    if (developmentCaptcha && !submitting) {
+      await verifyAndIssueChallenge("local-human-verified");
+    }
   };
 
   const verifyAndIssueChallenge = async (captchaVerifyParam) => {

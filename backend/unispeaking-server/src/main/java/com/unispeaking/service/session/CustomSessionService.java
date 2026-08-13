@@ -1,21 +1,155 @@
 package com.unispeaking.service.session;
 
+import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.common.logging.RealtimeFlowLog;
+import com.unispeaking.component.session.ObsoleteDialogueCleanup;
+import com.unispeaking.component.session.RealtimeSessionCoordinator;
+import com.unispeaking.component.session.SessionLifecycleManager;
+import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
+import com.unispeaking.domain.dto.scene.CustomDialogueSceneContext;
 import com.unispeaking.domain.dto.session.CompleteCustomSceneDialogueResponse;
 import com.unispeaking.domain.dto.session.EndCustomSessionCommand;
 import com.unispeaking.domain.dto.session.Message;
-import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
+import com.unispeaking.domain.dto.session.ScenarioDialogueStateResponse;
+import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
 import com.unispeaking.domain.dto.session.StartCustomSessionCommand;
+import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
+import com.unispeaking.domain.dto.session.StartSessionCommand;
+import com.unispeaking.domain.dto.session.StartSessionResponse;
+import com.unispeaking.domain.po.scene.CustomSceneDefinition;
+import com.unispeaking.domain.po.session.AbstractSceneSession;
+import com.unispeaking.domain.vo.scene.CustomStage;
+import com.unispeaking.domain.vo.scene.SceneFlowStage;
+import com.unispeaking.domain.vo.scene.SceneType;
+import com.unispeaking.service.evaluation.CustomEvaluationService;
+import com.unispeaking.service.scene.CustomSceneFlowService;
+import com.unispeaking.service.scene.CustomSceneService;
+import org.springframework.stereotype.Service;
 
-/** 自定义场景会话服务，提供会话生命周期操作。 */
-public interface CustomSessionService {
+@Service
+public class CustomSessionService {
 
-	/** 为当前用户拥有的自定义场景启动实时对话。 */
-	StartSceneSessionResponse startSession(StartCustomSessionCommand command);
+	private final CustomSceneService sceneService;
+	private final SessionLifecycleManager sessionLifecycle;
+	private final CustomSceneFlowService flowService;
+	private final RealtimeSessionCoordinator sessionCoordinator;
+	private final CustomEvaluationService evaluationService;
+	private final ObsoleteDialogueCleanup dialogueCleanup;
 
-	/** 将一条消息保存到指定自定义场景会话中。 */
-	void addMessage(String sessionId, Message message);
+	public CustomSessionService(
+			CustomSceneService sceneService,
+			SessionLifecycleManager sessionLifecycle,
+			CustomSceneFlowService flowService,
+			RealtimeSessionCoordinator sessionCoordinator,
+			CustomEvaluationService evaluationService,
+			ObsoleteDialogueCleanup dialogueCleanup) {
+		this.sceneService = sceneService;
+		this.sessionLifecycle = sessionLifecycle;
+		this.flowService = flowService;
+		this.sessionCoordinator = sessionCoordinator;
+		this.evaluationService = evaluationService;
+		this.dialogueCleanup = dialogueCleanup;
+	}
+	public StartSceneSessionResponse startSession(StartCustomSessionCommand command) {
+		String sceneId = command.sceneId();
+		StartCustomSceneDialogueRequest request = command.request();
+		CustomDialogueSceneContext prepared = sceneService.prepareDialogue(sceneId);
+		prepareDialogueFlow(sceneId);
+		StartSessionResponse started = sessionLifecycle.startSession(
+				new StartSessionCommand(
+						prepared.userId(),
+						prepared.sceneId(),
+						SceneType.CUSTOM_SCENE,
+						"DIALOGUE",
+						prepared.prompt()));
+		flowService.startDialogueState(
+				prepared.sceneId(),
+				started.sessionId(),
+				prepared.successFactorJson(),
+				prepared.learningGoal());
+		try {
+			return sessionCoordinator.connect(
+					prepared.scene(),
+					prepared.title(),
+					SceneFlowStage.DIALOGUE,
+					true,
+					started,
+					SceneType.CUSTOM_SCENE,
+					prepared.sceneId(),
+					prepared.prompt(),
+					request.offerSdp(),
+					request.provider(),
+					request.model(),
+					request.voice(),
+					request.translationEnabled());
+		}
+		catch (RuntimeException exception) {
+			flowService.clearDialogueState(started.sessionId());
+			throw exception;
+		}
+	}
 
-	/** 结束自定义对话并返回本次评价结果。 */
-	CompleteCustomSceneDialogueResponse endSession(
-			EndCustomSessionCommand command);
+	private void prepareDialogueFlow(String sceneId) {
+		CustomStage stage;
+		try {
+			stage = flowService.current(sceneId);
+		}
+		catch (BusinessException exception) {
+			if (!"SCENE_FLOW_NOT_FOUND".equals(exception.code())) throw exception;
+			stage = flowService.start(sceneId);
+		}
+		if (stage == CustomStage.COMPLETED) {
+			stage = flowService.start(sceneId);
+		}
+		while (stage != CustomStage.DIALOGUE) {
+			stage = flowService.next(sceneId);
+		}
+	}
+	public CompleteCustomSceneDialogueResponse endSession(
+			EndCustomSessionCommand command) {
+		String sceneId = command.sceneId();
+		String sessionId = command.sessionId();
+		CustomSceneDefinition definition = sceneService.getOwnedDefinition(sceneId);
+		AbstractSceneSession session = sessionCoordinator.requireOwnedSession(
+				definition.userId(),
+				sessionId);
+		requireBinding(session, sceneId);
+		ScenarioDialogueStateResponse state = flowService.beginDialogueClosing(
+				sceneId,
+				sessionId);
+		sessionLifecycle.endSession(sessionId);
+		String endedAt = session.getEndedAt().toString();
+		RealtimeFlowLog.info(
+				"evaluation.report.start sceneId={} sessionId={}",
+				sceneId,
+				sessionId);
+		DialogueReportResult report;
+		try {
+			report = evaluationService.generateReport(sceneId);
+		}
+		finally {
+			if (!flowService.isCompleted(sceneId)) flowService.next(sceneId);
+			flowService.clearDialogueState(sessionId);
+			sessionCoordinator.remove(sessionId);
+		}
+		dialogueCleanup.retainLatestDialogue(sceneId, sessionId);
+		return new CompleteCustomSceneDialogueResponse(
+				sceneId,
+				sessionId,
+				endedAt,
+				report,
+				state);
+	}
+	public void addMessage(String sessionId, Message message) {
+		sessionLifecycle.addMessage(sessionId, message);
+	}
+
+	private void requireBinding(AbstractSceneSession session, String sceneId) {
+		if (session.getSceneType() != SceneType.CUSTOM_SCENE
+				|| !sceneId.equals(session.getSceneId())) {
+			throw new BusinessException(
+					"SESSION_ACCESS_DENIED",
+					"当前会话不属于该场景");
+		}
+	}
 }

@@ -1,6 +1,5 @@
 package com.unispeaking.common.exception;
 
-import com.unispeaking.auth.EmailAuthService;
 import com.unispeaking.common.response.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -73,8 +72,8 @@ public class GlobalExceptionHandler {
 				.body(ApiResponse.failure(exception.code(), exception.getMessage()));
 	}
 
-	@ExceptionHandler(EmailAuthService.AuthException.class)
-	public ResponseEntity<ApiResponse<Void>> handleEmailAuthException(EmailAuthService.AuthException exception) {
+	@ExceptionHandler(EmailAuthException.class)
+	public ResponseEntity<ApiResponse<Void>> handleEmailAuthException(EmailAuthException exception) {
 		var status = switch (exception.getMessage()) {
 			case "UNAUTHENTICATED", "INVALID_CREDENTIALS" -> HttpStatus.UNAUTHORIZED;
 			default -> HttpStatus.BAD_REQUEST;

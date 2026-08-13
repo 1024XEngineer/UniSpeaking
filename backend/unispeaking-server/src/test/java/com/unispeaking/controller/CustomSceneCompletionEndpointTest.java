@@ -12,10 +12,10 @@ import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
 import com.unispeaking.domain.dto.session.CompleteCustomSceneDialogueResponse;
 import com.unispeaking.domain.dto.session.EndCustomSessionCommand;
 import com.unispeaking.service.asset.LearningAssetService;
-import com.unispeaking.service.evaluation.impl.CustomEvaluationServiceImpl;
-import com.unispeaking.service.scene.impl.CustomSceneFlowServiceImpl;
-import com.unispeaking.service.scene.impl.CustomSceneServiceImpl;
-import com.unispeaking.service.session.impl.CustomSessionServiceImpl;
+import com.unispeaking.service.evaluation.CustomEvaluationService;
+import com.unispeaking.service.scene.CustomSceneFlowService;
+import com.unispeaking.service.scene.CustomSceneService;
+import com.unispeaking.service.session.CustomSessionService;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -27,8 +27,8 @@ class CustomSceneCompletionEndpointTest {
 
 	@Test
 	void activeHangupReturnsPersistedFiveDimensionReport() throws Exception {
-		CustomSceneServiceImpl customSceneService = mock(CustomSceneServiceImpl.class);
-		CustomSessionServiceImpl customSessionService = mock(CustomSessionServiceImpl.class);
+		CustomSceneService customSceneService = mock(CustomSceneService.class);
+		CustomSessionService customSessionService = mock(CustomSessionService.class);
 		DialogueReportResult report = new DialogueReportResult(
 				new BigDecimal("84.0"),
 				new BigDecimal("81.0"),
@@ -52,8 +52,8 @@ class CustomSceneCompletionEndpointTest {
 						null));
 		CustomSceneController controller = new CustomSceneController(
 				customSceneService,
-				mock(CustomSceneFlowServiceImpl.class),
-				mock(CustomEvaluationServiceImpl.class),
+				mock(CustomSceneFlowService.class),
+				mock(CustomEvaluationService.class),
 				customSessionService,
 				mock(LearningAssetService.class));
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();

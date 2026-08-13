@@ -19,23 +19,28 @@ React Web 客户端、React Native 移动端、PostgreSQL 数据模型以及 Doc
 
 ## 核心架构
 
-场景运行时只定义五个稳定契约：
+场景运行时采用直接实现类，不再为每个 Service 同时维护“接口 + Impl”。只有存在稳定、
+确定返回类型和可复用逻辑时才保留具体公共父类：
 
 ```text
-SceneService<REQUEST, RESPONSE>       生成并准备场景
-SceneFlowService<STAGE>               推进多阶段场景
-SessionService                        管理会话生命周期和消息
-EvaluationService<REPORT, DETAIL>     逐轮评分与报告
-AiProvider                            提供厂商无关的 AI 能力
+Custom/Ielts/FreeChat/InterviewSceneService    直接生成并准备场景
+SceneFlowService<STAGE>                        具体父类，提供阶段流转实现
+Custom/Ielts/...SessionService                 直接管理各场景会话
+EvaluationService<REPORT, DETAIL>              具体父类，提供公共评价实现
+AiProvider                                     厂商无关的 AI 能力契约
 ```
 
-请求的主要依赖方向为：
+`CustomSceneFlowService`、`IeltsSceneFlowService` 继承 `SceneFlowService`，并显式
+`@Override` 公共流转方法；`CustomEvaluationService`、`IeltsEvaluationService` 以同样方式
+继承 `EvaluationService`。父类不是接口或抽象类，可以直接复用其完整实现。
+
+请求的主要调用方向为：
 
 ```text
 Controller / WebSocket
         │
         ▼
-五个稳定契约及场景实现
+具体 Service
         │
         ├── Component / State Machine
         ├── Domain DTO / PO / VO
@@ -48,16 +53,17 @@ Infrastructure（AI、Realtime、数据库、存储和配置）
 
 场景实现关系：
 
-| 能力 | FreeChat | Custom | IELTS |
+| 能力 | FreeChat | Custom | IELTS | Interview |
 |---|---:|---:|---:|
-| `SceneService` | ✓ | ✓ | ✓ |
-| `SceneFlowService` | — | ✓ | ✓ |
-| `SessionService` | ✓ | ✓ | ✓ |
-| `EvaluationService` | — | ✓ | ✓ |
-| `AiProvider` | 共享 | 共享 | 共享 |
+| 场景 Service | ✓ | ✓ | ✓ | ✓ |
+| `SceneFlowService` 具体父类 | — | ✓ | ✓ | — |
+| 会话 Service | ✓ | ✓ | ✓ | ✓ |
+| `EvaluationService` 具体父类 | — | ✓ | ✓ | — |
+| `AiProvider` | 共享 | 共享 | 共享 | 共享 |
 
-`SessionService` 是稳定公共契约，但由各场景分别实现；项目中不设置通用
-`SessionServiceImpl`。完整职责边界和新场景落位规范见 [CLAUDE.md](CLAUDE.md)。
+各场景的会话输入和返回值不同，因此会话目录使用独立具体类，不设置无实际复用价值的
+`SessionService` 父类或 `SessionServiceImpl`。完整职责边界和新场景落位规范见
+[CLAUDE.md](CLAUDE.md)。
 
 ## 仓库结构
 
@@ -79,18 +85,38 @@ Infrastructure（AI、Realtime、数据库、存储和配置）
 ├── controller                    HTTP 协议入口
 ├── websocket                     WebSocket 协议入口
 ├── service
-│   ├── scene                     SceneService、SceneFlowService
-│   │   └── impl                  各场景的生成与流程实现
-│   ├── session                   SessionService
-│   │   └── impl                  各场景的会话实现
-│   └── evaluation                EvaluationService
-│       └── impl                  支持评分的场景实现
+│   ├── auth                      认证用例和持久化端口
+│   ├── scene                     场景具体类、SceneFlowService 具体父类
+│   ├── session                   各场景会话具体类
+│   └── evaluation                评价具体类、EvaluationService 具体父类
 ├── component                     状态机、协调器、录音等进程内组件
-├── domain                        DTO、PO、VO
+├── domain
+│   └── dto/auth                  认证输入输出模型
 ├── provider                      厂商无关能力接口与 Registry
-├── infrastructure               AI、Realtime、持久化、存储和配置实现
-└── common                        异常、响应、Prompt 和纯工具逻辑
+├── infrastructure
+│   ├── ai/aliyun/captcha         阿里云 CAPTCHA SDK 调用和适配器
+│   ├── security/captcha          开发及 Turnstile 人机验证适配器
+│   ├── persistence/repository/auth  认证存储实现
+│   └── config                    认证 Bean 与适配器装配
+└── common
+    ├── security                  人机验证稳定端口
+    ├── email                     验证邮件稳定端口
+    └── exception                 公共异常
 ```
+
+原 `com.unispeaking.auth` 聚合包已拆除。认证链路遵循端口与适配器的依赖方向：
+
+```text
+Controller
+    -> service/auth
+        -> domain/dto/auth + common 端口
+                               ^
+                               |
+                 Infrastructure 适配器
+```
+
+Service 不依赖阿里云 SDK、JDBC、内存存储或 SMTP 的具体实现；Infrastructure 负责实现
+公共端口和 Service 持久化端口，并通过配置类完成装配。
 
 ## 技术栈
 
@@ -198,10 +224,21 @@ V2 及更高版本迁移增量执行。已存在旧版 Flyway 历史的开发数
 
 ```bash
 cd backend/unispeaking-server
+DATABASE_URL=jdbc:postgresql://127.0.0.1:5432/unispeaking \
+DATABASE_USERNAME=postgres \
+DATABASE_PASSWORD='your-local-password' \
+AUTH_COOKIE_SECURE=false \
+UNISPEAKING_ADMIN_SECURE_COOKIE=false \
+WEB_ALLOWED_ORIGIN_PATTERNS='http://localhost:*,http://127.0.0.1:*,http://100.100.57.60:*' \
+AUTH_CAPTCHA_PROVIDER=development \
+AUTH_CAPTCHA_DEVELOPMENT_TOKEN=local-human-verified \
 ./mvnw spring-boot:run
 ```
 
 默认地址：`http://localhost:8080`。
+
+这组参数仅用于本机联调：允许本机和局域网 Web/Expo 来源，并使用本地人机验证令牌，
+不会连接生产数据库或阿里云验证码。不要修改 `deploy/env/.env` 中的生产配置。
 
 ### 5. 启动 Web 客户端
 
@@ -228,6 +265,16 @@ npm run web
 npm run ios
 npm run android
 ```
+
+真机与电脑必须连接同一局域网。先查看电脑局域网 IP（例如 `100.100.57.60`），再启动 Expo：
+
+```bash
+EXPO_PUBLIC_BACKEND_URL=http://100.100.57.60:8080 \
+npx expo start --dev-client --host lan --clear --port 8081
+```
+
+如果只在 Android 模拟器中运行，可将地址改为 `http://10.0.2.2:8080`；iOS 模拟器使用
+`http://127.0.0.1:8080`。
 
 移动端当前仍处于持续联调阶段，页面完成度和 Web 端不完全一致。开发前请阅读
 [`frontend/mobile/HANDOFF.md`](frontend/mobile/HANDOFF.md)。
@@ -282,10 +329,12 @@ npm run test:ci
 
 ## 开发原则
 
-- 场景特有需求通过场景实现类和组件扩展，不修改五个稳定接口。
-- 场景准备、鉴权、次数限制、Prompt 和内容落库归 `SceneService` 实现负责。
-- `SessionService` 只管理已准备场景的会话，不重复生成场景，也不承担评分。
+- `scene`、`session`、`evaluation` 下的 Service 使用直接实现类，不新增配套 `Impl`。
+- 有公共具体逻辑时继承具体父类，子类对公开父类方法显式使用 `@Override`。
+- 场景准备、鉴权、次数限制、Prompt 和内容落库归对应场景 Service 负责。
+- 会话 Service 只管理已准备场景的会话，不重复生成场景，也不承担评分。
 - 状态机、录音、生成器和协调器属于 `component`，不能包装成伪 Service。
 - Controller 只做协议适配；同一场景的附属端点归并到同一个场景 Controller。
+- 业务 Service 依赖稳定端口，外部 SDK、数据库和远程调用只能由 Infrastructure 适配。
 - PostgreSQL 是业务真相来源，持久化只能通过 Repository 访问。
 - 接口或数据结构变化时，同步更新后端测试、前端调用和 API 文档。
