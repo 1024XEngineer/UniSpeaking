@@ -2,16 +2,27 @@ package com.unispeaking.service.evaluation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.AdditionalMatchers.aryEq;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.unispeaking.common.evaluation.model.EndingTone;
 import com.unispeaking.common.evaluation.model.IeltsTextAssessment;
+import com.unispeaking.common.evaluation.model.PronunciationAssessmentResult;
+import com.unispeaking.common.evaluation.model.PronunciationPhonemeResult;
+import com.unispeaking.common.evaluation.model.PronunciationWordResult;
+import com.unispeaking.common.evaluation.model.WordReadStatus;
+import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
+import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.component.session.ActiveSessionRegistry;
+import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationCommand;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.po.scene.IeltsPracticeRecord;
+import com.unispeaking.domain.po.session.CustomSceneSession;
 import com.unispeaking.domain.po.session.PracticeSessionRecord;
 import com.unispeaking.domain.vo.scene.IeltsContent;
 import com.unispeaking.domain.vo.scene.IeltsMode;
@@ -35,6 +46,7 @@ import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.component.evaluation.EvaluationProcessor;
 import com.unispeaking.service.scene.impl.IeltsSceneFlowServiceImpl;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -44,6 +56,89 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 class EvaluationServiceImplIeltsTest {
+
+	@Test
+	void preservesPronunciationWhenIeltsLanguageFeedbackProviderFails() {
+		UUID userId = UUID.fromString("3d8f80be-6390-4db9-a6cf-c10a0145d4c3");
+		String ieltsId = "ielts_part_2";
+		String sessionId = "ielts_session_2";
+		byte[] audio = canonicalWav();
+		PronunciationAssessmentClient pronunciationClient =
+				mock(PronunciationAssessmentClient.class);
+		when(pronunciationClient.evaluate(
+				eq("I would like to describe a memorable journey from last year."),
+				aryEq(audio)))
+				.thenReturn(pronunciationAssessment());
+		EvaluationLlmClient llmClient = mock(EvaluationLlmClient.class);
+		when(llmClient.assessTurn(any())).thenThrow(new EvaluationException(
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID));
+		ActiveSessionRegistry activeSessions = mock(ActiveSessionRegistry.class);
+		CustomSceneSession session = new CustomSceneSession(
+				sessionId,
+				userId.toString());
+		session.setSceneId(ieltsId);
+		session.setSceneType(SceneType.IELTS_SCENE);
+		when(activeSessions.findById(sessionId)).thenReturn(Optional.of(session));
+		IeltsPracticeRepository practiceRepository =
+				mock(IeltsPracticeRepository.class);
+		when(practiceRepository.findPractice(ieltsId)).thenReturn(Optional.of(
+				new IeltsPracticeRecord(
+						ieltsId,
+						userId,
+						IeltsMode.PART_PRACTICE,
+						com.unispeaking.domain.vo.scene.IeltsPart.PART_2,
+						"topic-p2",
+						new IeltsContent(List.of(), List.of(), List.of()))));
+		AuthService authService = mock(AuthService.class);
+		when(authService.requireUserId(null)).thenReturn(userId.toString());
+		SessionMessageRepository messageRepository =
+				mock(SessionMessageRepository.class);
+		when(messageRepository.findMessages(sessionId)).thenReturn(List.of(
+				new Message(0, "Describe a memorable journey.", null)));
+		TurnEvaluationRepository turnRepository =
+				mock(TurnEvaluationRepository.class);
+		var recordingStore = mock(
+				com.unispeaking.component.recording.RecordingStore.class);
+		when(recordingStore.store(sessionId, 1, audio)).thenReturn(
+				"/api/ielts/recordings/ielts_session_2/turn-1.wav");
+		EvaluationProcessor processor = new EvaluationProcessor(
+				pronunciationClient,
+				llmClient,
+				activeSessions,
+				mock(SceneRepository.class),
+				messageRepository,
+				turnRepository,
+				mock(SessionEvaluationRepository.class),
+				mock(SceneSentenceReadingRepository.class),
+				practiceRepository,
+				mock(com.unispeaking.infrastructure.persistence.repository.scene.IeltsRepository.class),
+				mock(IeltsSceneFlowServiceImpl.class),
+				mock(PracticeSessionRepository.class),
+				mock(IeltsEvaluationRepository.class),
+				mock(IeltsEvaluationLlmClient.class),
+				authService,
+				mock(com.unispeaking.provider.ObjectStorageProvider.class),
+				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
+				recordingStore);
+
+		var result = processor.evaluateIeltsTurn(
+				ieltsId,
+				new DialogueTurnEvaluationCommand(
+						sessionId,
+						1,
+						audio,
+						"I would like to describe a memorable journey from last year."));
+
+		assertEquals(new BigDecimal("88"), result.pronunciationScore());
+		assertEquals("本轮发音评分已完成，语言反馈暂不可用。", result.feedbackSummary());
+		ArgumentCaptor<CustomTurnEvaluation> savedTurn =
+				ArgumentCaptor.forClass(CustomTurnEvaluation.class);
+		verify(turnRepository).upsert(savedTurn.capture());
+		assertEquals(
+				new BigDecimal("88"),
+				savedTurn.getValue().pronunciationScore());
+		verify(recordingStore).store(sessionId, 1, audio);
+	}
 
 	@Test
 	void reusesCompletedPartScoresAndOnlyScoresMissingPartBeforeFinalReport() {
@@ -187,11 +282,13 @@ class EvaluationServiceImplIeltsTest {
 		assertEquals("FINAL", result.assessmentType());
 		assertEquals(new BigDecimal("7.0"), result.pronunciationScore());
 		assertEquals(new BigDecimal("7.0"), result.overallBandScore());
+		assertEquals(new BigDecimal("6.5"), result.lexicalResourceScore());
+		assertEquals(new BigDecimal("6.5"), result.grammaticalRangeAccuracyScore());
 		assertEquals(
-				"三个 Part 均能保持基本连贯。",
+				"流利与连贯分数由三个 Part 已完成的后台评分取平均并按 0.5 分取整，结果为 7.0。",
 				result.fluencyCoherenceReason());
 		assertEquals(
-				"基于本次 2 轮有效原始语音，音频模型的平均发音得分为 80.0/100，按 9 分制折算为 7.0。",
+				"发音分数由三个 Part 已完成的后台评分取平均并按 0.5 分取整，结果为 7.0。",
 				result.pronunciationReason());
 		assertEquals(3, result.partEvaluations().size());
 		assertEquals(
@@ -205,10 +302,20 @@ class EvaluationServiceImplIeltsTest {
 				org.mockito.ArgumentMatchers.anyString(),
 				org.mockito.ArgumentMatchers.nullable(String.class),
 				org.mockito.ArgumentMatchers.anyString());
-		verify(ieltsLlmClient, times(1)).assessFullTest(
+		verify(ieltsLlmClient, never()).assessPart(
+				eq(com.unispeaking.domain.vo.scene.IeltsPart.PART_1),
+				org.mockito.ArgumentMatchers.anyString(),
+				org.mockito.ArgumentMatchers.nullable(String.class),
+				org.mockito.ArgumentMatchers.anyString());
+		verify(ieltsLlmClient, never()).assessPart(
+				eq(com.unispeaking.domain.vo.scene.IeltsPart.PART_2),
+				org.mockito.ArgumentMatchers.anyString(),
+				org.mockito.ArgumentMatchers.nullable(String.class),
+				org.mockito.ArgumentMatchers.anyString());
+		verify(ieltsLlmClient, never()).assessFullTest(
 				org.mockito.ArgumentMatchers.anyString(),
 				org.mockito.ArgumentMatchers.anyString(),
-				eq("7.0"));
+				org.mockito.ArgumentMatchers.anyString());
 		ArgumentCaptor<com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult>
 				captor = ArgumentCaptor.forClass(
 						com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult.class);
@@ -293,5 +400,65 @@ class EvaluationServiceImplIeltsTest {
 		entity.setRecommendedExpressions(new String[]{"A clearer expression."});
 		entity.setEvaluationStatus("COMPLETED");
 		return entity;
+	}
+
+	private PronunciationAssessmentResult pronunciationAssessment() {
+		return new PronunciationAssessmentResult(
+				new BigDecimal("86"),
+				new BigDecimal("82"),
+				null,
+				new BigDecimal("90"),
+				new BigDecimal("88"),
+				new BigDecimal("84"),
+				EndingTone.FALL,
+				List.of(new PronunciationWordResult(
+						0,
+						"journey",
+						WordReadStatus.NORMAL,
+						new BigDecimal("88"),
+						new BigDecimal("88"),
+						null,
+						List.of(new PronunciationPhonemeResult(
+								0,
+								"dzh",
+								"dzh",
+								new BigDecimal("88"),
+								0,
+								20)))));
+	}
+
+	private byte[] canonicalWav() {
+		byte[] wav = new byte[46];
+		writeAscii(wav, 0, "RIFF");
+		writeInt(wav, 4, wav.length - 8);
+		writeAscii(wav, 8, "WAVE");
+		writeAscii(wav, 12, "fmt ");
+		writeInt(wav, 16, 16);
+		writeShort(wav, 20, 1);
+		writeShort(wav, 22, 1);
+		writeInt(wav, 24, 16_000);
+		writeInt(wav, 28, 32_000);
+		writeShort(wav, 32, 2);
+		writeShort(wav, 34, 16);
+		writeAscii(wav, 36, "data");
+		writeInt(wav, 40, 2);
+		return wav;
+	}
+
+	private void writeAscii(byte[] target, int offset, String value) {
+		byte[] bytes = value.getBytes(StandardCharsets.US_ASCII);
+		System.arraycopy(bytes, 0, target, offset, bytes.length);
+	}
+
+	private void writeShort(byte[] target, int offset, int value) {
+		target[offset] = (byte) value;
+		target[offset + 1] = (byte) (value >>> 8);
+	}
+
+	private void writeInt(byte[] target, int offset, int value) {
+		target[offset] = (byte) value;
+		target[offset + 1] = (byte) (value >>> 8);
+		target[offset + 2] = (byte) (value >>> 16);
+		target[offset + 3] = (byte) (value >>> 24);
 	}
 }

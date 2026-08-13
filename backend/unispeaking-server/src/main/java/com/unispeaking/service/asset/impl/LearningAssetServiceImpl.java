@@ -56,6 +56,7 @@ public class LearningAssetServiceImpl implements LearningAssetService {
 		return new LearningAssetDetail(
 				scene.sceneId(),
 				scene.title(),
+				scene.label(),
 				scene.background(),
 				scene.aiRole(),
 				scene.userRole(),
@@ -92,6 +93,7 @@ public class LearningAssetServiceImpl implements LearningAssetService {
 		return new LearningAssetSummary(
 				scene.sceneId(),
 				scene.title(),
+				scene.label(),
 				scene.background(),
 				scene.wordList().size(),
 				scene.phraseList().size(),

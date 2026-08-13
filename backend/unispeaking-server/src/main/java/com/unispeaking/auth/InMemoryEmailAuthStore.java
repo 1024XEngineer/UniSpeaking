@@ -34,7 +34,8 @@ final class InMemoryEmailAuthStore implements EmailAuthStore {
     }
 
     @Override
-    public boolean saveUser(UUID id, String email, String passwordHash, Instant createdAt, Instant emailVerifiedAt) {
+    public boolean saveUser(UUID id, String email, String passwordHash, String nickname,
+            Instant createdAt, Instant emailVerifiedAt) {
         var user = new UserRecord(id, email, passwordHash);
         if (usersByEmail.putIfAbsent(email, user) != null) {
             return false;

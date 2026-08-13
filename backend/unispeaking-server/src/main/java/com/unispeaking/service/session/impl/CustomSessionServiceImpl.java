@@ -18,6 +18,7 @@ import com.unispeaking.domain.dto.session.StartSessionCommand;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.po.session.AbstractSceneSession;
+import com.unispeaking.domain.vo.scene.CustomStage;
 import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.service.evaluation.CustomEvaluationService;
@@ -56,6 +57,7 @@ public class CustomSessionServiceImpl implements CustomSessionService {
 		String sceneId = command.sceneId();
 		StartCustomSceneDialogueRequest request = command.request();
 		CustomDialogueSceneContext prepared = sceneService.prepareDialogue(sceneId);
+		prepareDialogueFlow(sceneId);
 		StartSessionResponse started = sessionLifecycle.startSession(
 				new StartSessionCommand(
 						prepared.userId(),
@@ -87,6 +89,23 @@ public class CustomSessionServiceImpl implements CustomSessionService {
 		catch (RuntimeException exception) {
 			flowService.clearDialogueState(started.sessionId());
 			throw exception;
+		}
+	}
+
+	private void prepareDialogueFlow(String sceneId) {
+		CustomStage stage;
+		try {
+			stage = flowService.current(sceneId);
+		}
+		catch (BusinessException exception) {
+			if (!"SCENE_FLOW_NOT_FOUND".equals(exception.code())) throw exception;
+			stage = flowService.start(sceneId);
+		}
+		if (stage == CustomStage.COMPLETED) {
+			stage = flowService.start(sceneId);
+		}
+		while (stage != CustomStage.DIALOGUE) {
+			stage = flowService.next(sceneId);
 		}
 	}
 

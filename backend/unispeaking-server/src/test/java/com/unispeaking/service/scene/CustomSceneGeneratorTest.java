@@ -48,6 +48,7 @@ class CustomSceneGeneratorTest {
 				profile);
 
 		assertEquals(5, scene.wordList().size());
+		assertEquals("住宿", scene.label());
 		assertEquals(5, scene.phraseList().size());
 		assertEquals(3, scene.sentenceList().size());
 		assertTrue(scene.wordList().stream()
@@ -69,6 +70,7 @@ class CustomSceneGeneratorTest {
 		assertTrue(prompt.getValue().contains("酒店办理入住"));
 		assertTrue(prompt.getValue().contains("MODERATE"));
 		assertTrue(prompt.getValue().contains("learning_goal"));
+		assertTrue(prompt.getValue().contains("餐饮, 购物, 出行, 住宿"));
 	}
 
 	@Test
@@ -89,9 +91,28 @@ class CustomSceneGeneratorTest {
 		verify(registry, times(2)).executeLlmTask(anyString(), isNull());
 	}
 
+	@Test
+	void retriesWhenModelReturnsLabelOutsideAllowList() {
+		AiProviderRegistry registry = mock(AiProviderRegistry.class);
+		when(registry.executeLlmTask(anyString(), isNull()))
+				.thenReturn(validResponse(5).replace("住宿", "旅游"), validResponse(5));
+		var service = new CustomSceneGenerator(registry, objectMapper);
+
+		var scene = service.generate(
+				"custom_label_retry",
+				"user-1",
+				"酒店办理入住",
+				null,
+				new UserProfile("user-1", "B", "Katerina", "zh-CN", ""));
+
+		assertEquals("住宿", scene.label());
+		verify(registry, times(2)).executeLlmTask(anyString(), isNull());
+	}
+
 	private String validResponse(int wordCount) {
 		Map<String, Object> root = new LinkedHashMap<>();
 		root.put("title", "酒店办理入住");
+		root.put("label", "住宿");
 		root.put("background", "用户抵达酒店前台并办理入住。");
 		root.put("ai_role", "酒店前台接待员");
 		root.put("user_role", "持有预订的住客");

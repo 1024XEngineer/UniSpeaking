@@ -47,6 +47,7 @@ jest.mock('@/model/AppModel', () => ({
 const scene: GeneratedScene = {
   sceneId: 'generated-scene-1',
   title: '机场行李托运',
+  label: '出行',
   background: '在机场柜台办理行李托运。',
   aiRole: '航空公司工作人员',
   userRole: '乘客',
@@ -89,6 +90,7 @@ import {
   sceneMetricsForReport,
   SceneCallStage,
   ScenesHome,
+  ScenesScreen,
   Training,
 } from '../ScenesScreen';
 
@@ -117,6 +119,22 @@ describe('scene completion report mapping', () => {
 });
 
 describe('ScenesHome backend generation binding', () => {
+  it('opens IELTS and interview through the parent tab routes', async () => {
+    const onOpenIelts = jest.fn();
+    const onOpenInterview = jest.fn();
+    const screen = await render(
+      <ScenesScreen
+        onOpenIelts={onOpenIelts}
+        onOpenInterview={onOpenInterview}
+      />,
+    );
+
+    await fireEvent.press(screen.getByLabelText('进入雅思口语'));
+    expect(onOpenIelts).toHaveBeenCalledTimes(1);
+    await fireEvent.press(screen.getByLabelText('进入英文面试'));
+    expect(onOpenInterview).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the generated backend preview and opens that exact scene', async () => {
     const onOpen = jest.fn();
     const sceneService = {
@@ -138,8 +156,8 @@ describe('ScenesHome backend generation binding', () => {
 
     await waitFor(() => expect(screen.getByText('机场行李托运')).toBeTruthy());
     expect(sceneService.generate).toHaveBeenCalledWith('我想练习机场托运行李');
-    expect(screen.getByText('航空公司工作人员')).toBeTruthy();
-    await fireEvent.press(screen.getByText('确认进入'));
+    expect(screen.getByText('AI：航空公司工作人员 · 你：乘客')).toBeTruthy();
+    await fireEvent.press(screen.getByText('开始练习'));
     expect(onOpen).toHaveBeenCalledWith({ name: 'training', scene });
   });
 
@@ -164,6 +182,25 @@ describe('ScenesHome backend generation binding', () => {
 
     await waitFor(() => expect(screen.getByText('模型生成超时')).toBeTruthy());
     expect(screen.queryByText('确认进入')).toBeNull();
+  });
+
+  it('shows recommendation generation feedback on the selected lower arrow', async () => {
+    let resolveScene: (value: GeneratedScene) => void = () => undefined;
+    const sceneService = {
+      generate: jest.fn(() => new Promise<GeneratedScene>((resolve) => {
+        resolveScene = resolve;
+      })),
+    };
+    const screen = await render(
+      <ScenesHome onOpen={jest.fn()} sceneService={sceneService} />,
+    );
+
+    await fireEvent.press(screen.getByLabelText('生成每日推荐：咖啡店点单'));
+    expect(screen.getByLabelText('正在生成推荐场景')).toBeTruthy();
+    expect(screen.getByText('生成练习场景')).toBeTruthy();
+
+    await act(async () => resolveScene(scene));
+    await waitFor(() => expect(screen.getByText('机场行李托运')).toBeTruthy());
   });
 });
 
@@ -265,6 +302,7 @@ describe('SceneCallStage realtime binding', () => {
       sessionId: null,
       userTranscript: '',
       assistantTranscript: '',
+      transcriptHistory: [],
       error: null,
     };
     let listener: ((value: RealtimeSessionSnapshot) => void) | null = null;

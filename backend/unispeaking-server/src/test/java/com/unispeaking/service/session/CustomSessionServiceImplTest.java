@@ -5,17 +5,24 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.component.session.ObsoleteDialogueCleanup;
 import com.unispeaking.component.session.RealtimeSessionCoordinator;
 import com.unispeaking.component.session.SessionLifecycleManager;
 import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
+import com.unispeaking.domain.dto.scene.CustomDialogueSceneContext;
+import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.dto.session.EndCustomSessionCommand;
 import com.unispeaking.domain.dto.session.CompleteCustomSceneDialogueResponse;
+import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
+import com.unispeaking.domain.dto.session.StartCustomSessionCommand;
+import com.unispeaking.domain.dto.session.StartSessionResponse;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.po.session.CustomSceneSession;
 import com.unispeaking.domain.vo.scene.SceneType;
+import com.unispeaking.domain.vo.scene.CustomStage;
 import com.unispeaking.service.evaluation.CustomEvaluationService;
 import com.unispeaking.service.scene.CustomSceneFlowService;
 import com.unispeaking.service.scene.CustomSceneService;
@@ -25,6 +32,42 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class CustomSessionServiceImplTest {
+
+	@Test
+	void repracticeReusesDialogueFlowWithoutReplayingLearningStages() {
+		CustomSceneService scenes = mock(CustomSceneService.class);
+		SessionLifecycleManager lifecycle = mock(SessionLifecycleManager.class);
+		CustomSceneFlowService flow = mock(CustomSceneFlowService.class);
+		RealtimeSessionCoordinator coordinator = mock(RealtimeSessionCoordinator.class);
+		CustomSessionServiceImpl service = new CustomSessionServiceImpl(
+				scenes,
+				lifecycle,
+				flow,
+				coordinator,
+				mock(CustomEvaluationService.class),
+				mock(ObsoleteDialogueCleanup.class));
+		String sceneId = "scene-1";
+		StartCustomSceneDialogueRequest request = mock(StartCustomSceneDialogueRequest.class);
+		CustomDialogueSceneContext context = mock(CustomDialogueSceneContext.class);
+		StartSessionResponse started = mock(StartSessionResponse.class);
+		when(scenes.prepareDialogue(sceneId)).thenReturn(context);
+		when(context.sceneId()).thenReturn(sceneId);
+		when(context.userId()).thenReturn("user-1");
+		when(context.scene()).thenReturn(mock(SceneGenerationResponse.class));
+		when(flow.current(sceneId)).thenReturn(CustomStage.DIALOGUE);
+		when(lifecycle.startSession(any())).thenReturn(started);
+		when(started.sessionId()).thenReturn("session-1");
+
+		service.startSession(new StartCustomSessionCommand(sceneId, request));
+
+		verify(flow, never()).start(sceneId);
+		verify(flow, never()).next(sceneId);
+		verify(flow).startDialogueState(
+				sceneId,
+				"session-1",
+				context.successFactorJson(),
+				context.learningGoal());
+	}
 
 	@Test
 	void endSessionGeneratesTheSceneReportAndReturnsIt() {
@@ -49,6 +92,7 @@ class CustomSessionServiceImplTest {
 				sceneId,
 				userId,
 				"Ordering",
+				"餐饮",
 				null,
 				null,
 				null,

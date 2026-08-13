@@ -1,4 +1,5 @@
 import type { ApiRequestOptions } from '@/infrastructure/http/ApiClient';
+import { createWavUploadFile } from './SceneService';
 
 export type ScenarioDialogueState = {
   sceneId: string;
@@ -53,9 +54,15 @@ export class SceneDialogueApi {
     ) as Promise<ScenarioDialogueState>;
   }
 
-  evaluateTurn(sessionId: string, turnNo: number, transcript: string) {
+  evaluateTurn(
+    sessionId: string,
+    turnNo: number,
+    transcript: string,
+    wavUri?: string | null,
+  ) {
     const body = new FormData();
     body.append('transcript', transcript);
+    if (wavUri) body.append('audio', createWavUploadFile(wavUri));
     return this.client.request(
       `${this.turnPath(sessionId, turnNo)}/evaluation`,
       { method: 'POST', body },
@@ -68,7 +75,7 @@ export class SceneDialogueApi {
       {
         method: 'POST',
         body: JSON.stringify({ stopTime }),
-        timeoutMs: 25_000,
+        timeoutMs: 90_000,
       },
     ) as Promise<DialogueCompletion>;
   }

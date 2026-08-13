@@ -34,6 +34,17 @@ public class CustomSceneGenerator {
 	private static final int MIN_SENTENCES = 3;
 	private static final int MAX_SENTENCES = 4;
 	private static final int MAX_GENERATION_ATTEMPTS = 2;
+	private static final Set<String> ALLOWED_LABELS = Set.of(
+			"餐饮",
+			"购物",
+			"出行",
+			"住宿",
+			"健康",
+			"职场",
+			"社交",
+			"学习",
+			"服务",
+			"其他");
 
 	private final AiProviderRegistry providerRegistry;
 	private final ObjectMapper objectMapper;
@@ -123,6 +134,7 @@ public class CustomSceneGenerator {
 				The JSON shape must be:
 				{
 				  "title": "short Chinese scene title",
+				  "label": "餐饮|购物|出行|住宿|健康|职场|社交|学习|服务|其他",
 				  "background": "specific but privacy-safe scene context",
 				  "ai_role": "the role played by AI",
 				  "user_role": "the role played by the learner",
@@ -152,6 +164,9 @@ public class CustomSceneGenerator {
 				  ]
 				}
 
+				Choose exactly one label from these ten Chinese values: 餐饮, 购物, 出行, 住宿,
+				健康, 职场, 社交, 学习, 服务, 其他. Do not return a synonym, an English label,
+				multiple labels, or any value outside this list.
 				Generate about 5 distinct, scene-specific words, about 5 distinct phrases,
 				and about 3 practical reference sentences. Every reference sentence must reuse
 				at least one exact word or phrase from the generated words and phrases.
@@ -173,6 +188,10 @@ public class CustomSceneGenerator {
 				throw invalidResponse();
 			}
 			String title = requiredText(root, "title", 128);
+			String label = requiredText(root, "label", 16);
+			if (!ALLOWED_LABELS.contains(label)) {
+				throw invalidResponse();
+			}
 			String background = requiredText(root, "background", 4000);
 			String aiRole = requiredText(root, "ai_role", 2000);
 			String userRole = requiredText(root, "user_role", 2000);
@@ -199,6 +218,7 @@ public class CustomSceneGenerator {
 					sceneId,
 					userId,
 					title,
+					label,
 					background,
 					aiRole,
 					userRole,

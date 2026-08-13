@@ -4,8 +4,8 @@ import { MicrophoneIcon } from 'phosphor-react-native/src/icons/Microphone';
 import { MicrophoneSlashIcon } from 'phosphor-react-native/src/icons/MicrophoneSlash';
 import { PhoneDisconnectIcon } from 'phosphor-react-native/src/icons/PhoneDisconnect';
 import { SubtitlesIcon } from 'phosphor-react-native/src/icons/Subtitles';
-import { type ComponentProps, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { type ComponentProps, useCallback, useEffect, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -23,6 +23,8 @@ import { ConversationSettings } from '@/components/ConversationSettings';
 import { AppButton, AppIcon, AppScreen, Brand } from '@/components/ui';
 import { speedCodeForLabel } from '@/features/auth/preferenceMappings';
 import { useFreeChatSession } from '@/features/conversation/useFreeChatSession';
+import { createTranscriptTranslationApi } from '@/features/conversation/TranscriptTranslationApi';
+import type { RealtimeTranscriptEntry } from '@/features/realtime/RealtimeSessionController';
 import type { RealtimeState } from '@/features/realtime/types';
 import { useAppModel } from '@/model/AppModel';
 import { colors } from '@/theme/tokens';
@@ -36,14 +38,19 @@ const voiceWaveRestingLevels = [0.28, 0.52, 0.78, 1, 0.72, 0.48, 0.3];
 export function selectCallCaption(
   session: {
     state: RealtimeState;
-    error: string | null;
+    error: string | { message: string } | null;
     userTranscript: string;
     assistantTranscript: string;
   },
   teacherName: string,
   statusLabel: string,
 ) {
-  if (session.error) return { speaker: '系统', text: session.error };
+  if (session.error) {
+    return {
+      speaker: '系统',
+      text: typeof session.error === 'string' ? session.error : session.error.message,
+    };
+  }
   if (session.state === 'user_speaking') {
     return { speaker: '你', text: session.userTranscript || statusLabel };
   }
@@ -111,6 +118,86 @@ function VoiceWaveform({ active, compact, tone }: { active: boolean; compact: bo
   );
 }
 
+function TranscriptBubble({
+  content,
+  owner,
+  speaker,
+  tone,
+  showTranslation,
+  fallbackTranslation,
+  onTranslate,
+}: {
+  content: string;
+  owner: 0 | 1;
+  speaker: string;
+  tone: 'light' | 'navy';
+  showTranslation: boolean;
+  fallbackTranslation?: string;
+  onTranslate?: (text: string) => Promise<string>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [translation, setTranslation] = useState(fallbackTranslation ?? '');
+  const [translationError, setTranslationError] = useState<string | null>(null);
+  const [translating, setTranslating] = useState(false);
+
+  const toggleTranslation = async () => {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+    if (translation) {
+      setExpanded(true);
+      return;
+    }
+    if (!onTranslate || translating) return;
+    setTranslating(true);
+    setTranslationError(null);
+    try {
+      const translatedText = await onTranslate(content);
+      setTranslation(translatedText);
+      setExpanded(true);
+    } catch (error) {
+      setTranslationError(error instanceof Error ? error.message : '翻译失败，请重试');
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  const isUser = owner === 1;
+  return (
+    <View style={[styles.messageRow, isUser ? styles.messageRowUser : styles.messageRowAssistant]}>
+      <View style={[styles.messageColumn, isUser && styles.messageColumnUser]}>
+        <Text style={[styles.speaker, tone === 'navy' && styles.speakerNavy, isUser && styles.speakerUser]}>{speaker}</Text>
+        <View style={[
+          styles.messageBubble,
+          isUser ? styles.userMessageBubble : styles.assistantMessageBubble,
+          tone === 'navy' && (isUser ? styles.userMessageBubbleNavy : styles.assistantMessageBubbleNavy),
+        ]}>
+          <Text style={[styles.messageText, tone === 'navy' && styles.transcriptEnglishNavy]}>{content}</Text>
+          {!isUser && showTranslation && (onTranslate || fallbackTranslation) ? (
+            <>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={expanded ? '收起翻译' : '翻译'}
+                disabled={translating}
+                onPress={() => void toggleTranslation()}
+                style={styles.translate}
+              >
+                <AppIcon name="translate" size={14} color={tone === 'navy' ? '#5D7896' : colors.subtle} />
+                <Text style={[styles.translateText, tone === 'navy' && styles.translateTextNavy]}>
+                  {translating ? '翻译中…' : expanded ? '收起翻译' : '翻译'}
+                </Text>
+              </Pressable>
+              {expanded && translation ? <Text style={[styles.translation, tone === 'navy' && styles.translationNavy]}>{translation}</Text> : null}
+              {translationError ? <Text style={styles.translationError}>{translationError}</Text> : null}
+            </>
+          ) : null}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export function CallExperience({
   onEnd,
   allowSubtitleToggle = true,
@@ -122,16 +209,21 @@ export function CallExperience({
   progressCollapsed = false,
   transcriptSpeaker,
   showMuteControl = true,
+  showEndControl = true,
   showTranslationControl = true,
+  showUserTranscript = true,
   statusText = '可以开始说了',
+  timerRunning = true,
   tone = 'light',
   transcriptEnglish = 'Hi there! How are you feeling today?',
-  transcriptChinese = '嗨！你今天感觉怎么样？',
+  transcriptChinese = '',
   userTranscript = '',
+  transcriptHistory = [],
   elapsed: controlledElapsed,
   muted: controlledMuted,
   statusLabel,
   onMutedChange,
+  onTranslate,
 }: {
   onEnd: () => void;
   allowSubtitleToggle?: boolean;
@@ -146,23 +238,28 @@ export function CallExperience({
   progressCollapsed?: boolean;
   transcriptSpeaker?: string;
   showMuteControl?: boolean;
+  showEndControl?: boolean;
   showTranslationControl?: boolean;
+  showUserTranscript?: boolean;
   statusText?: string;
+  timerRunning?: boolean;
   tone?: 'light' | 'navy';
   transcriptEnglish?: string;
   transcriptChinese?: string;
   userTranscript?: string;
+  transcriptHistory?: readonly RealtimeTranscriptEntry[];
   elapsed?: number;
   muted?: boolean;
   statusLabel?: string;
   onMutedChange?: (muted: boolean) => void;
+  onTranslate?: (text: string) => Promise<string>;
 }) {
   const { teacher } = useAppModel();
   const activeParticipant = participant ?? teacher;
   const [internalElapsed, setInternalElapsed] = useState(0);
   const [internalMuted, setInternalMuted] = useState(false);
   const [subtitles, setSubtitles] = useState(initialSubtitles);
-  const [translated, setTranslated] = useState(false);
+  const transcriptScrollRef = useRef<ScrollView>(null);
   const subtitlesProgress = useSharedValue(initialSubtitles ? 1 : 0);
   const transcriptVisibility = useSharedValue(initialSubtitles ? 1 : 0);
   const compactLayoutProgress = useSharedValue(progressCollapsed ? 1 : 0);
@@ -172,13 +269,13 @@ export function CallExperience({
     transcriptSpeaker === '你' && transcriptEnglish === userTranscript;
 
   useEffect(() => {
-    if (controlledElapsed !== undefined || muted) return;
+    if (controlledElapsed !== undefined || muted || !timerRunning) return;
     const timer = setInterval(
       () => setInternalElapsed((current) => current + 1),
       1000,
     );
     return () => clearInterval(timer);
-  }, [controlledElapsed, muted]);
+  }, [controlledElapsed, muted, timerRunning]);
 
   useEffect(() => {
     subtitlesProgress.value = withTiming(subtitles ? 1 : 0, {
@@ -250,27 +347,40 @@ export function CallExperience({
           pointerEvents={subtitles ? 'auto' : 'none'}
           style={[styles.transcript, tone === 'navy' && styles.transcriptNavy, compactTranscriptLayout && styles.transcriptCompact, transcriptTransitionStyle]}
         >
-            {userTranscript ? (
-              <View style={styles.userTranscriptBlock}>
-                <Text style={[styles.speaker, tone === 'navy' && styles.speakerNavy]}>你</Text>
-                <Text style={[styles.userTranscriptText, tone === 'navy' && styles.transcriptEnglishNavy, compactTranscriptLayout && styles.userTranscriptTextCompact]}>{userTranscript}</Text>
-              </View>
+          <ScrollView
+            ref={transcriptScrollRef}
+            contentContainerStyle={styles.transcriptContent}
+            onContentSizeChange={() => transcriptScrollRef.current?.scrollToEnd({ animated: true })}
+            showsVerticalScrollIndicator={false}
+          >
+            {transcriptHistory.filter((entry) => showUserTranscript || entry.owner === 0).map((entry) => (
+              <TranscriptBubble
+                content={entry.content}
+                key={entry.id}
+                onTranslate={onTranslate}
+                owner={entry.owner}
+                showTranslation={showTranslationControl}
+                speaker={entry.owner === 1 ? '你' : activeParticipant.name}
+                tone={tone}
+              />
+            ))}
+            {showUserTranscript && userTranscript && !transcriptHistory.some((entry) => entry.owner === 1 && entry.content === userTranscript.trim()) ? (
+              <TranscriptBubble content={userTranscript} owner={1} showTranslation={false} speaker="你" tone={tone} />
             ) : null}
-            {!primaryDuplicatesUser ? (
-              <View style={userTranscript ? styles.assistantTranscriptBlock : undefined}>
-                <Text style={[styles.speaker, tone === 'navy' && styles.speakerNavy]}>{transcriptSpeaker ?? activeParticipant.name}</Text>
-                <Text style={[styles.transcriptEnglish, tone === 'navy' && styles.transcriptEnglishNavy, compactTranscriptLayout && styles.transcriptEnglishCompact]}>{transcriptEnglish}</Text>
-                {showTranslationControl ? (
-                  <>
-                    <Pressable accessibilityRole="button" accessibilityLabel={translated ? '收起翻译' : '翻译'} onPress={() => setTranslated((current) => !current)} style={styles.translate}>
-                      <AppIcon name="translate" size={14} color={tone === 'navy' ? '#5D7896' : colors.subtle} />
-                      <Text style={[styles.translateText, tone === 'navy' && styles.translateTextNavy]}>{translated ? '收起翻译' : '翻译'}</Text>
-                    </Pressable>
-                    {translated ? <Text style={[styles.translation, tone === 'navy' && styles.translationNavy]}>{transcriptChinese}</Text> : null}
-                  </>
-                ) : null}
-              </View>
+            {(showUserTranscript || transcriptSpeaker !== '你') &&
+            !primaryDuplicatesUser &&
+            !transcriptHistory.some((entry) => entry.owner === 0 && entry.content === transcriptEnglish.trim()) ? (
+              <TranscriptBubble
+                content={transcriptEnglish}
+                fallbackTranslation={transcriptChinese}
+                onTranslate={onTranslate}
+                owner={transcriptSpeaker === '你' ? 1 : 0}
+                showTranslation={showTranslationControl}
+                speaker={transcriptSpeaker ?? activeParticipant.name}
+                tone={tone}
+              />
             ) : null}
+          </ScrollView>
         </Animated.View>
       </View>
       <View style={[styles.callControls, compactTranscriptLayout && styles.callControlsCompact]}>
@@ -288,9 +398,11 @@ export function CallExperience({
             <SubtitlesIcon size={24} color={tone === 'navy' ? '#123255' : colors.ink} />
           </Pressable>
         ) : null}
-        <Pressable accessibilityRole="button" accessibilityLabel={endAccessibilityLabel} onPress={onEnd} style={[styles.callControl, tone === 'navy' && styles.callControlNavy, styles.endControl, tone === 'navy' && styles.endControlNavy]}>
-          {endControlIcon === 'arrow' ? <AppIcon name="arrow-right" size={25} color={colors.white} /> : <PhoneDisconnectIcon size={24} color={colors.white} weight="fill" />}
-        </Pressable>
+        {showEndControl ? (
+          <Pressable accessibilityRole="button" accessibilityLabel={endAccessibilityLabel} onPress={onEnd} style={[styles.callControl, tone === 'navy' && styles.callControlNavy, styles.endControl, tone === 'navy' && styles.endControlNavy]}>
+            {endControlIcon === 'arrow' ? <AppIcon name="arrow-right" size={25} color={colors.white} /> : <PhoneDisconnectIcon size={24} color={colors.white} weight="fill" />}
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -304,6 +416,11 @@ export function CallScreen({ onEnd }: { onEnd: () => void }) {
     speechSpeed: speedCodeForLabel(speed),
   });
   const caption = selectCallCaption(session, teacher.name, session.statusLabel);
+  const [translationApi] = useState(createTranscriptTranslationApi);
+  const translate = useCallback((text: string) => {
+    if (!session.sessionId) return Promise.reject(new Error('会话尚未连接，暂时无法翻译'));
+    return translationApi.translateFreeChat(session.sessionId, text);
+  }, [session.sessionId, translationApi]);
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.callScreen}>
@@ -317,6 +434,8 @@ export function CallScreen({ onEnd }: { onEnd: () => void }) {
         transcriptSpeaker={caption.speaker}
         transcriptEnglish={caption.text}
         userTranscript={session.userTranscript}
+        transcriptHistory={session.transcriptHistory}
+        onTranslate={translate}
         onMutedChange={() => session.toggleMuted()}
       />
     </SafeAreaView>
@@ -550,7 +669,20 @@ const styles = StyleSheet.create({
   transcript: { position: 'absolute', top: 220, left: 0, right: 0, bottom: 0, paddingHorizontal: 8, paddingTop: 12 },
   transcriptNavy: { backgroundColor: '#DCEBFA' },
   transcriptCompact: { top: 126, paddingHorizontal: 2, paddingTop: 18 },
+  transcriptContent: { paddingBottom: 16, gap: 12 },
+  messageRow: { width: '100%', flexDirection: 'row' },
+  messageRowAssistant: { justifyContent: 'flex-start' },
+  messageRowUser: { justifyContent: 'flex-end' },
+  messageColumn: { maxWidth: '84%', alignItems: 'flex-start' },
+  messageColumnUser: { alignItems: 'flex-end' },
+  messageBubble: { marginTop: 4, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 },
+  assistantMessageBubble: { backgroundColor: '#F1F1ED' },
+  userMessageBubble: { backgroundColor: '#DCEBFA' },
+  assistantMessageBubbleNavy: { backgroundColor: '#F7FBFF' },
+  userMessageBubbleNavy: { backgroundColor: '#BEDAF3' },
+  messageText: { color: colors.ink, fontSize: 17, lineHeight: 25, fontWeight: '300' },
   speaker: { color: colors.subtle, fontSize: 13, fontWeight: '300' },
+  speakerUser: { textAlign: 'right' },
   userTranscriptBlock: { paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: colors.line },
   userTranscriptText: { marginTop: 6, color: colors.muted, fontSize: 18, lineHeight: 26, fontWeight: '300' },
   userTranscriptTextCompact: { fontSize: 19, lineHeight: 27 },
@@ -564,6 +696,7 @@ const styles = StyleSheet.create({
   translateTextNavy: { color: '#5D7896' },
   translation: { marginTop: 8, color: colors.muted, fontSize: 13, lineHeight: 20, fontWeight: '300' },
   translationNavy: { color: '#5D7896' },
+  translationError: { marginTop: 6, color: '#B94D44', fontSize: 12, lineHeight: 18 },
   callControls: { paddingTop: 12, flexDirection: 'row', justifyContent: 'center', gap: 14 },
   callControlsCompact: { paddingTop: 8 },
   callControl: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 32, backgroundColor: colors.white },

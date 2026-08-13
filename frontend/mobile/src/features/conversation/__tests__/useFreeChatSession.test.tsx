@@ -14,6 +14,7 @@ const idleSnapshot: RealtimeSessionSnapshot = {
   sessionId: null,
   userTranscript: '',
   assistantTranscript: '',
+  transcriptHistory: [],
   error: null,
 };
 

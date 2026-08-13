@@ -7,37 +7,60 @@ function createClient() {
 }
 
 describe('AuthService', () => {
-  it('logs in with the Java auth request shape', async () => {
+  it('logs in through mobile email auth without human verification', async () => {
     const client = createClient();
     const service = new AuthService(client);
 
-    await service.login({ username: 'learner@example.com', password: 'password123' });
+    await service.login({
+      username: 'learner@example.com',
+      password: 'password123456',
+    });
 
-    expect(client.request).toHaveBeenCalledWith('/api/auth/login', {
+    expect(client.request).toHaveBeenCalledWith('/api/auth/mobile/email/login', {
       method: 'POST',
       body: JSON.stringify({
-        username: 'learner@example.com',
-        password: 'password123',
+        email: 'learner@example.com',
+        password: 'password123456',
       }),
     });
   });
 
-  it('registers with nickname using the Java auth request shape', async () => {
+  it('issues a mobile email challenge without human verification', async () => {
+    const client = createClient();
+    const service = new AuthService(client);
+
+    await service.issueEmailChallenge({
+      email: 'learner@example.com',
+    });
+
+    expect(client.request).toHaveBeenCalledWith('/api/auth/mobile/email/challenges', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: 'learner@example.com',
+      }),
+    });
+  });
+
+  it('registers with the email challenge and nickname', async () => {
     const client = createClient();
     const service = new AuthService(client);
 
     await service.register({
       username: 'learner@example.com',
-      password: 'password123',
+      password: 'password123456',
       nickname: 'Yufan',
+      challengeId: 'challenge-1',
+      code: '123456',
     });
 
-    expect(client.request).toHaveBeenCalledWith('/api/auth/register', {
+    expect(client.request).toHaveBeenCalledWith('/api/auth/mobile/email/register', {
       method: 'POST',
       body: JSON.stringify({
-        username: 'learner@example.com',
-        password: 'password123',
+        email: 'learner@example.com',
+        password: 'password123456',
         nickname: 'Yufan',
+        challengeId: 'challenge-1',
+        code: '123456',
       }),
     });
   });

@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton, AppIcon, Brand } from '@/components/ui';
 import { TeacherSwipeStack } from '@/components/TeacherSwipeStack';
+import { authErrorMessage } from '@/features/auth/AuthSessionController';
 import { useAppModel } from '@/model/AppModel';
 import { colors, levels } from '@/theme/tokens';
 
@@ -185,35 +186,127 @@ export function AuthFormScreen({
   onBack: () => void;
   onSwitch: () => void;
 }) {
-  const { authError, authStatus, nickname, setNickname, signIn, signUp } = useAppModel();
+  const { authError, authStatus, issueEmailChallenge, nickname, setNickname, signIn, signUp } = useAppModel();
   const [draftNickname, setDraftNickname] = useState(nickname);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [step, setStep] = useState<'credentials' | 'verification'>('credentials');
+  const [challengeId, setChallengeId] = useState('');
+  const [code, setCode] = useState('');
+  const [resendSeconds, setResendSeconds] = useState(0);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [submittingChallenge, setSubmittingChallenge] = useState(false);
   const emailValid = /^\S+@\S+\.\S+$/.test(email.trim());
-  const passwordValid = password.length >= 8;
+  const passwordValid = mode === 'signup' ? password.length >= 12 : password.length >= 6;
   const nicknameValid = mode === 'login' || draftNickname.trim().length >= 2;
   const valid = emailValid && passwordValid && nicknameValid;
 
+  useEffect(() => {
+    if (resendSeconds <= 0) return;
+    const timer = setInterval(() => setResendSeconds((current) => Math.max(0, current - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [resendSeconds]);
+
+  const sendEmailCode = async () => {
+    setLocalError(null);
+    setSubmittingChallenge(true);
+    try {
+      const challenge = await issueEmailChallenge({
+        email: email.trim(),
+      });
+      setChallengeId(challenge.challengeId);
+      setResendSeconds(challenge.resendAfterSeconds);
+      setCode('');
+      setStep('verification');
+    } catch (error) {
+      setLocalError(authErrorMessage(error));
+    } finally {
+      setSubmittingChallenge(false);
+    }
+  };
+
   const submit = async () => {
     setSubmitted(true);
+    setLocalError(null);
     if (!valid) return;
     try {
       if (mode === 'signup') {
         const nextNickname = draftNickname.trim();
         setNickname(nextNickname);
+        await sendEmailCode();
+        return;
+      }
+      await signIn({ username: email.trim(), password });
+    } catch (error) {
+      setLocalError(authErrorMessage(error));
+    }
+  };
+
+  const completeRegistration = async () => {
+    setLocalError(null);
+    if (!/^[0-9]{6}$/.test(code)) {
+      setLocalError('请输入 6 位邮箱验证码');
+      return;
+    }
+    try {
+      const nextNickname = draftNickname.trim();
+      setNickname(nextNickname);
         await signUp({
           username: email.trim(),
           password,
           nickname: nextNickname,
+          challengeId,
+          code,
         });
-        return;
-      }
-      await signIn({ username: email.trim(), password });
-    } catch {
-      // The controller publishes the backend-safe message through authError.
+    } catch (error) {
+      setLocalError(authErrorMessage(error));
     }
   };
+
+  if (mode === 'signup' && step === 'verification') {
+    return (
+      <AuthPage header={<AuthHeader title="验证邮箱" onBack={() => setStep('credentials')} />}>
+        <View style={styles.heading}>
+          <Text style={styles.authTitle}>查看你的邮箱</Text>
+          <Text style={styles.authSubtitle}>验证码已发送至 {email.trim()}，10 分钟内有效。</Text>
+        </View>
+        <View style={styles.form}>
+          <View style={styles.formGroup}>
+            <Text style={styles.fieldLabel}>6 位验证码</Text>
+            <TextInput
+              value={code}
+              onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="000000"
+              placeholderTextColor={colors.subtle}
+              keyboardType="number-pad"
+              autoComplete="one-time-code"
+              maxLength={6}
+              style={[styles.input, styles.codeInput]}
+              onSubmitEditing={() => void completeRegistration()}
+            />
+          </View>
+        </View>
+        {localError || authError ? <Text accessibilityRole="alert" style={styles.errorText}>{localError ?? authError}</Text> : null}
+        <AppButton
+          title={authStatus === 'authenticating' ? '正在验证…' : '完成注册'}
+          disabled={authStatus === 'authenticating' || code.length !== 6}
+          onPress={() => void completeRegistration()}
+          style={styles.fullWidth}
+        />
+        <Pressable
+          accessibilityRole="button"
+          disabled={resendSeconds > 0 || submittingChallenge}
+          onPress={() => void sendEmailCode()}
+          style={styles.switchButton}
+        >
+          <Text style={styles.switchText}>
+            {submittingChallenge ? '正在发送…' : resendSeconds > 0 ? `${resendSeconds} 秒后可重新发送` : '重新发送验证码'}
+          </Text>
+        </Pressable>
+      </AuthPage>
+    );
+  }
 
   return (
     <AuthPage header={<AuthHeader title={mode === 'login' ? '登录' : '创建账号'} onBack={onBack} />}>
@@ -264,7 +357,7 @@ export function AuthFormScreen({
           <TextInput
             value={password}
             onChangeText={setPassword}
-            placeholder="至少 8 位字符"
+            placeholder={mode === 'signup' ? '至少 12 位字符' : '请输入密码'}
             placeholderTextColor={colors.subtle}
             secureTextEntry
             autoCapitalize="none"
@@ -272,15 +365,17 @@ export function AuthFormScreen({
             style={[styles.input, submitted && !passwordValid && styles.inputError]}
             onSubmitEditing={() => void submit()}
           />
-          {submitted && !passwordValid ? <Text style={styles.errorText}>密码至少需要 8 位字符</Text> : null}
+          {submitted && !passwordValid ? (
+            <Text style={styles.errorText}>{mode === 'signup' ? '密码至少需要 12 位字符' : '请输入正确的密码'}</Text>
+          ) : null}
         </View>
       </View>
 
-      {authError ? <Text accessibilityRole="alert" style={styles.errorText}>{authError}</Text> : null}
+      {localError || authError ? <Text accessibilityRole="alert" style={styles.errorText}>{localError ?? authError}</Text> : null}
 
       <AppButton
-        title={mode === 'login' ? '登录' : '注册并继续'}
-        disabled={authStatus === 'authenticating'}
+        title={submittingChallenge || authStatus === 'authenticating' ? '正在处理…' : mode === 'login' ? '登录' : '发送邮箱验证码'}
+        disabled={authStatus === 'authenticating' || submittingChallenge}
         onPress={() => void submit()}
         style={styles.fullWidth}
       />
@@ -402,6 +497,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   inputError: { borderColor: colors.red },
+  codeInput: { textAlign: 'center', fontSize: 24, fontVariant: ['tabular-nums'], letterSpacing: 8 },
   errorText: { color: colors.red, fontSize: 11, fontWeight: '300' },
   fullWidth: { width: '100%' },
   switchButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },

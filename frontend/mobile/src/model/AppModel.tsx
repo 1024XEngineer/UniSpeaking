@@ -12,7 +12,11 @@ import {
   AuthSessionController,
   type AuthSessionState,
 } from '@/features/auth/AuthSessionController';
-import { AuthService, type UserPreference } from '@/features/auth/AuthService';
+import {
+  AuthService,
+  type EmailChallenge,
+  type UserPreference,
+} from '@/features/auth/AuthService';
 import {
   cefrLevelForLevel,
   levelForCefrLevel,
@@ -37,10 +41,13 @@ export type AppModelAuthController = {
   subscribe(listener: (state: AuthSessionState) => void): () => void;
   bootstrap(): Promise<void>;
   login(input: { username: string; password: string }): Promise<void>;
+  issueEmailChallenge(input: { email: string }): Promise<EmailChallenge>;
   register(input: {
     username: string;
     password: string;
     nickname: string | null;
+    challengeId: string;
+    code: string;
   }): Promise<void>;
   updatePreference(patch: Partial<UserPreference>): Promise<UserPreference>;
   logout(): Promise<void>;
@@ -54,10 +61,13 @@ type AppModelValue = {
   authStatus: AuthSessionState['status'];
   authError: string | null;
   signIn: (input: { username: string; password: string }) => Promise<void>;
+  issueEmailChallenge: (input: { email: string }) => Promise<EmailChallenge>;
   signUp: (input: {
     username: string;
     password: string;
     nickname: string | null;
+    challengeId: string;
+    code: string;
   }) => Promise<void>;
   completeOnboarding: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -67,6 +77,7 @@ type AppModelValue = {
   setSpeed: (value: string) => void;
   level: string;
   setLevel: (value: string) => void;
+  saveLevel: (value: string) => Promise<void>;
   teacher: Teacher;
   setTeacher: (value: Teacher) => void;
   sceneRecords: SceneLearningRecord[];
@@ -157,8 +168,14 @@ export function AppModelProvider({
     [authController],
   );
 
+  const issueEmailChallenge = useCallback(
+    (input: { email: string }) =>
+      authController.issueEmailChallenge(input),
+    [authController],
+  );
+
   const signUp = useCallback(
-    (input: { username: string; password: string; nickname: string | null }) =>
+    (input: { username: string; password: string; nickname: string | null; challengeId: string; code: string }) =>
       authController.register(input),
     [authController],
   );
@@ -170,6 +187,14 @@ export function AppModelProvider({
       preferredVoice: voiceForTeacher(teacher),
     });
   }, [authController, level, teacher]);
+
+  const saveLevel = useCallback(async (value: string) => {
+    const selectedLevel = levels.find((option) => option.id === value) ?? levels[0];
+    const preference = await authController.updatePreference({
+      cefrLevel: cefrLevelForLevel(selectedLevel),
+    });
+    setLevel(levelForCefrLevel(preference.cefrLevel, levels).id);
+  }, [authController]);
 
   const signOut = useCallback(() => authController.logout(), [authController]);
 
@@ -187,6 +212,7 @@ export function AppModelProvider({
       authStatus: authState.status,
       authError: authState.error,
       signIn,
+      issueEmailChallenge,
       signUp,
       completeOnboarding,
       signOut,
@@ -196,6 +222,7 @@ export function AppModelProvider({
       setSpeed,
       level,
       setLevel,
+      saveLevel,
       teacher,
       setTeacher,
       sceneRecords,
@@ -216,6 +243,7 @@ export function AppModelProvider({
       hasCompletedOnboarding,
       isModelReady,
       isAuthenticated,
+      issueEmailChallenge,
       authState.error,
       authState.status,
       level,
@@ -224,6 +252,7 @@ export function AppModelProvider({
       ieltsRecords,
       interviewRecords,
       removeSceneRecord,
+      saveLevel,
       sceneRecords,
       signIn,
       signOut,

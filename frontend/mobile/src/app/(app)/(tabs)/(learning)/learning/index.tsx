@@ -1,15 +1,10 @@
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useRouter } from 'expo-router';
 
 import { routes } from '@/navigation/routes';
-import { forgetSpecialty } from '@/navigation/specialtyMemory';
 import { AssetsScreen } from '@/screens/AssetsScreen';
 
 export default function LearningHomeRoute() {
   const router = useRouter();
-  useFocusEffect(useCallback(() => {
-    void forgetSpecialty();
-  }, []));
   return (
     <AssetsScreen
       onOpenRecord={(record) => router.push(routes.learning.sceneDetail(record.id))}

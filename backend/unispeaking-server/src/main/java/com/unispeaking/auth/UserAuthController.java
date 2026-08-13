@@ -1,6 +1,8 @@
 package com.unispeaking.auth;
 
 import com.unispeaking.common.response.ApiResponse;
+import com.unispeaking.domain.dto.auth.AuthResponse;
+import com.unispeaking.service.auth.AuthService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -12,6 +14,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.time.Duration;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -37,7 +40,8 @@ public final class UserAuthController {
             @NotBlank @Email String email,
             @NotBlank @Size(min = 12, max = 200) String password,
             @NotNull UUID challengeId,
-            @NotBlank @Pattern(regexp = "[0-9]{6}") String code) {
+            @NotBlank @Pattern(regexp = "[0-9]{6}") String code,
+            @Size(max = 32) String nickname) {
     }
 
     public record LoginRequest(
@@ -57,16 +61,27 @@ public final class UserAuthController {
     }
 
     private final EmailAuthService authService;
+    private final AuthService learningAuthService;
     private final boolean secureCookie;
     private final long sessionMaxAgeSeconds;
+
+    @Autowired
+    public UserAuthController(
+            EmailAuthService authService,
+            AuthService learningAuthService,
+            @Value("${AUTH_COOKIE_SECURE:false}") boolean secureCookie,
+            @Value("${AUTH_SESSION_MAX_AGE_SECONDS:28800}") long sessionMaxAgeSeconds) {
+        this.authService = authService;
+        this.learningAuthService = learningAuthService;
+        this.secureCookie = secureCookie;
+        this.sessionMaxAgeSeconds = sessionMaxAgeSeconds;
+    }
 
     public UserAuthController(
             EmailAuthService authService,
             @Value("${AUTH_COOKIE_SECURE:false}") boolean secureCookie,
             @Value("${AUTH_SESSION_MAX_AGE_SECONDS:28800}") long sessionMaxAgeSeconds) {
-        this.authService = authService;
-        this.secureCookie = secureCookie;
-        this.sessionMaxAgeSeconds = sessionMaxAgeSeconds;
+        this(authService, null, secureCookie, sessionMaxAgeSeconds);
     }
 
     @PostMapping("/email/challenges")
@@ -94,7 +109,7 @@ public final class UserAuthController {
             @Valid @RequestBody RegisterRequest request,
             HttpServletResponse response) {
         var user = authService.register(
-                request.email(), request.password(), request.challengeId(), request.code());
+                request.email(), request.password(), request.challengeId(), request.code(), request.nickname());
         var login = authService.login(request.email(), request.password());
         addSessionCookie(response, login.rawToken());
         return ResponseEntity.ok(ApiResponse.success(user));
@@ -108,6 +123,30 @@ public final class UserAuthController {
                 request.email(), request.password(), request.humanVerificationToken());
         addSessionCookie(response, login.rawToken());
         return ResponseEntity.ok(ApiResponse.success(login.user()));
+    }
+
+    /** Web login response for local HTTP and other clients that cannot persist Secure cookies. */
+    @PostMapping("/email/password/login/token")
+    public ApiResponse<AuthResponse> loginToken(@Valid @RequestBody LoginRequest request) {
+        authService.login(request.email(), request.password(), request.humanVerificationToken());
+        if (learningAuthService == null) {
+            throw new IllegalStateException("Learning auth service is not configured");
+        }
+        return ApiResponse.success(
+                learningAuthService.login(new com.unispeaking.domain.dto.auth.LoginRequest(
+                        request.email(), request.password())));
+    }
+
+    @PostMapping("/email/register/token")
+    public ApiResponse<AuthResponse> registerToken(@Valid @RequestBody RegisterRequest request) {
+        if (learningAuthService == null) {
+            throw new IllegalStateException("Learning auth service is not configured");
+        }
+        authService.register(
+                request.email(), request.password(), request.challengeId(), request.code(), request.nickname());
+        return ApiResponse.success(learningAuthService.login(
+                new com.unispeaking.domain.dto.auth.LoginRequest(
+                        request.email(), request.password())));
     }
 
     @GetMapping("/email/me")

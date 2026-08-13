@@ -80,6 +80,7 @@ public class CustomSceneServiceImpl implements CustomSceneService {
 		return new CustomSceneGenerationResponse(
 				generated.sceneId(),
 				definition.title(),
+				definition.label(),
 				definition.background(),
 				definition.aiRole(),
 				definition.userRole(),

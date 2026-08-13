@@ -44,7 +44,7 @@ async function provider(test: ReturnType<typeof fixture>, event: unknown) {
 }
 
 describe('InterviewSessionController', () => {
-  it('starts continuous recording before WebRTC and opens the mic only after opening response.done', async () => {
+  it('starts continuous recording before WebRTC and opens the mic for interviewer barge-in', async () => {
     const test = fixture();
     await test.controller.start();
     expect(test.calls.slice(0, 4)).toEqual(['recorder.start', 'webrtc.prepare', 'webrtc.offer', 'webrtc.answer']);
@@ -52,7 +52,7 @@ describe('InterviewSessionController', () => {
     await provider(test, { type: 'session.updated' });
     expect(test.transport.sendProviderEvent).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'response.create' }));
     expect(test.sessionSocket.bindProviderSession).toHaveBeenCalledWith('provider-1');
-    expect(test.transport.setAudioEnabled).toHaveBeenLastCalledWith(false);
+    expect(test.transport.setAudioEnabled).toHaveBeenLastCalledWith(true);
     await provider(test, { type: 'response.done', response: { status: 'completed' } });
     expect(test.transport.setAudioEnabled).toHaveBeenLastCalledWith(true);
     expect(test.controller.getSnapshot().state).toBe('active');
@@ -80,10 +80,10 @@ describe('InterviewSessionController', () => {
     await provider(test, { type: 'response.done', response: { status: 'completed' } });
     await provider(test, { type: 'input_audio_buffer.speech_started', item_id: 'item-1' });
     await provider(test, { type: 'input_audio_buffer.speech_stopped', item_id: 'item-1' });
-    await provider(test, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'item-1', transcript: 'answer' });
-    await provider(test, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'item-1', transcript: 'answer' });
+    await provider(test, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'item-1', transcript: 'This is my complete answer.' });
+    await provider(test, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'item-1', transcript: 'This is my complete answer.' });
     expect(test.sessionSocket.persistMessage).toHaveBeenCalledTimes(1);
-    expect(test.sessionApi.submitTurn).toHaveBeenCalledWith('session-1', 1, 'answer', 'turn-1.wav');
+    expect(test.sessionApi.submitTurn).toHaveBeenCalledWith('session-1', 1, 'This is my complete answer.', 'turn-1.wav');
     expect(test.recorder.discard).toHaveBeenCalledTimes(1);
   });
 
@@ -112,7 +112,7 @@ describe('InterviewSessionController', () => {
     await provider(test, { type: 'response.done', response: { status: 'completed' } });
     await provider(test, { type: 'input_audio_buffer.speech_started', item_id: 'item-1' });
     await provider(test, { type: 'input_audio_buffer.speech_stopped', item_id: 'item-1' });
-    await provider(test, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'item-1', transcript: 'answer' });
+    await provider(test, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'item-1', transcript: 'This is my complete answer.' });
     await provider(test, { type: 'response.done', response: { status: 'completed' } });
     expect(test.transport.setAudioEnabled).toHaveBeenLastCalledWith(false);
     expect(test.sessionApi.end).toHaveBeenCalledTimes(1);
@@ -169,7 +169,7 @@ describe('InterviewSessionController', () => {
     const turn = test.controller.handleProviderMessage(JSON.stringify({
       type: 'conversation.item.input_audio_transcription.completed',
       item_id: 'item-1',
-      transcript: 'answer',
+      transcript: 'This is my complete answer.',
     }));
     while (!rejectTurn) await Promise.resolve();
     const ending = test.controller.end();
@@ -178,7 +178,7 @@ describe('InterviewSessionController', () => {
     await expect(turn).rejects.toThrow('turn failed');
     await ending;
     expect(test.sessionApi.end).toHaveBeenCalledTimes(1);
-    expect(test.transport.sendProviderEvent).toHaveBeenCalledTimes(2);
+    expect(test.transport.sendProviderEvent.mock.calls.filter(([event]) => event.type === 'response.create')).toHaveLength(1);
     expect(test.controller.getSnapshot().state).toBe('ended');
   });
 
@@ -194,7 +194,7 @@ describe('InterviewSessionController', () => {
     const event = {
       type: 'conversation.item.input_audio_transcription.completed',
       item_id: 'item-retry',
-      transcript: 'answer',
+      transcript: 'This is my complete answer.',
     };
 
     await expect(test.controller.handleProviderMessage(JSON.stringify(event))).rejects.toThrow('ack failed');

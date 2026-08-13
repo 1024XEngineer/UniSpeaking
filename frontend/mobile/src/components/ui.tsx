@@ -8,6 +8,7 @@ import { TrashIcon } from 'phosphor-react-native/src/icons/Trash';
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
 import type { ComponentProps, PropsWithChildren, ReactNode } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   Platform,
   ScrollView,
@@ -183,7 +184,7 @@ export function AppScreen({
   fixedHeader?: ReactNode;
 }>) {
   return (
-    <SafeAreaView edges={['top']} style={styles.screen}>
+    <SafeAreaView edges={['top', 'bottom']} style={styles.screen}>
       {fixedHeader}
       <ScrollView
         bounces={scrollEnabled}
@@ -407,6 +408,20 @@ export function ProgressBar({ value, max = 100 }: { value: number; max?: number 
   );
 }
 
+export function EvaluationPendingOverlay({
+  copy = '正在整理本次对话与能力表现…',
+}: {
+  copy?: string;
+}) {
+  return (
+    <View style={styles.evaluationPendingOverlay}>
+      <ActivityIndicator color={colors.ink} size="large" />
+      <Text style={styles.evaluationPendingTitle}>正在生成评分</Text>
+      <Text style={styles.evaluationPendingCopy}>{copy}</Text>
+    </View>
+  );
+}
+
 export function Metric({ label, value, suffix }: { label: string; value: string | number; suffix?: string }) {
   return (
     <View style={styles.metric}>
@@ -551,6 +566,9 @@ const styles = StyleSheet.create({
   dangerText: { color: colors.red },
   progressTrack: { height: 6, overflow: 'hidden', borderRadius: 3, backgroundColor: '#E9E9E5' },
   progressFill: { height: '100%', borderRadius: 3, backgroundColor: colors.ink },
+  evaluationPendingOverlay: { position: 'absolute', zIndex: 250, top: 0, right: 0, bottom: 0, left: 0, paddingHorizontal: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.94)' },
+  evaluationPendingTitle: { marginTop: 18, color: colors.ink, fontSize: 23, lineHeight: 30, fontWeight: '600' },
+  evaluationPendingCopy: { marginTop: 8, color: colors.muted, fontSize: 14, lineHeight: 21, fontWeight: '300', textAlign: 'center' },
   metric: {
     flex: 1,
     padding: 14,

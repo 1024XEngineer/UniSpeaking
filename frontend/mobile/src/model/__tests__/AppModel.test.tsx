@@ -29,6 +29,11 @@ function createController(state: AuthSessionState): AppModelAuthController & {
       listener?.(state);
     }),
     login: jest.fn(async () => undefined),
+    issueEmailChallenge: jest.fn(async () => ({
+      challengeId: 'challenge-1',
+      expiresInSeconds: 600,
+      resendAfterSeconds: 60,
+    })),
     register: jest.fn(async () => undefined),
     updatePreference: jest.fn(async (patch: Partial<UserPreference>) => ({
       userId: 'user-1',
@@ -88,7 +93,7 @@ function SessionProbe() {
         onPress={() =>
           void model.signIn({
             username: 'learner@example.com',
-            password: 'password123',
+            password: 'password123456',
           })
         }
       />
@@ -101,6 +106,7 @@ function OnboardingProbe() {
   return (
     <View>
       <Pressable accessibilityLabel="choose-level" onPress={() => model.setLevel('basic')} />
+      <Pressable accessibilityLabel="save-ielts-level" onPress={() => void model.saveLevel('independent')} />
       <Pressable accessibilityLabel="choose-teacher" onPress={() => model.setTeacher(teachers[1])} />
       <Pressable
         accessibilityLabel="complete-onboarding"
@@ -153,7 +159,7 @@ describe('AppModelProvider authentication binding', () => {
     await waitFor(() =>
       expect(controller.login).toHaveBeenCalledWith({
         username: 'learner@example.com',
-        password: 'password123',
+        password: 'password123456',
       }),
     );
   });
@@ -182,6 +188,23 @@ describe('AppModelProvider authentication binding', () => {
       expect(controller.updatePreference).toHaveBeenCalledWith({
         cefrLevel: 'B',
         preferredVoice: 'Harvey',
+      }),
+    );
+  });
+
+  it('persists a changed IELTS intake level in the user preference', async () => {
+    const controller = createController(authenticatedState);
+    const screen = await render(
+      <AppModelProvider authController={controller}>
+        <OnboardingProbe />
+      </AppModelProvider>,
+    );
+
+    await fireEvent.press(screen.getByLabelText('save-ielts-level'));
+
+    await waitFor(() =>
+      expect(controller.updatePreference).toHaveBeenCalledWith({
+        cefrLevel: 'C',
       }),
     );
   });

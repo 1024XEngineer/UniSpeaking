@@ -40,8 +40,26 @@ export type IeltsLearningRecord = {
   date: string;
   duration: string;
   result: string;
-  estimatedBand: number;
+  estimatedBand: number | null;
   scores: readonly [number, number, number, number];
+  bandScores?: readonly [number | null, number | null, number | null, number | null];
+  summary?: string;
+  strengths?: readonly string[];
+  improvements?: readonly string[];
+  recommendedExpressions?: readonly string[];
+  scoreReasons?: readonly [string | null, string | null, string | null, string | null];
+  recordingUrls?: readonly string[];
+  mode?: 'PART_PRACTICE' | 'MOCK_TEST';
+  part?: 'PART_1' | 'PART_2' | 'PART_3' | null;
+  startedAt?: string;
+  endedAt?: string;
+  partEvaluations?: readonly {
+    part: 'PART_1' | 'PART_2' | 'PART_3';
+    fluencyCoherenceScore: number | null;
+    lexicalResourceScore: number | null;
+    grammaticalRangeAccuracyScore: number | null;
+    pronunciationScore: number | null;
+  }[];
 };
 
 export type InterviewLearningRecord = {

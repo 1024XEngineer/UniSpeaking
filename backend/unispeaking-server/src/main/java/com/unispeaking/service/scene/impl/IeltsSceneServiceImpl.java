@@ -138,9 +138,6 @@ public class IeltsSceneServiceImpl implements IeltsSceneService {
 	public IeltsStage completeDialogue(String ieltsId, String userId) {
 		IeltsPracticeRecord practice = requirePracticeOwnedBy(ieltsId, userId);
 		IeltsStage next = flowService.next(ieltsId);
-		if (next == IeltsStage.COMPLETED) {
-			practiceRepository.incrementCompletedCount(practice.userId());
-		}
 		return next;
 	}
 

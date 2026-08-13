@@ -35,6 +35,7 @@ class LearningAssetServiceImplTest {
 				sceneId,
 				userId,
 				"咖啡店点单",
+				"餐饮",
 				"在咖啡店完成点单",
 				"咖啡店店员",
 				"顾客",
@@ -87,12 +88,14 @@ class LearningAssetServiceImplTest {
 				evaluationService);
 
 		assertEquals(1, service.listAssets().size());
+		assertEquals("餐饮", service.listAssets().getFirst().label());
 		assertEquals(
 				new BigDecimal("83"),
 				service.listAssets().getFirst().latestScore());
 		assertEquals(
 				dialogue,
 				service.getAsset(sceneId).dialogueEvaluation());
+		assertEquals("餐饮", service.getAsset(sceneId).label());
 		assertEquals(
 				report,
 				service.getAsset(sceneId).latestReport());

@@ -193,7 +193,7 @@ class IELTSSceneServiceImplTest {
 	}
 
 	@Test
-	void completedFlowConsumesTheDailyPracticeInSceneModule() {
+	void completedFlowOnlyAdvancesTheSceneAndLeavesCountingToEvaluation() {
 		IeltsPracticeRecord practice = mockPractice("ielts_complete");
 		when(practiceRepository.findPractice(practice.ieltsId()))
 				.thenReturn(Optional.of(practice));
@@ -202,7 +202,7 @@ class IELTSSceneServiceImplTest {
 
 		service.completeDialogue(practice.ieltsId(), userId.toString());
 
-		verify(practiceRepository).incrementCompletedCount(userId);
+		verify(practiceRepository, never()).incrementCompletedCount(userId);
 	}
 
 	@Test

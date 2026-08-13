@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Image, PanResponder, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Image, PanResponder, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Reanimated, {
   cancelAnimation,
@@ -14,6 +14,7 @@ import Svg, { Circle, Line, Polygon, Text as SvgText } from 'react-native-svg';
 import {
   AppIcon,
   AppScreen,
+  EvaluationPendingOverlay,
   MainModuleHeader,
 } from '@/components/ui';
 import { SceneCategoryTag } from '@/components/SceneCategoryTag';
@@ -26,6 +27,7 @@ import {
 import { SceneService, type GeneratedScene } from '@/features/scenes/SceneService';
 import { SceneTrainingController, type SceneTrainingSnapshot } from '@/features/scenes/SceneTrainingController';
 import { WavRecorder } from '@/features/audio/WavRecorder';
+import { createTurnAudioCapture } from '@/features/audio/TurnAudioCapture';
 import { SceneSpeechClient, TtsPlayer } from '@/features/audio/TtsPlayer';
 import {
   useFreeChatSession,
@@ -45,8 +47,11 @@ import { speedCodeForLabel } from '@/features/auth/preferenceMappings';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
 import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
 import { ApiClient } from '@/infrastructure/http/ApiClient';
-import type { SceneCategory } from '@/data/sceneCategories';
+import { sceneCategoryForLabel } from '@/data/sceneCategories';
 import { useAppModel } from '@/model/AppModel';
+import { useLearningStage } from '@/navigation/learningStage';
+import { forgetSpecialty } from '@/navigation/specialtyMemory';
+import { createTranscriptTranslationApi } from '@/features/conversation/TranscriptTranslationApi';
 import { colors } from '@/theme/tokens';
 import { CallExperience, selectCallCaption } from './ConversationScreen';
 import { IeltsFlow, InterviewFlow } from './SpecialtyFlows';
@@ -233,6 +238,7 @@ function createDefaultSceneController(
       sessionApi: new RealtimeSessionApi(apiClient),
       sessionSocket: new SessionMessageSocket({ baseUrl: backendUrl, tokenStore }),
       sceneDialogue: new SceneDialogueApi(apiClient, sceneId),
+      turnAudioCapture: createTurnAudioCapture(new WavRecorder()),
     },
     {
       mode: 'scene',
@@ -255,6 +261,9 @@ export function SceneCallStage({
 }) {
   const { teacher, speed } = useAppModel();
   const deliveredCompletion = useRef<DialogueCompletion | null>(null);
+  const autoEnding = useRef(false);
+  const [evaluationPending, setEvaluationPending] = useState(false);
+  const [translationApi] = useState(createTranscriptTranslationApi);
   const session = useFreeChatSession(
     {
       voice: teacher.voiceId,
@@ -274,28 +283,46 @@ export function SceneCallStage({
     }
   }, [onComplete, session.completion]);
 
+  const translate = useCallback(
+    (text: string) => translationApi.translateScene(scene.sceneId, text),
+    [scene.sceneId, translationApi],
+  );
+
   const caption = selectCallCaption(session, teacher.name, session.statusLabel);
   return (
-    <CallExperience
-      allowSubtitleToggle={false}
-      compactTranscriptLayout
-      elapsed={session.elapsed}
-      muted={session.muted}
-      onEnd={() => {
-        void session.end().catch(() => undefined);
-      }}
-      onMutedChange={() => session.toggleMuted()}
-      progressCollapsed={progressCollapsed}
-      statusLabel={session.statusLabel}
-      transcriptSpeaker={caption.speaker}
-      transcriptEnglish={caption.text}
-      transcriptChinese=""
-      userTranscript={session.userTranscript}
-    />
+    <View style={styles.sceneCallExperience}>
+      <CallExperience
+        allowSubtitleToggle={false}
+        compactTranscriptLayout
+        elapsed={session.elapsed}
+        muted={session.muted}
+        onEnd={() => {
+          if (autoEnding.current) return;
+          autoEnding.current = true;
+          setEvaluationPending(true);
+          void session.end().catch(() => {
+            autoEnding.current = false;
+            setEvaluationPending(false);
+          });
+        }}
+        onMutedChange={() => session.toggleMuted()}
+        onTranslate={translate}
+        progressCollapsed={progressCollapsed}
+        statusLabel={session.statusLabel}
+        transcriptSpeaker={caption.speaker}
+        transcriptEnglish={caption.text}
+        userTranscript={session.userTranscript}
+        transcriptHistory={session.transcriptHistory}
+      />
+      {(evaluationPending || session.state === 'ending') ? (
+        <EvaluationPendingOverlay copy="正在整理本次对话与五项能力表现…" />
+      ) : null}
+    </View>
   );
 }
 
 export function Training({ id, scene, trainingController: injectedTrainingController, wavRecorder: injectedWavRecorder, ttsPlayer: injectedTtsPlayer, initialStage = 'learn', onBack, onFinish, onViewDetails }: { id?: string; scene?: GeneratedScene; trainingController?: SceneTrainingController; wavRecorder?: Pick<WavRecorder, 'start' | 'stop' | 'cancel'>; ttsPlayer?: Pick<TtsPlayer, 'play' | 'stop'>; initialStage?: TrainingStage; onBack: () => void; onFinish: () => void; onViewDetails?: (id: string) => void }) {
+  const { setImmersiveLearning } = useLearningStage();
   const sceneId = scene?.sceneId ?? id ?? recommendations[0].id;
   const scenario = scene
     ? { id: scene.sceneId, title: scene.title }
@@ -311,6 +338,7 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
   const [readPassed, setReadPassed] = useState(false);
   const [readFeedbackOpen, setReadFeedbackOpen] = useState(false);
   const [demoPlaying, setDemoPlaying] = useState(false);
+  const demoActive = useRef(false);
   const [recording, setRecording] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [completionOpen, setCompletionOpen] = useState(false);
@@ -333,11 +361,16 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
   );
 
   useEffect(() => {
+    setImmersiveLearning(true);
+    return () => setImmersiveLearning(false);
+  }, [setImmersiveLearning]);
+
+  useEffect(() => {
     if (!scene || !trainingController) return;
     const unsubscribe = trainingController.subscribe(setTrainingSnapshot);
-    void trainingController.start(scene).catch(() => undefined);
+    void trainingController.start(scene, initialStage).catch(() => undefined);
     return unsubscribe;
-  }, [scene, trainingController]);
+  }, [initialStage, scene, trainingController]);
 
   useEffect(
     () => () => {
@@ -384,16 +417,19 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
       setDemoPlaying((current) => !current);
       return;
     }
-    if (demoPlaying) {
+    if (demoActive.current) {
       ttsPlayer.stop();
+      demoActive.current = false;
       setDemoPlaying(false);
       return;
     }
+    demoActive.current = true;
+    setDemoPlaying(true);
     setAudioError(null);
     try {
       await ttsPlayer.play(scene.sceneId, text);
-      setDemoPlaying(true);
     } catch (error) {
+      demoActive.current = false;
       setDemoPlaying(false);
       setAudioError(
         error instanceof Error ? error.message : '标准发音播放失败',
@@ -403,6 +439,7 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
 
   const nextLearn = () => {
     ttsPlayer?.stop();
+    demoActive.current = false;
     setDemoPlaying(false);
     if (scene && trainingController) {
       void trainingController.next();
@@ -420,6 +457,7 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
   };
   const previousLearn = () => {
     ttsPlayer?.stop();
+    demoActive.current = false;
     setDemoPlaying(false);
     if (scene && trainingController) {
       trainingController.previous();
@@ -570,7 +608,7 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
             <Text style={styles.stageCount}>{displayedReadIndex + 1} / {displayedReadItems.length}</Text>
           </View>
           <View style={styles.readCard}>
-            {displayedReadPassed ? <View style={styles.scoreBadge}><Text style={styles.scoreBadgeValue}>{trainingSnapshot?.readingResult?.overallScore ?? 86}</Text><Text style={styles.scoreBadgeMax}>/100</Text></View> : null}
+            {displayedReadPassed ? <View style={styles.scoreBadge}><Text style={styles.scoreBadgeValue}>{Math.round(trainingSnapshot?.readingResult?.overallScore ?? 86)}</Text><Text style={styles.scoreBadgeMax}>/100</Text></View> : null}
             <Text style={styles.readSentence}>
               {displayedReadPassed ? readItem.en : readItem.en}
             </Text>
@@ -635,7 +673,7 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
     {readFeedbackOpen ? (
       <View style={styles.scoreModalBackdrop}>
         <View style={styles.scoreModal}>
-          <View style={styles.scoreModalValueRow}><Text style={styles.scoreModalValue}>{readingResult?.overallScore ?? 86}</Text><Text style={styles.scoreModalMax}>/100</Text></View>
+          <View style={styles.scoreModalValueRow}><Text style={styles.scoreModalValue}>{Math.round(readingResult?.overallScore ?? 86)}</Text><Text style={styles.scoreModalMax}>/100</Text></View>
           <Text style={styles.scoreModalTitle}>本句发音评估</Text>
           <Text style={styles.scoreModalLead}>{readingResult?.passed ? `本句已达到通过标准，可以${isLastReadItem ? '进入模拟' : '进入下一句'}；低分词仍可继续练习。` : '本句尚未达到通过标准，请根据逐词结果再次朗读。'}</Text>
           <View style={styles.scoreFocusCard}>
@@ -664,7 +702,7 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
               <Text style={styles.completionLead}>本次场景对话已结束，下面是你的五维表现。</Text>
             </View>
             <View style={styles.completionScoreRow}>
-              <Text style={styles.completionScore}>{dialogueCompletion?.evaluation?.finalScore ?? 86}</Text>
+              <Text style={styles.completionScore}>{Math.round(dialogueCompletion?.evaluation?.finalScore ?? 86)}</Text>
               <Text style={styles.completionScoreMax}>/100</Text>
             </View>
           </View>
@@ -674,7 +712,7 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
               {completionMetrics.map((metric) => (
                 <View key={metric.label} style={styles.completionMetricRow}>
                   <Text style={styles.completionMetricLabel}>{metric.label}</Text>
-                  <Text style={styles.completionMetricValue}>{metric.value}</Text>
+                  <Text style={styles.completionMetricValue}>{Math.round(metric.value)}</Text>
                 </View>
               ))}
             </View>
@@ -713,10 +751,6 @@ function createDefaultTtsPlayer() {
       tokenStore,
     }),
   });
-}
-
-function inferSceneCategory(scene: GeneratedScene): SceneCategory {
-  return recommendations.find((item) => item.title === scene.title)?.category ?? 'other';
 }
 
 function ScenePromptInput({
@@ -799,11 +833,12 @@ export function ScenesHome({
   );
   const [prompt, setPrompt] = useState('');
   const [preview, setPreview] = useState<GeneratedScene | null>(null);
-  const [generating, setGenerating] = useState(false);
+  const [generatingSource, setGeneratingSource] = useState<'custom' | string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const generatePreview = async (sceneInput: string) => {
+  const generating = generatingSource !== null;
+  const generatePreview = async (sceneInput: string, source: 'custom' | string) => {
     if (!sceneInput.trim() || generating) return;
-    setGenerating(true);
+    setGeneratingSource(source);
     setGenerationError(null);
     try {
       setPreview(await sceneService.generate(sceneInput.trim()));
@@ -813,7 +848,7 @@ export function ScenesHome({
         error instanceof Error ? error.message : '场景生成失败，请重试',
       );
     } finally {
-      setGenerating(false);
+      setGeneratingSource(null);
     }
   };
 
@@ -851,14 +886,14 @@ export function ScenesHome({
               accessibilityRole="button"
               accessibilityLabel="生成练习场景"
               disabled={!prompt.trim() || generating}
-              onPress={() => void generatePreview(prompt)}
+              onPress={() => void generatePreview(prompt, 'custom')}
               style={({ pressed }) => [
                 styles.generateButton,
                 prompt.trim() && !generating ? styles.generateButtonReady : styles.generateButtonDisabled,
                 pressed && prompt.trim() && !generating && styles.generateButtonPressed,
               ]}
             >
-              <Text style={[styles.generateButtonText, prompt.trim() && !generating ? styles.generateButtonTextActive : styles.generateButtonTextDisabled]}>{generating ? '正在生成…' : '生成练习场景'}</Text>
+              <Text style={[styles.generateButtonText, prompt.trim() && !generating ? styles.generateButtonTextActive : styles.generateButtonTextDisabled]}>{generatingSource === 'custom' ? '正在生成…' : '生成练习场景'}</Text>
               <AppIcon name="arrow-right" size={18} color={prompt.trim() && !generating ? colors.white : '#7896B8'} />
             </Pressable>
           </View>
@@ -916,8 +951,10 @@ export function ScenesHome({
           {recommendations.map((item) => (
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel={`生成每日推荐：${item.title}`}
               key={item.id}
-              onPress={() => void generatePreview(`${item.title}：${item.goal}`)}
+              disabled={generating}
+              onPress={() => void generatePreview(`${item.title}：${item.goal}`, item.id)}
               style={({ pressed }) => [styles.recommendation, pressed && styles.compactPressed]}
             >
               <View style={styles.recommendationCopy}>
@@ -928,7 +965,9 @@ export function ScenesHome({
                 <Text numberOfLines={1} style={styles.recommendationMeta}>{item.goal} · {item.duration}</Text>
               </View>
               <View style={styles.recommendationArrow}>
-              <AppIcon name="arrow-right" size={17} color={colors.white} />
+              {generatingSource === item.id
+                ? <ActivityIndicator accessibilityLabel="正在生成推荐场景" color={colors.white} size="small" />
+                : <AppIcon name="arrow-right" size={17} color={colors.white} />}
               </View>
             </Pressable>
           ))}
@@ -944,16 +983,15 @@ export function ScenesHome({
             <Text style={styles.previewEyebrow}>场景已准备好</Text>
             <View style={styles.previewTitleRow}>
               <Text style={styles.previewTitle}>{preview.title}</Text>
-              <SceneCategoryTag category={inferSceneCategory(preview)} />
+              <SceneCategoryTag category={sceneCategoryForLabel(preview.label)} />
             </View>
-            <Text style={styles.previewLead}>确认场景信息，然后开始学习。</Text>
+            <Text style={styles.previewLead}>场景已生成，确认后即可开始练习。</Text>
             <View style={styles.previewSummary}>
               {[
-                ['场景简介', preview.background],
-                ['AI 扮演', preview.aiRole],
-                ['你将扮演', preview.userRole],
-                ['练习重点', preview.learningGoal],
-                ['预计用时', `${preview.estimatedMinutes} 分钟`],
+                ['场景', preview.background],
+                ['角色', `AI：${preview.aiRole} · 你：${preview.userRole}`],
+                ['目标', preview.learningGoal],
+                ['时长', `约 ${preview.estimatedMinutes} 分钟`],
               ].map(([label, value]) => (
                 <View key={label} style={styles.previewSummaryRow}>
                   <Text style={styles.previewSummaryLabel}>{label}</Text>
@@ -970,7 +1008,7 @@ export function ScenesHome({
                 onPress={() => onOpen({ name: 'training', scene: preview })}
                 style={[styles.previewButton, styles.previewButtonPrimary]}
               >
-                <Text style={styles.previewButtonPrimaryText}>确认进入</Text>
+                <Text style={styles.previewButtonPrimaryText}>开始练习</Text>
                 <AppIcon name="arrow-right" size={18} color={colors.white} />
               </Pressable>
             </View>
@@ -981,14 +1019,38 @@ export function ScenesHome({
   );
 }
 
-export function ScenesScreen() {
+export function ScenesScreen({
+  onIeltsViewDetails,
+  onSceneViewDetails,
+  onOpenIelts,
+  onOpenInterview,
+}: {
+  onIeltsViewDetails?: (recordId: string) => void;
+  onSceneViewDetails?: (sceneId: string) => void;
+  onOpenIelts?: () => void;
+  onOpenInterview?: () => void;
+} = {}) {
   const [route, setRoute] = useState<SceneRoute>({ name: 'home' });
+  const openRoute = (nextRoute: SceneRoute) => {
+    if (nextRoute.name === 'ielts' && onOpenIelts) {
+      onOpenIelts();
+      return;
+    }
+    if (nextRoute.name === 'interview' && onOpenInterview) {
+      onOpenInterview();
+      return;
+    }
+    setRoute(nextRoute);
+  };
+  useEffect(() => {
+    if (route.name === 'home') void forgetSpecialty();
+  }, [route.name]);
   if (route.name === 'training') {
-    return <Training scene={route.scene} onBack={() => setRoute({ name: 'home' })} onFinish={() => setRoute({ name: 'home' })} />;
+    return <Training scene={route.scene} onBack={() => setRoute({ name: 'home' })} onFinish={() => setRoute({ name: 'home' })} onViewDetails={onSceneViewDetails} />;
   }
-  if (route.name === 'ielts') return <IeltsFlow onExit={() => setRoute({ name: 'home' })} />;
+  if (route.name === 'ielts') return <IeltsFlow onExit={() => setRoute({ name: 'home' })} onViewDetails={onIeltsViewDetails} />;
   if (route.name === 'interview') return <InterviewFlow onExit={() => setRoute({ name: 'home' })} />;
-  return <ScenesHome onOpen={setRoute} />;
+  return <ScenesHome onOpen={openRoute} />;
 }
 
 const styles = StyleSheet.create({
@@ -1251,6 +1313,7 @@ const styles = StyleSheet.create({
   readDemoButton: { minHeight: 36, marginTop: 18, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7 },
   readDemoText: { color: colors.subtle, fontSize: 12, fontWeight: '500' },
   sceneCallStage: { flex: 1, minHeight: 0, marginHorizontal: -2 },
+  sceneCallExperience: { flex: 1, position: 'relative' },
   scoreModalBackdrop: { position: 'absolute', zIndex: 200, top: 0, right: 0, bottom: 0, left: 0, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,20,19,0.32)' },
   scoreModal: { width: '100%', maxWidth: 420, padding: 24, borderRadius: 24, backgroundColor: colors.white, shadowColor: '#000000', shadowOffset: { width: 0, height: 24 }, shadowOpacity: 0.2, shadowRadius: 36, elevation: 18 },
   scoreModalValueRow: { flexDirection: 'row', alignItems: 'flex-end' },

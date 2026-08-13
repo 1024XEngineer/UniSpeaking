@@ -60,6 +60,7 @@ class SceneServiceImplTest {
 				"custom_generated",
 				userId,
 				"酒店办理入住",
+				"住宿",
 				"酒店前台",
 				"前台接待员",
 				"住客",
@@ -84,6 +85,7 @@ class SceneServiceImplTest {
 						invocation.getArgument(0),
 						definition.userId(),
 						definition.title(),
+						definition.label(),
 						definition.background(),
 						definition.aiRole(),
 						definition.userRole(),
@@ -131,6 +133,7 @@ class SceneServiceImplTest {
 						null));
 
 		assertEquals(5, response.wordList().size());
+		assertEquals("住宿", response.label());
 		assertEquals(5, response.phraseList().size());
 		assertEquals(3, response.sentenceList().size());
 		assertEquals("layer one\n\nlayer two", response.scenePrompt());

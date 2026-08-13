@@ -13,10 +13,15 @@ export class RealtimeSessionApi {
   constructor(private readonly client: ApiRequester) {}
 
   start(request: RealtimeSessionStartRequest) {
-    const { sceneId, ...body } = request;
-    const path = sceneId
-      ? `/api/custom-scenes/${encodeURIComponent(sceneId)}/sessions`
-      : '/api/scene-sessions';
+    const { sceneId, ieltsId, voice, ...rest } = request;
+    const path = ieltsId
+      ? `/api/ielts/${encodeURIComponent(ieltsId)}/sessions`
+      : sceneId
+        ? `/api/custom-scenes/${encodeURIComponent(sceneId)}/sessions`
+        : '/api/scene-sessions';
+    const body = ieltsId
+      ? { ...rest, voiceId: voice, translationEnabled: request.translationEnabled }
+      : { ...rest, voice, translationEnabled: request.translationEnabled };
     return this.client.request(path, {
       method: 'POST',
       body: JSON.stringify(body),

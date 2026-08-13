@@ -63,6 +63,15 @@ public class EmailAuthService {
         if (!humanVerificationGateway.verify(humanVerificationToken)) {
             throw new AuthException("HUMAN_VERIFICATION_REQUIRED");
         }
+        return issueVerifiedChallenge(rawEmail);
+    }
+
+    /** Issues an email challenge for the mobile registration flow. */
+    public ChallengeIssued issueMobileChallenge(String rawEmail) {
+        return issueVerifiedChallenge(rawEmail);
+    }
+
+    private ChallengeIssued issueVerifiedChallenge(String rawEmail) {
         var email = normalizeEmail(rawEmail);
         var code = String.format("%0" + CODE_LENGTH + "d", RANDOM.nextInt(1_000_000));
         var challengeId = UUID.randomUUID();
@@ -72,6 +81,15 @@ public class EmailAuthService {
     }
 
     public UserView register(String rawEmail, String rawPassword, UUID challengeId, String code) {
+        return register(rawEmail, rawPassword, challengeId, code, null);
+    }
+
+    public UserView register(
+            String rawEmail,
+            String rawPassword,
+            UUID challengeId,
+            String code,
+            String nickname) {
         var email = normalizeEmail(rawEmail);
         if (!StringUtils.hasText(rawPassword) || rawPassword.length() < 12) {
             throw new AuthException("WEAK_PASSWORD");
@@ -86,7 +104,8 @@ public class EmailAuthService {
             throw new AuthException("CHALLENGE_INVALID");
         }
         var userId = UUID.randomUUID();
-        if (!store.saveUser(userId, email, passwordEncoder.encode(rawPassword), now, now)) {
+        var normalizedNickname = StringUtils.hasText(nickname) ? nickname.trim() : null;
+        if (!store.saveUser(userId, email, passwordEncoder.encode(rawPassword), normalizedNickname, now, now)) {
             throw new AuthException("IDENTITY_ALREADY_BOUND");
         }
         return new UserView(userId, email);

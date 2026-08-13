@@ -3,6 +3,7 @@ import { ApiError } from '@/infrastructure/http/ApiClient';
 
 import type {
   AuthResponse,
+  EmailChallenge,
   UserAccount,
   UserPreference,
 } from './AuthService';
@@ -22,10 +23,13 @@ export type AuthSessionState = Readonly<{
 
 type AuthServicePort = {
   login(input: { username: string; password: string }): Promise<AuthResponse>;
+  issueEmailChallenge(input: { email: string }): Promise<EmailChallenge>;
   register(input: {
     username: string;
     password: string;
     nickname: string | null;
+    challengeId: string;
+    code: string;
   }): Promise<AuthResponse>;
   currentUser(): Promise<UserAccount>;
   getPreference(): Promise<UserPreference>;
@@ -46,7 +50,16 @@ const initialState: AuthSessionState = {
   error: null,
 };
 
-function errorMessage(error: unknown) {
+export function authErrorMessage(error: unknown) {
+  if (error instanceof ApiError) {
+    const messages: Record<string, string> = {
+      INVALID_CREDENTIALS: '邮箱或密码错误',
+      CHALLENGE_INVALID: '验证码无效或已过期，请重新获取',
+      IDENTITY_ALREADY_BOUND: '该邮箱已注册，请直接登录',
+      WEAK_PASSWORD: '密码至少需要 12 位字符',
+    };
+    if (error.code && messages[error.code]) return messages[error.code];
+  }
   return error instanceof Error ? error.message : '请求失败，请稍后重试';
 }
 
@@ -83,8 +96,12 @@ export class AuthSessionController {
       if (error instanceof ApiError && error.status === 401) {
         await this.dependencies.tokenStore.clear();
       }
-      this.setAnonymous(errorMessage(error));
+      this.setAnonymous(authErrorMessage(error));
     }
+  }
+
+  issueEmailChallenge(input: { email: string }) {
+    return this.dependencies.authService.issueEmailChallenge(input);
   }
 
   async login(input: { username: string; password: string }) {
@@ -93,7 +110,7 @@ export class AuthSessionController {
       const auth = await this.dependencies.authService.login(input);
       await this.finishAuthentication(auth);
     } catch (error) {
-      this.setAnonymous(errorMessage(error));
+      this.setAnonymous(authErrorMessage(error));
       throw error;
     }
   }
@@ -102,13 +119,15 @@ export class AuthSessionController {
     username: string;
     password: string;
     nickname: string | null;
+    challengeId: string;
+    code: string;
   }) {
     this.setState({ ...initialState, status: 'authenticating' });
     try {
       const auth = await this.dependencies.authService.register(input);
       await this.finishAuthentication(auth);
     } catch (error) {
-      this.setAnonymous(errorMessage(error));
+      this.setAnonymous(authErrorMessage(error));
       throw error;
     }
   }

@@ -5,6 +5,7 @@ import java.util.List;
 public record CustomSceneGenerationResponse(
 		String sceneId,
 		String title,
+		String label,
 		String background,
 		String aiRole,
 		String userRole,

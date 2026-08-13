@@ -1,6 +1,8 @@
 import type { ApiRequestOptions } from '@/infrastructure/http/ApiClient';
 import { File } from 'expo-file-system';
 
+import type { SceneLabel } from '@/data/sceneCategories';
+
 export type SceneFlowStage =
   | 'WORD_LEARNING'
   | 'PHRASE_LEARNING'
@@ -18,6 +20,7 @@ export type LearningContentItem = {
 export type GeneratedScene = {
   sceneId: string;
   title: string;
+  label: SceneLabel;
   background: string;
   aiRole: string;
   userRole: string;
@@ -62,6 +65,7 @@ function isGeneratedScene(value: unknown): value is GeneratedScene {
   const scene = value as Partial<GeneratedScene>;
   return Boolean(
     scene.sceneId?.trim() &&
+      scene.label?.trim() &&
       Array.isArray(scene.wordList) &&
       scene.wordList.length &&
       Array.isArray(scene.phraseList) &&

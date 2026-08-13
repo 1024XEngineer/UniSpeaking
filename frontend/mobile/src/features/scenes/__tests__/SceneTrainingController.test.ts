@@ -30,6 +30,7 @@ const sentence: LearningContentItem = {
 const scene: GeneratedScene = {
   sceneId: 'scene-1',
   title: '咖啡店点单',
+  label: '餐饮',
   background: 'A coffee shop.',
   aiRole: 'Barista',
   userRole: 'Customer',
@@ -97,6 +98,24 @@ describe('SceneTrainingController', () => {
         index: 0,
       }),
     );
+  });
+
+  it('reuses the normal dialogue stage for repractice without replaying learning transitions', async () => {
+    const service = createService();
+    const controller = new SceneTrainingController(service);
+
+    await controller.start(scene, 'speak');
+
+    expect(controller.getSnapshot()).toEqual(
+      expect.objectContaining({
+        status: 'ready',
+        stage: 'speak',
+        unlockedStage: 2,
+      }),
+    );
+    expect(service.createFlow).not.toHaveBeenCalled();
+    expect(service.advanceStage).not.toHaveBeenCalled();
+    expect(service.getContent).not.toHaveBeenCalled();
   });
 
   it('advances words to phrases and phrases to the reading stage', async () => {

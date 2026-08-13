@@ -30,5 +30,5 @@ export default function InterviewAssetReportRoute() {
   if (loading) return <AppScreen><Text>正在读取面试报告…</Text></AppScreen>;
   if (error) return <AppScreen><Card><Text>{error}</Text></Card></AppScreen>;
   if (!record) return <Redirect href={routes.learning.interview.history} />;
-  return <InterviewAssetRemoteReport asset={record} onBack={() => router.back()} onPractice={() => router.replace(routes.specialty.interviewPractice(record.sceneId, record.jobTitle))} />;
+  return <InterviewAssetRemoteReport asset={record} onBack={() => router.replace(routes.learning.interview.history)} onPractice={() => router.replace(routes.specialty.interviewPractice(record.sceneId, record.jobTitle))} />;
 }
