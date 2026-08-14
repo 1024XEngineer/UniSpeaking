@@ -73,6 +73,7 @@ async function releaseSceneInput(controller: RealtimeSessionController) {
     JSON.stringify({ type: 'response.done', response: { status: 'completed' } }),
   );
   jest.advanceTimersByTime(1_200);
+  await Promise.resolve();
   jest.useRealTimers();
 }
 
@@ -430,7 +431,7 @@ describe('RealtimeSessionController', () => {
       dependencies.transport.sendProviderEvent.mock.calls.filter(
         ([event]) => event.type === 'response.create',
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     expect(dependencies.transport.sendProviderEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'session.update',
@@ -456,7 +457,7 @@ describe('RealtimeSessionController', () => {
       dependencies.transport.sendProviderEvent.mock.calls.filter(
         ([event]) => event.type === 'response.create',
       ),
-    ).toHaveLength(3);
+    ).toHaveLength(2);
   });
 
   it('does not advance the scene state twice for a repeated provider transcript', async () => {
@@ -540,7 +541,7 @@ describe('RealtimeSessionController', () => {
       dependencies.transport.sendProviderEvent.mock.calls.filter(
         ([event]) => event.type === 'response.create',
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
 
     await controller.handleProviderMessage(
       JSON.stringify({
@@ -564,7 +565,7 @@ describe('RealtimeSessionController', () => {
       dependencies.transport.sendProviderEvent.mock.calls.filter(
         ([event]) => event.type === 'response.create',
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
   });
 
   it('waits for the final scene response before ending and exposing evaluation', async () => {
@@ -623,9 +624,14 @@ describe('RealtimeSessionController', () => {
     await controller.handleProviderMessage(JSON.stringify({ type: 'response.created' }));
     expect(sceneDialogue.complete).not.toHaveBeenCalled();
 
+    jest.useFakeTimers();
     await controller.handleProviderMessage(
       JSON.stringify({ type: 'response.done', response: { status: 'completed' } }),
     );
+    jest.advanceTimersByTime(1_200);
+    await Promise.resolve();
+    await Promise.resolve();
+    jest.useRealTimers();
 
     expect(sceneDialogue.complete).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot()).toEqual(

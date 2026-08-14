@@ -1013,7 +1013,7 @@ export function ScenesHome({
             <Text style={styles.previewTitle}>{previewDisplay?.title || preview.title}</Text>
               <SceneCategoryTag category={sceneCategoryForLabel(preview.label)} />
             </View>
-            <Text style={styles.previewLead}>确认场景信息，然后开始学习。</Text>
+            <Text style={styles.previewLead}>场景已生成，确认后即可开始练习。</Text>
             <View style={styles.previewSummary}>
               {[
                 ['场景简介', previewDisplay?.background || preview.background],
