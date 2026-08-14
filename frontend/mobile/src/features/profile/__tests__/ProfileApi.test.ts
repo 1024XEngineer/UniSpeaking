@@ -72,4 +72,21 @@ describe('ProfileApi', () => {
 
     expect(request).toHaveBeenCalledWith('/api/help-center');
   });
+
+  it('loads help category and article routes with encoded identifiers', async () => {
+    const request = jest.fn().mockResolvedValue({});
+    const api = new ProfileApi({ request });
+
+    await api.getHelpCategory('quick start');
+    await api.getHelpArticle('first setup');
+
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      '/api/help-center/categories/quick%20start',
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      '/api/help-center/articles/first%20setup',
+    );
+  });
 });

@@ -56,27 +56,33 @@ class WeeklyGoalProgressCalculatorTest {
 				NOW,
 				ZONE_ID);
 
-		assertEquals(330, progress.completedDurationSeconds());
+		assertEquals(930, progress.completedDurationSeconds());
 		assertEquals(0, progress.remainingDurationSeconds());
 		assertEquals(100.0, progress.durationProgress());
 		assertTrue(progress.durationAchieved());
-		assertEquals(2, progress.completedTrainingCount());
-		assertEquals(2, progress.remainingTrainingCount());
-		assertEquals(50.0, progress.countProgress());
+		assertEquals(3, progress.completedTrainingCount());
+		assertEquals(1, progress.remainingTrainingCount());
+		assertEquals(75.0, progress.countProgress());
 		assertFalse(progress.countAchieved());
-		assertEquals(2, progress.trainingTypeDurations().size());
+		assertEquals(3, progress.trainingTypeDurations().size());
 		assertEquals(SceneType.FREE_CHAT,
 				progress.trainingTypeDurations().get(0).type());
 		assertEquals(30,
 				progress.trainingTypeDurations().get(0).durationSeconds());
-		assertEquals(9.1,
+		assertEquals(3.2,
 				progress.trainingTypeDurations().get(0).percentage());
 		assertEquals(SceneType.CUSTOM_SCENE,
 				progress.trainingTypeDurations().get(1).type());
 		assertEquals(300,
 				progress.trainingTypeDurations().get(1).durationSeconds());
-		assertEquals(90.9,
+		assertEquals(32.3,
 				progress.trainingTypeDurations().get(1).percentage());
+		assertEquals(SceneType.IELTS_SCENE,
+				progress.trainingTypeDurations().get(2).type());
+		assertEquals(600,
+				progress.trainingTypeDurations().get(2).durationSeconds());
+		assertEquals(64.5,
+				progress.trainingTypeDurations().get(2).percentage());
 		assertEquals(Instant.parse("2026-08-02T16:00:00Z"),
 				progress.weekStartsAt());
 		assertEquals(Instant.parse("2026-08-09T16:00:00Z"),
@@ -107,7 +113,7 @@ class WeeklyGoalProgressCalculatorTest {
 	}
 
 	@Test
-	void returnsEmptyDistributionWhenNoSessionContributesDuration() {
+	void includesIeltsSessionsInLearningDuration() {
 		var progress = calculator.calculate(
 				List.of(record(
 						SceneType.IELTS_SCENE,
@@ -118,7 +124,10 @@ class WeeklyGoalProgressCalculatorTest {
 				NOW,
 				ZONE_ID);
 
-		assertTrue(progress.trainingTypeDurations().isEmpty());
+		assertEquals(300, progress.completedDurationSeconds());
+		assertEquals(1, progress.completedTrainingCount());
+		assertEquals(SceneType.IELTS_SCENE,
+				progress.trainingTypeDurations().getFirst().type());
 	}
 
 	private PracticeSessionRecord record(
