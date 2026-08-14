@@ -276,13 +276,18 @@
 .landing-device--mobile { right: 2%; bottom: 4px; width: 160px; height: 320px; padding: 8px; border: 4px solid #2f2f2d; border-radius: 24px; transform: rotate(4deg); background: #292927; }
 .landing-device__speaker { position: absolute; z-index: 2; top: 8px; left: 50%; width: 42px; height: 5px; border-radius: 5px; transform: translateX(-50%); background: #30302e; }
 .landing-device--mobile .landing-device__screen { width: 100%; height: 100%; padding: 44px 14px 22px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 17px; color: #1c1c1b; text-align: center; background: #f4f4f0; }
+.landing-mobile-download { text-decoration: none; }
 .landing-device--mobile img { width: 42px; height: 42px; margin-bottom: 15px; border-radius: 8px; }
+.landing-device--mobile .landing-mobile-download__qr { width: 82px; height: 82px; padding: 6px; object-fit: contain; border: 1px solid #deded8; border-radius: 6px; background: #fff; image-rendering: pixelated; }
 .landing-device--mobile strong { font-size: 11px; }
 .landing-device--mobile span { margin-top: 6px; color: #83837d; font-size: 8px; }
-.landing-device--mobile .landing-device__screen i { width: 40px; height: 40px; margin-top: 28px; display: grid; place-items: center; border: 1px solid #d6d6d0; border-radius: 50%; background: #fff; }
+.landing-device--mobile .landing-device__screen i { width: 40px; height: 40px; margin-top: 18px; display: grid; place-items: center; border: 1px solid #d6d6d0; border-radius: 50%; background: #fff; }
 .landing-device--mobile svg { width: 18px; height: 18px; }
-.landing-devices__badge { position: absolute; z-index: 4; right: 32px; bottom: 22px; padding: 10px 12px; display: flex; align-items: center; gap: 9px; border: 1px solid #d6d6d0; border-radius: 7px; color: #282826; background: #fff; box-shadow: 0 16px 34px rgba(0,0,0,.24); }
+.landing-devices__badge { position: absolute; z-index: 4; right: 32px; bottom: 22px; padding: 10px 12px; display: flex; align-items: center; gap: 9px; border: 1px solid #d6d6d0; border-radius: 7px; color: #282826; background: #fff; box-shadow: 0 16px 34px rgba(0,0,0,.24); text-decoration: none; transition: transform .2s ease, box-shadow .2s ease; }
+.landing-devices__badge:hover { transform: translateY(-2px); box-shadow: 0 20px 40px rgba(0,0,0,.3); }
+.landing-devices__badge:focus-visible, .landing-mobile-download:focus-visible { outline: 3px solid var(--landing-yellow); outline-offset: 3px; }
 .landing-devices__badge svg { width: 21px; height: 21px; }
+.landing-devices__badge > svg:last-child { width: 12px; height: 12px; margin-left: 2px; }
 .landing-devices__badge strong, .landing-devices__badge small { display: block; }
 .landing-devices__badge strong { font-size: 9px; }
 .landing-devices__badge small { margin-top: 3px; color: #898983; font-size: 7px; }
@@ -470,8 +475,9 @@
   .landing-mini-wave { height: 38px; }
   .landing-device--mobile { right: -2%; width: 112px; height: 230px; border-radius: 20px; }
   .landing-device--mobile .landing-device__screen { padding-inline: 8px; }
+  .landing-device--mobile .landing-mobile-download__qr { width: 58px; height: 58px; padding: 5px; margin-bottom: 10px; }
   .landing-device--mobile strong { font-size: 8px; }
-  .landing-device--mobile .landing-device__screen i { width: 32px; height: 32px; margin-top: 20px; }
+  .landing-device--mobile .landing-device__screen i { width: 32px; height: 32px; margin-top: 12px; }
   .landing-devices__badge { right: 4px; bottom: 2px; }
   .landing-plan { min-height: 400px; padding: 24px; }
   .landing-pricing__footnote { align-items: flex-start; text-align: left; line-height: 1.5; }

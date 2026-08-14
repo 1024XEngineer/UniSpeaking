@@ -112,6 +112,9 @@ export class SceneTrainingController {
   }
 
   async next() {
+    if (this.snapshot.status === 'loading' || this.snapshot.status === 'scoring') {
+      return false;
+    }
     const scene = this.requireScene();
     if (this.snapshot.stage === 'speak') return false;
     if (this.snapshot.index < this.snapshot.items.length - 1) {
@@ -139,21 +142,27 @@ export class SceneTrainingController {
     }
 
     if (!this.snapshot.readingResult?.passed) return false;
-    const flow = await this.service.advanceStage(
-      scene.sceneId,
-      'SENTENCE_LEARNING',
-    );
-    if (flow.stage !== 'DIALOGUE') {
-      throw new Error('后端未进入场景对话阶段');
+    this.update({ ...this.snapshot, status: 'loading', error: null });
+    try {
+      const flow = await this.service.advanceStage(
+        scene.sceneId,
+        'SENTENCE_LEARNING',
+      );
+      if (flow.stage !== 'DIALOGUE') {
+        throw new Error('后端未进入场景对话阶段');
+      }
+      this.update({
+        ...this.snapshot,
+        status: 'ready',
+        stage: 'speak',
+        unlockedStage: 2,
+        readingResult: null,
+      });
+      return true;
+    } catch (error) {
+      this.fail(error);
+      throw error;
     }
-    this.update({
-      ...this.snapshot,
-      status: 'ready',
-      stage: 'speak',
-      unlockedStage: 2,
-      readingResult: null,
-    });
-    return true;
   }
 
   previous() {

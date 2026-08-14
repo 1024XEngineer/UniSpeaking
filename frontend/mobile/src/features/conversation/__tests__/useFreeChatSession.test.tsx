@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Pressable, Text, View } from 'react-native';
 
@@ -111,6 +112,21 @@ describe('useFreeChatSession', () => {
 
     expect(controller.setMuted).toHaveBeenCalledWith(true);
     expect(controller.interrupt).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not end and restart the same controller during StrictMode effect replay', async () => {
+    const controller = createController();
+    const screen = await render(
+      <StrictMode>
+        <SessionProbe createController={() => controller} />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(controller.start).toHaveBeenCalledTimes(1));
+    expect(controller.end).not.toHaveBeenCalled();
+
+    screen.unmount();
+    await waitFor(() => expect(controller.end).toHaveBeenCalledTimes(1));
   });
 
   it('exposes startup errors and performs idempotent cleanup after ending', async () => {
