@@ -143,6 +143,7 @@ export class ContinuousTurnRecorder {
   private nativeRecordingUri: string | null = null;
   private readonly sessionSegments: Uint8Array[] = [];
   private assistantChunks: Uint8Array[] = [];
+  private lastAssistantAudioDurationMs = 0;
 
   constructor(
     private readonly recorder: StreamRecorderPort,
@@ -161,6 +162,7 @@ export class ContinuousTurnRecorder {
         this.active = null;
         this.sessionSegments.length = 0;
         this.assistantChunks = [];
+        this.lastAssistantAudioDurationMs = 0;
         this.storage.prepare(this.runId);
         const started = await this.recorder.startRecording({
           sampleRate: SAMPLE_RATE,
@@ -243,6 +245,7 @@ export class ContinuousTurnRecorder {
     const source = concat(this.assistantChunks);
     const sourceView = new DataView(source.buffer, source.byteOffset, source.byteLength);
     const sourceSamples = source.length / BYTES_PER_SAMPLE;
+    this.lastAssistantAudioDurationMs = sourceSamples / PROVIDER_SAMPLE_RATE * 1_000;
     const outputSamples = Math.floor(sourceSamples * SAMPLE_RATE / PROVIDER_SAMPLE_RATE);
     const output = new Uint8Array(outputSamples * BYTES_PER_SAMPLE);
     const outputView = new DataView(output.buffer);
@@ -252,6 +255,20 @@ export class ContinuousTurnRecorder {
     }
     this.sessionSegments.push(output);
     this.assistantChunks = [];
+  }
+
+  /**
+   * React Native WebRTC does not expose a reliable remote-audio `ended` event.
+   * response.done only means that the provider has finished generating audio;
+   * give the native receiver a bounded drain window before closing the peer.
+   */
+  async waitForAssistantAudioDrain() {
+    const drainMs = Math.min(
+      4_000,
+      Math.max(1_500, Math.round(this.lastAssistantAudioDurationMs * 0.35)),
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, drainMs));
+    this.lastAssistantAudioDurationMs = 0;
   }
 
   saveSessionRecording(sessionId: string) {

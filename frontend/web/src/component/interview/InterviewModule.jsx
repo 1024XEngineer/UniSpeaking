@@ -614,12 +614,59 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
         remoteAudioRef.current.srcObject = stream;
         void remoteAudioRef.current.play().catch(() => setStatus("点击页面后可播放面试官声音"));
       },
+      onRemoteAudioDrain: ({ fallbackMs = 2_500, timeoutMs = 10_000 } = {}) => {
+        const audio = remoteAudioRef.current;
+        if (!audio) return new Promise((resolve) => window.setTimeout(resolve, fallbackMs));
+
+        // WebRTC MediaStream audio has no reliable `ended` event. Wait until
+        // the track has gone quiet after the provider has finished generating
+        // the closing response. A conservative fallback covers browsers that
+        // do not expose an analyser for a remote track.
+        const stream = audio.srcObject;
+        const tracks = stream?.getAudioTracks?.() || [];
+        if (!tracks.length || !window.AudioContext) {
+          return new Promise((resolve) => window.setTimeout(resolve, fallbackMs));
+        }
+        const context = new window.AudioContext();
+        const source = context.createMediaStreamSource(stream);
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 2048;
+        source.connect(analyser);
+        const data = new Uint8Array(analyser.fftSize);
+        const startedAt = Date.now();
+        const notBefore = startedAt + fallbackMs;
+        let quietSince = null;
+        let timer = null;
+        return new Promise((resolve) => {
+          const cleanup = () => {
+            if (timer) window.clearInterval(timer);
+            source.disconnect();
+            analyser.disconnect();
+            void context.close();
+          };
+          const finish = () => { cleanup(); resolve(); };
+          timer = window.setInterval(() => {
+            analyser.getByteTimeDomainData(data);
+            let peak = 0;
+            for (const value of data) peak = Math.max(peak, Math.abs(value - 128));
+            if (peak <= 3 && Date.now() >= notBefore) {
+              quietSince ??= Date.now();
+              if (Date.now() - quietSince >= 350) finish();
+            } else {
+              quietSince = null;
+            }
+            if (Date.now() - startedAt >= timeoutMs) finish();
+          }, 50);
+        });
+      },
     });
     clientRef.current = client;
     void client.start({
       voice: teacher?.voiceId || "Katerina",
       speechSpeed: speedCodeByLabel[speed] || "NATURAL",
-      silenceDurationMs: 1_500, // 容忍思考停顿（Custom 600 / IELTS 3000 之间的自然对话档位）
+      silenceDurationMs: 3_000,
+      turnDetectionType: "semantic_vad",
+      interruptResponse: true,
     }).then(() => {
       if (!cancelled) interviewAnalyticsRef.current.started();
     }).catch((startError) => {

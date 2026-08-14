@@ -240,6 +240,22 @@ assert.equal(deterministicIeltsPart.turn_detection.create_response, false);
 assert.equal(partTwoSession.turn_detection.create_response, false);
 assert.equal(partTwoSession.turn_detection.interrupt_response, false);
 
+const interviewSession = buildRealtimeSessionConfig({
+  systemPrompt: "Conduct a structured interview.",
+  model: "qwen3.5-omni-flash-realtime",
+  automaticTurnResponses: false,
+  silenceDurationMs: 3_000,
+  interruptResponse: true,
+  vadThreshold: 0.8,
+  prefixPaddingMs: 1_000,
+});
+assert.equal(interviewSession.turn_detection.type, "semantic_vad");
+assert.equal(interviewSession.turn_detection.silence_duration_ms, 3_000);
+assert.equal(interviewSession.turn_detection.create_response, false);
+assert.equal(interviewSession.turn_detection.interrupt_response, true);
+assert.equal(interviewSession.turn_detection.threshold, 0.8);
+assert.equal(interviewSession.turn_detection.prefix_padding_ms, 1_000);
+
 let segmentStartCount = 0;
 let segmentStopCount = 0;
 const expectedAudio = { type: "audio/wav" };
