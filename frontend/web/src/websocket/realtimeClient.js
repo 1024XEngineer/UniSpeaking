@@ -23,7 +23,8 @@ const DEFAULT_ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
 ];
 const SCENARIO_CLOSING_TIMEOUT_MS = 20_000;
-const SCENARIO_AUDIO_DRAIN_MS = 1_200;
+const SCENARIO_AUDIO_DRAIN_FALLBACK_MS = 2_500;
+const SCENARIO_AUDIO_DRAIN_MAX_MS = 10_000;
 const SESSION_UPDATE_TIMEOUT_MS = 5_000;
 const IELTS_STATE_TIMEOUT_MS = 5_000;
 const IELTS_INPUT_RECOVERY_MS = 2_500;
@@ -314,6 +315,8 @@ export function buildRealtimeSessionConfig({
   silenceDurationMs = 600,
   turnDetectionType = null,
   interruptResponse = true,
+  vadThreshold = 0.5,
+  prefixPaddingMs = 500,
 } = {}) {
   const selectedSpeechSpeed = normalizedSpeechSpeed(speechSpeed);
   const config = {
@@ -329,8 +332,8 @@ export function buildRealtimeSessionConfig({
     turn_detection: {
       type: turnDetectionType
         || (String(model || DEFAULT_MODEL).startsWith("qwen3.5-omni-") ? "semantic_vad" : "server_vad"),
-      threshold: 0.5,
-      prefix_padding_ms: 500,
+      threshold: Number(vadThreshold) || 0.5,
+      prefix_padding_ms: Math.max(0, Number(prefixPaddingMs) || 0),
       silence_duration_ms: Math.max(600, Number(silenceDurationMs) || 600),
       create_response: Boolean(automaticTurnResponses),
       interrupt_response: Boolean(interruptResponse),
@@ -377,6 +380,7 @@ export function createRealtimeClient({
   sceneType = "free-chat",
   onEvent = () => {},
   onRemoteStream = () => {},
+  onRemoteAudioDrain = null,
 } = {}) {
   const base = normalizeBaseUrl(apiBase);
   const customSceneId = sceneType === "custom" ? sceneId : null;
@@ -410,6 +414,7 @@ export function createRealtimeClient({
   let scenarioCompletionEmitted = false;
   let scenarioCompletionTimer = null;
   let scenarioAudioDrainTimer = null;
+  let scenarioAudioDrainStarted = false;
   let responsePending = false;
   let closingResponseRequested = false;
   let statePipeline = Promise.resolve();
@@ -433,7 +438,14 @@ export function createRealtimeClient({
     const track = localStream?.getAudioTracks?.()[0];
     const enabled = started && inputReady && !muted && !paused;
     if (track) track.enabled = enabled;
-    if (enabled && (customSceneId || ieltsSceneId || interviewSceneId)) turnAudioCapture?.start();
+    // Interview must keep the track enabled while the interviewer is speaking
+    // so provider VAD can detect a deliberate barge-in. Do not start the
+    // answer recorder for that interviewer-only interval; speech_started will
+    // start it when the candidate actually interrupts.
+    if (enabled && (customSceneId || ieltsSceneId || interviewSceneId)
+      && (!interviewSceneId || !responsePending)) {
+      turnAudioCapture?.start();
+    }
   }
 
   function isDeterministicIeltsPart() {
@@ -741,6 +753,7 @@ export function createRealtimeClient({
       window.clearTimeout(scenarioAudioDrainTimer);
       scenarioAudioDrainTimer = null;
     }
+    scenarioAudioDrainStarted = false;
     scenarioCompletionEmitted = true;
     if (interviewSceneId) {
       emit({ type: "local.interview_end_requested", reportStatus: pendingInterviewReportStatus });
@@ -765,11 +778,35 @@ export function createRealtimeClient({
   }
 
   function scheduleScenarioCompletionAfterAudioDrain() {
-    if (!scenarioCompletionPending || scenarioAudioDrainTimer) return;
-    scenarioAudioDrainTimer = window.setTimeout(() => {
-      scenarioAudioDrainTimer = null;
+    if (!scenarioCompletionPending || scenarioAudioDrainStarted) return;
+    scenarioAudioDrainStarted = true;
+
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (scenarioAudioDrainTimer) {
+        window.clearTimeout(scenarioAudioDrainTimer);
+        scenarioAudioDrainTimer = null;
+      }
+      scenarioAudioDrainStarted = false;
       emitScenarioCompleted();
-    }, SCENARIO_AUDIO_DRAIN_MS);
+    };
+
+    // response.done means that generation has completed, not that the WebRTC
+    // receiver has played the last packet. InterviewModule supplies an audio
+    // activity based drain promise. The timeout is only a safety valve for a
+    // blocked/unsupported audio analyser so a session cannot hang forever.
+    scenarioAudioDrainTimer = window.setTimeout(finish, SCENARIO_AUDIO_DRAIN_MAX_MS);
+    const drain = typeof onRemoteAudioDrain === "function"
+      ? onRemoteAudioDrain({
+        fallbackMs: SCENARIO_AUDIO_DRAIN_FALLBACK_MS,
+        timeoutMs: SCENARIO_AUDIO_DRAIN_MAX_MS,
+      })
+      : new Promise((resolve) => {
+        window.setTimeout(resolve, SCENARIO_AUDIO_DRAIN_FALLBACK_MS);
+      });
+    Promise.resolve(drain).catch(() => {}).then(finish);
   }
 
   function requestTurnResponse({ closing = false, instructions = "" } = {}) {
@@ -950,7 +987,10 @@ export function createRealtimeClient({
         window.clearTimeout(sessionUpdateRetryTimer);
         sessionUpdateRetryTimer = null;
       }
-      inputReady = !manualTurnResponses;
+      // The interview uses provider-managed VAD, but the backend state machine
+      // is the only producer of interviewer responses. VAD only detects the
+      // candidate turn and never creates a response by itself.
+      inputReady = !manualTurnResponses || interviewSceneId;
       setTrackEnabled();
       requestInitialResponse();
       return;
@@ -967,6 +1007,17 @@ export function createRealtimeClient({
         ieltsTimedOutTurn = null;
       }
       activeInputItemId = startedItemId;
+      if (interviewSceneId && responsePending && !scenarioCompletionPending) {
+        // Keep deliberate barge-in: VAD detects the candidate speech and the
+        // active interviewer response is cancelled. Since interview VAD does
+        // not create responses automatically, this is the only cancellation
+        // path during a normal turn.
+        responsePending = false;
+        if (channel?.readyState === "open") {
+          sendProviderEvent({ event_id: eventId("interrupt"), type: "response.cancel" });
+        }
+        emit({ type: "local.interview_interrupted" });
+      }
       turnAudioCapture?.start();
       return;
     }
@@ -980,7 +1031,7 @@ export function createRealtimeClient({
       clearIeltsInputRecovery();
       initialResponseStarted = true;
       responsePending = true;
-      inputReady = !manualTurnResponses;
+      inputReady = !manualTurnResponses || interviewSceneId;
       if (initialResponseFallbackTimer) {
         window.clearTimeout(initialResponseFallbackTimer);
         initialResponseFallbackTimer = null;
@@ -1192,13 +1243,13 @@ export function createRealtimeClient({
               requestTurnResponse({ closing: true, instructions: closingInstructions });
             }
           } else {
-            requestTurnResponse({
-              instructions:
-                state?.controlInstruction ||
-                (state?.currentTopic
-                  ? `Current interview topic: ${state.currentTopic}. Continue the interview naturally — ask a focused follow-up within this topic, or transition to the NEXT topic in the interview flow when this one is covered. Do not skip topics.`
-                  : ""),
-            });
+            const instructions = state?.controlInstruction ||
+              (state?.currentTopic
+                ? `Current interview topic: ${state.currentTopic}. Continue the interview naturally — ask a focused follow-up within this topic, or transition to the NEXT topic in the interview flow when this one is covered. Do not skip topics.`
+                : "");
+            // Interview VAD has create_response=false, so the state machine
+            // result is the single authoritative trigger for the next prompt.
+            requestTurnResponse({ instructions });
           }
         } catch (error) {
           emit({
@@ -1340,11 +1391,18 @@ export function createRealtimeClient({
         includeVoice: backend.voiceId !== "Cherry",
         model: DEFAULT_MODEL,
         speechSpeed,
+        // Interview and IELTS both keep the provider VAD open through a
+        // natural three-second thinking pause. Interview response.create is
+        // still orchestrated after the backend state transition, but turn
+        // detection and interruption are automatic at the provider.
+        // Scenario/interview state machines own the next prompt. Provider VAD
+        // remains automatic, but it must not create a competing response.
         automaticTurnResponses: !manualTurnResponses,
-        // 场景覆盖：Interview 由调用方显式传 1500；IELTS 保持确定性 3000；其余回落 600
-        silenceDurationMs: silenceDurationMs ?? (ieltsSceneId ? 3_000 : 600),
+        silenceDurationMs: silenceDurationMs ?? (interviewSceneId || ieltsSceneId ? 3_000 : 600),
         turnDetectionType: turnDetectionType ?? (isDeterministicIeltsPart() ? "server_vad" : null),
-        interruptResponse: interruptResponse ?? (ieltsActivePart !== "PART_2"),
+        interruptResponse: interruptResponse ?? (interviewSceneId || ieltsActivePart !== "PART_2"),
+        vadThreshold: interviewSceneId ? 0.8 : 0.5,
+        prefixPaddingMs: interviewSceneId ? 1_000 : 500,
       });
       baseSessionInstructions = sessionConfig.instructions;
 
@@ -1617,6 +1675,7 @@ export function createRealtimeClient({
       scenarioCompletionEmitted = false;
       scenarioCompletionTimer = null;
       scenarioAudioDrainTimer = null;
+      scenarioAudioDrainStarted = false;
       responsePending = false;
       closingResponseRequested = false;
       closingInstructions = "";

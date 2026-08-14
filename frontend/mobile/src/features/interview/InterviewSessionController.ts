@@ -40,7 +40,7 @@ type InterviewSocket = {
 };
 
 type InterviewDependencies = {
-  recorder: Pick<ContinuousTurnRecorder, 'start' | 'setInputEnabled' | 'speechStarted' | 'speechStopped' | 'takeTurn' | 'discard' | 'appendAssistantAudio' | 'finishAssistantAudio' | 'saveSessionRecording' | 'close'>;
+  recorder: Pick<ContinuousTurnRecorder, 'start' | 'setInputEnabled' | 'speechStarted' | 'speechStopped' | 'takeTurn' | 'discard' | 'appendAssistantAudio' | 'finishAssistantAudio' | 'waitForAssistantAudioDrain' | 'saveSessionRecording' | 'close'>;
   transport: RealtimeTransport;
   sessionApi: Pick<InterviewSessionApi, 'startSession' | 'submitTurn' | 'end'>;
   sessionSocket: InterviewSocket;
@@ -90,6 +90,10 @@ export class InterviewSessionController {
   private configured = false;
   private openingRequested = false;
   private fullRecordingUri: string | null = null;
+  private responseInFlight = false;
+  private responseAwaitingInterviewState = false;
+  private responseCancelRequested = false;
+  private pendingResponseInstructions: string | null = null;
 
   constructor(
     private readonly dependencies: InterviewDependencies,
@@ -209,7 +213,7 @@ export class InterviewSessionController {
               // Interview answers commonly contain thinking pauses. Keep the microphone
               // open through natural pauses and never let a new user turn cancel an
               // interviewer response while the candidate is still speaking.
-              turn_detection: { type: 'semantic_vad', threshold: 0.8, prefix_padding_ms: 1_000, silence_duration_ms: 3_000, create_response: false, interrupt_response: true },
+              turn_detection: { type: 'semantic_vad', threshold: 0.8, prefix_padding_ms: 1_000, silence_duration_ms: 3_000, create_response: true, interrupt_response: true },
             },
           });
           this.configured = true;
@@ -230,6 +234,14 @@ export class InterviewSessionController {
         // Keep the candidate microphone live while the interviewer is speaking so
         // Qwen can detect a deliberate barge-in and stop its response.
         this.muted = false;
+        this.responseInFlight = true;
+        if (this.responseAwaitingInterviewState && !this.closingRequested && !this.responseCancelRequested) {
+          this.responseCancelRequested = true;
+          this.dependencies.transport.sendProviderEvent({
+            event_id: this.createEventId(),
+            type: 'response.cancel',
+          });
+        }
         this.state = 'active';
         this.dependencies.recorder.setInputEnabled(true);
         this.currentQuestion = '';
@@ -240,7 +252,15 @@ export class InterviewSessionController {
         this.dependencies.recorder.appendAssistantAudio(event.audio);
         return;
       case 'assistant.response.completed':
+        this.responseInFlight = false;
+        this.responseCancelRequested = false;
         this.dependencies.recorder.finishAssistantAudio();
+        if (this.pendingResponseInstructions !== null && !this.endRequested) {
+          const instructions = this.pendingResponseInstructions;
+          this.pendingResponseInstructions = null;
+          this.sendInterviewResponse(instructions);
+          return;
+        }
         if (!this.closingRequested && !this.endRequested) {
           this.muted = false;
           this.dependencies.recorder.setInputEnabled(true);
@@ -248,12 +268,14 @@ export class InterviewSessionController {
           this.applyInput();
           this.publish();
         } else if (this.closingRequested) {
+          await this.dependencies.recorder.waitForAssistantAudioDrain();
           await this.end();
         }
         return;
       case 'user.speech.started':
         if (this.closingRequested || this.endRequested) return;
         this.dependencies.transport.sendProviderEvent({ event_id: this.createEventId(), type: 'response.cancel' });
+        this.responseCancelRequested = true;
         this.dependencies.recorder.speechStarted();
         return;
       case 'user.speech.stopped':
@@ -261,6 +283,7 @@ export class InterviewSessionController {
         return;
       case 'user.transcript.completed':
         if (this.closingRequested || this.endRequested || !event.text.trim()) return;
+        this.responseAwaitingInterviewState = true;
         await this.processTranscriptOnce(1, event, () => {
           this.turnOperation = this.processTurn(event.text.trim(), event.itemId)
             .finally(() => { this.turnOperation = null; });
@@ -289,20 +312,14 @@ export class InterviewSessionController {
     // persist or submit a fragment as a complete interview turn: doing so would
     // advance the backend topic state (and could trigger an early end). Ask for
     // continuation and keep the same interview turn open instead.
-    if (looksLikeCutoffTranscript(transcript)) {
+      if (looksLikeCutoffTranscript(transcript)) {
       const fragmentAudio = await this.dependencies.recorder.takeTurn(this.turnNo + 1);
       this.dependencies.recorder.discard(fragmentAudio);
       this.muted = false;
       this.dependencies.recorder.setInputEnabled(true);
       this.applyInput();
-      this.dependencies.transport.sendProviderEvent({
-        event_id: this.createEventId(),
-        type: 'response.create',
-        response: {
-          instructions: CONTINUE_AFTER_CUTOFF_INSTRUCTION,
-          modalities: ['text', 'audio'],
-        },
-      });
+      this.responseAwaitingInterviewState = false;
+      this.sendInterviewResponse(CONTINUE_AFTER_CUTOFF_INSTRUCTION);
       this.publish();
       return;
     }
@@ -312,11 +329,8 @@ export class InterviewSessionController {
       this.muted = false;
       this.dependencies.recorder.setInputEnabled(true);
       this.applyInput();
-      this.dependencies.transport.sendProviderEvent({
-        event_id: this.createEventId(),
-        type: 'response.create',
-        response: { instructions: REPEAT_AFTER_MISSING_AUDIO_INSTRUCTION, modalities: ['text', 'audio'] },
-      });
+      this.responseAwaitingInterviewState = false;
+      this.sendInterviewResponse(REPEAT_AFTER_MISSING_AUDIO_INSTRUCTION);
       this.publish();
       return;
     }
@@ -329,19 +343,15 @@ export class InterviewSessionController {
       this.publish();
       if (this.endRequested) return;
       if (result.state.shouldEnd) {
+        this.responseAwaitingInterviewState = false;
         this.closingRequested = true;
         this.muted = true;
         this.dependencies.recorder.setInputEnabled(false);
         this.applyInput();
-        this.dependencies.transport.sendProviderEvent({
-          event_id: this.createEventId(), type: 'response.create',
-          response: { instructions: result.state.controlInstruction?.trim() || CLOSING_INSTRUCTION, modalities: ['text', 'audio'] },
-        });
+        this.sendInterviewResponse(result.state.controlInstruction?.trim() || CLOSING_INSTRUCTION);
       } else {
-        this.dependencies.transport.sendProviderEvent({
-          event_id: this.createEventId(), type: 'response.create',
-          response: { instructions: result.state.controlInstruction?.trim() || '', modalities: ['text', 'audio'] },
-        });
+        this.responseAwaitingInterviewState = false;
+        this.sendInterviewResponse(result.state.controlInstruction?.trim() || '');
       }
     } finally {
       this.dependencies.recorder.discard(wav);
@@ -395,6 +405,26 @@ export class InterviewSessionController {
 
   private applyInput() {
     this.dependencies.transport.setAudioEnabled(this.state === 'active' && !this.muted && !this.userMuted && !this.closingRequested && !this.endRequested);
+  }
+
+  private sendInterviewResponse(instructions: string) {
+    if (this.responseInFlight) {
+      this.pendingResponseInstructions = instructions;
+      if (!this.responseCancelRequested) {
+        this.responseCancelRequested = true;
+        this.dependencies.transport.sendProviderEvent({
+          event_id: this.createEventId(),
+          type: 'response.cancel',
+        });
+      }
+      return;
+    }
+    this.dependencies.transport.sendProviderEvent({
+      event_id: this.createEventId(),
+      type: 'response.create',
+      response: { instructions, modalities: ['text', 'audio'] },
+    });
+    this.responseInFlight = true;
   }
 
   private assertStartActive() {
@@ -461,6 +491,7 @@ export class InterviewSessionController {
   private reset() {
     this.state = 'idle'; this.error = null; this.backend = null; this.turnNo = 0; this.interviewState = null; this.reportStatus = null;
     this.transcripts.length = 0; this.seenTranscriptIds.clear(); this.pendingTranscriptIds.clear(); this.endRequested = false; this.closingRequested = false; this.configured = false; this.openingRequested = false; this.endPromise = null;
+    this.responseInFlight = false; this.responseAwaitingInterviewState = false; this.responseCancelRequested = false; this.pendingResponseInstructions = null;
   }
 
   private publish() { const snapshot = this.getSnapshot(); this.listeners.forEach((listener) => listener(snapshot)); }

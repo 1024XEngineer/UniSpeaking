@@ -18,7 +18,7 @@ function fixture() {
     start: jest.fn(async () => { calls.push('recorder.start'); }),
     setInputEnabled: jest.fn(), speechStarted: jest.fn(), speechStopped: jest.fn(),
     takeTurn: jest.fn(async (turnNo: number) => ({ uri: `turn-${turnNo}.wav`, name: `turn-${turnNo}.wav`, size: 16_044, durationMs: 500 })),
-    appendAssistantAudio: jest.fn(), finishAssistantAudio: jest.fn(), saveSessionRecording: jest.fn(() => 'file:///full.wav'),
+    appendAssistantAudio: jest.fn(), finishAssistantAudio: jest.fn(), waitForAssistantAudioDrain: jest.fn(async () => undefined), saveSessionRecording: jest.fn(() => 'file:///full.wav'),
     discard: jest.fn(), close: jest.fn(async () => { calls.push('recorder.close'); }),
   };
   const sessionApi = {
@@ -58,6 +58,18 @@ describe('InterviewSessionController', () => {
     expect(test.controller.getSnapshot().state).toBe('active');
   });
 
+  it('uses automatic provider VAD responses while retaining interview orchestration', async () => {
+    const test = fixture();
+    await test.controller.start();
+    await provider(test, { type: 'session.created' });
+    const update = test.transport.sendProviderEvent.mock.calls.find(([event]) => event.type === 'session.update')?.[0];
+    expect(update.session.turn_detection).toEqual(expect.objectContaining({
+      silence_duration_ms: 3_000,
+      create_response: true,
+      interrupt_response: true,
+    }));
+  });
+
   it('uses a pause-tolerant VAD configuration for interview answers', async () => {
     const test = fixture();
     await test.controller.start();
@@ -68,7 +80,7 @@ describe('InterviewSessionController', () => {
       threshold: 0.8,
       prefix_padding_ms: 1_000,
       interrupt_response: true,
-      create_response: false,
+      create_response: true,
     }));
   });
 
@@ -104,7 +116,7 @@ describe('InterviewSessionController', () => {
     }));
   });
 
-  it('mutes once shouldEnd is returned, sends one closing response, and ends after response.done', async () => {
+  it('mutes once shouldEnd is returned, drains the closing audio, and then ends', async () => {
     const test = fixture();
     await test.controller.start();
     await provider(test, { type: 'session.created' });
@@ -115,6 +127,7 @@ describe('InterviewSessionController', () => {
     await provider(test, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'item-1', transcript: 'This is my complete answer.' });
     await provider(test, { type: 'response.done', response: { status: 'completed' } });
     expect(test.transport.setAudioEnabled).toHaveBeenLastCalledWith(false);
+    expect(test.recorder.waitForAssistantAudioDrain).toHaveBeenCalledTimes(1);
     expect(test.sessionApi.end).toHaveBeenCalledTimes(1);
     expect(test.controller.getSnapshot().state).toBe('ended');
   });
