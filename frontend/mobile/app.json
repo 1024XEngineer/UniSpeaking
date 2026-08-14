@@ -41,6 +41,12 @@
         }
       ],
       "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "允许 UniSpeaking 访问照片，以便选择并上传个人头像。"
+        }
+      ],
       "expo-audio",
       "@siteed/audio-studio"
     ],

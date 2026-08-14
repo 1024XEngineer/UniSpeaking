@@ -5,11 +5,7 @@ import type { AuthSessionState } from '@/features/auth/AuthSessionController';
 import type { UserPreference } from '@/features/auth/AuthService';
 import { teachers } from '@/theme/tokens';
 
-import {
-  AppModelProvider,
-  type AppModelAuthController,
-  useAppModel,
-} from '../AppModel';
+import { AppModelProvider, type AppModelAuthController, useAppModel } from '../AppModel';
 
 function createController(state: AuthSessionState): AppModelAuthController & {
   emit(nextState: AuthSessionState): void;
@@ -108,10 +104,18 @@ function OnboardingProbe() {
       <Pressable accessibilityLabel="choose-level" onPress={() => model.setLevel('basic')} />
       <Pressable accessibilityLabel="save-ielts-level" onPress={() => void model.saveLevel('independent')} />
       <Pressable accessibilityLabel="choose-teacher" onPress={() => model.setTeacher(teachers[1])} />
-      <Pressable
-        accessibilityLabel="complete-onboarding"
-        onPress={() => void model.completeOnboarding()}
-      />
+      <Pressable accessibilityLabel="complete-onboarding" onPress={() => void model.completeOnboarding()} />
+    </View>
+  );
+}
+
+function ProfileSettingsProbe() {
+  const model = useAppModel();
+  return (
+    <View>
+      <Text testID="profile-email">{model.email}</Text>
+      <Pressable accessibilityLabel="save-speed" onPress={() => void model.saveSpeed('慢一些')} />
+      <Pressable accessibilityLabel="save-teacher" onPress={() => void model.saveTeacher(teachers[2])} />
     </View>
   );
 }
@@ -207,5 +211,27 @@ describe('AppModelProvider authentication binding', () => {
         cefrLevel: 'C',
       }),
     );
+  });
+
+  it('exposes the authenticated email and persists profile assistant settings', async () => {
+    const controller = createController(authenticatedState);
+    const screen = await render(
+      <AppModelProvider authController={controller}>
+        <ProfileSettingsProbe />
+      </AppModelProvider>,
+    );
+
+    expect(screen.getByTestId('profile-email').props.children).toBe('learner@example.com');
+    await fireEvent.press(screen.getByLabelText('save-speed'));
+    await fireEvent.press(screen.getByLabelText('save-teacher'));
+
+    await waitFor(() => {
+      expect(controller.updatePreference).toHaveBeenCalledWith({
+        preferredAiSpeechSpeed: 'SLOWER',
+      });
+      expect(controller.updatePreference).toHaveBeenCalledWith({
+        preferredVoice: teachers[2].voiceId,
+      });
+    });
   });
 });
