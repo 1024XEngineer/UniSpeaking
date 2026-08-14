@@ -85,7 +85,9 @@ export function useFreeChatSession(
   );
   const [startupError, setStartupError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const startPromise = useRef<Promise<unknown> | null>(null);
   const endPromise = useRef<Promise<unknown> | null>(null);
+  const lifecycleVersion = useRef(0);
 
   const end = useCallback(() => {
     if (!endPromise.current) {
@@ -97,8 +99,12 @@ export function useFreeChatSession(
   useEffect(() => controller.subscribe(setSnapshot), [controller]);
 
   useEffect(() => {
+    lifecycleVersion.current += 1;
     let active = true;
-    void controller.start().catch((error: unknown) => {
+    if (!startPromise.current) {
+      startPromise.current = Promise.resolve().then(() => controller.start());
+    }
+    void startPromise.current.catch((error: unknown) => {
       if (active) {
         setStartupError(
           error instanceof Error ? error.message : '实时对话启动失败',
@@ -107,7 +113,13 @@ export function useFreeChatSession(
     });
     return () => {
       active = false;
-      void end().catch(() => undefined);
+      lifecycleVersion.current += 1;
+      const cleanupVersion = lifecycleVersion.current;
+      queueMicrotask(() => {
+        if (lifecycleVersion.current === cleanupVersion) {
+          void end().catch(() => undefined);
+        }
+      });
     };
   }, [controller, end]);
 
