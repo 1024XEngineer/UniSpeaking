@@ -145,6 +145,41 @@ describe('SceneTrainingController', () => {
     ]);
   });
 
+  it('ignores a duplicate next action while a stage transition is pending', async () => {
+    const service = createService();
+    const controller = new SceneTrainingController(service);
+    await controller.start(scene);
+
+    let resolveAdvance!: (flow: {
+      sceneId: string;
+      stage: SceneFlowStage;
+      completed: boolean;
+    }) => void;
+    service.advanceStage.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveAdvance = resolve;
+      }),
+    );
+
+    const first = controller.next();
+    await expect(controller.next()).resolves.toBe(false);
+    expect(service.advanceStage).toHaveBeenCalledTimes(1);
+
+    resolveAdvance({
+      sceneId: 'scene-1',
+      stage: 'PHRASE_LEARNING',
+      completed: false,
+    });
+    await expect(first).resolves.toBe(true);
+    expect(controller.getSnapshot()).toEqual(
+      expect.objectContaining({
+        status: 'ready',
+        learningGroup: 'phrases',
+        currentItem: phrase,
+      }),
+    );
+  });
+
   it('scores the current WAV and unlocks dialogue only after a passing result', async () => {
     const service = createService();
     const controller = new SceneTrainingController(service);

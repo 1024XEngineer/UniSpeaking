@@ -410,6 +410,7 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
     : readPassed;
   const isLastReadItem = displayedReadIndex >= displayedReadItems.length - 1;
   const readingResult = trainingSnapshot?.readingResult;
+  const trainingTransitioning = trainingSnapshot?.status === 'loading';
   const completionMetrics = sceneMetricsForReport(dialogueCompletion?.evaluation);
 
   const toggleDemo = async (text: string) => {
@@ -442,7 +443,7 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
     demoActive.current = false;
     setDemoPlaying(false);
     if (scene && trainingController) {
-      void trainingController.next();
+      void trainingController.next().catch(() => undefined);
       return;
     }
     if (learnIndex < learnItems.length - 1) setLearnIndex((current) => current + 1);
@@ -591,7 +592,12 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
             >
               <AppIcon name="arrow-left" size={20} />
             </Pressable>
-            <Pressable accessibilityRole="button" onPress={nextLearn} style={styles.primaryPillButton}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={trainingTransitioning}
+              onPress={nextLearn}
+              style={[styles.primaryPillButton, trainingTransitioning && styles.primaryPillDisabled]}
+            >
               <Text style={styles.primaryPillText}>
                 {displayedIndex < learnItems.length - 1 ? '下一个' : displayedLearningGroup === 'words' ? '进入词组' : '进入朗读'}
               </Text>
@@ -630,14 +636,14 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              disabled={!displayedReadPassed}
+              disabled={!displayedReadPassed || trainingTransitioning}
               onPress={() => {
-                if (scene && trainingController) void trainingController.next();
+                if (scene && trainingController) void trainingController.next().catch(() => undefined);
                 else { setUnlockedStage(2); setStage('speak'); }
                 setRecording(false);
                 setDemoPlaying(false);
               }}
-              style={[styles.primaryPillButton, !displayedReadPassed && styles.primaryPillDisabled]}
+              style={[styles.primaryPillButton, (!displayedReadPassed || trainingTransitioning) && styles.primaryPillDisabled]}
             >
               <Text style={styles.primaryPillText}>{isLastReadItem ? '进入模拟' : '下一句'}</Text>
               <AppIcon name="arrow-right" size={18} color={colors.white} />
