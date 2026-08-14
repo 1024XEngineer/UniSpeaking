@@ -1,25 +1,11 @@
-import {
-  createContext,
-  type PropsWithChildren,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
+import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-import {
-  AuthSessionController,
-  type AuthSessionState,
-} from '@/features/auth/AuthSessionController';
-import {
-  AuthService,
-  type EmailChallenge,
-  type UserPreference,
-} from '@/features/auth/AuthService';
+import { AuthSessionController, type AuthSessionState } from '@/features/auth/AuthSessionController';
+import { AuthService, type EmailChallenge, type UserPreference } from '@/features/auth/AuthService';
 import {
   cefrLevelForLevel,
   levelForCefrLevel,
+  speedCodeForLabel,
   speedLabelForCode,
   teacherForVoice,
   voiceForTeacher,
@@ -73,13 +59,16 @@ type AppModelValue = {
   signOut: () => Promise<void>;
   nickname: string;
   setNickname: (value: string) => void;
+  email: string;
   speed: string;
   setSpeed: (value: string) => void;
+  saveSpeed: (value: string) => Promise<void>;
   level: string;
   setLevel: (value: string) => void;
   saveLevel: (value: string) => Promise<void>;
   teacher: Teacher;
   setTeacher: (value: Teacher) => void;
+  saveTeacher: (value: Teacher) => Promise<void>;
   sceneRecords: SceneLearningRecord[];
   ieltsRecords: IeltsLearningRecord[];
   interviewRecords: InterviewLearningRecord[];
@@ -115,9 +104,7 @@ export function AppModelProvider({
   const [authController] = useState<AppModelAuthController>(
     () => injectedAuthController ?? createDefaultAuthController(),
   );
-  const [authState, setAuthState] = useState<AuthSessionState>(
-    () => authController.getSnapshot(),
-  );
+  const [authState, setAuthState] = useState<AuthSessionState>(() => authController.getSnapshot());
   const [nickname, setNickname] = useState('Yufan');
   const [speed, setSpeed] = useState('自然');
   const [level, setLevel] = useState('starter');
@@ -169,8 +156,7 @@ export function AppModelProvider({
   );
 
   const issueEmailChallenge = useCallback(
-    (input: { email: string }) =>
-      authController.issueEmailChallenge(input),
+    (input: { email: string }) => authController.issueEmailChallenge(input),
     [authController],
   );
 
@@ -188,21 +174,42 @@ export function AppModelProvider({
     });
   }, [authController, level, teacher]);
 
-  const saveLevel = useCallback(async (value: string) => {
-    const selectedLevel = levels.find((option) => option.id === value) ?? levels[0];
-    const preference = await authController.updatePreference({
-      cefrLevel: cefrLevelForLevel(selectedLevel),
-    });
-    setLevel(levelForCefrLevel(preference.cefrLevel, levels).id);
-  }, [authController]);
+  const saveLevel = useCallback(
+    async (value: string) => {
+      const selectedLevel = levels.find((option) => option.id === value) ?? levels[0];
+      const preference = await authController.updatePreference({
+        cefrLevel: cefrLevelForLevel(selectedLevel),
+      });
+      setLevel(levelForCefrLevel(preference.cefrLevel, levels).id);
+    },
+    [authController],
+  );
+
+  const saveSpeed = useCallback(
+    async (value: string) => {
+      const preference = await authController.updatePreference({
+        preferredAiSpeechSpeed: speedCodeForLabel(value),
+      });
+      setSpeed(speedLabelForCode(preference.preferredAiSpeechSpeed));
+    },
+    [authController],
+  );
+
+  const saveTeacher = useCallback(
+    async (value: Teacher) => {
+      const preference = await authController.updatePreference({
+        preferredVoice: voiceForTeacher(value),
+      });
+      setTeacher(teacherForVoice(preference.preferredVoice, teachers));
+    },
+    [authController],
+  );
 
   const signOut = useCallback(() => authController.logout(), [authController]);
 
   const isModelReady = authState.status !== 'booting';
   const isAuthenticated = authState.status === 'authenticated';
-  const hasCompletedOnboarding = Boolean(
-    authState.preference?.cefrLevel && authState.preference?.preferredVoice,
-  );
+  const hasCompletedOnboarding = Boolean(authState.preference?.cefrLevel && authState.preference?.preferredVoice);
 
   const value = useMemo(
     () => ({
@@ -218,13 +225,16 @@ export function AppModelProvider({
       signOut,
       nickname,
       setNickname,
+      email: authState.user?.username ?? '',
       speed,
       setSpeed,
+      saveSpeed,
       level,
       setLevel,
       saveLevel,
       teacher,
       setTeacher,
+      saveTeacher,
       sceneRecords,
       ieltsRecords,
       interviewRecords,
@@ -246,12 +256,15 @@ export function AppModelProvider({
       issueEmailChallenge,
       authState.error,
       authState.status,
+      authState.user,
       level,
       membership,
       nickname,
       ieltsRecords,
       interviewRecords,
       removeSceneRecord,
+      saveSpeed,
+      saveTeacher,
       saveLevel,
       sceneRecords,
       signIn,
