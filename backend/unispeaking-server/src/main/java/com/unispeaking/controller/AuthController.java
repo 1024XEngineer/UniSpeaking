@@ -1,15 +1,15 @@
 package com.unispeaking.controller;
 
-import com.unispeaking.auth.EmailAuthService;
-import com.unispeaking.auth.UserAuthController;
+import com.unispeaking.common.exception.EmailAuthException;
+import com.unispeaking.common.response.ApiResponse;
 import com.unispeaking.domain.dto.auth.AuthResponse;
 import com.unispeaking.domain.dto.auth.ChangePasswordRequest;
 import com.unispeaking.domain.dto.auth.ChangePasswordResponse;
 import com.unispeaking.domain.dto.auth.LoginRequest;
 import com.unispeaking.domain.dto.auth.RegisterRequest;
 import com.unispeaking.domain.dto.auth.UserAccountResponse;
-import com.unispeaking.common.response.ApiResponse;
 import com.unispeaking.service.auth.AuthService;
+import com.unispeaking.service.auth.EmailAuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.util.StringUtils;
@@ -51,7 +51,7 @@ public class AuthController {
 	private void requireVerifiedEmail(String username, HttpServletRequest request) {
 		var verifiedUser = emailAuthService.currentUser(readEmailSession(request));
 		if (!verifiedUser.email().equalsIgnoreCase(username.trim())) {
-			throw new EmailAuthService.AuthException("HUMAN_VERIFICATION_REQUIRED");
+			throw new EmailAuthException("HUMAN_VERIFICATION_REQUIRED");
 		}
 	}
 
@@ -64,7 +64,7 @@ public class AuthController {
 				}
 			}
 		}
-		throw new EmailAuthService.AuthException("HUMAN_VERIFICATION_REQUIRED");
+		throw new EmailAuthException("HUMAN_VERIFICATION_REQUIRED");
 	}
 
 	@GetMapping("/me")

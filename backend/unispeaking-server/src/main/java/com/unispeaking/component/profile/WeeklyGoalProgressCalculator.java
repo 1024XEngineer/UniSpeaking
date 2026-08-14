@@ -17,7 +17,10 @@ import java.util.Set;
 public class WeeklyGoalProgressCalculator {
 
 	private static final Set<SceneType> INCLUDED_TYPES =
-			EnumSet.of(SceneType.FREE_CHAT, SceneType.CUSTOM_SCENE);
+			EnumSet.of(
+					SceneType.FREE_CHAT,
+					SceneType.CUSTOM_SCENE,
+					SceneType.IELTS_SCENE);
 
 	public WeeklyGoalProgress calculate(
 			List<PracticeSessionRecord> records,

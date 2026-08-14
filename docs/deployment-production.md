@@ -41,9 +41,9 @@ Set the permanent MaaS credential and keep the default two-model route in
 ```dotenv
 QINIU_MAAS_BASE_URL=https://api.qnaigc.com/v1
 QINIU_MAAS_API_KEY=replace-with-qiniu-maas-api-key
-QINIU_MAAS_PRIMARY_MODEL=deepseek/deepseek-v4-flash
-QINIU_MAAS_FALLBACK_MODEL=qwen/qwen3.5-plus
-AI_PROVIDER_ROUTE_LLM=deepseek/deepseek-v4-flash,qwen/qwen3.5-plus
+QINIU_MAAS_PRIMARY_MODEL=qwen/qwen3.5-plus
+QINIU_MAAS_FALLBACK_MODEL=deepseek/deepseek-v4-flash
+AI_PROVIDER_ROUTE_LLM=qwen/qwen3.5-plus,qwen3.5-plus
 ```
 
 The alternative trusted base URL is `https://openai.sufy.com/v1`. Do not put

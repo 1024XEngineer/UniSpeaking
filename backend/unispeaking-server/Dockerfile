@@ -23,6 +23,7 @@ WORKDIR /app
 ARG DEBIAN_MIRROR=https://mirrors.aliyun.com/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.aliyun.com/debian-security
 ARG PYPI_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PYPI_FALLBACK_INDEX_URL=https://pypi.org/simple
 ARG PADDLE_PDX_MODEL_SOURCE=bos
 
 RUN sed -i \
@@ -53,9 +54,15 @@ ENV PIP_DEFAULT_TIMEOUT=120
 
 COPY docker/ocr/requirements.txt /tmp/ocr-requirements.txt
 RUN python -m pip install \
-    --no-cache-dir \
-    --retries 5 \
-    -r /tmp/ocr-requirements.txt
+        --no-cache-dir \
+        --retries 5 \
+        -r /tmp/ocr-requirements.txt \
+    || python -m pip install \
+        --no-cache-dir \
+        --index-url "${PYPI_FALLBACK_INDEX_URL}" \
+        --retries 5 \
+        --timeout 300 \
+        -r /tmp/ocr-requirements.txt
 
 RUN mkdir -p /app/ocr/models
 COPY src/main/resources/ocr/paddle_ocr_runner.py /app/ocr/paddle_ocr_runner.py

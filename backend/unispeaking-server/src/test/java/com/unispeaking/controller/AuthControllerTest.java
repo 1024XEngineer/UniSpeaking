@@ -9,7 +9,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.unispeaking.auth.EmailAuthService;
+import com.unispeaking.service.auth.EmailAuthService;
+import com.unispeaking.domain.dto.auth.EmailAuthUser;
 import com.unispeaking.common.exception.GlobalExceptionHandler;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.domain.dto.auth.LoginRequest;
@@ -41,7 +42,7 @@ class AuthControllerTest {
         var authService = mock(AuthService.class);
         var emailAuthService = mock(EmailAuthService.class);
         when(emailAuthService.currentUser("verified-session"))
-                .thenReturn(new EmailAuthService.UserView(
+                .thenReturn(new EmailAuthUser(
                         java.util.UUID.randomUUID(), "other@example.com"));
         var mvc = MockMvcBuilders.standaloneSetup(new AuthController(authService, emailAuthService))
                 .setControllerAdvice(new GlobalExceptionHandler())
@@ -62,7 +63,7 @@ class AuthControllerTest {
         var authService = mock(AuthService.class);
         var emailAuthService = mock(EmailAuthService.class);
         when(emailAuthService.currentUser("verified-session"))
-                .thenReturn(new EmailAuthService.UserView(
+                .thenReturn(new EmailAuthUser(
                         java.util.UUID.randomUUID(), "person@example.com"));
         var mvc = MockMvcBuilders.standaloneSetup(new AuthController(authService, emailAuthService))
                 .setControllerAdvice(new GlobalExceptionHandler())
@@ -99,7 +100,7 @@ class AuthControllerTest {
         var authService = mock(AuthService.class);
         var emailAuthService = mock(EmailAuthService.class);
         when(emailAuthService.currentUser("verified-session"))
-                .thenReturn(new EmailAuthService.UserView(
+                .thenReturn(new EmailAuthUser(
                         java.util.UUID.randomUUID(), "person@example.com"));
         var mvc = MockMvcBuilders.standaloneSetup(new AuthController(authService, emailAuthService))
                 .setControllerAdvice(new GlobalExceptionHandler())

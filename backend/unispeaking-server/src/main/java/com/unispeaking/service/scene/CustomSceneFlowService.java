@@ -1,63 +1,166 @@
 package com.unispeaking.service.scene;
 
+import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.common.exception.SceneNotFoundException;
+import com.unispeaking.component.session.RealtimeSessionCoordinator;
+import com.unispeaking.component.statemachine.ScenarioDialogueStateMachine;
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.dto.scene.SceneFlowResponse;
+import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.dto.session.ScenarioDialogueStateResponse;
+import com.unispeaking.domain.po.scene.CustomSceneDefinition;
+import com.unispeaking.domain.po.session.AbstractSceneSession;
 import com.unispeaking.domain.vo.scene.CustomStage;
+import com.unispeaking.domain.vo.scene.SceneFlowStage;
+import com.unispeaking.domain.vo.scene.SceneType;
+import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
 import java.util.List;
+import org.springframework.stereotype.Service;
 
-/** 自定义场景流程服务，继承通用阶段流转能力并处理自定义对话状态。 */
-public interface CustomSceneFlowService extends SceneFlowService<CustomStage> {
+@Service
+public class CustomSceneFlowService extends SceneFlowService<CustomStage> {
 
-	/** 覆写通用流程方法，初始化并返回自定义场景的首个阶段。 */
+	private final SceneRepository sceneRepository;
+	private final ScenarioDialogueStateMachine dialogueStateMachine;
+	private final RealtimeSessionCoordinator sessionCoordinator;
+
+	public CustomSceneFlowService(
+			SceneRepository sceneRepository,
+			ScenarioDialogueStateMachine dialogueStateMachine,
+			RealtimeSessionCoordinator sessionCoordinator) {
+		super(
+				sceneId -> initialStage(sceneRepository, sceneId),
+				(sceneId, stage) -> nextStage(stage),
+				stage -> stage == CustomStage.COMPLETED,
+				"scene flow has not been started");
+		this.sceneRepository = sceneRepository;
+		this.dialogueStateMachine = dialogueStateMachine;
+		this.sessionCoordinator = sessionCoordinator;
+	}
+
 	@Override
-	CustomStage start(String sceneId);
+	public CustomStage start(String sceneId) {
+		return super.start(sceneId);
+	}
 
-	/** 覆写通用流程方法，返回自定义场景当前阶段。 */
 	@Override
-	CustomStage current(String sceneId);
+	public CustomStage current(String sceneId) {
+		return super.current(sceneId);
+	}
 
-	/** 覆写通用流程方法，推进并返回自定义场景的新阶段。 */
 	@Override
-	CustomStage next(String sceneId);
+	public CustomStage next(String sceneId) {
+		return super.next(sceneId);
+	}
 
-	/** 覆写通用流程方法，判断自定义场景是否已经完成。 */
 	@Override
-	boolean isCompleted(String sceneId);
+	public boolean isCompleted(String sceneId) {
+		return super.isCompleted(sceneId);
+	}
 
-	/** 清除指定自定义场景缓存的流程阶段。 */
-	void clear(String sceneId);
+	@Override
+	public void clear(String sceneId) {
+		super.clear(sceneId);
+	}
 
-	/** 返回供客户端使用的自定义场景流程快照。 */
-	SceneFlowResponse response(String sceneId);
+	private static CustomStage initialStage(
+			SceneRepository sceneRepository,
+			String sceneId) {
+		sceneRepository.findGeneratedById(sceneId)
+				.orElseThrow(() -> new SceneNotFoundException(sceneId));
+		return CustomStage.WORD;
+	}
 
-	/** 根据当前阶段返回自定义场景对应的学习内容。 */
-	List<LearningContentItem> content(String sceneId);
-
-	/** 为新启动的场景会话初始化自定义对话状态。 */
-	ScenarioDialogueStateResponse startDialogueState(
+	private static CustomStage nextStage(CustomStage stage) {
+		return switch (stage) {
+			case WORD -> CustomStage.PHRASE;
+			case PHRASE -> CustomStage.SENTENCE;
+			case SENTENCE -> CustomStage.DIALOGUE;
+			case DIALOGUE, COMPLETED -> CustomStage.COMPLETED;
+		};
+	}
+	public SceneFlowResponse response(String sceneId) {
+		CustomStage stage = current(sceneId);
+		return new SceneFlowResponse(
+				sceneId,
+				toLegacyStage(stage),
+				stage == CustomStage.COMPLETED);
+	}
+	public List<LearningContentItem> content(String sceneId) {
+		CustomStage stage = current(sceneId);
+		SceneGenerationResponse scene = requireScene(sceneId);
+		return switch (stage) {
+			case WORD -> scene.wordList();
+			case PHRASE -> scene.phraseList();
+			case SENTENCE -> scene.sentenceList();
+			case DIALOGUE, COMPLETED -> List.of();
+		};
+	}
+	public ScenarioDialogueStateResponse startDialogueState(
 			String sceneId,
 			String sessionId,
 			String successFactorJson,
-			String learningGoal);
-
-	/** 根据学习者的一轮转写推进自定义对话状态。 */
-	ScenarioDialogueStateResponse advanceDialogueState(
+			String learningGoal) {
+		requireOwnedBinding(sceneId, sessionId);
+		return dialogueStateMachine.start(
+				sessionId,
+				sceneId,
+				successFactorJson,
+				learningGoal);
+	}
+	public ScenarioDialogueStateResponse advanceDialogueState(
 			String sceneId,
 			String sessionId,
 			int turnNo,
-			String transcript);
-
-	/** 获取指定自定义对话会话当前的状态。 */
-	ScenarioDialogueStateResponse getDialogueState(
+			String transcript) {
+		requireOwnedBinding(sceneId, sessionId);
+		return dialogueStateMachine.advance(sessionId, turnNo, transcript);
+	}
+	public ScenarioDialogueStateResponse getDialogueState(
 			String sceneId,
-			String sessionId);
-
-	/** 在状态存在时将自定义对话推进到收尾阶段。 */
-	ScenarioDialogueStateResponse beginDialogueClosing(
+			String sessionId) {
+		requireOwnedBinding(sceneId, sessionId);
+		return dialogueStateMachine.getState(sessionId);
+	}
+	public ScenarioDialogueStateResponse beginDialogueClosing(
 			String sceneId,
-			String sessionId);
+			String sessionId) {
+		requireOwnedBinding(sceneId, sessionId);
+		return dialogueStateMachine.findState(sessionId)
+				.map(ignored -> dialogueStateMachine.beginClosing(sessionId))
+				.orElse(null);
+	}
+	public void clearDialogueState(String sessionId) {
+		dialogueStateMachine.remove(sessionId);
+	}
 
-	/** 在会话完成或启动失败后清除自定义对话状态。 */
-	void clearDialogueState(String sessionId);
+	private SceneGenerationResponse requireScene(String sceneId) {
+		return sceneRepository.findGeneratedById(sceneId)
+				.orElseThrow(() -> new SceneNotFoundException(sceneId));
+	}
+
+	private void requireOwnedBinding(String sceneId, String sessionId) {
+		CustomSceneDefinition definition = sceneRepository
+				.findCustomDefinitionById(sceneId)
+				.orElseThrow(() -> new SceneNotFoundException(sceneId));
+		AbstractSceneSession session = sessionCoordinator.requireOwnedSession(
+				definition.userId(),
+				sessionId);
+		if (session.getSceneType() != SceneType.CUSTOM_SCENE
+				|| !sceneId.equals(session.getSceneId())) {
+			throw new BusinessException(
+					"SESSION_ACCESS_DENIED",
+					"当前会话不属于该场景");
+		}
+	}
+
+	private SceneFlowStage toLegacyStage(CustomStage stage) {
+		return switch (stage) {
+			case WORD -> SceneFlowStage.WORD_LEARNING;
+			case PHRASE -> SceneFlowStage.PHRASE_LEARNING;
+			case SENTENCE -> SceneFlowStage.SENTENCE_LEARNING;
+			case DIALOGUE -> SceneFlowStage.DIALOGUE;
+			case COMPLETED -> SceneFlowStage.COMPLETED;
+		};
+	}
 }

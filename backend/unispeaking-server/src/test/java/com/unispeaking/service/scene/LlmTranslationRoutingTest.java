@@ -14,8 +14,6 @@ import com.unispeaking.infrastructure.persistence.repository.scene.SceneReposito
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.profile.ProfileService;
-import com.unispeaking.service.scene.impl.CustomSceneServiceImpl;
-import com.unispeaking.service.scene.impl.FreeChatSceneServiceImpl;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -28,7 +26,7 @@ class LlmTranslationRoutingTest {
 		AuthService authService = mock(AuthService.class);
 		AiProviderRegistry registry = mock(AiProviderRegistry.class);
 		when(registry.executeLlmTask(anyString(), isNull())).thenReturn("你好");
-		FreeChatSceneServiceImpl service = new FreeChatSceneServiceImpl(
+		FreeChatSceneService service = new FreeChatSceneService(
 				authService,
 				mock(ProfileService.class),
 				mock(SceneRepository.class),
@@ -65,7 +63,7 @@ class LlmTranslationRoutingTest {
 						List.of(),
 						List.of())));
 		when(registry.executeLlmTask(anyString(), isNull())).thenReturn("你好");
-		CustomSceneServiceImpl service = new CustomSceneServiceImpl(
+		CustomSceneService service = new CustomSceneService(
 				authService,
 				mock(ProfileService.class),
 				repository,

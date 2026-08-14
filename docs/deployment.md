@@ -182,8 +182,8 @@ ai:
   qiniu-maas:
     base-url: ${QINIU_MAAS_BASE_URL:https://api.qnaigc.com/v1}
     api-key: ${QINIU_MAAS_API_KEY:}
-    primary-model: ${QINIU_MAAS_PRIMARY_MODEL:deepseek/deepseek-v4-flash}
-    fallback-model: ${QINIU_MAAS_FALLBACK_MODEL:qwen/qwen3.5-plus}
+    primary-model: ${QINIU_MAAS_PRIMARY_MODEL:qwen/qwen3.5-plus}
+    fallback-model: ${QINIU_MAAS_FALLBACK_MODEL:deepseek/deepseek-v4-flash}
     connect-timeout: ${QINIU_MAAS_CONNECT_TIMEOUT:10s}
     read-timeout: ${QINIU_MAAS_READ_TIMEOUT:90s}
     max-response-bytes: ${QINIU_MAAS_MAX_RESPONSE_BYTES:2097152}
@@ -211,7 +211,7 @@ AI_PROVIDER_ROUTE_REALTIME=qwen3.5-omni-plus-realtime,qwen3.5-omni-flash-realtim
 The default LLM route stays entirely inside Qiniu MaaS:
 
 ```properties
-AI_PROVIDER_ROUTE_LLM=deepseek/deepseek-v4-flash,qwen/qwen3.5-plus
+AI_PROVIDER_ROUTE_LLM=qwen/qwen3.5-plus,qwen3.5-plus
 ```
 
 The backend sends OpenAI-compatible `POST /v1/chat/completions` requests. It

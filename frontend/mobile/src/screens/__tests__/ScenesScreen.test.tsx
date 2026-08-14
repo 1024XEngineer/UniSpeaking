@@ -156,7 +156,10 @@ describe('ScenesHome backend generation binding', () => {
 
     await waitFor(() => expect(screen.getByText('机场行李托运')).toBeTruthy());
     expect(sceneService.generate).toHaveBeenCalledWith('我想练习机场托运行李');
-    expect(screen.getByText('AI：航空公司工作人员 · 你：乘客')).toBeTruthy();
+    expect(screen.getByText('AI 扮演')).toBeTruthy();
+    expect(screen.getByText('航空公司工作人员')).toBeTruthy();
+    expect(screen.getByText('你将扮演')).toBeTruthy();
+    expect(screen.getByText('乘客')).toBeTruthy();
     await fireEvent.press(screen.getByText('开始练习'));
     expect(onOpen).toHaveBeenCalledWith({ name: 'training', scene });
   });

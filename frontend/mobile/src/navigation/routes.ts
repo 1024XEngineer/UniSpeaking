@@ -55,6 +55,8 @@ export const routes = {
     assistant: href('/profile/assistant'),
     account: href('/profile/account'),
     help: href('/profile/help'),
+    helpCategory: (id: string) => href(`/profile/help/${encodeURIComponent(id)}`),
+    helpArticle: (id: string) => href(`/profile/help/article/${encodeURIComponent(id)}`),
     about: href('/profile/about'),
   },
 } as const;

@@ -1,5 +1,6 @@
 package com.unispeaking.infrastructure.email;
 
+import com.unispeaking.common.email.VerificationEmailSender;
 import java.nio.charset.StandardCharsets;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.mail.javamail.JavaMailSender;

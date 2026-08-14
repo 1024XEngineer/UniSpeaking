@@ -50,21 +50,38 @@ export class WavRecorder {
     if (!permission.granted) {
       throw new Error('请允许麦克风权限后再朗读');
     }
-    await this.nativeRecorder.startRecording(pcm16WavConfig);
+    try {
+      await this.nativeRecorder.startRecording(pcm16WavConfig);
+    } catch (error) {
+      if (!this.isAlreadyRecordingError(error)) throw error;
+      // The native module can keep recording after a previous screen or
+      // realtime session disappears. Clear that orphan before retrying.
+      await this.nativeRecorder.stopRecording().catch(() => null);
+      await this.nativeRecorder.startRecording(pcm16WavConfig);
+    }
     this.active = true;
   }
 
   async stop() {
     if (!this.active) throw new Error('当前没有正在进行的录音');
-    this.active = false;
-    const result = await this.nativeRecorder.stopRecording();
+    const result = await this.nativeRecorder.stopRecording().finally(() => {
+      this.active = false;
+    });
     if (!result?.fileUri) throw new Error('录音文件生成失败，请重新朗读');
     return result.fileUri;
   }
 
   async cancel() {
     if (!this.active) return;
-    this.active = false;
-    await this.nativeRecorder.stopRecording();
+    await this.nativeRecorder.stopRecording().finally(() => {
+      this.active = false;
+    });
+  }
+
+  private isAlreadyRecordingError(error: unknown) {
+    if (!error || typeof error !== 'object') return false;
+    const value = error as { code?: unknown; message?: unknown };
+    return value.code === 'ALREADY_RECORDING' ||
+      /recording is already in progress/i.test(String(value.message ?? ''));
   }
 }

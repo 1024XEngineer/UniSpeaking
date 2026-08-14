@@ -138,6 +138,10 @@ export default function TabsLayout() {
         listeners={{
           tabPress: (event) => {
             if (pathname === '/profile') return;
+            if (pathname.startsWith('/profile/')) {
+              event.preventDefault();
+              return;
+            }
             event.preventDefault();
             void (async () => {
               if (pathname === '/ielts' || pathname === '/interview') await rememberSpecialty(pathname === '/ielts' ? 'ielts' : 'interview');
