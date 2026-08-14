@@ -259,6 +259,14 @@ public class AiProviderRegistry {
 		return getLlmProvider(modelId).executeLlmTask(prompt, token);
 	}
 
+	public String executeLlmTask(
+			String modelId,
+			String prompt,
+			String token,
+			LlmResponseFormat responseFormat) {
+		return getLlmProvider(modelId).executeLlmTask(prompt, token, responseFormat);
+	}
+
 	public String executeLlmTask(String prompt, String token) {
 		return executeLlmTaskRouted(prompt, token).response();
 	}
@@ -267,6 +275,15 @@ public class AiProviderRegistry {
 		return invokeRouteWithResult(
 				AiCapability.LLM,
 				modelId -> executeLlmTask(modelId, prompt, token));
+	}
+
+	public RoutedResult<String> executeLlmTaskRouted(
+			String prompt,
+			String token,
+			LlmResponseFormat responseFormat) {
+		return invokeRouteWithResult(
+				AiCapability.LLM,
+				modelId -> executeLlmTask(modelId, prompt, token, responseFormat));
 	}
 
 	public String convertAudioToText(String modelId, Byte[] audio, String token) {

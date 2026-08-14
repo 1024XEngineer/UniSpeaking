@@ -13,4 +13,15 @@ public abstract class LlmProvider extends AbstractAiProvider {
 	public final AiCapability capability() {
 		return AiCapability.LLM;
 	}
+
+	/**
+	 * Default overload keeps existing providers and callers in plain-text mode.
+	 * A provider may override this only when it has a native format parameter.
+	 */
+	public String executeLlmTask(
+			String prompt,
+			String token,
+			LlmResponseFormat responseFormat) {
+		return executeLlmTask(prompt, token);
+	}
 }

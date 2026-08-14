@@ -3,6 +3,7 @@ package com.unispeaking.infrastructure.ai.qwen;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.LlmProvider;
+import com.unispeaking.provider.LlmResponseFormat;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -13,6 +14,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -82,15 +84,26 @@ public class QwenLlmProvider extends LlmProvider {
 
 	@Override
 	public String executeLlmTask(String prompt, String token) {
+		return executeLlmTask(prompt, token, LlmResponseFormat.TEXT);
+	}
+
+	@Override
+	public String executeLlmTask(
+			String prompt,
+			String token,
+			LlmResponseFormat responseFormat) {
 		if (apiKey.isBlank()) {
 			throw retryableFailure(
 					"QWEN_LLM_CREDENTIAL_MISSING",
 					"Set DASHSCOPE_API_KEY before calling Qwen LLM");
 		}
-		return callForContent(prompt, apiKey);
+		return callForContent(prompt, apiKey, responseFormat);
 	}
 
-	private String callForContent(String promptValue, String credential) {
+	private String callForContent(
+			String promptValue,
+			String credential,
+			LlmResponseFormat responseFormat) {
 		String prompt = trim(promptValue);
 		if (prompt.isBlank()) {
 			throw nonRetryableFailure("INVALID_LLM_PROMPT", "LLM task prompt is required");
@@ -98,10 +111,13 @@ public class QwenLlmProvider extends LlmProvider {
 		requireHttpsEndpoint();
 
 		try {
-			Map<String, Object> body = Map.of(
-					"model", model,
-					"messages", List.of(Map.of("role", "user", "content", prompt)),
-					"enable_thinking", false);
+			Map<String, Object> body = new LinkedHashMap<>();
+			body.put("model", model);
+			body.put("messages", List.of(Map.of("role", "user", "content", prompt)));
+			body.put("enable_thinking", false);
+			if (responseFormat == LlmResponseFormat.JSON_OBJECT) {
+				body.put("response_format", Map.of("type", "json_object"));
+			}
 			HttpRequest httpRequest = HttpRequest.newBuilder()
 					.uri(endpoint)
 					.timeout(readTimeout)

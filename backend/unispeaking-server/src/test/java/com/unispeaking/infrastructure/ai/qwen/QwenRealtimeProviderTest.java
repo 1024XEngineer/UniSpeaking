@@ -21,6 +21,7 @@ import com.unispeaking.infrastructure.ai.doubao.DoubaoAsrProvider;
 import com.unispeaking.infrastructure.ai.iflytek.IflytekScoringProvider;
 import com.unispeaking.infrastructure.ai.minimax.MiniMaxTtsProvider;
 import com.unispeaking.infrastructure.realtime.RealtimeCredentialIssuer;
+import com.unispeaking.provider.LlmResponseFormat;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.Authenticator;
@@ -346,6 +347,39 @@ class QwenRealtimeProviderTest {
 		assertTrue(body.contains("\"enable_thinking\":false"));
 		assertFalse(body.contains("dashscope-key"));
 		assertFalse(httpClient.bodyCompletedOnSubscribe);
+	}
+
+	@Test
+	void addsJsonObjectResponseFormatOnlyWhenRequested() {
+		RecordingHttpClient httpClient = new RecordingHttpClient(
+				new QueuedResponse(200, utf8(
+						"{\"choices\":[{\"message\":{\"content\":\"{\\\"ok\\\":true}\"}}]}")));
+		QwenLlmProvider provider = new QwenLlmProvider(
+				httpClient,
+				new ObjectMapper(),
+				"dashscope-key",
+				URI.create("https://workspace-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"),
+				"qwen3.5-plus",
+				Duration.ofSeconds(20),
+				1_048_576);
+
+		provider.executeLlmTask("Return JSON.", null, LlmResponseFormat.JSON_OBJECT);
+		String body = readBody(httpClient.requests.getFirst());
+		assertTrue(body.contains("\"response_format\":{\"type\":\"json_object\"}"));
+
+		RecordingHttpClient textHttpClient = new RecordingHttpClient(
+				new QueuedResponse(200, utf8(
+						"{\"choices\":[{\"message\":{\"content\":\"plain\"}}]}")));
+		QwenLlmProvider textProvider = new QwenLlmProvider(
+				textHttpClient,
+				new ObjectMapper(),
+				"dashscope-key",
+				URI.create("https://workspace-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"),
+				"qwen3.5-plus",
+				Duration.ofSeconds(20),
+				1_048_576);
+		textProvider.executeLlmTask("Return text.", null);
+		assertFalse(readBody(textHttpClient.requests.getFirst()).contains("response_format"));
 	}
 
 	@Test

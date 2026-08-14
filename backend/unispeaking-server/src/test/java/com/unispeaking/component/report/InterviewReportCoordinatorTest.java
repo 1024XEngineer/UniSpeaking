@@ -213,6 +213,27 @@ class InterviewReportCoordinatorTest {
 		verify(reportRepository, never()).markCompleted(any());
 	}
 
+	@Test
+	void asksLlmToWriteReportNarrativesInSimplifiedChinese() {
+		when(sessionMessageRepository.findMessagesWithAudioObjectKeys(SESSION_ID))
+				.thenReturn(List.of());
+		when(sessionMessageRepository.findMessages(SESSION_ID))
+				.thenReturn(List.of(new Message(1, "I am a backend engineer", null)));
+		when(sceneRepository.findById(SCENE_ID))
+				.thenReturn(Optional.of(sceneDefinition()));
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+				.thenReturn(routed(validLlmJson()));
+
+		coordinator.submit(SESSION_ID, SCENE_ID, USER_ID);
+
+		ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+		verify(providerRegistry).executeLlmTaskRouted(prompt.capture(), isNull());
+		assertTrue(prompt.getValue().contains("Simplified Chinese"));
+		assertTrue(prompt.getValue().contains("ALL \"evaluation\""));
+		assertTrue(prompt.getValue().contains("\"advice\", and \"summary\" fields"));
+		assertTrue(prompt.getValue().contains("property names and score values"));
+	}
+
 	private LearnerMessageRecord turn(int messageNo, String content) {
 		return new LearnerMessageRecord(
 				messageNo,
