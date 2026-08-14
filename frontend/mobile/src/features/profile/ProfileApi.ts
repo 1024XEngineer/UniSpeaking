@@ -120,6 +120,24 @@ export type HelpCenterContent = {
   categories: HelpCategory[];
 };
 
+export type HelpArticleSummary = {
+  id: string;
+  title: string;
+  summary: string;
+};
+
+export type HelpCategoryDetail = {
+  id: string;
+  title: string;
+  description: string;
+  articles: HelpArticleSummary[];
+};
+
+export type HelpArticle = HelpArticleSummary & {
+  categoryId: string;
+  updatedAt: string;
+};
+
 export type ProfileAvatar = {
   uri: string;
   mimeType: string;
@@ -183,5 +201,17 @@ export class ProfileApi {
 
   getHelpCenter() {
     return this.client.request<HelpCenterContent>('/api/help-center');
+  }
+
+  getHelpCategory(categoryId: string) {
+    return this.client.request<HelpCategoryDetail>(
+      `/api/help-center/categories/${encodeURIComponent(categoryId)}`,
+    );
+  }
+
+  getHelpArticle(articleId: string) {
+    return this.client.request<HelpArticle>(
+      `/api/help-center/articles/${encodeURIComponent(articleId)}`,
+    );
   }
 }

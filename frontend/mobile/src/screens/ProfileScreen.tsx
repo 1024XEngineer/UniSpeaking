@@ -41,6 +41,8 @@ import { LevelSelector, SpeedSelector, TeacherSelector } from '@/components/Conv
 import {
   ProfileApi,
   type AchievementOverview,
+  type HelpArticle as HelpArticleData,
+  type HelpCategoryDetail,
   type HelpCenterContent,
   type ProfileAvatar,
   type ProfileInsights,
@@ -1112,6 +1114,7 @@ export function AccountSettings({ onBack, onLogout }: { onBack: () => void; onLo
   const [draft, setDraft] = useState(nickname);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [nicknameOpen, setNicknameOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const saveNickname = async () => {
     const normalized = draft.trim();
@@ -1125,6 +1128,7 @@ export function AccountSettings({ onBack, onLogout }: { onBack: () => void; onLo
       const updated = await api.updateNickname(normalized);
       setNickname(updated.nickname);
       setDraft(updated.nickname);
+      setNicknameOpen(false);
     } catch (requestError) {
       setError(errorMessage(requestError, '用户名保存失败'));
     } finally {
@@ -1151,6 +1155,17 @@ export function AccountSettings({ onBack, onLogout }: { onBack: () => void; onLo
       <Card style={styles.accountCard}>
         <ListRow title="登录邮箱" subtitle={email} icon="chat" meta="当前账号" />
         <ListRow
+          title="展示用户名"
+          subtitle={nickname || '尚未设置'}
+          icon="user"
+          meta="修改用户名"
+          onPress={() => {
+            setDraft(nickname);
+            setError('');
+            setNicknameOpen(true);
+          }}
+        />
+        <ListRow
           title="登录密码"
           subtitle="密码已设置"
           icon="lock"
@@ -1175,18 +1190,75 @@ export function AccountSettings({ onBack, onLogout }: { onBack: () => void; onLo
           onPress={onLogout}
         />
       </Card>
-      <View style={styles.formGroup}>
-        <Text style={styles.fieldLabel}>展示用户名</Text>
-        <TextInput editable={!saving} maxLength={32} value={draft} onChangeText={setDraft} style={styles.input} />
-        {error ? (
-          <Text accessibilityRole="alert" style={styles.formError}>
-            {error}
-          </Text>
-        ) : null}
-        <AppButton title={saving ? '正在保存' : '保存用户名'} disabled={saving} onPress={saveNickname} />
-      </View>
+      {nicknameOpen ? (
+        <NicknameChangeModal
+          draft={draft}
+          error={error}
+          saving={saving}
+          onChange={setDraft}
+          onClose={() => setNicknameOpen(false)}
+          onSubmit={saveNickname}
+        />
+      ) : null}
       {passwordOpen ? <PasswordChangeModal onClose={() => setPasswordOpen(false)} onSubmit={changePassword} /> : null}
     </AppScreen>
+  );
+}
+
+function NicknameChangeModal({
+  draft,
+  error,
+  saving,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  draft: string;
+  error: string;
+  saving: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <Modal transparent visible animationType="fade" onRequestClose={saving ? undefined : onClose}>
+      <View style={styles.modalRoot}>
+        <Pressable style={styles.modalBackdrop} disabled={saving} onPress={onClose} />
+        <View style={styles.goalsModal}>
+          <View style={styles.editModalTop}>
+            <View style={styles.flex}>
+              <Text style={styles.modalTitle}>修改用户名</Text>
+              <Text style={styles.modalLead}>用户名将同步显示在个人概览中。</Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="关闭修改用户名"
+              disabled={saving}
+              onPress={onClose}
+              style={styles.closeButton}
+            >
+              <XIcon color={colors.ink} size={20} />
+            </Pressable>
+          </View>
+          <View style={styles.formGroup}>
+            <Text style={styles.fieldLabel}>展示用户名</Text>
+            <TextInput
+              autoFocus
+              editable={!saving}
+              maxLength={32}
+              value={draft}
+              onChangeText={onChange}
+              style={styles.input}
+            />
+          </View>
+          {error ? <Text accessibilityRole="alert" style={styles.formError}>{error}</Text> : null}
+          <View style={styles.modalActions}>
+            <AppButton title="取消" variant="secondary" disabled={saving} onPress={onClose} style={styles.modalAction} />
+            <AppButton title={saving ? '正在保存' : '保存用户名'} disabled={saving} onPress={onSubmit} style={styles.modalAction} />
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1297,7 +1369,13 @@ function PasswordChangeModal({
   );
 }
 
-export function HelpCenter({ onBack }: { onBack: () => void }) {
+export function HelpCenter({
+  onBack,
+  onOpenCategory,
+}: {
+  onBack: () => void;
+  onOpenCategory: (categoryId: string) => void;
+}) {
   const api = useProfileApi();
   const [content, setContent] = useState<HelpCenterContent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1352,13 +1430,22 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
       ) : (
         <View style={styles.helpList}>
           {(content?.categories ?? []).map((category) => (
-            <Card key={category.id} style={styles.helpCard}>
-              <View style={styles.flex}>
-                <Text style={styles.helpTitle}>{category.title}</Text>
-                <Text style={styles.helpNote}>{category.description}</Text>
-                <Text style={styles.helpCount}>共 {category.articleCount} 篇说明</Text>
-              </View>
-            </Card>
+            <Pressable
+              key={category.id}
+              accessibilityRole="button"
+              accessibilityLabel={`打开${category.title}`}
+              onPress={() => onOpenCategory(category.id)}
+              style={({ pressed }) => pressed && styles.pressed}
+            >
+              <Card style={styles.helpCard}>
+                <View style={styles.flex}>
+                  <Text style={styles.helpTitle}>{category.title}</Text>
+                  <Text style={styles.helpNote}>{category.description}</Text>
+                  <Text style={styles.helpCount}>共 {category.articleCount} 篇说明</Text>
+                </View>
+                <AppIcon name="chevron-right" size={18} color={colors.subtle} />
+              </Card>
+            </Pressable>
           ))}
         </View>
       )}
@@ -1369,6 +1456,149 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
           <Text style={styles.helpNote}>联系 UniSpeaking 支持团队，我们会继续协助你。</Text>
         </View>
       </Card>
+    </AppScreen>
+  );
+}
+
+export function HelpCategory({
+  categoryId,
+  onBack,
+  onOpenArticle,
+}: {
+  categoryId: string;
+  onBack: () => void;
+  onOpenArticle: (articleId: string) => void;
+}) {
+  const api = useProfileApi();
+  const [category, setCategory] = useState<HelpCategoryDetail | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setCategory(await api.getHelpCategory(categoryId));
+      setError('');
+    } catch (requestError) {
+      setError(errorMessage(requestError, '帮助分类加载失败'));
+    } finally {
+      setLoading(false);
+    }
+  }, [api, categoryId]);
+  useEffect(() => {
+    let cancelled = false;
+    api.getHelpCategory(categoryId)
+      .then((value) => {
+        if (!cancelled) setCategory(value);
+      })
+      .catch((requestError) => {
+        if (!cancelled) setError(errorMessage(requestError, '帮助分类加载失败'));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [api, categoryId]);
+
+  return (
+    <AppScreen
+      contentStyle={styles.pageContent}
+      fixedHeader={<PageHeader fixed onBack={onBack} title={category?.title ?? '帮助分类'} />}
+    >
+      {loading ? (
+        <View style={styles.loadingState}><ActivityIndicator color={colors.ink} /></View>
+      ) : error ? (
+        <View style={styles.errorState}>
+          <Text accessibilityRole="alert" style={styles.formError}>{error}</Text>
+          <AppButton title="重新加载" variant="secondary" onPress={() => void load()} />
+        </View>
+      ) : category ? (
+        <>
+          <Text style={styles.pageTitle}>{category.title}</Text>
+          <Text style={styles.pageSubtitle}>{category.description}</Text>
+          <View style={styles.helpList}>
+            {category.articles.map((article) => (
+              <Pressable
+                key={article.id}
+                accessibilityRole="button"
+                accessibilityLabel={`打开${article.title}`}
+                onPress={() => onOpenArticle(article.id)}
+                style={({ pressed }) => pressed && styles.pressed}
+              >
+                <Card style={styles.helpCard}>
+                  <View style={styles.flex}>
+                    <Text style={styles.helpTitle}>{article.title}</Text>
+                    <Text style={styles.helpNote}>{article.summary}</Text>
+                  </View>
+                  <AppIcon name="chevron-right" size={18} color={colors.subtle} />
+                </Card>
+              </Pressable>
+            ))}
+          </View>
+        </>
+      ) : null}
+    </AppScreen>
+  );
+}
+
+export function HelpArticle({
+  articleId,
+  onBack,
+}: {
+  articleId: string;
+  onBack: () => void;
+}) {
+  const api = useProfileApi();
+  const [article, setArticle] = useState<HelpArticleData | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setArticle(await api.getHelpArticle(articleId));
+      setError('');
+    } catch (requestError) {
+      setError(errorMessage(requestError, '帮助文章加载失败'));
+    } finally {
+      setLoading(false);
+    }
+  }, [api, articleId]);
+  useEffect(() => {
+    let cancelled = false;
+    api.getHelpArticle(articleId)
+      .then((value) => {
+        if (!cancelled) setArticle(value);
+      })
+      .catch((requestError) => {
+        if (!cancelled) setError(errorMessage(requestError, '帮助文章加载失败'));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [api, articleId]);
+
+  return (
+    <AppScreen
+      contentStyle={styles.pageContent}
+      fixedHeader={<PageHeader fixed onBack={onBack} title="帮助详情" />}
+    >
+      {loading ? (
+        <View style={styles.loadingState}><ActivityIndicator color={colors.ink} /></View>
+      ) : error ? (
+        <View style={styles.errorState}>
+          <Text accessibilityRole="alert" style={styles.formError}>{error}</Text>
+          <AppButton title="重新加载" variant="secondary" onPress={() => void load()} />
+        </View>
+      ) : article ? (
+        <>
+          <Text style={styles.pageTitle}>{article.title}</Text>
+          <Text style={styles.helpArticleDate}>更新时间：{article.updatedAt}</Text>
+          <Card style={styles.helpArticleBody}>
+            <Text style={styles.helpArticleHeading}>说明</Text>
+            <Text style={styles.helpArticleText}>{article.summary}</Text>
+          </Card>
+        </>
+      ) : null}
     </AppScreen>
   );
 }
@@ -1410,7 +1640,15 @@ export function AboutProduct({ onBack }: { onBack: () => void }) {
   );
 }
 
-export function ProfileHome({ onOpen, onLogout }: { onOpen: (route: ProfileRoute) => void; onLogout?: () => void }) {
+export function ProfileHome({
+  activeRoute = 'overview',
+  onOpen,
+  onLogout,
+}: {
+  activeRoute?: ProfileRoute;
+  onOpen: (route: ProfileRoute) => void;
+  onLogout?: () => void;
+}) {
   const api = useProfileApi();
   const { nickname, setNickname, email, teacher } = useAppModel();
   const [editOpen, setEditOpen] = useState(false);
@@ -1489,37 +1727,43 @@ export function ProfileHome({ onOpen, onLogout }: { onOpen: (route: ProfileRoute
         <ProfileMenuItem
           icon={<UserCircleIcon color={colors.ink} size={25} />}
           title="个人概览"
-          active
+          active={activeRoute === 'overview'}
           onPress={() => onOpen('overview')}
         />
         <ProfileMenuItem
           icon={<ChartLineUpIcon color={colors.ink} size={25} />}
           title="学习目标与洞察"
+          active={activeRoute === 'insights'}
           onPress={() => onOpen('insights')}
         />
         <ProfileMenuItem
           icon={<CrownIcon color={colors.ink} size={25} />}
           title="会员权益"
+          active={activeRoute === 'membership'}
           onPress={() => onOpen('membership')}
         />
         <ProfileMenuItem
           icon={<SlidersHorizontalIcon color={colors.ink} size={25} />}
           title="助手设置"
+          active={activeRoute === 'assistant'}
           onPress={() => onOpen('assistant')}
         />
         <ProfileMenuItem
           icon={<ShieldCheckIcon color={colors.ink} size={25} />}
           title="账号与安全"
+          active={activeRoute === 'account'}
           onPress={() => onOpen('account')}
         />
         <ProfileMenuItem
           icon={<LifebuoyIcon color={colors.ink} size={25} />}
           title="帮助中心"
+          active={activeRoute === 'help'}
           onPress={() => onOpen('help')}
         />
         <ProfileMenuItem
           icon={<InfoIcon color={colors.ink} size={25} />}
           title="关于产品"
+          active={activeRoute === 'about'}
           onPress={() => onOpen('about')}
         />
       </View>
@@ -1547,7 +1791,7 @@ export function ProfileScreen() {
   if (route === 'membership') return <Membership onBack={() => setRoute('home')} />;
   if (route === 'assistant') return <AssistantSettings onBack={() => setRoute('home')} />;
   if (route === 'account') return <AccountSettings onBack={() => setRoute('home')} />;
-  if (route === 'help') return <HelpCenter onBack={() => setRoute('home')} />;
+  if (route === 'help') return <HelpCenter onBack={() => setRoute('home')} onOpenCategory={() => undefined} />;
   if (route === 'about') return <AboutProduct onBack={() => setRoute('home')} />;
   return <ProfileHome onOpen={setRoute} />;
 }
@@ -2105,6 +2349,15 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '300',
   },
+  helpArticleDate: {
+    marginTop: 12,
+    color: colors.subtle,
+    fontSize: 11,
+    fontWeight: '300',
+  },
+  helpArticleBody: { marginTop: 24, gap: 10 },
+  helpArticleHeading: { color: colors.ink, fontSize: 18, fontWeight: '600' },
+  helpArticleText: { color: colors.muted, fontSize: 15, lineHeight: 25, fontWeight: '300' },
   helpContact: {
     marginTop: 18,
     flexDirection: 'row',
