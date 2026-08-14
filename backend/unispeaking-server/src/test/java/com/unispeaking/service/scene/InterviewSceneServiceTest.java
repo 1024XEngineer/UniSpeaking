@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -42,6 +43,7 @@ import com.unispeaking.infrastructure.persistence.repository.scene.InterviewScen
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.AiProviderRegistry.RoutedResult;
+import com.unispeaking.provider.LlmResponseFormat;
 import com.unispeaking.provider.OcrProvider;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.scene.InterviewSceneService;
@@ -198,7 +200,7 @@ class InterviewSceneServiceTest {
 				.thenReturn("脱敏后 JD");
 		when(materialDesensitizer.desensitize("简历原始文本"))
 				.thenReturn("脱敏后简历");
-		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT)))
 				.thenReturn(completed(validMaterial()));
 
 		InterviewMaterialDraft draft = service.prepareMaterials(
@@ -211,7 +213,7 @@ class InterviewSceneServiceTest {
 		assertEquals(List.of("负责支付系统设计"), material.responsibilities());
 		assertEquals(List.of("掌握 Java"), material.qualificationRequirements());
 		ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-		verify(providerRegistry).executeLlmTaskRouted(promptCaptor.capture(), isNull());
+		verify(providerRegistry).executeLlmTaskRouted(promptCaptor.capture(), isNull(), eq(LlmResponseFormat.JSON_OBJECT));
 		String prompt = promptCaptor.getValue();
 		assertTrue(prompt.contains("脱敏后 JD"));
 		assertTrue(prompt.contains("脱敏后简历"));
@@ -227,14 +229,14 @@ class InterviewSceneServiceTest {
 						"JD 原始文本", null, true));
 		when(materialDesensitizer.desensitize("JD 原始文本"))
 				.thenReturn("脱敏后 JD");
-		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT)))
 				.thenReturn(completed(validMaterial()));
 
 		service.prepareMaterials(
 				new InterviewMaterialPreparationInput(null, null, "JD 原始文本", null));
 
 		ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-		verify(providerRegistry).executeLlmTaskRouted(promptCaptor.capture(), isNull());
+		verify(providerRegistry).executeLlmTaskRouted(promptCaptor.capture(), isNull(), eq(LlmResponseFormat.JSON_OBJECT));
 		assertTrue(promptCaptor.getValue().contains("No resume was provided."));
 	}
 
@@ -246,14 +248,14 @@ class InterviewSceneServiceTest {
 						"JD 文本", "简历文本", false));
 		when(materialDesensitizer.desensitize(anyString()))
 				.thenAnswer(invocation -> invocation.getArgument(0));
-		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT)))
 				.thenReturn(completed(invalidMaterial()), completed(validMaterial()));
 
 		InterviewMaterialDraft draft = service.prepareMaterials(
 				new InterviewMaterialPreparationInput(null, null, "JD 文本", null));
 
 		assertEquals("后端开发工程师", draft.material().jobTitle());
-		verify(providerRegistry, times(2)).executeLlmTaskRouted(anyString(), isNull());
+		verify(providerRegistry, times(2)).executeLlmTaskRouted(anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT));
 	}
 
 	@Test
@@ -264,7 +266,7 @@ class InterviewSceneServiceTest {
 						"JD 文本", "简历文本", false));
 		when(materialDesensitizer.desensitize(anyString()))
 				.thenAnswer(invocation -> invocation.getArgument(0));
-		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT)))
 				.thenReturn(completed(invalidMaterial()), completed(invalidMaterial()));
 
 		BusinessException exception = assertThrows(
@@ -273,7 +275,7 @@ class InterviewSceneServiceTest {
 						new InterviewMaterialPreparationInput(null, null, "JD 文本", null)));
 
 		assertEquals(InterviewErrorCode.INTERVIEW_MATERIAL_SOURCE_INSUFFICIENT, exception.code());
-		verify(providerRegistry, times(2)).executeLlmTaskRouted(anyString(), isNull());
+		verify(providerRegistry, times(2)).executeLlmTaskRouted(anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT));
 	}
 
 	@Test
@@ -286,7 +288,7 @@ class InterviewSceneServiceTest {
 						true));
 		when(materialDesensitizer.desensitize(anyString()))
 				.thenAnswer(invocation -> invocation.getArgument(0));
-		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT)))
 				.thenReturn(completed(invalidMaterial()), completed(invalidMaterial()));
 
 		InterviewMaterial material = service.prepareMaterials(

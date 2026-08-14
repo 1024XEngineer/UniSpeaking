@@ -30,6 +30,7 @@ import com.unispeaking.infrastructure.persistence.repository.evaluation.Intervie
 import com.unispeaking.infrastructure.persistence.repository.scene.InterviewSceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.provider.AiProviderRegistry;
+import com.unispeaking.provider.LlmResponseFormat;
 import com.unispeaking.provider.OcrProvider;
 import com.unispeaking.service.auth.AuthService;
 import java.time.OffsetDateTime;
@@ -321,7 +322,9 @@ public class InterviewSceneService {
 			String resumeText,
 			boolean resumeAbsent) {
 		String prompt = buildMaterialPrompt(jobDescriptionText, resumeText, resumeAbsent);
-		String content = providerRegistry.executeLlmTaskRouted(prompt, null).response();
+		String content = providerRegistry
+				.executeLlmTaskRouted(prompt, null, LlmResponseFormat.JSON_OBJECT)
+				.response();
 		InterviewMaterialResponseNormalizer.ParseResult parsed =
 				materialResponseNormalizer.parse(content);
 		if (parsed.valid()) {
@@ -335,7 +338,7 @@ public class InterviewSceneService {
 				prompt,
 				parsed.errors());
 		String repairedContent = providerRegistry
-				.executeLlmTaskRouted(repairPrompt, null)
+				.executeLlmTaskRouted(repairPrompt, null, LlmResponseFormat.JSON_OBJECT)
 				.response();
 		InterviewMaterialResponseNormalizer.ParseResult repaired =
 				materialResponseNormalizer.parse(repairedContent);

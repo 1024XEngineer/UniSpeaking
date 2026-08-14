@@ -517,7 +517,14 @@ public class InterviewReportCoordinator {
 				- VOCABULARY_EXPRESSION (0-100)
 
 				Produce an overall_score (0-100) as your comprehensive judgment across all five
-				dimensions, and a short summary narrative of the candidate's spoken English.
+				dimensions.
+
+				LANGUAGE REQUIREMENT: Write the natural-language values of ALL "evaluation",
+				"advice", and "summary" fields in Simplified Chinese. Do not return those
+				fields in English. Keep standard English linguistic terms, quoted candidate
+				English, and short English examples only when they are necessary as evidence;
+				these exceptions must be embedded in an otherwise Chinese explanation. The JSON
+				property names and score values must remain exactly as specified below.
 
 				Return exactly one JSON object and no Markdown or explanatory prose.
 				The JSON shape must be:
