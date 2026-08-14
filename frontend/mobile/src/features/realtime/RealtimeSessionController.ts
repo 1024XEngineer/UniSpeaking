@@ -348,6 +348,7 @@ export class RealtimeSessionController {
       return { sessionId: backend.sessionId };
     } catch (error) {
       this.inputEnabled = false;
+      await this.releaseTurnAudioCapture();
       this.dependencies.transport.setAudioEnabled(false);
       this.dependencies.transport.close();
       this.dependencies.sessionSocket.close();
@@ -529,6 +530,7 @@ export class RealtimeSessionController {
           : 'PEER_CONNECTION_FAILED';
     this.inputEnabled = false;
     this.applyAudioEnabled();
+    void this.releaseTurnAudioCapture();
     this.machine.dispatch({
       type: 'FAIL',
       error: {
@@ -680,6 +682,7 @@ export class RealtimeSessionController {
         }
         this.inputEnabled = false;
         this.applyAudioEnabled();
+        void this.releaseTurnAudioCapture();
         this.machine.dispatch({
           type: 'FAIL',
           error: {
@@ -753,6 +756,9 @@ export class RealtimeSessionController {
         if (this.options.mode === 'scene') {
           await this.waitForPendingTurnEvaluations();
         }
+        if (this.dependencies.turnAudioCapture?.release) {
+          await this.releaseTurnAudioCapture();
+        }
         const stopTime = this.now().toISOString();
         completion =
           this.options.mode === 'scene' && this.dependencies.sceneDialogue
@@ -767,6 +773,9 @@ export class RealtimeSessionController {
       }
       return completion;
     } finally {
+      if (this.dependencies.turnAudioCapture?.release) {
+        await this.releaseTurnAudioCapture();
+      }
       this.dependencies.transport.close();
       this.dependencies.sessionSocket.close();
       this.unsubscribeTransport();
@@ -859,6 +868,13 @@ export class RealtimeSessionController {
       return await capture.take();
     } catch {
       return null;
+    }
+  }
+
+  private async releaseTurnAudioCapture() {
+    const release = this.dependencies.turnAudioCapture?.release;
+    if (typeof release === 'function') {
+      await release().catch(() => undefined);
     }
   }
 

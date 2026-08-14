@@ -4,6 +4,7 @@ export type TurnAudioCapturePort = {
   start(): Promise<void>;
   stop(): boolean;
   take(): Promise<string | null>;
+  release(): Promise<void>;
 };
 
 export function createTurnAudioCapture(
@@ -50,6 +51,19 @@ export function createTurnAudioCapture(
       audioPromise = Promise.resolve(null);
       finalized = false;
       return audio;
+    },
+    async release() {
+      stopRequested = true;
+      if (startPromise) await startPromise.catch(() => undefined);
+      if (active) {
+        await recorder.cancel().catch(() => undefined);
+      } else if (finalized) {
+        await audioPromise.catch(() => null);
+      }
+      active = false;
+      finalized = false;
+      stopRequested = false;
+      audioPromise = Promise.resolve(null);
     },
   };
 }

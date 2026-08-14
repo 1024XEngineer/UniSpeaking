@@ -316,6 +316,7 @@ describe('RealtimeSessionController', () => {
       start: jest.fn(async () => undefined),
       stop: jest.fn(() => true),
       take: jest.fn(async () => 'file:///scene-turn.wav'),
+      release: jest.fn(async () => undefined),
     };
     dependencies.turnAudioCapture = turnAudioCapture;
     const sceneDialogue = {
@@ -1111,6 +1112,7 @@ describe('RealtimeSessionController', () => {
       start: jest.fn(async () => undefined),
       stop: jest.fn(() => true),
       take: jest.fn(async () => 'file:///ielts-part2.wav'),
+      release: jest.fn(async () => undefined),
     };
     dependencies.turnAudioCapture = turnAudioCapture;
     const ieltsDialogue: NonNullable<RealtimeSessionDependencies['ieltsDialogue']> = {
@@ -1177,6 +1179,7 @@ describe('RealtimeSessionController', () => {
       start: jest.fn(async () => undefined),
       stop: jest.fn(() => true),
       take: jest.fn(async () => 'file:///ielts-part2-final.wav'),
+      release: jest.fn(async () => undefined),
     };
     dependencies.ieltsDialogue = {
       advanceState: jest.fn(),
