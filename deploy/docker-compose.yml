@@ -33,7 +33,7 @@ services:
       DATABASE_USERNAME: ${POSTGRES_USER:-unispeaking}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-unispeaking-local-password}
     ports:
-      - "8080:8080"
+      - "${BACKEND_HOST_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
