@@ -291,35 +291,16 @@ function StaticAudioToggle({ src, label = "播放试听音频", mini = false }) 
 function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
   const audioRef = useRef(null);
   const objectUrlRef = useRef("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     setFailed(false);
     audioRef.current?.pause();
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     objectUrlRef.current = "";
     audioRef.current = null;
-
-    cachedPronunciationAudio(sceneId, text)
-      .then((blob) => {
-        if (cancelled) return;
-        const objectUrl = URL.createObjectURL(blob);
-        const audio = new Audio(objectUrl);
-        objectUrlRef.current = objectUrl;
-        audioRef.current = audio;
-        setLoading(false);
-        audio.play().catch(() => undefined);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setLoading(false);
-          setFailed(true);
-        }
-      });
 
     return () => {
       cancelled = true;
@@ -328,12 +309,22 @@ function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = "";
     };
-  }, [sceneId, text, reloadKey]);
+  }, [sceneId, text]);
 
   const replay = () => {
     const audio = audioRef.current;
     if (!audio) {
-      setReloadKey((current) => current + 1);
+      setLoading(true);
+      cachedPronunciationAudio(sceneId, text)
+        .then((blob) => {
+          const objectUrl = URL.createObjectURL(blob);
+          const nextAudio = new Audio(objectUrl);
+          objectUrlRef.current = objectUrl;
+          audioRef.current = nextAudio;
+          nextAudio.play().catch(() => setFailed(true));
+        })
+        .catch(() => setFailed(true))
+        .finally(() => setLoading(false));
       return;
     }
     audio.currentTime = 0;
@@ -354,15 +345,8 @@ function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
   );
 }
 
-function ScenePlaybackToggle({ label = "播放发音" }) {
-  const [playing, setPlaying] = useState(false);
-  return (
-    <label className="scene-playback-toggle" title={playing ? "暂停发音" : label}>
-      <input type="checkbox" checked={playing} onChange={(event) => setPlaying(event.target.checked)} />
-      <Play className="play" weight="fill" />
-      <Pause className="pause" weight="fill" />
-    </label>
-  );
+function ScenePlaybackToggle({ sceneId, text, label = "播放发音" }) {
+  return <PronunciationAudioButton sceneId={sceneId} text={text} label={label} />;
 }
 
 function MicrophoneToggle({ label = "麦克风", className, onActivate }) {
@@ -595,6 +579,7 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
     : mode === "reset"
       ? "reset-email-challenge"
       : "signup-email-challenge";
+  const developmentCaptcha = import.meta.env.DEV && (import.meta.env.VITE_AUTH_CAPTCHA_PROVIDER || "development") === "development";
 
   const clearChallenge = () => {
     setStep("credentials");
@@ -629,6 +614,9 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
 
   const submitCredentials = async (event) => {
     event.preventDefault();
+    if (developmentCaptcha && !submitting) {
+      await verifyAndIssueChallenge("local-human-verified");
+    }
   };
 
   const verifyAndIssueChallenge = async (captchaVerifyParam) => {
@@ -2364,7 +2352,7 @@ function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRe
             <div className="asset-detail__actions"><AnimatedDeleteButton onClick={() => setDeleteOpen(true)} /><ExpandingCta className="teacher-cta asset-open-button" disabled={!selected.latestSessionId} onClick={() => onOpenRecord(selected.sceneId)}>打开当前学习资产</ExpandingCta></div>
           </header>}
           <div className="asset-items" aria-label="已保存的单词、短语和句子">
-            {items.map((item) => <div key={`${item.type}-${item.contentId}`}><span className="tag">{item.type}</span><p><strong>{item.englishText}</strong><small>{item.chineseText}</small></p><ScenePlaybackToggle label={`播放 ${item.englishText} 的发音`} /></div>)}
+            {items.map((item) => <div key={`${item.type}-${item.contentId}`}><span className="tag">{item.type}</span><p><strong>{item.englishText}</strong><small>{item.chineseText}</small></p><ScenePlaybackToggle sceneId={selected.sceneId} text={item.englishText} label={`播放 ${item.englishText} 的发音`} /></div>)}
             {selected && !items.length && <div className="asset-list__empty">正在读取该场景的语言资产</div>}
           </div>
         </article>

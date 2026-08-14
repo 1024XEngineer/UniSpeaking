@@ -9,6 +9,7 @@ import {
 const ALIYUN_CAPTCHA_SCRIPT = getAliyunCaptchaScriptUrl(import.meta.env.VITE_ALIYUN_CAPTCHA_SCRIPT_URL);
 
 export function HumanVerification({ buttonId, onVerify }) {
+  const developmentMode = import.meta.env.DEV && (import.meta.env.VITE_AUTH_CAPTCHA_PROVIDER || "development") === "development";
   const instanceRef = useRef(null);
   const onVerifyRef = useRef(onVerify);
   const sceneId = import.meta.env.VITE_ALIYUN_CAPTCHA_SCENE_ID || "i12nr63f";
@@ -20,6 +21,7 @@ export function HumanVerification({ buttonId, onVerify }) {
   useEffect(() => { onVerifyRef.current = onVerify; }, [onVerify]);
 
   useEffect(() => {
+    if (developmentMode) return undefined;
     let cancelled = false;
     const initialize = () => {
       if (cancelled || !window.initAliyunCaptcha) return;
@@ -54,7 +56,7 @@ export function HumanVerification({ buttonId, onVerify }) {
       instanceRef.current?.destroy?.();
       instanceRef.current = null;
     };
-  }, [buttonId, mode, prefix, region, sceneId]);
+  }, [buttonId, developmentMode, mode, prefix, region, sceneId]);
 
   return null;
 }

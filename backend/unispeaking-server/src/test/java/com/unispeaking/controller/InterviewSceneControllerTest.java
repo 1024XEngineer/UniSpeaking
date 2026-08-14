@@ -15,7 +15,7 @@ import com.unispeaking.domain.dto.asset.InterviewAssetItem;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
 import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
 import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
-import com.unispeaking.service.scene.impl.InterviewSceneServiceImpl;
+import com.unispeaking.service.scene.InterviewSceneService;
 import com.unispeaking.service.session.InterviewSessionService;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -30,7 +30,7 @@ class InterviewSceneControllerTest {
 
 	@Test
 	void prepareMaterialsBindsMultipartAndReturnsDraft() throws Exception {
-		InterviewSceneServiceImpl service = mock(InterviewSceneServiceImpl.class);
+		InterviewSceneService service = mock(InterviewSceneService.class);
 		InterviewMaterial material = new InterviewMaterial(
 				"Java 工程师",
 				List.of("负责后端服务开发"),
@@ -69,7 +69,7 @@ class InterviewSceneControllerTest {
 
 	@Test
 	void prepareMaterialsAcceptsResumePdf() throws Exception {
-		InterviewSceneServiceImpl service = mock(InterviewSceneServiceImpl.class);
+		InterviewSceneService service = mock(InterviewSceneService.class);
 		when(service.prepareMaterials(any()))
 				.thenReturn(new InterviewMaterialDraft(new InterviewMaterial(
 						"Java 工程师",
@@ -103,7 +103,7 @@ class InterviewSceneControllerTest {
 
 	@Test
 	void listAssetsReturnsOwnedInterviewAssetItems() throws Exception {
-		InterviewSceneServiceImpl service = mock(InterviewSceneServiceImpl.class);
+		InterviewSceneService service = mock(InterviewSceneService.class);
 		OffsetDateTime now = OffsetDateTime.parse("2026-08-09T00:00:00Z");
 		when(service.listOwnedScenes()).thenReturn(List.of(new InterviewAssetItem(
 				"interview_1",
@@ -135,7 +135,7 @@ class InterviewSceneControllerTest {
 
 	@Test
 	void ocrAvailabilityDelegatesToService() throws Exception {
-		InterviewSceneServiceImpl service = mock(InterviewSceneServiceImpl.class);
+		InterviewSceneService service = mock(InterviewSceneService.class);
 		when(service.isOcrAvailable()).thenReturn(false);
 		MockMvc mvc = MockMvcBuilders
 				.standaloneSetup(new InterviewSceneController(
@@ -173,7 +173,7 @@ class InterviewSceneControllerTest {
 						"system-prompt"));
 		MockMvc mvc = MockMvcBuilders
 				.standaloneSetup(new InterviewSceneController(
-						mock(InterviewSceneServiceImpl.class),
+						mock(InterviewSceneService.class),
 						sessions,
 						mock(RecordingStore.class)))
 				.build();
@@ -200,7 +200,7 @@ class InterviewSceneControllerTest {
 						null));
 		MockMvc mvc = MockMvcBuilders
 				.standaloneSetup(new InterviewSceneController(
-						mock(InterviewSceneServiceImpl.class),
+						mock(InterviewSceneService.class),
 						sessions,
 						mock(RecordingStore.class)))
 				.build();

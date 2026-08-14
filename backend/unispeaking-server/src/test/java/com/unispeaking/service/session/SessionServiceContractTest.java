@@ -1,10 +1,11 @@
 package com.unispeaking.service.session;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
-import com.unispeaking.service.session.impl.CustomSessionServiceImpl;
-import com.unispeaking.service.session.impl.FreeChatSessionServiceImpl;
-import com.unispeaking.service.session.impl.IeltsSessionServiceImpl;
+import com.unispeaking.service.session.CustomSessionService;
+import com.unispeaking.service.session.FreeChatSessionService;
+import com.unispeaking.service.session.IeltsSessionService;
 import com.unispeaking.component.session.SessionLifecycleManager;
 import com.unispeaking.service.auth.AuthService;
 import java.util.Arrays;
@@ -14,35 +15,33 @@ import org.junit.jupiter.api.Test;
 class SessionServiceContractTest {
 
 	@Test
-	void everySessionInterfaceExposesLifecycleShapeAndImplImplementsOwnInterface() {
-		assertSessionShape(FreeChatSessionService.class, FreeChatSessionServiceImpl.class);
-		assertSessionShape(CustomSessionService.class, CustomSessionServiceImpl.class);
-		assertSessionShape(IeltsSessionService.class, IeltsSessionServiceImpl.class);
+	void everySessionServiceIsConcreteAndExposesLifecycleShape() {
+		assertSessionShape(FreeChatSessionService.class);
+		assertSessionShape(CustomSessionService.class);
+		assertSessionShape(IeltsSessionService.class);
 	}
 
-	private void assertSessionShape(
-			Class<?> sessionInterface,
-			Class<?> implementation) {
-		Set<String> methodNames = Arrays.stream(sessionInterface.getDeclaredMethods())
+	private void assertSessionShape(Class<?> service) {
+		assertFalse(service.isInterface(),
+				service.getSimpleName() + " must be a concrete class");
+		Set<String> methodNames = Arrays.stream(service.getDeclaredMethods())
 				.map(java.lang.reflect.Method::getName)
 				.collect(java.util.stream.Collectors.toSet());
 		// 接受 WS 实时帧的场景会话接口必须暴露 startSession/addMessage/endSession 生命周期形状。
 		assertTrue(methodNames.contains("startSession"),
-				sessionInterface.getSimpleName() + " must declare startSession");
+				service.getSimpleName() + " must declare startSession");
 		assertTrue(methodNames.contains("addMessage"),
-				sessionInterface.getSimpleName() + " must declare addMessage (consumed by SessionMessageDispatcher)");
+				service.getSimpleName() + " must declare addMessage (consumed by SessionMessageDispatcher)");
 		assertTrue(methodNames.contains("endSession"),
-				sessionInterface.getSimpleName() + " must declare endSession");
-		assertTrue(sessionInterface.isAssignableFrom(implementation),
-				implementation.getSimpleName() + " must implement " + sessionInterface.getSimpleName());
+				service.getSimpleName() + " must declare endSession");
 	}
 
 	@Test
 	void sessionLayerDoesNotOwnAuthentication() {
 		for (Class<?> type : Set.of(
-				FreeChatSessionServiceImpl.class,
-				CustomSessionServiceImpl.class,
-				IeltsSessionServiceImpl.class,
+				FreeChatSessionService.class,
+				CustomSessionService.class,
+				IeltsSessionService.class,
 				SessionLifecycleManager.class)) {
 			boolean dependsOnAuth = Arrays.stream(type.getDeclaredFields())
 					.anyMatch(field -> AuthService.class.isAssignableFrom(field.getType()));
@@ -63,9 +62,9 @@ class SessionServiceContractTest {
 					type.getSimpleName() + " must not expose scene state transitions");
 		}
 		for (Class<?> type : Set.of(
-				FreeChatSessionServiceImpl.class,
-				CustomSessionServiceImpl.class,
-				IeltsSessionServiceImpl.class)) {
+				FreeChatSessionService.class,
+				CustomSessionService.class,
+				IeltsSessionService.class)) {
 			boolean ownsStateMachine = Arrays.stream(type.getDeclaredFields())
 					.map(field -> field.getType().getPackageName())
 					.anyMatch(packageName -> packageName.endsWith(".statemachine"));

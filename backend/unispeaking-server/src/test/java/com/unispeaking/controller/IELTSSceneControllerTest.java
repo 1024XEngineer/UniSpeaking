@@ -35,10 +35,10 @@ import com.unispeaking.domain.vo.scene.IeltsTopicType;
 import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
-import com.unispeaking.service.evaluation.impl.IeltsEvaluationServiceImpl;
-import com.unispeaking.service.scene.impl.IeltsSceneFlowServiceImpl;
-import com.unispeaking.service.scene.impl.IeltsSceneServiceImpl;
-import com.unispeaking.service.session.impl.IeltsSessionServiceImpl;
+import com.unispeaking.service.evaluation.IeltsEvaluationService;
+import com.unispeaking.service.scene.IeltsSceneFlowService;
+import com.unispeaking.service.scene.IeltsSceneService;
+import com.unispeaking.service.session.IeltsSessionService;
 import java.util.List;
 import java.time.Instant;
 import java.math.BigDecimal;
@@ -57,10 +57,10 @@ class IELTSSceneControllerTest {
 				.thenReturn(new ByteArrayResource(new byte[] {1, 2, 3}));
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(
 				new IELTSSceneController(
-						mock(IeltsSceneServiceImpl.class),
-						mock(IeltsSceneFlowServiceImpl.class),
-						mock(IeltsEvaluationServiceImpl.class),
-						mock(IeltsSessionServiceImpl.class),
+						mock(IeltsSceneService.class),
+						mock(IeltsSceneFlowService.class),
+						mock(IeltsEvaluationService.class),
+						mock(IeltsSessionService.class),
 						recordingStore)).build();
 
 		mvc.perform(get("/api/ielts/recordings/session_1/turn-1.wav"))
@@ -74,9 +74,9 @@ class IELTSSceneControllerTest {
 
 	@Test
 	void partTwoStateEndpointAcceptsApplicationTimerEvents() throws Exception {
-		IeltsSceneServiceImpl sceneService = mock(IeltsSceneServiceImpl.class);
-		IeltsSceneFlowServiceImpl flowService = mock(IeltsSceneFlowServiceImpl.class);
-		IeltsSessionServiceImpl sessionService = mock(IeltsSessionServiceImpl.class);
+		IeltsSceneService sceneService = mock(IeltsSceneService.class);
+		IeltsSceneFlowService flowService = mock(IeltsSceneFlowService.class);
+		IeltsSessionService sessionService = mock(IeltsSessionService.class);
 		when(flowService.advancePart2State(
 				"ielts_2",
 				"session_2",
@@ -91,7 +91,7 @@ class IELTSSceneControllerTest {
 				new IELTSSceneController(
 						sceneService,
 						flowService,
-						mock(IeltsEvaluationServiceImpl.class),
+						mock(IeltsEvaluationService.class),
 						sessionService,
 						mock(RecordingStore.class))).build();
 
@@ -113,9 +113,9 @@ class IELTSSceneControllerTest {
 	@Test
 	void settingsUsesPersistedTargetCountAndLatestMockScore()
 			throws Exception {
-		IeltsSceneServiceImpl sceneService = mock(IeltsSceneServiceImpl.class);
-		IeltsSceneFlowServiceImpl flowService = mock(IeltsSceneFlowServiceImpl.class);
-		IeltsEvaluationServiceImpl evaluationService = mock(IeltsEvaluationServiceImpl.class);
+		IeltsSceneService sceneService = mock(IeltsSceneService.class);
+		IeltsSceneFlowService flowService = mock(IeltsSceneFlowService.class);
+		IeltsEvaluationService evaluationService = mock(IeltsEvaluationService.class);
 		when(sceneService.getSettings()).thenReturn(new IeltsSettingsResponse(
 				new BigDecimal("7.0"),
 				2,
@@ -129,7 +129,7 @@ class IELTSSceneControllerTest {
 						sceneService,
 						flowService,
 						evaluationService,
-						mock(IeltsSessionServiceImpl.class),
+						mock(IeltsSessionService.class),
 						mock(RecordingStore.class))).build();
 
 		mvc.perform(get("/api/ielts/settings"))
@@ -141,8 +141,8 @@ class IELTSSceneControllerTest {
 
 	@Test
 	void topicAndTrainingEndpointsAreExposedForEveryPart() throws Exception {
-		IeltsSceneServiceImpl sceneService = mock(IeltsSceneServiceImpl.class);
-		IeltsSceneFlowServiceImpl flowService = mock(IeltsSceneFlowServiceImpl.class);
+		IeltsSceneService sceneService = mock(IeltsSceneService.class);
+		IeltsSceneFlowService flowService = mock(IeltsSceneFlowService.class);
 		when(sceneService.searchTopics(
 				IeltsPart.PART_1,
 				"REQUIRED",
@@ -179,8 +179,8 @@ class IELTSSceneControllerTest {
 				new IELTSSceneController(
 						sceneService,
 						flowService,
-						mock(IeltsEvaluationServiceImpl.class),
-						mock(IeltsSessionServiceImpl.class),
+						mock(IeltsEvaluationService.class),
+						mock(IeltsSessionService.class),
 						mock(RecordingStore.class))).build();
 
 		mvc.perform(get("/api/ielts/topics")
@@ -201,8 +201,8 @@ class IELTSSceneControllerTest {
 
 	@Test
 	void generateDelegatesOnlyToIeltsSceneService() throws Exception {
-		IeltsSceneServiceImpl sceneService = mock(IeltsSceneServiceImpl.class);
-		IeltsSceneFlowServiceImpl flowService = mock(IeltsSceneFlowServiceImpl.class);
+		IeltsSceneService sceneService = mock(IeltsSceneService.class);
+		IeltsSceneFlowService flowService = mock(IeltsSceneFlowService.class);
 		IeltsGenerationRequest request = new IeltsGenerationRequest(
 				IeltsMode.PART_PRACTICE,
 				IeltsPart.PART_1,
@@ -227,8 +227,8 @@ class IELTSSceneControllerTest {
 				new IELTSSceneController(
 						sceneService,
 						flowService,
-						mock(IeltsEvaluationServiceImpl.class),
-						mock(IeltsSessionServiceImpl.class),
+						mock(IeltsEvaluationService.class),
+						mock(IeltsSessionService.class),
 						mock(RecordingStore.class))).build();
 
 		mvc.perform(post("/api/ielts/generate")
@@ -250,8 +250,8 @@ class IELTSSceneControllerTest {
 
 	@Test
 	void flowEndpointUsesSceneFlowServiceDirectly() throws Exception {
-		IeltsSceneServiceImpl sceneService = mock(IeltsSceneServiceImpl.class);
-		IeltsSceneFlowServiceImpl flowService = mock(IeltsSceneFlowServiceImpl.class);
+		IeltsSceneService sceneService = mock(IeltsSceneService.class);
+		IeltsSceneFlowService flowService = mock(IeltsSceneFlowService.class);
 		when(flowService.response("ielts_123")).thenReturn(
 				new SceneFlowResponse(
 						"ielts_123",
@@ -261,8 +261,8 @@ class IELTSSceneControllerTest {
 				new IELTSSceneController(
 						sceneService,
 						flowService,
-						mock(IeltsEvaluationServiceImpl.class),
-						mock(IeltsSessionServiceImpl.class),
+						mock(IeltsEvaluationService.class),
+						mock(IeltsSessionService.class),
 						mock(RecordingStore.class))).build();
 
 		mvc.perform(post("/api/ielts/flows")
@@ -277,9 +277,9 @@ class IELTSSceneControllerTest {
 	@Test
 	void startSessionReturnsIeltsContentWithoutCustomLearningFields()
 			throws Exception {
-		IeltsSceneServiceImpl sceneService = mock(IeltsSceneServiceImpl.class);
-		IeltsSceneFlowServiceImpl flowService = mock(IeltsSceneFlowServiceImpl.class);
-		IeltsSessionServiceImpl sessionService = mock(IeltsSessionServiceImpl.class);
+		IeltsSceneService sceneService = mock(IeltsSceneService.class);
+		IeltsSceneFlowService flowService = mock(IeltsSceneFlowService.class);
+		IeltsSessionService sessionService = mock(IeltsSessionService.class);
 		IeltsContent content = new IeltsContent(
 				List.of(new IeltsContentQuestion(
 						"What do you do at weekends?",
@@ -314,7 +314,7 @@ class IELTSSceneControllerTest {
 				new IELTSSceneController(
 						sceneService,
 						flowService,
-						mock(IeltsEvaluationServiceImpl.class),
+						mock(IeltsEvaluationService.class),
 						sessionService,
 						mock(RecordingStore.class))).build();
 

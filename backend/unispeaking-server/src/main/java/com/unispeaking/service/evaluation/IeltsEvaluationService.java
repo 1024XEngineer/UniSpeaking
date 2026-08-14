@@ -1,38 +1,102 @@
 package com.unispeaking.service.evaluation;
 
+import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.component.session.SessionLifecycleManager;
+import com.unispeaking.component.evaluation.EvaluationProcessor;
+import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationCommand;
+import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationResult;
 import com.unispeaking.domain.dto.evaluation.IeltsEvaluationDetail;
 import com.unispeaking.domain.dto.evaluation.IeltsEvaluationHistoryItem;
 import com.unispeaking.domain.dto.evaluation.IeltsEvaluationReport;
 import com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult;
-import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationCommand;
-import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationResult;
+import com.unispeaking.domain.dto.session.SessionDetail;
 import java.math.BigDecimal;
 import java.util.List;
+import org.springframework.stereotype.Service;
 
-/** IELTS 评价服务，继承通用单轮评价、报告和详情能力。 */
-public interface IeltsEvaluationService extends EvaluationService<
+@Service
+public class IeltsEvaluationService extends EvaluationService<
 		IeltsEvaluationReport,
 		IeltsEvaluationDetail> {
 
-	/** 覆写通用单轮评价方法，返回 IELTS 场景的单轮评价结果。 */
+	private final EvaluationProcessor delegate;
+
+	public IeltsEvaluationService(
+			EvaluationProcessor delegate,
+			SessionLifecycleManager sessionLifecycle) {
+		super(
+				command -> evaluateTurn(delegate, sessionLifecycle, command),
+				sceneId -> toReport(generateResult(
+						delegate,
+						sessionLifecycle,
+						sceneId)),
+				sceneId -> {
+					IeltsEvaluationResult result = generateResult(
+							delegate,
+							sessionLifecycle,
+							sceneId);
+					return new IeltsEvaluationDetail(toReport(result), result);
+				});
+		this.delegate = delegate;
+	}
+
 	@Override
-	DialogueTurnEvaluationResult evaluateTurn(
-			DialogueTurnEvaluationCommand command);
+	public DialogueTurnEvaluationResult evaluateTurn(
+			DialogueTurnEvaluationCommand command) {
+		return super.evaluateTurn(command);
+	}
 
-	/** 覆写通用报告生成方法，返回 IELTS 场景评价报告。 */
 	@Override
-	IeltsEvaluationReport generateReport(String sceneId);
+	public IeltsEvaluationReport generateReport(String sceneId) {
+		return super.generateReport(sceneId);
+	}
 
-	/** 覆写通用详情查询方法，返回 IELTS 场景评价详情。 */
 	@Override
-	IeltsEvaluationDetail getEvaluation(String sceneId);
+	public IeltsEvaluationDetail getEvaluation(String sceneId) {
+		return super.getEvaluation(sceneId);
+	}
 
-	/** 为已完成的 IELTS 会话生成并保存评价结果。 */
-	IeltsEvaluationResult generateEvaluation(String ieltsId, String sessionId);
+	private static DialogueTurnEvaluationResult evaluateTurn(
+			EvaluationProcessor delegate,
+			SessionLifecycleManager sessionLifecycle,
+			DialogueTurnEvaluationCommand command) {
+		SessionDetail session = sessionLifecycle.getSession(command.sessionId());
+		return delegate.evaluateIeltsTurn(session.sceneId(), command);
+	}
+	public IeltsEvaluationResult generateEvaluation(
+			String ieltsId,
+			String sessionId) {
+		return delegate.generateIeltsEvaluation(ieltsId, sessionId);
+	}
+	public BigDecimal getLatestEstimatedScore() {
+		return delegate.getLatestIeltsEstimatedScore();
+	}
+	public List<IeltsEvaluationHistoryItem> getHistory() {
+		return delegate.getIeltsEvaluationHistory();
+	}
 
-	/** 获取当前用户最新估算的 IELTS 分数。 */
-	BigDecimal getLatestEstimatedScore();
+	private static IeltsEvaluationResult generateResult(
+			EvaluationProcessor delegate,
+			SessionLifecycleManager sessionLifecycle,
+			String sceneId) {
+		List<SessionDetail> sessions = sessionLifecycle.getBySceneId(sceneId);
+		if (sessions.isEmpty()) {
+			throw new BusinessException(
+					"SESSION_NOT_FOUND",
+					"IELTS scene has no session");
+		}
+		return delegate.generateIeltsEvaluation(
+				sceneId,
+				sessions.getLast().sessionId());
+	}
 
-	/** 查询当前用户的 IELTS 历史评价记录。 */
-	List<IeltsEvaluationHistoryItem> getHistory();
+	private static IeltsEvaluationReport toReport(IeltsEvaluationResult result) {
+		return new IeltsEvaluationReport(
+				result.fluencyCoherenceScore(),
+				result.lexicalResourceScore(),
+				result.grammaticalRangeAccuracyScore(),
+				result.pronunciationScore(),
+				result.overallBandScore(),
+				result.summary());
+	}
 }
