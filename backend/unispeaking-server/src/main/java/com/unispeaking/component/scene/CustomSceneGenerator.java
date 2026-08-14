@@ -80,7 +80,22 @@ public class CustomSceneGenerator {
 				String content = providerRegistry.executeLlmTask(attemptPrompt, null);
 				long llmMillis = elapsedMillis(llmStartedAt);
 				long parseStartedAt = System.nanoTime();
-				CustomSceneDefinition definition = parse(sceneId, userId, content);
+				CustomSceneDefinition definition;
+				try {
+					definition = parse(sceneId, userId, content);
+				}
+				catch (BusinessException exception) {
+					if ("CUSTOM_SCENE_LLM_RESPONSE_INVALID".equals(exception.code())) {
+						LOGGER.warn(
+								"custom scene LLM response rejected sceneId={} attempt={} llmMs={} parseMs={} responseChars={}",
+								sceneId,
+								attempt,
+								llmMillis,
+								elapsedMillis(parseStartedAt),
+								content.length());
+					}
+					throw exception;
+				}
 				LOGGER.info(
 						"custom scene LLM completed sceneId={} attempt={} llmMs={} parseMs={}",
 						sceneId,
@@ -93,10 +108,6 @@ public class CustomSceneGenerator {
 				if (!"CUSTOM_SCENE_LLM_RESPONSE_INVALID".equals(exception.code())) {
 					throw exception;
 				}
-				LOGGER.warn(
-						"custom scene LLM response rejected sceneId={} attempt={}",
-						sceneId,
-						attempt);
 				lastFailure = exception;
 			}
 		}

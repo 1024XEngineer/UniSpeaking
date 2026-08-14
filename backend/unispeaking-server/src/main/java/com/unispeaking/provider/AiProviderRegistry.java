@@ -39,6 +39,8 @@ public class AiProviderRegistry {
 	public static final String QINIU_REALTIME_PLUS = "qwen3.5-omni-plus-realtime";
 	public static final String QWEN_LLM_PLUS = "qwen3.5-plus";
 	public static final String DEEPSEEK_CHAT = "deepseek-v4-flash";
+	public static final String QINIU_MAAS_DEEPSEEK_FLASH = "deepseek/deepseek-v4-flash";
+	public static final String QINIU_MAAS_QWEN_PLUS = "qwen/qwen3.5-plus";
 	public static final String QWEN_ASR = "qwen3-asr-flash";
 	public static final String DOUBAO_ASR = "volc.bigasr.auc_turbo";
 	public static final String IFLYTEK_PRONUNCIATION_SCORING = "iflytek-suntone";
@@ -48,14 +50,14 @@ public class AiProviderRegistry {
 
 	private static final Map<AiCapability, List<String>> DEFAULT_MODEL_ROUTES = Map.of(
 			AiCapability.REALTIME, List.of(QINIU_REALTIME_PLUS, QWEN_REALTIME_FLASH),
-			AiCapability.LLM, List.of(QWEN_LLM_PLUS, DEEPSEEK_CHAT),
+			AiCapability.LLM, List.of(QINIU_MAAS_QWEN_PLUS, QWEN_LLM_PLUS),
 			AiCapability.SCORING, List.of(IFLYTEK_PRONUNCIATION_SCORING),
 			AiCapability.TTS, List.of(QWEN_TTS, ALIYUN_TTS, MINIMAX_TTS),
 			AiCapability.TRANSCRIPTION, List.of(QWEN_ASR, DOUBAO_ASR));
 
 	private static final Map<AiCapability, List<String>> DEFAULT_PROVIDER_ROUTES = Map.of(
 			AiCapability.REALTIME, List.of("qiniu", "qwen"),
-			AiCapability.LLM, List.of("qwen", "deepseek"),
+			AiCapability.LLM, List.of("qiniu-maas", "qwen"),
 			AiCapability.SCORING, List.of("iflytek"),
 			AiCapability.TTS, List.of("qwen", "aliyun", "minimax"),
 			AiCapability.TRANSCRIPTION, List.of("qwen", "doubao"));
@@ -368,6 +370,13 @@ public class AiProviderRegistry {
 		for (String providerId : DEFAULT_PROVIDER_ROUTES.getOrDefault(capability, List.of())) {
 			addProviderModelsIfAbsent(route, registeredProviders, providerId);
 		}
+		// The LLM default route is intentionally limited to Qiniu MaaS Qwen and
+		// Alibaba Qwen. Do not append unrelated legacy providers after that route
+		// has been established; explicit configured routes still remain untouched.
+		if (capability == AiCapability.LLM
+				&& route.contains(QINIU_MAAS_QWEN_PLUS)) {
+			return List.copyOf(route);
+		}
 		for (AbstractAiProvider provider : registeredProviders.values()) {
 			addProviderModelsIfAbsent(route, registeredProviders, provider.providerId());
 		}
@@ -434,14 +443,23 @@ public class AiProviderRegistry {
 		BusinessException lastFailure = null;
 		for (int index = 0; index < models.size(); index++) {
 			String modelId = models.get(index);
+			AiModelDefinition definition = getModel(modelId);
+			long startedAt = System.nanoTime();
+			LOGGER.info(
+					"AI provider attempt capability={} model={} provider={} attempt={}/{}",
+					capability,
+					definition.modelId(),
+					definition.providerId(),
+					index + 1,
+					models.size());
 			try {
 				T response = operation.apply(modelId);
-				AiModelDefinition definition = getModel(modelId);
 				LOGGER.info(
-						"AI provider selected capability={} model={} provider={}",
+						"AI provider selected capability={} model={} provider={} durationMs={}",
 						capability,
 						definition.modelId(),
-						definition.providerId());
+						definition.providerId(),
+						elapsedMillis(startedAt));
 				return response;
 			}
 			catch (BusinessException exception) {
@@ -451,11 +469,22 @@ public class AiProviderRegistry {
 				lastFailure = exception;
 				if (index + 1 < models.size()) {
 					LOGGER.warn(
-							"AI provider failover capability={} failedModel={} errorCode={} nextModel={}",
+							"AI provider failover capability={} failedModel={} provider={} durationMs={} errorCode={} nextModel={}",
 							capability,
 							modelId,
+							definition.providerId(),
+							elapsedMillis(startedAt),
 							exception.code(),
 							models.get(index + 1));
+				}
+				else {
+					LOGGER.warn(
+							"AI provider route exhausted capability={} failedModel={} provider={} durationMs={} errorCode={}",
+							capability,
+							modelId,
+							definition.providerId(),
+							elapsedMillis(startedAt),
+							exception.code());
 				}
 			}
 		}
@@ -465,6 +494,10 @@ public class AiProviderRegistry {
 		throw new BusinessException(
 				"AI_PROVIDER_ROUTE_EXHAUSTED",
 				"No AI provider completed the " + capability + " request");
+	}
+
+	private static long elapsedMillis(long startedAt) {
+		return (System.nanoTime() - startedAt) / 1_000_000;
 	}
 
 	private boolean shouldFailOver(BusinessException exception) {
