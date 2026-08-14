@@ -208,7 +208,8 @@ The default realtime route is:
 AI_PROVIDER_ROUTE_REALTIME=qwen3.5-omni-plus-realtime,qwen3.5-omni-flash-realtime
 ```
 
-The default LLM route stays entirely inside Qiniu MaaS:
+The default LLM route uses Qiniu MaaS first and falls back to Alibaba Cloud Qwen
+when the first request fails with a retryable provider error:
 
 ```properties
 AI_PROVIDER_ROUTE_LLM=qwen/qwen3.5-plus,qwen3.5-plus
@@ -218,8 +219,8 @@ The backend sends OpenAI-compatible `POST /v1/chat/completions` requests. It
 accepts only `https://api.qnaigc.com/v1` and `https://openai.sufy.com/v1` as
 MaaS base URLs. Authentication failures (`401` and `403`) stop the route so a
 bad credential is not hidden; rate limits, server failures, I/O failures, and
-invalid or empty responses may fall back to the second Qiniu MaaS model. The
-legacy Qwen and DeepSeek direct providers remain available only when an operator
+invalid or empty responses may fall back to Alibaba Cloud Qwen. The legacy
+Qwen and DeepSeek direct providers remain available only when an operator
 explicitly configures their model IDs in `AI_PROVIDER_ROUTE_LLM`.
 
 Keep `QINIU_MAAS_API_KEY` in the backend environment only. It must not use a
