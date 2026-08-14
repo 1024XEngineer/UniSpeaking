@@ -20,6 +20,7 @@ import { useIeltsFlowController } from '@/features/ielts/useIeltsFlowController'
 import { useIeltsSession } from '@/features/ielts/useIeltsSession';
 import { ieltsExaminers, toApiPart, type MobileIeltsPartId } from '@/features/ielts/ieltsMappings';
 import { resolvePart2CueCard } from '@/features/ielts/part2CueCard';
+import { IeltsPracticeScoreDialog } from '@/features/ielts/IeltsPracticeScoreDialog';
 import type { IeltsTopicSummary } from '@/features/ielts/types';
 import { compactPageNumbers } from '@/features/ielts/compactPagination';
 import { createTranscriptTranslationApi } from '@/features/conversation/TranscriptTranslationApi';
@@ -1210,7 +1211,7 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
       title: fullMock ? '完整口语模拟' : topic || ielts.generated?.title || 'IELTS 专项练习',
       date: '刚刚',
       duration: fullMock ? '14 分钟' : '4 分钟',
-      result: `预估 ${bandScore}`,
+      result: fullMock ? `预估 ${bandScore}` : '专项诊断',
       estimatedBand: evaluation.overallBandScore == null ? null : Number(evaluation.overallBandScore),
       scores: [
         Math.round(((evaluation.fluencyCoherenceScore ?? 0) / 9) * 100),
@@ -1242,6 +1243,32 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
     return recordId;
   };
 
+  const returnToIeltsHome = () => {
+    saveReport();
+    setRoute('home');
+  };
+  const viewIeltsDetails = () => {
+    const recordId = saveReport();
+    if (onViewDetails) {
+      setImmersiveLearning(false);
+      if (recordId) onViewDetails(recordId);
+    } else {
+      onExit();
+    }
+  };
+
+  if (!fullMock) {
+    return (
+      <AppScreen contentStyle={styles.practiceScoreScreen} stickyHeader={false}>
+        <IeltsPracticeScoreDialog
+          evaluation={evaluation}
+          onHome={returnToIeltsHome}
+          onDetails={viewIeltsDetails}
+        />
+      </AppScreen>
+    );
+  }
+
   return (
     <AppScreen contentStyle={[styles.ieltsStageScreen, styles.reportScreen]} stickyHeader={false}>
       <View style={styles.bandHero}>
@@ -1261,23 +1288,12 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
         <AppButton
           title="返回主页"
           variant="secondary"
-          onPress={() => {
-            saveReport();
-            setRoute('home');
-          }}
+          onPress={returnToIeltsHome}
           style={styles.reportSecondaryButton}
         />
         <AppButton
           title="查看详情"
-          onPress={() => {
-            const recordId = saveReport();
-            if (onViewDetails) {
-              setImmersiveLearning(false);
-              if (recordId) onViewDetails(recordId);
-            } else {
-              onExit();
-            }
-          }}
+          onPress={viewIeltsDetails}
           style={styles.reportPrimaryButton}
         />
       </View>
@@ -1740,6 +1756,7 @@ const styles = StyleSheet.create({
   analysisTitle: { color: colors.ink, fontSize: 25, lineHeight: 34, fontWeight: '600', textAlign: 'center' },
   progressText: { color: colors.subtle, fontSize: 12, fontWeight: '300', fontVariant: ['tabular-nums'] },
   reportScreen: { paddingTop: 32, paddingBottom: 44, justifyContent: 'center', gap: 14 },
+  practiceScoreScreen: { paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0, backgroundColor: ieltsPalette.canvas },
   bandHero: { minHeight: 204, paddingVertical: 25, alignItems: 'center', justifyContent: 'center', gap: 4, borderWidth: 1, borderColor: ieltsPalette.borderStrong, borderRadius: 24, backgroundColor: ieltsPalette.purple, shadowColor: ieltsPalette.purple, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.2, shadowRadius: 22, elevation: 5, boxShadow: '0px 10px 24px rgba(128, 96, 232, 0.20)' },
   bandEyebrow: { color: '#E8DEFF', fontSize: 12, fontWeight: '600', letterSpacing: 1.1 },
   bandScore: { color: colors.white, fontSize: 82, lineHeight: 88, fontWeight: '600', letterSpacing: -5 },

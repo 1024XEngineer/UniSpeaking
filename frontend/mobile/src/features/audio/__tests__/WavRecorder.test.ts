@@ -58,4 +58,20 @@ describe('WavRecorder', () => {
 
     expect(nativeRecorder.stopRecording).toHaveBeenCalledTimes(1);
   });
+
+  it('clears an orphaned native recording and retries once', async () => {
+    const nativeRecorder = createNativeRecorder();
+    nativeRecorder.startRecording
+      .mockRejectedValueOnce(Object.assign(new Error('Recording is already in progress'), {
+        code: 'ALREADY_RECORDING',
+      }))
+      .mockResolvedValueOnce(undefined);
+    const recorder = new WavRecorder(nativeRecorder);
+
+    await recorder.start();
+    await expect(recorder.stop()).resolves.toBe('file:///take.wav');
+
+    expect(nativeRecorder.startRecording).toHaveBeenCalledTimes(2);
+    expect(nativeRecorder.stopRecording).toHaveBeenCalledTimes(2);
+  });
 });
