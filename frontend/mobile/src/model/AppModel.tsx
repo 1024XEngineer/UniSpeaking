@@ -43,6 +43,7 @@ export type AppModelAuthController = {
 type AppModelValue = {
   isModelReady: boolean;
   isAuthenticated: boolean;
+  userId: string | null;
   hasCompletedOnboarding: boolean;
   authStatus: AuthSessionState['status'];
   authError: string | null;
@@ -215,6 +216,7 @@ export function AppModelProvider({
     () => ({
       isModelReady,
       isAuthenticated,
+      userId: authState.user?.id ?? null,
       hasCompletedOnboarding,
       authStatus: authState.status,
       authError: authState.error,

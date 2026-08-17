@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { DevicePreviewFrame } from '@/components/DevicePreviewFrame';
+import { AnalyticsProvider } from '@/model/AnalyticsProvider';
 import { AppModelProvider, useAppModel } from '@/model/AppModel';
 
 function RootNavigator() {
@@ -35,12 +36,14 @@ export default function RootLayout() {
 
   return (
     <AppModelProvider>
-      <StatusBar style="dark" />
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <DevicePreviewFrame>
-          <RootNavigator />
-        </DevicePreviewFrame>
-      </GestureHandlerRootView>
+      <AnalyticsProvider>
+        <StatusBar style="dark" />
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <DevicePreviewFrame>
+            <RootNavigator />
+          </DevicePreviewFrame>
+        </GestureHandlerRootView>
+      </AnalyticsProvider>
     </AppModelProvider>
   );
 }
