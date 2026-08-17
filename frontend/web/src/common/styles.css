@@ -857,29 +857,23 @@ svg { display: block; }
 .asset-conversation-page .page-header { margin-bottom: 28px; }
 .asset-conversation-actions { display: flex; align-items: flex-start; gap: 10px; }
 .asset-conversation-exit { width: 56px; height: 56px; }
-.asset-practice-menu { position: relative; z-index: 7; }
-.asset-practice-menu__primary { min-width: 192px; min-height: 56px; position: relative; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 16px 0 9px; overflow: hidden; border: 0; border-radius: 999px; background: transparent; color: #fff; font: inherit; cursor: pointer; transition: transform .2s, filter .25s; }
-.asset-practice-menu__primary::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background-image: linear-gradient(135deg, #111110 0%, #686863 54%, #292927 100%); background-size: 210% 210%; background-position: 0 50%; box-shadow: 0 9px 24px rgba(20,20,19,.13); transition: background-position .38s ease, filter .25s ease; }
-.asset-practice-menu__primary:hover::before { background-position: 100% 50%; filter: brightness(1.06); }
-.asset-practice-menu__primary:active { transform: scale(.97); }
-.asset-practice-menu__primary > * { position: relative; z-index: 1; }
-.asset-practice-menu__primary strong { font-size: 16px; letter-spacing: .01em; }
-.asset-practice-menu__icon { width: 36px; height: 36px; flex: 0 0 36px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.45); border-radius: 50%; background: rgba(255,255,255,.08); }
-.asset-practice-menu__icon svg { width: 16px; height: 16px; transform: translateX(1px); }
-.asset-practice-menu__primary > svg:last-child { width: 17px; height: 17px; margin-left: 3px; transition: transform .2s; }
-.asset-practice-menu__popover { width: 245px; position: absolute; top: calc(100% + 8px); right: 0; padding: 7px; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: 0 16px 38px rgba(0,0,0,.13); opacity: 0; visibility: hidden; transform: translateY(-6px); transition: opacity .2s, visibility .2s, transform .2s; }
-.asset-practice-menu:hover .asset-practice-menu__popover, .asset-practice-menu:focus-within .asset-practice-menu__popover { opacity: 1; visibility: visible; transform: translateY(0); }
-.asset-practice-menu:hover .asset-practice-menu__primary > svg:last-child, .asset-practice-menu:focus-within .asset-practice-menu__primary > svg:last-child { transform: rotate(180deg); }
-.asset-practice-menu__popover button { width: 100%; min-height: 64px; display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 9px; padding: 9px 11px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; transition: background .2s; }
-.asset-practice-menu__popover button:hover { background: #f3f3ef; }
-.asset-practice-menu__popover svg { width: 17px; height: 17px; }
-.asset-practice-menu__popover strong, .asset-practice-menu__popover small { display: block; }
-.asset-practice-menu__popover strong { font-size: 14px; }
-.asset-practice-menu__popover small { margin-top: 4px; color: var(--muted); font-size: 10px; }
+.asset-practice-button { min-width: 192px; min-height: 56px; position: relative; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 18px 0 9px; overflow: hidden; border: 0; border-radius: 999px; background: transparent; color: #fff; font: inherit; cursor: pointer; transition: transform .2s, filter .25s; }
+.asset-practice-button::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background-image: linear-gradient(135deg, #111110 0%, #686863 54%, #292927 100%); background-size: 210% 210%; background-position: 0 50%; box-shadow: 0 9px 24px rgba(20,20,19,.13); transition: background-position .38s ease, filter .25s ease; }
+.asset-practice-button:hover::before { background-position: 100% 50%; filter: brightness(1.06); }
+.asset-practice-button:active { transform: scale(.97); }
+.asset-practice-button > * { position: relative; z-index: 1; }
+.asset-practice-button strong { font-size: 16px; letter-spacing: .01em; }
+.asset-practice-button__icon { width: 36px; height: 36px; flex: 0 0 36px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.45); border-radius: 50%; background: rgba(255,255,255,.08); }
+.asset-practice-button__icon svg { width: 16px; height: 16px; transform: translateX(1px); }
 .asset-conversation-card { min-height: 660px; border: 1px solid #d9d9d4; border-radius: 22px; background: #fff; box-shadow: 0 2px 0 rgba(22,22,21,.03); overflow: hidden; }
 .asset-conversation-card__label { height: 72px; display: flex; align-items: center; gap: 9px; padding: 0 26px; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 750; }
 .asset-conversation-card__label svg { width: 18px; height: 18px; }
 .asset-conversation-thread { padding: 28px 30px 48px; display: grid; gap: 22px; }
+.asset-conversation-empty { min-height: 470px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 24px; text-align: center; }
+.asset-conversation-empty > svg { width: 42px; height: 42px; margin-bottom: 18px; color: #777773; stroke-width: 1.5; }
+.asset-conversation-empty .eyebrow { margin: 0 0 9px; color: #8a8a85; }
+.asset-conversation-empty h2 { margin: 0; font-size: 28px; }
+.asset-conversation-empty > p:last-child { max-width: 520px; margin: 14px 0 0; color: var(--muted); font-size: 14px; line-height: 1.75; }
 .asset-message { width: 100%; display: flex; flex-direction: column; align-items: flex-start; }
 .asset-message > small { margin-bottom: 7px; color: #989894; font-size: 10px; font-weight: 800; letter-spacing: .06em; }
 .asset-message > p { max-width: 62%; margin: 0; padding: 14px 18px; border: 1px solid var(--line); border-radius: 15px; background: #fdfdfb; font-size: 15px; line-height: 1.6; }
@@ -1374,6 +1368,8 @@ svg { display: block; }
   .achievement-overall { width: 100%; }
   .achievement-filters { overflow-x: auto; padding-bottom: 4px; }
   .achievement-series-grid, .achievement-loading > div { grid-template-columns: 1fr; }
+  .asset-conversation-empty { min-height: 360px; padding-inline: 12px; }
+  .asset-conversation-empty h2 { font-size: 24px; }
   .achievement-level-panel > header { align-items: flex-start; }
   .achievement-level-track { padding-inline: 18px; }
   .achievement-level-track li { width: 174px; flex-basis: 174px; }

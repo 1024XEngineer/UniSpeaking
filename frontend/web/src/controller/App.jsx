@@ -2294,18 +2294,13 @@ function AssetFeedback({ feedback }) {
   );
 }
 
-function AssetPracticeMenu({ scene, onPractice, onRestart }) {
+function AssetPracticeButton({ scene, onPractice }) {
   return (
-    <div className="asset-practice-menu">
-      <button className="asset-practice-menu__primary" type="button" onClick={() => onPractice(scene)}><span className="asset-practice-menu__icon"><Play weight="fill" /></span><strong>复练场景</strong><CaretDown weight="bold" /></button>
-      <div className="asset-practice-menu__popover">
-        <button type="button" onClick={() => onRestart(scene)}><ArrowLeft weight="bold" /><span><strong>重新学习</strong><small>从学、读、说第一步开始</small></span></button>
-      </div>
-    </div>
+    <button className="asset-practice-button" type="button" onClick={() => onPractice(scene)}><span className="asset-practice-button__icon"><Play weight="fill" /></span><strong>复练场景</strong></button>
   );
 }
 
-function AssetConversationDetail({ record, onBack, onPractice, onRestart }) {
+function AssetConversationDetail({ record, onBack, onPractice }) {
   const evaluationByTurn = new Map(
     (record.dialogueEvaluation?.turnEvaluation || [])
       .map((evaluation) => [evaluation.turnNo, evaluation]),
@@ -2322,15 +2317,16 @@ function AssetConversationDetail({ record, onBack, onPractice, onRestart }) {
       feedback: isUser ? evaluationByTurn.get(userTurn) : null,
     };
   });
+  const hasCompletedConversation = conversation.length > 0;
   return (
     <main className="page assets-page asset-conversation-page">
       <PageHeader
         title={`${record.title} · 语境复现`}
-        subtitle="最近一次模拟对话已完整保留，每句表达都附有 AI 评价与更自然的说法。"
-        action={<div className="asset-conversation-actions"><AssetPracticeMenu scene={record} onPractice={onPractice} onRestart={onRestart} /><button className="training-exit asset-conversation-exit" type="button" aria-label="退出当前学习资产" onClick={onBack}><span><X weight="bold" /></span></button></div>}
+        subtitle={hasCompletedConversation ? "最近一次模拟对话已完整保留，每句表达都附有 AI 评价与更自然的说法。" : "学与读阶段的语言资产已保存，可随时回到完整流程继续练习。"}
+        action={<div className="asset-conversation-actions"><AssetPracticeButton scene={record} onPractice={onPractice} /><button className="training-exit asset-conversation-exit" type="button" aria-label="退出当前学习资产" onClick={onBack}><span><X weight="bold" /></span></button></div>}
       />
       <section className="asset-conversation-card">
-        <div className="asset-conversation-card__label"><Translate weight="bold" />对话语境下的纠错与地道表达</div>
+        <div className="asset-conversation-card__label">{hasCompletedConversation ? <Translate weight="bold" /> : <BookOpenText weight="bold" />}{hasCompletedConversation ? "对话语境下的纠错与地道表达" : "学习进度"}</div>
         <div className="asset-conversation-thread">
           {conversation.map((message) => (
             <article key={message.id} className={cx("asset-message", message.role === "user" && "is-user")}>
@@ -2339,7 +2335,7 @@ function AssetConversationDetail({ record, onBack, onPractice, onRestart }) {
               {message.feedback && <AssetFeedback feedback={message.feedback} />}
             </article>
           ))}
-          {!conversation.length && <div className="asset-list__empty">该场景还没有已完成的模拟对话</div>}
+          {!hasCompletedConversation && <section className="asset-conversation-empty" role="status"><MessagesSquare /><p className="eyebrow">SIMULATION PENDING</p><h2>您还没有完成模拟对话</h2><p>学与读阶段的内容已经保存。点击右上角“复练场景”将继续进入说阶段，也可以通过进度条返回学或读阶段复练。</p></section>}
         </div>
       </section>
     </main>
@@ -2355,7 +2351,7 @@ function AssetModulePlaceholder({ module, onBack }) {
   );
 }
 
-function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRecord, onCloseRecord, initialView = "home", initialRecordTitle }) {
+function Assets({ sceneId, onPractice, onIelts, onInterview, onOpenRecord, onCloseRecord, initialView = "home", initialRecordTitle }) {
   const [records, setRecords] = useState([]);
   const [selectedId, setSelectedId] = useState(sceneId || "");
   const [detail, setDetail] = useState(null);
@@ -2416,7 +2412,7 @@ function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRe
   }, [sceneId, selected?.sceneId]);
 
   if (reservedModule) return <AssetModulePlaceholder module={reservedModule} onBack={() => setReservedModule(null)} />;
-  if (initialView === "detail" && detail) return <AssetConversationDetail record={detail} onBack={onCloseRecord} onPractice={onPractice} onRestart={onRestart} />;
+  if (initialView === "detail" && detail) return <AssetConversationDetail record={detail} onBack={onCloseRecord} onPractice={onPractice} />;
   if (initialView === "detail" && (loading || !detail)) {
     return <main className="page assets-page"><PageHeader title="学习资产" subtitle="正在读取最近一次对话与评分。" />{assetError ? <p className="call-error" role="alert">{assetError}</p> : <NewtonsCradle label="正在加载学习资产" />}</main>;
   }
@@ -2460,7 +2456,7 @@ function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRe
         <article className="asset-detail">
           {selected && <header>
             <div><p className="eyebrow">{selected.label || "其他"}</p><h2>{selected.title}</h2><p>{selected.latestPracticedAt ? `${new Date(selected.latestPracticedAt).toLocaleDateString("zh-CN")} · 已完成 ${selected.practiceCount} 次模拟` : "尚未完成模拟对话"}</p></div>
-            <div className="asset-detail__actions"><AnimatedDeleteButton onClick={() => { setDeleteError(""); setDeleteOpen(true); }} /><ExpandingCta className="teacher-cta asset-open-button" disabled={!selected.latestSessionId} onClick={() => onOpenRecord(selected.sceneId)}>打开当前学习资产</ExpandingCta></div>
+            <div className="asset-detail__actions"><AnimatedDeleteButton onClick={() => { setDeleteError(""); setDeleteOpen(true); }} /><ExpandingCta className="teacher-cta asset-open-button" onClick={() => onOpenRecord(selected.sceneId)}>打开当前学习资产</ExpandingCta></div>
           </header>}
           <div className="asset-items" aria-label="已保存的单词、短语和句子">
             {items.map((item) => <div key={`${item.type}-${item.contentId}`}><span className="tag">{item.type}</span><p><strong>{item.englishText}</strong><small>{item.chineseText}</small></p><ScenePlaybackToggle sceneId={selected.sceneId} text={item.englishText} label={`播放 ${item.englishText} 的发音`} /></div>)}
@@ -3404,7 +3400,7 @@ export function App() {
   if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={completeScenePractice} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
   else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={(sessionId) => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); recordCompletedPractice("free", sessionId); void synchronizeAchievements({ revealNotifications: true }); }} />;
   else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={selectIelts} onInterview={selectInterview} />;
-  else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => selectMainPage("ielts-assets")} onInterview={() => selectMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: true, returnPage: "assets" })} onRestart={(scene) => startTraining(scene, "learn", { returnPage: "assets" })} />;
+  else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => selectMainPage("ielts-assets")} onInterview={() => selectMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: false, returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
   else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToInterview={() => selectMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
   else if (page === "interview") content = <InterviewModule route={interviewRoute} teacher={teacher} speed={conversationSpeed} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} />;
