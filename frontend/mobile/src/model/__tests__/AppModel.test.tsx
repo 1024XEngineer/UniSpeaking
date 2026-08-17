@@ -120,7 +120,28 @@ function ProfileSettingsProbe() {
   );
 }
 
+function NicknameProbe() {
+  const model = useAppModel();
+  return <Text testID="nickname">{model.nickname}</Text>;
+}
+
 describe('AppModelProvider authentication binding', () => {
+  it('starts without a default nickname for an anonymous session', async () => {
+    const controller = createController({
+      status: 'anonymous',
+      user: null,
+      preference: null,
+      error: null,
+    });
+    const screen = await render(
+      <AppModelProvider authController={controller}>
+        <NicknameProbe />
+      </AppModelProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('nickname').props.children).toBe(''));
+  });
+
   it('hydrates the finalized UI choices from the authenticated backend preference', async () => {
     const controller = createController(authenticatedState);
     const screen = await render(
