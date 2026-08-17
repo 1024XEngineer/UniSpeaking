@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton, AppIcon } from '@/components/ui';
+import { useTeacherPreview } from '@/features/audio/useTeacherPreview';
 import { colors, levels, speedOptions, teachers, type Teacher } from '@/theme/tokens';
 
 export function SpeedSelector({
@@ -74,9 +75,11 @@ export function LevelSelector({
 export function TeacherSelector({
   selectedId,
   onSelect,
+  onPreview,
 }: {
   selectedId: string;
   onSelect: (teacher: Teacher) => void;
+  onPreview?: (teacher: Teacher) => void;
 }) {
   return (
     <View style={styles.teacherGrid}>
@@ -86,8 +89,12 @@ export function TeacherSelector({
           <Pressable
             key={teacher.id}
             accessibilityRole="radio"
+            accessibilityLabel={`选择 ${teacher.name}`}
             accessibilityState={{ checked: selected }}
-            onPress={() => onSelect(teacher)}
+            onPress={() => {
+              onSelect(teacher);
+              onPreview?.(teacher);
+            }}
             style={[styles.teacher, selected && styles.selectedBorder]}
           >
             <Image source={teacher.image} style={styles.teacherImage} contentFit="contain" />
@@ -151,6 +158,7 @@ function ConversationSettingsSheet({
   const [draftSpeed, setDraftSpeed] = useState(speed);
   const [draftLevel, setDraftLevel] = useState(level);
   const [draftTeacher, setDraftTeacher] = useState(teacher);
+  const { playTeacher } = useTeacherPreview();
 
   return (
     <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -172,7 +180,11 @@ function ConversationSettingsSheet({
           </View>
           <View style={styles.group}>
             <Text style={styles.groupTitle}>AI 老师</Text>
-            <TeacherSelector selectedId={draftTeacher.id} onSelect={setDraftTeacher} />
+            <TeacherSelector
+              selectedId={draftTeacher.id}
+              onSelect={setDraftTeacher}
+              onPreview={playTeacher}
+            />
           </View>
           <View style={styles.actions}>
             <AppButton title="取消" variant="secondary" onPress={onClose} style={styles.flex} />
