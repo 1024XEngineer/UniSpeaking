@@ -1,5 +1,6 @@
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
 import { ArrowLeftIcon } from 'phosphor-react-native/src/icons/ArrowLeft';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { type ReactNode, useEffect, useState } from 'react';
 import {
   AccessibilityInfo,
@@ -190,6 +191,9 @@ export function AuthFormScreen({
   const [draftNickname, setDraftNickname] = useState(nickname);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [step, setStep] = useState<'credentials' | 'verification'>('credentials');
   const [challengeId, setChallengeId] = useState('');
@@ -200,7 +204,8 @@ export function AuthFormScreen({
   const emailValid = /^\S+@\S+\.\S+$/.test(email.trim());
   const passwordValid = mode === 'signup' ? password.length >= 12 : password.length >= 6;
   const nicknameValid = mode === 'login' || draftNickname.trim().length >= 2;
-  const valid = emailValid && passwordValid && nicknameValid;
+  const confirmPasswordValid = mode === 'login' || confirmPassword === password;
+  const valid = emailValid && passwordValid && nicknameValid && confirmPasswordValid;
 
   useEffect(() => {
     if (resendSeconds <= 0) return;
@@ -354,21 +359,68 @@ export function AuthFormScreen({
             <Text style={styles.fieldLabel}>密码</Text>
             {mode === 'login' ? <Text style={styles.forgotText}>忘记密码？</Text> : null}
           </View>
-          <TextInput
-            value={password}
-            onChangeText={setPassword}
-            placeholder={mode === 'signup' ? '至少 12 位字符' : '请输入密码'}
-            placeholderTextColor={colors.subtle}
-            secureTextEntry
-            autoCapitalize="none"
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            style={[styles.input, submitted && !passwordValid && styles.inputError]}
-            onSubmitEditing={() => void submit()}
-          />
+          <View style={styles.passwordField}>
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              placeholder={mode === 'signup' ? '至少 12 位字符' : '请输入密码'}
+              placeholderTextColor={colors.subtle}
+              secureTextEntry={!passwordVisible}
+              autoCapitalize="none"
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              style={[styles.input, mode === 'signup' && styles.passwordInput, submitted && !passwordValid && styles.inputError]}
+              onSubmitEditing={() => void submit()}
+            />
+            {mode === 'signup' ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={passwordVisible ? '隐藏密码' : '显示密码'}
+                onPress={() => setPasswordVisible((visible) => !visible)}
+                style={styles.passwordVisibilityButton}
+              >
+                <MaterialIcons
+                  name={passwordVisible ? 'visibility-off' : 'visibility'}
+                  size={20}
+                  color={colors.muted}
+                />
+              </Pressable>
+            ) : null}
+          </View>
           {submitted && !passwordValid ? (
             <Text style={styles.errorText}>{mode === 'signup' ? '密码至少需要 12 位字符' : '请输入正确的密码'}</Text>
           ) : null}
         </View>
+
+        {mode === 'signup' ? (
+          <View style={styles.formGroup}>
+            <Text style={styles.fieldLabel}>确认密码</Text>
+            <View style={styles.passwordField}>
+              <TextInput
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                placeholder="再次输入密码"
+                placeholderTextColor={colors.subtle}
+                secureTextEntry={!confirmPasswordVisible}
+                autoCapitalize="none"
+                autoComplete="new-password"
+                style={[styles.input, styles.passwordInput, submitted && !confirmPasswordValid && styles.inputError]}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={confirmPasswordVisible ? '隐藏确认密码' : '显示确认密码'}
+                onPress={() => setConfirmPasswordVisible((visible) => !visible)}
+                style={styles.passwordVisibilityButton}
+              >
+                <MaterialIcons
+                  name={confirmPasswordVisible ? 'visibility-off' : 'visibility'}
+                  size={20}
+                  color={colors.muted}
+                />
+              </Pressable>
+            </View>
+            {submitted && !confirmPasswordValid ? <Text style={styles.errorText}>两次输入的密码不一致</Text> : null}
+          </View>
+        ) : null}
       </View>
 
       {localError || authError ? <Text accessibilityRole="alert" style={styles.errorText}>{localError ?? authError}</Text> : null}
@@ -495,6 +547,17 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     borderRadius: 12,
     backgroundColor: colors.white,
+  },
+  passwordField: { position: 'relative' },
+  passwordInput: { paddingRight: 50 },
+  passwordVisibilityButton: {
+    position: 'absolute',
+    right: 10,
+    bottom: 7,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   inputError: { borderColor: colors.red },
   codeInput: { textAlign: 'center', fontSize: 24, fontVariant: ['tabular-nums'], letterSpacing: 8 },
