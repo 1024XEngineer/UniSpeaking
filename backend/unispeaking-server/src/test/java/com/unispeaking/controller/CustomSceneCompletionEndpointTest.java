@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -24,6 +25,24 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class CustomSceneCompletionEndpointTest {
+
+	@Test
+	void deletesLearningAssetThroughItsAssetEndpoint() throws Exception {
+		LearningAssetService assets = mock(LearningAssetService.class);
+		CustomSceneController controller = new CustomSceneController(
+				mock(CustomSceneService.class),
+				mock(CustomSceneFlowService.class),
+				mock(CustomEvaluationService.class),
+				mock(CustomSessionService.class),
+				assets);
+		MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		mvc.perform(delete("/api/custom-scenes/custom_2001/assets"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.success").value(true));
+
+		verify(assets).deleteAsset("custom_2001");
+	}
 
 	@Test
 	void activeHangupReturnsPersistedFiveDimensionReport() throws Exception {

@@ -63,6 +63,7 @@ import {
   clearAuthSession,
   advanceCustomSceneFlow,
   createCustomSceneFlow,
+  deleteLearningAsset,
   evaluateSentenceReading,
   generateCustomScene,
   getAchievementOverview,
@@ -2283,10 +2284,11 @@ function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRe
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [assetError, setAssetError] = useState("");
-  const [deleted, setDeleted] = useState([]);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [reservedModule, setReservedModule] = useState(null);
-  const visibleRecords = records.filter((record) => !deleted.includes(record.sceneId));
+  const visibleRecords = records;
   const selected = visibleRecords.find((record) => record.sceneId === selectedId)
     || visibleRecords.find((record) => record.title === initialRecordTitle)
     || visibleRecords[0]
@@ -2342,12 +2344,24 @@ function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRe
     return <main className="page assets-page"><PageHeader title="学习资产" subtitle="正在读取最近一次对话与评分。" />{assetError ? <p className="call-error" role="alert">{assetError}</p> : <NewtonsCradle label="正在加载学习资产" />}</main>;
   }
 
-  const deleteSelected = () => {
-    if (!selected) return;
-    const remaining = visibleRecords.filter((record) => record.sceneId !== selected.sceneId);
-    setDeleted((current) => [...current, selected.sceneId]);
-    setDeleteOpen(false);
-    setSelectedId(remaining[0]?.sceneId || "");
+  const deleteSelected = async () => {
+    if (!selected || deleting) return;
+    const deletedSceneId = selected.sceneId;
+    const remaining = visibleRecords.filter((record) => record.sceneId !== deletedSceneId);
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await deleteLearningAsset(deletedSceneId);
+      setRecords((current) => current.filter((record) => record.sceneId !== deletedSceneId));
+      setDetail(null);
+      setSelectedId(remaining[0]?.sceneId || "");
+      setAssetError("");
+      setDeleteOpen(false);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "学习资产删除失败，请稍后重试");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const items = detail ? [
@@ -2369,7 +2383,7 @@ function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRe
         <article className="asset-detail">
           {selected && <header>
             <div><p className="eyebrow">{selected.label || "其他"}</p><h2>{selected.title}</h2><p>{selected.latestPracticedAt ? `${new Date(selected.latestPracticedAt).toLocaleDateString("zh-CN")} · 已完成 ${selected.practiceCount} 次模拟` : "尚未完成模拟对话"}</p></div>
-            <div className="asset-detail__actions"><AnimatedDeleteButton onClick={() => setDeleteOpen(true)} /><ExpandingCta className="teacher-cta asset-open-button" disabled={!selected.latestSessionId} onClick={() => onOpenRecord(selected.sceneId)}>打开当前学习资产</ExpandingCta></div>
+            <div className="asset-detail__actions"><AnimatedDeleteButton onClick={() => { setDeleteError(""); setDeleteOpen(true); }} /><ExpandingCta className="teacher-cta asset-open-button" disabled={!selected.latestSessionId} onClick={() => onOpenRecord(selected.sceneId)}>打开当前学习资产</ExpandingCta></div>
           </header>}
           <div className="asset-items" aria-label="已保存的单词、短语和句子">
             {items.map((item) => <div key={`${item.type}-${item.contentId}`}><span className="tag">{item.type}</span><p><strong>{item.englishText}</strong><small>{item.chineseText}</small></p><ScenePlaybackToggle sceneId={selected.sceneId} text={item.englishText} label={`播放 ${item.englishText} 的发音`} /></div>)}
@@ -2377,7 +2391,7 @@ function Assets({ sceneId, onPractice, onRestart, onIelts, onInterview, onOpenRe
           </div>
         </article>
       </section>
-      {deleteOpen && <Modal onClose={() => setDeleteOpen(false)}><p className="eyebrow">DELETE ASSET</p><h2>删除当前学习资产？</h2><p className="modal-lead">这条场景记录、对话和评分将一起删除，且无法恢复。</p><div className="modal-actions"><Button variant="secondary" onClick={() => setDeleteOpen(false)}>取消</Button><Button onClick={deleteSelected}>确认删除</Button></div></Modal>}
+      {deleteOpen && <Modal dismissible={!deleting} onClose={() => setDeleteOpen(false)}><p className="eyebrow">DELETE ASSET</p><h2>删除当前学习资产？</h2><p className="modal-lead">这条场景记录、对话和评分将一起删除，且无法恢复。</p>{deleteError && <p className="call-error" role="alert">{deleteError}</p>}<div className="modal-actions"><Button variant="secondary" disabled={deleting} onClick={() => setDeleteOpen(false)}>取消</Button><Button disabled={deleting} onClick={() => void deleteSelected()}>{deleting ? "正在删除" : "确认删除"}</Button></div></Modal>}
     </main>
   );
 }

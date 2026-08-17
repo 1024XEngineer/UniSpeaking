@@ -21,7 +21,7 @@ import { colors } from '@/theme/tokens';
 
 type LearningAssetServicePort = Pick<
   LearningAssetService,
-  'listRecords' | 'getRecord'
+  'listRecords' | 'getRecord' | 'deleteRecord'
 >;
 
 function createLearningAssetService(): LearningAssetService {
@@ -208,9 +208,11 @@ function ConversationThread({ record }: { record: SceneLearningRecord }) {
   );
 }
 
-export function SceneAssetDetail({ record, onBack, onPractice, onDelete, ttsPlayer: injectedTtsPlayer }: { record: SceneLearningRecord; onBack: () => void; onPractice: () => void; onDelete: () => void; ttsPlayer?: Pick<TtsPlayer, 'play' | 'stop'> }) {
+export function SceneAssetDetail({ record, onBack, onPractice, onDelete, ttsPlayer: injectedTtsPlayer }: { record: SceneLearningRecord; onBack: () => void; onPractice: () => void; onDelete: () => void | Promise<void>; ttsPlayer?: Pick<TtsPlayer, 'play' | 'stop'> }) {
   const [view, setView] = useState<'expressions' | 'conversation'>('expressions');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [playingExpressionId, setPlayingExpressionId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [ttsPlayer] = useState<Pick<TtsPlayer, 'play' | 'stop'>>(
@@ -235,6 +237,31 @@ export function SceneAssetDetail({ record, onBack, onPractice, onDelete, ttsPlay
       setAudioError(error instanceof Error ? error.message : '发音播放失败');
     }
   };
+
+  const openDeleteConfirmation = () => {
+    setDeleteError(null);
+    setConfirmDelete(true);
+  };
+
+  const closeDeleteConfirmation = () => {
+    if (deleting) return;
+    setConfirmDelete(false);
+  };
+
+  const deleteRecord = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await onDelete();
+      setConfirmDelete(false);
+    } catch (cause) {
+      setDeleteError(cause instanceof Error ? cause.message : '学习资产删除失败，请稍后重试');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <>
       <AppScreen
@@ -243,7 +270,7 @@ export function SceneAssetDetail({ record, onBack, onPractice, onDelete, ttsPlay
             fixed
             onBack={onBack}
             title="详情"
-            action={<HeaderIconButton icon="delete" accessibilityLabel="删除当前学习资产" onPress={() => setConfirmDelete(true)} color={colors.muted} />}
+            action={<HeaderIconButton icon="delete" accessibilityLabel="删除当前学习资产" onPress={openDeleteConfirmation} color={colors.muted} />}
           />
         }
       >
@@ -264,15 +291,16 @@ export function SceneAssetDetail({ record, onBack, onPractice, onDelete, ttsPlay
           </Card>
         ) : <ConversationThread record={record} />}
       </AppScreen>
-      <Modal transparent visible={confirmDelete} animationType="fade" onRequestClose={() => setConfirmDelete(false)}>
+      <Modal transparent visible={confirmDelete} animationType="fade" onRequestClose={closeDeleteConfirmation}>
         <View style={styles.confirmRoot}>
-          <Pressable style={styles.confirmBackdrop} onPress={() => setConfirmDelete(false)} />
+          <Pressable disabled={deleting} style={styles.confirmBackdrop} onPress={closeDeleteConfirmation} />
           <View style={styles.confirmCard}>
             <Text style={styles.confirmTitle}>删除当前学习资产？</Text>
             <Text style={styles.confirmCopy}>这条场景记录、最近对话和评分将一起删除，且无法恢复。</Text>
+            {deleteError ? <Text accessibilityRole="alert" style={styles.deleteError}>{deleteError}</Text> : null}
             <View style={styles.confirmActions}>
-              <AppButton title="取消" variant="secondary" onPress={() => setConfirmDelete(false)} style={styles.flex} />
-              <AppButton title="确认删除" variant="danger" onPress={onDelete} style={styles.flex} />
+              <AppButton title="取消" variant="secondary" disabled={deleting} onPress={closeDeleteConfirmation} style={styles.flex} />
+              <AppButton title={deleting ? '正在删除…' : '确认删除'} variant="danger" disabled={deleting} onPress={() => void deleteRecord()} style={styles.flex} />
             </View>
           </View>
         </View>
@@ -332,7 +360,10 @@ export function SceneAssetDetailLoader({
         record={record}
         onBack={onBack}
         onPractice={onPractice}
-        onDelete={onDelete}
+        onDelete={async () => {
+          await assetService.deleteRecord(sceneId);
+          onDelete();
+        }}
         ttsPlayer={ttsPlayer}
       />
     );
@@ -405,5 +436,6 @@ const styles = StyleSheet.create({
   confirmCard: { padding: 22, gap: 11, borderRadius: 20, backgroundColor: colors.white },
   confirmTitle: { color: colors.ink, fontSize: 22, fontWeight: '600' },
   confirmCopy: { color: colors.muted, fontSize: 13, lineHeight: 20, fontWeight: '300' },
+  deleteError: { color: '#B94D44', fontSize: 12, lineHeight: 18 },
   confirmActions: { marginTop: 10, flexDirection: 'row', gap: 10 },
 });

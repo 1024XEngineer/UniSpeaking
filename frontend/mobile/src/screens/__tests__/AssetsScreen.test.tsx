@@ -38,6 +38,7 @@ describe('AssetsScreen backend binding', () => {
     const service = {
       listRecords: jest.fn(() => recordsPromise),
       getRecord: jest.fn(async () => detailRecord),
+      deleteRecord: jest.fn(async () => undefined),
     };
     const screen = await render(
       <AssetsScreen
@@ -62,6 +63,7 @@ describe('AssetsScreen backend binding', () => {
         throw new Error('资产服务暂时不可用');
       }),
       getRecord: jest.fn(async () => detailRecord),
+      deleteRecord: jest.fn(async () => undefined),
     };
     const screen = await render(
       <AssetsScreen
@@ -83,6 +85,7 @@ describe('SceneAssetDetailLoader', () => {
     const service = {
       listRecords: jest.fn(async () => []),
       getRecord: jest.fn(async () => detailRecord),
+      deleteRecord: jest.fn(async () => undefined),
     };
     const screen = await render(
       <SceneAssetDetailLoader
@@ -115,5 +118,77 @@ describe('SceneAssetDetailLoader', () => {
     expect(ttsPlayer.play).toHaveBeenCalledWith(detailRecord.id, 'baggage');
     await fireEvent.press(screen.getByLabelText('停止播放 baggage'));
     expect(ttsPlayer.stop).toHaveBeenCalled();
+  });
+
+  it('waits for backend deletion before dismissing the confirmation', async () => {
+    let resolveDelete: () => void = () => undefined;
+    const deletePromise = new Promise<void>((resolve) => {
+      resolveDelete = resolve;
+    });
+    const onDelete = jest.fn(() => deletePromise);
+    const screen = await render(
+      <SceneAssetDetail
+        record={detailRecord}
+        onBack={jest.fn()}
+        onPractice={jest.fn()}
+        onDelete={onDelete}
+        ttsPlayer={{ play: jest.fn(), stop: jest.fn() }}
+      />,
+    );
+
+    await fireEvent.press(screen.getByLabelText('删除当前学习资产'));
+    await fireEvent.press(screen.getByText('确认删除'));
+
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('正在删除…')).toBeTruthy();
+    resolveDelete();
+    await waitFor(() => expect(screen.queryByText('删除当前学习资产？')).toBeNull());
+  });
+
+  it('keeps the confirmation open and shows backend deletion failures', async () => {
+    const screen = await render(
+      <SceneAssetDetail
+        record={detailRecord}
+        onBack={jest.fn()}
+        onPractice={jest.fn()}
+        onDelete={jest.fn(async () => {
+          throw new Error('删除服务暂时不可用');
+        })}
+        ttsPlayer={{ play: jest.fn(), stop: jest.fn() }}
+      />,
+    );
+
+    await fireEvent.press(screen.getByLabelText('删除当前学习资产'));
+    await fireEvent.press(screen.getByText('确认删除'));
+
+    await waitFor(() => expect(screen.getByText('删除服务暂时不可用')).toBeTruthy());
+    expect(screen.getByText('删除当前学习资产？')).toBeTruthy();
+    expect(screen.getByText('确认删除')).toBeTruthy();
+  });
+
+  it('deletes through the loader service before navigating back', async () => {
+    const service = {
+      listRecords: jest.fn(async () => []),
+      getRecord: jest.fn(async () => detailRecord),
+      deleteRecord: jest.fn(async () => undefined),
+    };
+    const onDelete = jest.fn();
+    const screen = await render(
+      <SceneAssetDetailLoader
+        assetService={service}
+        sceneId="scene/airport"
+        onBack={jest.fn()}
+        onPractice={jest.fn()}
+        onDelete={onDelete}
+        ttsPlayer={{ play: jest.fn(), stop: jest.fn() }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText('baggage')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('删除当前学习资产'));
+    await fireEvent.press(screen.getByText('确认删除'));
+
+    await waitFor(() => expect(onDelete).toHaveBeenCalledTimes(1));
+    expect(service.deleteRecord).toHaveBeenCalledWith('scene/airport');
   });
 });

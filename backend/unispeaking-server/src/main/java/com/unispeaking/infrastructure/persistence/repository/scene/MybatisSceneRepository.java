@@ -1,6 +1,7 @@
 package com.unispeaking.infrastructure.persistence.repository.scene;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.dto.scene.SceneGenerationResponse;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
@@ -17,6 +18,7 @@ import com.unispeaking.infrastructure.persistence.mapper.scene.ScenePhraseMapper
 import com.unispeaking.infrastructure.persistence.mapper.scene.SceneSentenceMapper;
 import com.unispeaking.infrastructure.persistence.mapper.scene.SceneWordMapper;
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -119,6 +121,24 @@ public class MybatisSceneRepository implements SceneRepository {
 						scene.getCreatedAt(),
 						scene.getUpdatedAt()))
 				.toList();
+	}
+
+	@Override
+	public boolean softDelete(String sceneId, String userId) {
+		UUID ownerId;
+		try {
+			ownerId = UUID.fromString(userId);
+		}
+		catch (IllegalArgumentException exception) {
+			return false;
+		}
+		return sceneMapper.update(
+				null,
+				new LambdaUpdateWrapper<SceneEntity>()
+						.eq(SceneEntity::getId, sceneId)
+						.eq(SceneEntity::getUserId, ownerId)
+						.isNull(SceneEntity::getDeletedAt)
+						.set(SceneEntity::getDeletedAt, OffsetDateTime.now())) == 1;
 	}
 
 	@Override

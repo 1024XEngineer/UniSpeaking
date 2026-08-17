@@ -1,9 +1,13 @@
 package com.unispeaking.service.asset;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.domain.dto.asset.SessionEvaluationRecord;
 import com.unispeaking.domain.dto.evaluation.DialogueEvaluationResult;
 import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
@@ -23,6 +27,45 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class LearningAssetServiceImplTest {
+
+	@Test
+	void deletesOnlyAnAssetOwnedByTheCurrentUser() {
+		String userId = "f3cc4bdf-8db1-48b4-b504-d31375e1eb68";
+		String sceneId = "custom_2001";
+		AuthService authService = mock(AuthService.class);
+		SceneRepository sceneRepository = mock(SceneRepository.class);
+		CustomSceneDefinition scene = scene(sceneId, userId);
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(sceneRepository.findCustomDefinitionById(sceneId))
+				.thenReturn(Optional.of(scene));
+		when(sceneRepository.softDelete(sceneId, userId)).thenReturn(true);
+		LearningAssetService service = service(authService, sceneRepository);
+
+		service.deleteAsset(sceneId);
+
+		verify(sceneRepository).softDelete(sceneId, userId);
+	}
+
+	@Test
+	void rejectsDeletingAnotherUsersAsset() {
+		String userId = "f3cc4bdf-8db1-48b4-b504-d31375e1eb68";
+		String sceneId = "custom_2001";
+		AuthService authService = mock(AuthService.class);
+		SceneRepository sceneRepository = mock(SceneRepository.class);
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(sceneRepository.findCustomDefinitionById(sceneId))
+				.thenReturn(Optional.of(scene(
+						sceneId,
+						"11111111-1111-4111-8111-111111111111")));
+		LearningAssetService service = service(authService, sceneRepository);
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> service.deleteAsset(sceneId));
+
+		assertEquals("LEARNING_ASSET_ACCESS_DENIED", exception.code());
+		verify(sceneRepository, never()).softDelete(sceneId, userId);
+	}
 
 	@Test
 	void loadsSceneContentLatestDialogueAndReportHistory() {
@@ -99,5 +142,32 @@ class LearningAssetServiceImplTest {
 		assertEquals(
 				report,
 				service.getAsset(sceneId).latestReport());
+	}
+
+	private LearningAssetService service(
+			AuthService authService,
+			SceneRepository sceneRepository) {
+		return new LearningAssetServiceImpl(
+				authService,
+				sceneRepository,
+				mock(SessionEvaluationRepository.class),
+				mock(CustomEvaluationService.class));
+	}
+
+	private CustomSceneDefinition scene(String sceneId, String userId) {
+		return new CustomSceneDefinition(
+				sceneId,
+				userId,
+				"咖啡店点单",
+				"餐饮",
+				"在咖啡店完成点单",
+				"咖啡店店员",
+				"顾客",
+				"完成一杯咖啡的点单",
+				"简短自然",
+				"{\"stop_when\":\"order confirmed\"}",
+				List.of(),
+				List.of(),
+				List.of());
 	}
 }

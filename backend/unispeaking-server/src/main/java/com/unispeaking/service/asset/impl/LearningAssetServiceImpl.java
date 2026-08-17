@@ -71,6 +71,16 @@ public class LearningAssetServiceImpl implements LearningAssetService {
 	}
 
 	@Override
+	public void deleteAsset(String sceneId) {
+		CustomSceneDefinition scene = requireOwnedScene(sceneId);
+		if (!sceneRepository.softDelete(sceneId, scene.userId())) {
+			throw new BusinessException(
+					"LEARNING_ASSET_NOT_FOUND",
+					"学习资产不存在");
+		}
+	}
+
+	@Override
 	public DialogueReportResult getReport(
 			String sceneId,
 			String sessionId) {

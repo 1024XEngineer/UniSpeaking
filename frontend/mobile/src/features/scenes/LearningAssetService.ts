@@ -164,6 +164,13 @@ export class LearningAssetService {
     };
   }
 
+  async deleteRecord(sceneId: string): Promise<void> {
+    await this.client.request(
+      `/api/custom-scenes/${encodeURIComponent(sceneId)}/assets`,
+      { method: 'DELETE' },
+    );
+  }
+
   async getScene(sceneId: string): Promise<GeneratedScene> {
     const value = await this.getDetail(sceneId);
     return {

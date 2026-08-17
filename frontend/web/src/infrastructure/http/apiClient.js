@@ -430,6 +430,13 @@ export function getLearningAsset(sceneId) {
   );
 }
 
+export function deleteLearningAsset(sceneId) {
+  return request(
+    `/api/custom-scenes/${encodeURIComponent(sceneId)}/assets`,
+    { method: "DELETE" },
+  );
+}
+
 export async function synthesizeSpeech(sceneId, text, model = null) {
 	const token = getAccessToken();
 	const response = await fetch(
