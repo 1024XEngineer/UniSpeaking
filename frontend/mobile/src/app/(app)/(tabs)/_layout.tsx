@@ -6,6 +6,7 @@ import { WaveformIcon } from 'phosphor-react-native/src/icons/Waveform';
 import { useState } from 'react';
 
 import { LiquidGlassTabBar } from '@/components/LiquidGlassTabBar';
+import { useAnalytics } from '@/model/AnalyticsProvider';
 import { colors } from '@/theme/tokens';
 import { LearningStageProvider } from '@/navigation/learningStage';
 import { routes } from '@/navigation/routes';
@@ -14,6 +15,7 @@ import { forgetSpecialty, readRememberedSpecialty, rememberSpecialty } from '@/n
 export default function TabsLayout() {
   const pathname = usePathname();
   const router = useRouter();
+  const analytics = useAnalytics();
   const [immersiveLearning, setImmersiveLearning] = useState(false);
   const hideTabBar = immersiveLearning;
 
@@ -45,6 +47,7 @@ export default function TabsLayout() {
           tabPress: (event) => {
             if (pathname === '/conversation') return;
             event.preventDefault();
+            analytics.trackModeSelection({ mode: 'FREE_CHAT', pageCode: 'conversation' }, 'tab-navigation');
             void (async () => {
               if (pathname === '/ielts' || pathname === '/interview') await rememberSpecialty(pathname === '/ielts' ? 'ielts' : 'interview');
               router.replace('/(app)/(tabs)/conversation');
@@ -65,10 +68,19 @@ export default function TabsLayout() {
           tabPress: (event) => {
             if (pathname === '/ielts' || pathname === '/interview') {
               event.preventDefault();
+              analytics.trackModeSelection({ mode: 'SCENE', pageCode: 'scene-training' }, 'tab-navigation');
               void forgetSpecialty().then(() => router.replace('/(app)/(tabs)/(scenes)/scenes'));
             } else if (pathname !== '/scenes') {
               event.preventDefault();
               void readRememberedSpecialty().then((saved) => {
+                analytics.trackModeSelection(
+                  saved === 'ielts'
+                    ? { mode: 'IELTS', pageCode: 'ielts-training' }
+                    : saved === 'interview'
+                      ? { mode: 'INTERVIEW', pageCode: 'interview-training' }
+                      : { mode: 'SCENE', pageCode: 'scene-training' },
+                  'tab-navigation',
+                );
                 router.replace(
                   saved === 'ielts'
                     ? '/(app)/(tabs)/(scenes)/ielts'
@@ -103,6 +115,12 @@ export default function TabsLayout() {
             event.preventDefault();
             void (async () => {
               if (currentSpecialty) {
+                analytics.trackLearningAsset(
+                  currentSpecialty === 'ielts'
+                    ? { mode: 'IELTS', pageCode: 'ielts-assets' }
+                    : { mode: 'INTERVIEW', pageCode: 'interview-assets' },
+                  'REPORT',
+                );
                 await rememberSpecialty(currentSpecialty);
                 router.replace(
                   currentSpecialty === 'ielts'
@@ -114,6 +132,12 @@ export default function TabsLayout() {
               const remembered = await readRememberedSpecialty();
               if (remembered) {
                 const specialty = remembered;
+                analytics.trackLearningAsset(
+                  specialty === 'ielts'
+                    ? { mode: 'IELTS', pageCode: 'ielts-assets' }
+                    : { mode: 'INTERVIEW', pageCode: 'interview-assets' },
+                  'REPORT',
+                );
                 await rememberSpecialty(specialty);
                 router.replace(
                   specialty === 'ielts'
@@ -122,6 +146,7 @@ export default function TabsLayout() {
                 );
                 return;
               }
+              analytics.trackLearningAsset({ mode: 'SCENE', pageCode: 'scene-assets' }, 'REPORT');
               router.replace('/(app)/(tabs)/(learning)/learning');
             })();
           },

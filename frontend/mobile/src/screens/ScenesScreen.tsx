@@ -827,10 +827,12 @@ function ScenePromptInput({
 
 export function ScenesHome({
   onOpen,
+  onStartScene,
   promptExample = getDailyScenePromptExample(),
   sceneService: injectedSceneService,
 }: {
   onOpen: (route: SceneRoute) => void;
+  onStartScene?: () => void;
   promptExample?: ScenePromptExample;
   sceneService?: Pick<SceneService, 'generate'>;
 }) {
@@ -1040,7 +1042,10 @@ export function ScenesHome({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                onPress={() => onOpen({ name: 'training', scene: preview })}
+                onPress={() => {
+                  onStartScene?.();
+                  onOpen({ name: 'training', scene: preview });
+                }}
                 style={[styles.previewButton, styles.previewButtonPrimary]}
               >
                 <Text style={styles.previewButtonPrimaryText}>开始练习</Text>
@@ -1059,11 +1064,13 @@ export function ScenesScreen({
   onSceneViewDetails,
   onOpenIelts,
   onOpenInterview,
+  onStartScene,
 }: {
   onIeltsViewDetails?: (recordId: string) => void;
   onSceneViewDetails?: (sceneId: string) => void;
   onOpenIelts?: () => void;
   onOpenInterview?: () => void;
+  onStartScene?: () => void;
 } = {}) {
   const [route, setRoute] = useState<SceneRoute>({ name: 'home' });
   const openRoute = (nextRoute: SceneRoute) => {
@@ -1085,7 +1092,7 @@ export function ScenesScreen({
   }
   if (route.name === 'ielts') return <IeltsFlow onExit={() => setRoute({ name: 'home' })} onViewDetails={onIeltsViewDetails} />;
   if (route.name === 'interview') return <InterviewFlow onExit={() => setRoute({ name: 'home' })} />;
-  return <ScenesHome onOpen={openRoute} />;
+  return <ScenesHome onOpen={openRoute} onStartScene={onStartScene} />;
 }
 
 const styles = StyleSheet.create({
