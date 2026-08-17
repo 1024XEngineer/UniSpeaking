@@ -27,6 +27,7 @@ import { createTranscriptTranslationApi } from '@/features/conversation/Transcri
 import type { RealtimeTranscriptEntry } from '@/features/realtime/RealtimeSessionController';
 import type { RealtimeState } from '@/features/realtime/types';
 import { useAppModel } from '@/model/AppModel';
+import type { AnalyticsTrackerFactory } from '@/infrastructure/analytics/AnalyticsClient';
 import { colors } from '@/theme/tokens';
 
 function formatDuration(total: number) {
@@ -408,13 +409,17 @@ export function CallExperience({
   );
 }
 
-export function CallScreen({ onEnd }: { onEnd: () => void }) {
+export function CallScreen({ onEnd, analytics }: { onEnd: () => void; analytics?: AnalyticsTrackerFactory }) {
   const { teacher, speed } = useAppModel();
+  const [trainingAnalytics] = useState(() => analytics?.training({
+    mode: 'FREE_CHAT',
+    pageCode: 'conversation',
+  }));
   const session = useFreeChatSession({
     voice: teacher.voiceId,
     model: 'qwen3.5-omni-flash-realtime',
     speechSpeed: speedCodeForLabel(speed),
-  });
+  }, undefined, trainingAnalytics);
   const caption = selectCallCaption(session, teacher.name, session.statusLabel);
   const [translationApi] = useState(createTranscriptTranslationApi);
   const translate = useCallback((text: string) => {

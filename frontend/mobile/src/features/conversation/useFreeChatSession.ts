@@ -12,6 +12,7 @@ import type { RealtimeState } from '@/features/realtime/types';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
 import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
 import { ApiClient } from '@/infrastructure/http/ApiClient';
+import type { TrainingTracker } from '@/infrastructure/analytics/AnalyticsClient';
 
 export type FreeChatConfig = Pick<
   RealtimeSessionOptions,
@@ -78,6 +79,7 @@ const initialSnapshot: RealtimeSessionSnapshot = {
 export function useFreeChatSession(
   config: FreeChatConfig,
   createController: FreeChatControllerFactory = createFreeChatController,
+  analytics?: TrainingTracker,
 ) {
   const [controller] = useState(() => createController(config));
   const [snapshot, setSnapshot] = useState<RealtimeSessionSnapshot>(() =>
@@ -91,10 +93,17 @@ export function useFreeChatSession(
 
   const end = useCallback(() => {
     if (!endPromise.current) {
-      endPromise.current = Promise.resolve(controller.end());
+      endPromise.current = Promise.resolve(controller.end()).then((result) => {
+        analytics?.complete();
+        return result;
+      }).catch((error: unknown) => {
+        if (analytics?.isStarted()) analytics.abandon('REALTIME_ERROR');
+        else analytics?.fail('REALTIME_ERROR');
+        throw error;
+      });
     }
     return endPromise.current;
-  }, [controller]);
+  }, [analytics, controller]);
 
   useEffect(() => controller.subscribe(setSnapshot), [controller]);
 
@@ -102,10 +111,12 @@ export function useFreeChatSession(
     lifecycleVersion.current += 1;
     let active = true;
     if (!startPromise.current) {
+      analytics?.attempt();
       startPromise.current = Promise.resolve().then(() => controller.start());
     }
     void startPromise.current.catch((error: unknown) => {
       if (active) {
+        analytics?.fail('REALTIME_ERROR');
         setStartupError(
           error instanceof Error ? error.message : '实时对话启动失败',
         );
@@ -117,11 +128,24 @@ export function useFreeChatSession(
       const cleanupVersion = lifecycleVersion.current;
       queueMicrotask(() => {
         if (lifecycleVersion.current === cleanupVersion) {
+          analytics?.abandon('USER_EXIT');
           void end().catch(() => undefined);
         }
       });
     };
-  }, [controller, end]);
+  }, [analytics, controller, end]);
+
+  useEffect(() => {
+    if (['ready', 'user_speaking', 'assistant_speaking'].includes(snapshot.state)) {
+      analytics?.started();
+      analytics?.resume();
+    } else if (snapshot.state === 'paused') {
+      analytics?.pause();
+    } else if (snapshot.state === 'error') {
+      if (analytics?.isStarted()) analytics.abandon('REALTIME_ERROR');
+      else analytics?.fail('REALTIME_ERROR');
+    }
+  }, [analytics, snapshot.state]);
 
   useEffect(() => {
     const active = !['idle', 'ending', 'ended', 'error'].includes(snapshot.state);

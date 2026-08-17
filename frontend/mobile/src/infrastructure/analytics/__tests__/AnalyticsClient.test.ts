@@ -73,6 +73,7 @@ describe('AnalyticsClient', () => {
 
     const training = client.training({ mode: 'FREE_CHAT', pageCode: 'conversation' });
     training.attempt();
+    training.attempt();
     training.started();
     current = 7_400;
     training.complete();

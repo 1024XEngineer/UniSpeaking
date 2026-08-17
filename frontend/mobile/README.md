@@ -23,11 +23,27 @@ npx tsc --noEmit
 npx expo-doctor
 ```
 
+## Umami 行为统计
+
+移动端 Umami 默认关闭。生产构建使用与 Web 端相同的 Website ID，并通过 Umami Cloud
+发送同名页面、模式选择、学习资产和训练生命周期事件：
+
+```dotenv
+EXPO_PUBLIC_UMAMI_ENABLED=true
+EXPO_PUBLIC_UMAMI_ENDPOINT=https://cloud.umami.is/api/send
+EXPO_PUBLIC_UMAMI_WEBSITE_ID=3ae2dee9-d585-43a9-93f3-fcafcd14b258
+```
+
+已登录用户使用后端返回的用户 UUID 作为 Distinct ID，以关联 Web 和移动端会话。事件数据
+不包含邮箱、昵称、口令、JWT、对话文本、音频、简历或岗位描述。生产统计主机名固定为
+`unispeaking.qnsdk.com`，不要为移动端创建第二个 Website ID。
+
 ## 主要目录
 
 - `src/components`：移动端通用 UI 组件与对话设置
 - `src/screens`：对话、场景、专项训练、资产和个人中心页面
 - `src/model`：跨页面状态与交互逻辑
+- `src/infrastructure/analytics`：Umami 传输、页面归一化与有效时长计时
 - `src/data`：演示内容和训练数据
 - `src/theme`：移动端设计令牌
 - `assets/images/unispeaking`：移动端使用的品牌与角色图片副本

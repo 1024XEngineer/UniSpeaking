@@ -29,6 +29,7 @@ import { type InterviewSessionApi } from '@/features/interview/InterviewSessionA
 import { createInterviewApi, useInterviewSession } from '@/features/interview/useInterviewSession';
 import { useInterviewPreparation, type InterviewDifficultyOption, type InterviewPreparationResult } from '@/features/interview/useInterviewPreparation';
 import { useAppModel } from '@/model/AppModel';
+import type { AnalyticsTrackerFactory } from '@/infrastructure/analytics/AnalyticsClient';
 import { useLearningStage } from '@/navigation/learningStage';
 import { rememberSpecialty } from '@/navigation/specialtyMemory';
 import { colors, examinerAssets, ieltsAssets, interviewAssets, levels } from '@/theme/tokens';
@@ -106,19 +107,25 @@ function IeltsSession({
   voiceId,
   autoAdvance,
   onFinish,
+  analytics,
 }: {
   examiner: (typeof examiners)[number];
   part: 'p1' | 'p3';
   ieltsId: string;
   voiceId: string;
   autoAdvance: boolean;
+  analytics?: AnalyticsTrackerFactory;
   onFinish: (
     sessionId: string | null,
     ending: Promise<unknown>,
     turnEvaluations: Promise<void>,
   ) => void;
 }) {
-  const session = useIeltsSession({ ieltsId, voiceId, part: toApiPart(part) });
+  const [trainingAnalytics] = useState(() => analytics?.training({
+    mode: 'IELTS',
+    pageCode: 'ielts-training',
+  }));
+  const session = useIeltsSession({ ieltsId, voiceId, part: toApiPart(part) }, trainingAnalytics);
   const partThreeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastInputReadyTick = useRef(0);
   const finishingRef = useRef(false);
@@ -233,18 +240,24 @@ function IeltsPart2Session({
   ieltsId,
   voiceId,
   onFinish,
+  analytics,
 }: {
   examiner: (typeof examiners)[number];
   cueCard: { title: string; points: string[] };
   ieltsId: string;
   voiceId: string;
+  analytics?: AnalyticsTrackerFactory;
   onFinish: (
     sessionId: string | null,
     ending: Promise<unknown>,
     turnEvaluations: Promise<void>,
   ) => void;
 }) {
-  const session = useIeltsSession({ ieltsId, voiceId, part: 'PART_2' });
+  const [trainingAnalytics] = useState(() => analytics?.training({
+    mode: 'IELTS',
+    pageCode: 'ielts-training',
+  }));
+  const session = useIeltsSession({ ieltsId, voiceId, part: 'PART_2' }, trainingAnalytics);
   const [phase, setPhase] = useState<Part2Phase>('INTRODUCTION');
   const [prepRemaining, setPrepRemaining] = useState(60);
   const [longTurnRemaining, setLongTurnRemaining] = useState(120);
@@ -549,7 +562,7 @@ function ReportMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onViewDetails?: (recordId: string) => void }) {
+export function IeltsFlow({ onExit, onViewDetails, analytics }: { onExit: () => void; onViewDetails?: (recordId: string) => void; analytics?: AnalyticsTrackerFactory }) {
   const { addIeltsRecord, hasCompletedOnboarding, level, saveLevel } = useAppModel();
   const { setImmersiveLearning } = useLearningStage();
   const ielts = useIeltsFlowController();
@@ -1162,6 +1175,7 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
       const cueCard = resolvePart2CueCard(generatedScene, ielts.training);
       return (
         <IeltsPart2Session
+          analytics={analytics}
           cueCard={cueCard}
           examiner={examiner}
           ieltsId={ieltsId}
@@ -1172,6 +1186,7 @@ export function IeltsFlow({ onExit, onViewDetails }: { onExit: () => void; onVie
     }
     return (
       <IeltsSession
+        analytics={analytics}
         examiner={examiner}
         part={part}
         ieltsId={ieltsId}
@@ -1310,9 +1325,16 @@ const interviewDifficulties: readonly { id: InterviewDifficulty; title: string; 
   { id: 'hard', title: '困难', note: '深入追问' },
 ];
 
-function InterviewSession({ preparation, onFinished }: { preparation: InterviewPreparationResult & { scene: NonNullable<InterviewPreparationResult['scene']> }; onFinished: (sessionId: string, api: InterviewSessionApi) => void }) {
+function InterviewSession({ preparation, onFinished, analytics }: { preparation: InterviewPreparationResult & { scene: NonNullable<InterviewPreparationResult['scene']> }; onFinished: (sessionId: string, api: InterviewSessionApi) => void; analytics?: AnalyticsTrackerFactory }) {
   const { teacher } = useAppModel();
-  const session = useInterviewSession({ sceneId: preparation.scene.sceneId, voice: teacher.voiceId });
+  const [trainingAnalytics] = useState(() => analytics?.training({
+    mode: 'INTERVIEW',
+    pageCode: 'interview-training',
+  }));
+  const session = useInterviewSession(
+    { sceneId: preparation.scene.sceneId, voice: teacher.voiceId },
+    trainingAnalytics,
+  );
   const deliveredSession = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1354,7 +1376,7 @@ function InterviewSession({ preparation, onFinished }: { preparation: InterviewP
   );
 }
 
-export function InterviewFlow({ onExit, onViewDetails, practiceScene }: { onExit: () => void; onViewDetails?: () => void; practiceScene?: { sceneId: string; jobTitle?: string } }) {
+export function InterviewFlow({ onExit, onViewDetails, practiceScene, analytics }: { onExit: () => void; onViewDetails?: () => void; practiceScene?: { sceneId: string; jobTitle?: string }; analytics?: AnalyticsTrackerFactory }) {
   const { setImmersiveLearning } = useLearningStage();
   const [route, setRoute] = useState<InterviewRoute>(practiceScene ? 'live' : 'input');
   const [jobDescription, setJobDescription] = useState('');
@@ -1565,6 +1587,7 @@ export function InterviewFlow({ onExit, onViewDetails, practiceScene }: { onExit
     const livePreparation = preparation as InterviewPreparationResult & { scene: NonNullable<InterviewPreparationResult['scene']> };
     return (
       <InterviewSession
+        analytics={analytics}
         preparation={livePreparation}
         onFinished={(sessionId, api) => {
           setCompletedSession({ sessionId, api });

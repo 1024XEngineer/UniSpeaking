@@ -1,14 +1,17 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { forgetSpecialty } from '@/navigation/specialtyMemory';
+import { useAnalytics } from '@/model/AnalyticsProvider';
 import { routes } from '@/navigation/routes';
 import { InterviewFlow } from '@/screens/SpecialtyFlows';
 
 export default function InterviewRoute() {
   const router = useRouter();
+  const analytics = useAnalytics();
   const { sceneId, jobTitle, practice } = useLocalSearchParams<{ sceneId?: string; jobTitle?: string; practice?: string }>();
   return (
     <InterviewFlow
+      analytics={analytics}
       onExit={() => void forgetSpecialty().then(() => router.replace('/(app)/(tabs)/(scenes)/scenes'))}
       onViewDetails={() => router.replace(routes.learning.interview.history)}
       key={practice === '1' && sceneId ? `practice-${sceneId}` : 'new-interview'}

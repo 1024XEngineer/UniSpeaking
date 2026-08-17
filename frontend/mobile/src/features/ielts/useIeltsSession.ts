@@ -17,6 +17,7 @@ import type { RealtimeState } from '@/features/realtime/types';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
 import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
 import { ApiClient } from '@/infrastructure/http/ApiClient';
+import type { TrainingTracker } from '@/infrastructure/analytics/AnalyticsClient';
 import { useAppModel } from '@/model/AppModel';
 
 import { IELTS_REALTIME_MODEL } from './ieltsMappings';
@@ -92,7 +93,7 @@ export function createIeltsSessionController(
   return controller;
 }
 
-export function useIeltsSession(config: IeltsSessionConfig | null) {
+export function useIeltsSession(config: IeltsSessionConfig | null, analytics?: TrainingTracker) {
   const { speed } = useAppModel();
   const [controller] = useState<IeltsSessionControllerPort | null>(() =>
     config ? createIeltsSessionController(config, speed) : null,
@@ -100,14 +101,22 @@ export function useIeltsSession(config: IeltsSessionConfig | null) {
   const [snapshot, setSnapshot] = useState<RealtimeSessionSnapshot>(initialSnapshot);
   const [startupError, setStartupError] = useState<string | null>(null);
   const endPromise = useRef<Promise<unknown> | null>(null);
+  const lifecycleVersion = useRef(0);
 
   const end = useCallback(() => {
     if (!controller) return Promise.resolve(null);
     if (!endPromise.current) {
-      endPromise.current = Promise.resolve(controller.end());
+      endPromise.current = Promise.resolve(controller.end()).then((result) => {
+        analytics?.complete();
+        return result;
+      }).catch((error: unknown) => {
+        if (analytics?.isStarted()) analytics.abandon('REALTIME_ERROR');
+        else analytics?.fail('REALTIME_ERROR');
+        throw error;
+      });
     }
     return endPromise.current;
-  }, [controller]);
+  }, [analytics, controller]);
 
   useEffect(() => {
     if (!controller) return;
@@ -116,20 +125,42 @@ export function useIeltsSession(config: IeltsSessionConfig | null) {
 
   useEffect(() => {
     if (!controller) return;
+    lifecycleVersion.current += 1;
     let active = true;
     if (config?.part === 'PART_2') {
       controller.setMuted(true);
     }
+    analytics?.attempt();
     void controller.start().catch((error: unknown) => {
       if (active) {
+        analytics?.fail('REALTIME_ERROR');
         setStartupError(error instanceof Error ? error.message : 'IELTS 会话启动失败');
       }
     });
     return () => {
       active = false;
-      void end().catch(() => undefined);
+      lifecycleVersion.current += 1;
+      const cleanupVersion = lifecycleVersion.current;
+      queueMicrotask(() => {
+        if (lifecycleVersion.current === cleanupVersion) {
+          analytics?.abandon('USER_EXIT');
+          void end().catch(() => undefined);
+        }
+      });
     };
-  }, [controller, config?.part, end]);
+  }, [analytics, controller, config?.part, end]);
+
+  useEffect(() => {
+    if (['ready', 'user_speaking', 'assistant_speaking'].includes(snapshot.state)) {
+      analytics?.started();
+      analytics?.resume();
+    } else if (snapshot.state === 'paused') {
+      analytics?.pause();
+    } else if (snapshot.state === 'error') {
+      if (analytics?.isStarted()) analytics.abandon('REALTIME_ERROR');
+      else analytics?.fail('REALTIME_ERROR');
+    }
+  }, [analytics, snapshot.state]);
 
   const toggleMuted = useCallback(
     (muted: boolean) => {

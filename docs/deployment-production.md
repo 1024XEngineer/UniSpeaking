@@ -1,6 +1,6 @@
 # UniSpeaking production deployment
 
-This runbook targets the single-server Docker deployment for `unispeaking.cn`.
+This runbook targets the single-server Docker deployment for `unispeaking.qnsdk.com`.
 It assumes Ubuntu 24.04, Docker Compose, PostgreSQL 17, and public TCP ports
 80 and 443 mapped to the server.
 
@@ -19,7 +19,7 @@ sudo chmod 600 /etc/unispeaking/certs/privkey.pem
 ```
 
 The certificate files must not be committed to Git. The certificate must cover
-both `unispeaking.cn` and `www.unispeaking.cn`.
+`unispeaking.qnsdk.com`.
 
 Create the runtime environment file:
 
@@ -78,10 +78,23 @@ docker compose --env-file deploy/env/.env \
 ```
 
 After release, open the migrated site and confirm the visit in Umami Realtime.
-Then verify Pages and Events for the four anonymous training modes: `SCENE`,
-`FREE_CHAT`, `INTERVIEW`, and `IELTS`. Learning assets are reported separately;
-no real user ID, transcript, audio, resume, job description, or credential is
-sent to Umami.
+Then verify Pages and Events for the four training modes: `SCENE`, `FREE_CHAT`,
+`INTERVIEW`, and `IELTS`. Learning assets are reported separately. Authenticated
+Web and mobile events use the same backend user UUID as the Umami Distinct ID;
+no email, nickname, transcript, audio, resume, job description, JWT, password,
+or other credential is sent to Umami.
+
+Build the mobile app with the same public Website ID:
+
+```dotenv
+EXPO_PUBLIC_UMAMI_ENABLED=true
+EXPO_PUBLIC_UMAMI_ENDPOINT=https://cloud.umami.is/api/send
+EXPO_PUBLIC_UMAMI_WEBSITE_ID=3ae2dee9-d585-43a9-93f3-fcafcd14b258
+```
+
+Do not create a second Umami Website for mobile. The native client sends a
+valid app User-Agent and the production hostname `unispeaking.qnsdk.com` to
+`/api/send`; no Umami login or API token is embedded in the app.
 
 The environment template selects mirrors reachable from mainland China for
 Docker images, Debian packages, Maven, PyPI, and npm. The committed defaults
@@ -169,7 +182,7 @@ docker compose --env-file deploy/env/.env \
   "SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;"
 ```
 
-Visit `https://unispeaking.cn` and verify registration, login, microphone
+Visit `https://unispeaking.qnsdk.com` and verify registration, login, microphone
 permission, WebSocket sessions, IELTS topics, and audio features.
 
 Then verify the LLM migration with one request from each business path:
