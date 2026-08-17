@@ -120,6 +120,22 @@ function ProfileSettingsProbe() {
   );
 }
 
+function ConversationSettingsProbe() {
+  const model = useAppModel();
+  return (
+    <Pressable
+      accessibilityLabel="save-conversation-settings"
+      onPress={() =>
+        void model.saveConversationSettings({
+          speed: '慢一些',
+          level: 'basic',
+          teacher: teachers[2],
+        })
+      }
+    />
+  );
+}
+
 function NicknameProbe() {
   const model = useAppModel();
   return <Text testID="nickname">{model.nickname}</Text>;
@@ -254,5 +270,25 @@ describe('AppModelProvider authentication binding', () => {
         preferredVoice: teachers[2].voiceId,
       });
     });
+  });
+
+  it('persists all conversation settings in one preference update', async () => {
+    const controller = createController(authenticatedState);
+    const screen = await render(
+      <AppModelProvider authController={controller}>
+        <ConversationSettingsProbe />
+      </AppModelProvider>,
+    );
+
+    await fireEvent.press(screen.getByLabelText('save-conversation-settings'));
+
+    await waitFor(() =>
+      expect(controller.updatePreference).toHaveBeenCalledWith({
+        preferredAiSpeechSpeed: 'SLOWER',
+        cefrLevel: 'B',
+        preferredVoice: teachers[2].voiceId,
+      }),
+    );
+    expect(controller.updatePreference).toHaveBeenCalledTimes(1);
   });
 });
