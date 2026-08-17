@@ -564,8 +564,10 @@ function Button({ children, variant = "primary", icon, className, ...props }) {
 function Auth({ mode: initialMode, onBack, onSuccess }) {
   const [mode, setMode] = useState(initialMode || "signup");
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [step, setStep] = useState("credentials");
   const [email, setEmail] = useState("");
+  const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [code, setCode] = useState("");
@@ -573,7 +575,7 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const registrationDraftRef = useRef({ email: "", password: "" });
+  const registrationDraftRef = useRef({ email: "", password: "", nickname: "" });
   const captchaButtonId = mode === "login"
     ? "login-email-auth"
     : mode === "reset"
@@ -586,6 +588,7 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
     setCode("");
     setChallengeId("");
     setConfirmPassword("");
+    setShowConfirmPassword(false);
     setError("");
   };
 
@@ -593,23 +596,29 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
     setMode(mode === "signup" ? "login" : "signup");
     clearChallenge();
     setPassword("");
+    setNickname("");
+    setShowPassword(false);
     setNotice("");
-    registrationDraftRef.current = { email: "", password: "" };
+    registrationDraftRef.current = { email: "", password: "", nickname: "" };
   };
 
   const beginPasswordReset = () => {
     setMode("reset");
     clearChallenge();
     setPassword("");
+    setNickname("");
+    setShowPassword(false);
     setNotice("");
-    registrationDraftRef.current = { email: email.trim(), password: "" };
+    registrationDraftRef.current = { email: email.trim(), password: "", nickname: "" };
   };
 
   const returnToLogin = () => {
     setMode("login");
     clearChallenge();
     setPassword("");
-    registrationDraftRef.current = { email: "", password: "" };
+    setNickname("");
+    setShowPassword(false);
+    registrationDraftRef.current = { email: "", password: "", nickname: "" };
   };
 
   const submitCredentials = async (event) => {
@@ -645,13 +654,21 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
       }
     }
     const validationCode = mode === "signup"
-      ? validateRegistrationCredentials(normalizedEmail, password)
+      ? validateRegistrationCredentials(normalizedEmail, password, nickname)
       : null;
+    if (validationCode === "INVALID_NICKNAME") {
+      setError("请输入昵称。");
+      return { captchaResult: true, bizResult: false };
+    }
     if (validationCode === "WEAK_PASSWORD") {
       setError("密码至少需要 12 位字符。");
       return { captchaResult: true, bizResult: false };
     }
-    registrationDraftRef.current = { email: normalizedEmail, password };
+    if (mode === "signup" && password !== confirmPassword) {
+      setError("两次输入的密码不一致。");
+      return { captchaResult: true, bizResult: false };
+    }
+    registrationDraftRef.current = { email: normalizedEmail, password, nickname: nickname.trim() };
     setSubmitting(true);
     try {
       const challenge = mode === "reset"
@@ -702,9 +719,9 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
         setNotice("密码已重置，请使用新密码登录。");
         return;
       }
-      const validationCode = validateRegistrationCredentials(draft.email, draft.password);
+      const validationCode = validateRegistrationCredentials(draft.email, draft.password, draft.nickname);
       if (validationCode) {
-        setError(validationCode === "INVALID_EMAIL" ? "请输入有效邮箱地址。" : "密码至少需要 12 位字符。");
+        setError(validationCode === "INVALID_EMAIL" ? "请输入有效邮箱地址。" : validationCode === "INVALID_NICKNAME" ? "请输入昵称。" : "密码至少需要 12 位字符。");
         setStep("credentials");
         setChallengeId("");
         setCode("");
@@ -713,6 +730,7 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
       const auth = await registerWithEmail({
         email: draft.email,
         password: draft.password,
+        nickname: draft.nickname,
         challengeId,
         code,
       });
@@ -765,7 +783,9 @@ function Auth({ mode: initialMode, onBack, onSuccess }) {
         <div className="auth-panel__heading"><h1>{mode === "signup" ? "创建账号" : mode === "reset" ? "重置密码" : "欢迎回来"}</h1><p>{mode === "signup" ? "用邮箱注册，开始你的口语练习。" : mode === "reset" ? "输入注册邮箱，验证后设置新密码。" : "继续上一次的学习进度。"}</p></div>
         <form onSubmit={submitCredentials}>
           <label>邮箱<input type="email" value={email} onChange={(event) => { const nextEmail = event.target.value; setEmail(nextEmail); registrationDraftRef.current.email = nextEmail.trim(); }} placeholder="name@example.com" autoComplete="email" maxLength="254" required disabled={submitting} /></label>
+          {mode === "signup" && <label>昵称<input type="text" value={nickname} onChange={(event) => { const nextNickname = event.target.value; setNickname(nextNickname); registrationDraftRef.current.nickname = nextNickname.trim(); }} placeholder="请输入昵称" autoComplete="nickname" required disabled={submitting} /></label>}
           {mode !== "reset" && <label>密码<span className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => { const nextPassword = event.target.value; setPassword(nextPassword); registrationDraftRef.current.password = nextPassword; }} placeholder="至少 12 位字符" autoComplete={mode === "signup" ? "new-password" : "current-password"} minLength="12" maxLength="200" required disabled={submitting} /><button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeSlash /> : <Eye />}</button></span></label>}
+          {mode === "signup" && <label>确认密码<span className="password-field"><input type={showConfirmPassword ? "text" : "password"} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="再次输入密码" autoComplete="new-password" minLength="12" maxLength="200" required disabled={submitting} /><button type="button" aria-label={showConfirmPassword ? "隐藏确认密码" : "显示确认密码"} onClick={() => setShowConfirmPassword(!showConfirmPassword)}>{showConfirmPassword ? <EyeSlash /> : <Eye />}</button></span></label>}
           <HumanVerification buttonId={captchaButtonId} onVerify={verifyAndIssueChallenge} />
           {mode === "login" && <button type="button" className="forgot-link" onClick={beginPasswordReset}>忘记密码？</button>}
           {notice && <p className="auth-notice" role="status">{notice}</p>}
