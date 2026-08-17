@@ -7,7 +7,19 @@ import { pageForPath } from '../src/analytics/pageCatalog.js'
 
 function recorder() {
   const events = []
-  return { events, tracker: { track: (name, data) => events.push({ name, data }) } }
+  const identities = []
+  return {
+    events,
+    identities,
+    tracker: {
+      identify: (id) => identities.push(id),
+      track: (payload) => events.push(payload({
+        hostname: 'unispeaking.qnsdk.com',
+        title: 'Initial title',
+        url: '/initial/private-path',
+      })),
+    },
+  }
 }
 
 function eventTargetRecorder() {
@@ -31,6 +43,7 @@ test('queues the initial page view until the Umami tracker is ready', () => {
     enabled: true,
     tracker: () => tracker,
     eventTarget,
+    schedule: () => undefined,
   })
 
   client.trackPageView('/conversation/private-session')
@@ -38,15 +51,18 @@ test('queues the initial page view until the Umami tracker is ready', () => {
   assert.deepEqual(calls, [])
 
   tracker = { track: (...args) => calls.push(args) }
-  eventTarget.dispatch('umami:loaded')
+  eventTarget.dispatch('load')
 
   assert.equal(calls.length, 2)
   assert.equal(typeof calls[0][0], 'function')
-  assert.deepEqual(calls[1], ['mode_selected', {
-    mode: 'FREE_CHAT',
-    page_code: 'conversation',
-    source: 'sidebar',
-  }])
+  assert.equal(typeof calls[1][0], 'function')
+  assert.deepEqual(calls[1][0]({ url: '/private' }), {
+    url: '/conversation/session',
+    id: undefined,
+    name: 'mode_selected',
+    data: { mode: 'FREE_CHAT', page_code: 'conversation', source: 'sidebar' },
+    title: 'UniSpeaking',
+  })
 })
 
 test('tracks only approved primitive mode-selection properties', () => {
@@ -61,8 +77,12 @@ test('tracks only approved primitive mode-selection properties', () => {
   }, 'main_navigation')
 
   assert.deepEqual(events, [{
+    hostname: 'unispeaking.qnsdk.com',
+    id: undefined,
     name: 'mode_selected',
     data: { mode: 'INTERVIEW', page_code: 'interview-training', source: 'main_navigation' },
+    title: 'UniSpeaking',
+    url: '/',
   }])
 })
 
@@ -101,7 +121,7 @@ test('emits terminal training duration without heartbeat or identifiers', () => 
   training.heartbeat()
   training.complete({ transcript: 'private-transcript' })
 
-  assert.deepEqual(events, [
+  assert.deepEqual(events.map(({ name, data }) => ({ name, data })), [
     { name: 'training_start_attempt', data: { mode: 'FREE_CHAT', page_code: 'conversation' } },
     { name: 'training_started', data: { mode: 'FREE_CHAT', page_code: 'conversation' } },
     { name: 'training_completed', data: { mode: 'FREE_CHAT', page_code: 'conversation', effective_duration_seconds: 7 } },
@@ -135,10 +155,35 @@ test('tracks learning assets separately from training modes', () => {
   const { events, tracker } = recorder()
   const client = createAnalyticsClient({ enabled: true, tracker: () => tracker })
   client.trackLearningAsset({ pageCode: 'interview-assets', mode: 'INTERVIEW' }, 'REPORT')
-  assert.deepEqual(events, [{
+  assert.deepEqual(events.map(({ name, data }) => ({ name, data })), [{
     name: 'learning_asset_view',
     data: { mode: 'INTERVIEW', page_code: 'interview-assets', asset_type: 'REPORT' },
   }])
+})
+
+test('uses and clears the authenticated user UUID as the Umami Distinct ID', () => {
+  const { events, identities, tracker } = recorder()
+  const client = createAnalyticsClient({ enabled: true, tracker: () => tracker })
+
+  client.setDistinctId('c8ca76c6-ea4b-46e8-aaf1-848d074d54ec')
+  client.trackModeSelection({ mode: 'SCENE', pageCode: 'scene-training' })
+  client.setDistinctId(null)
+  client.trackModeSelection({ mode: 'FREE_CHAT', pageCode: 'conversation' })
+
+  assert.deepEqual(identities, ['c8ca76c6-ea4b-46e8-aaf1-848d074d54ec', ''])
+  assert.equal(events[0].id, 'c8ca76c6-ea4b-46e8-aaf1-848d074d54ec')
+  assert.equal(events[1].id, undefined)
+})
+
+test('attributes custom events to the latest normalized page URL', () => {
+  const { events, tracker } = recorder()
+  const client = createAnalyticsClient({ enabled: true, tracker: () => tracker })
+
+  client.trackPageView('/scenes/private-scene/session/private-session')
+  client.trackModeSelection({ mode: 'SCENE', pageCode: 'scene-training' })
+
+  assert.equal(events[1].url, '/scenes/session')
+  assert.equal(events[1].name, 'mode_selected')
 })
 
 test('reports page views with normalized paths and without route identifiers or query strings', () => {
@@ -161,7 +206,7 @@ test('reports page views with normalized paths and without route identifiers or 
     title: 'Private title',
     url: '/private/path?token=private',
     website: 'public-website-id',
-  })), [
+  })).map(({ id: _id, ...payload }) => payload), [
     {
       hostname: 'unispeaking.qnsdk.com',
       language: 'zh-CN',
