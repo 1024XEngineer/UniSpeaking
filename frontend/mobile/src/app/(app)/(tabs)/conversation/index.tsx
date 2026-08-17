@@ -1,9 +1,18 @@
 import { useRouter } from 'expo-router';
 
+import { useAnalytics } from '@/model/AnalyticsProvider';
 import { routes } from '@/navigation/routes';
 import { ConversationScreen } from '@/screens/ConversationScreen';
 
 export default function ConversationHomeRoute() {
   const router = useRouter();
-  return <ConversationScreen onStartCall={() => router.push(routes.conversation.call)} />;
+  const analytics = useAnalytics();
+  return (
+    <ConversationScreen
+      onStartCall={() => {
+        analytics.trackModeSelection({ mode: 'FREE_CHAT', pageCode: 'conversation' }, 'conversation-home');
+        router.push(routes.conversation.call);
+      }}
+    />
+  );
 }

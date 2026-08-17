@@ -137,12 +137,14 @@ describe('ScenesHome backend generation binding', () => {
 
   it('shows the generated backend preview and opens that exact scene', async () => {
     const onOpen = jest.fn();
+    const onStartScene = jest.fn();
     const sceneService = {
       generate: jest.fn(async () => scene),
     };
     const screen = await render(
       <ScenesHome
         onOpen={onOpen}
+        onStartScene={onStartScene}
         promptExample={{ id: 'airport', prompt: '机场托运行李' }}
         sceneService={sceneService}
       />,
@@ -161,6 +163,7 @@ describe('ScenesHome backend generation binding', () => {
     expect(screen.getByText('你将扮演')).toBeTruthy();
     expect(screen.getByText('乘客')).toBeTruthy();
     await fireEvent.press(screen.getByText('开始练习'));
+    expect(onStartScene).toHaveBeenCalledTimes(1);
     expect(onOpen).toHaveBeenCalledWith({ name: 'training', scene });
   });
 
