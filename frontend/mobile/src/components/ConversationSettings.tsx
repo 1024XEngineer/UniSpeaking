@@ -127,15 +127,30 @@ export function ConversationSettings({
   onSave: (settings: { speed: string; level: string; teacher: Teacher }) => void | Promise<void>;
   onClose: () => void;
 }) {
+  const [saving, setSaving] = useState(false);
+  const handleClose = () => {
+    if (saving) return;
+    onClose();
+  };
+  const handleSave = async (settings: { speed: string; level: string; teacher: Teacher }) => {
+    setSaving(true);
+    try {
+      await onSave(settings);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <Modal animationType="slide" transparent visible={open} onRequestClose={onClose}>
+    <Modal animationType="slide" transparent visible={open} onRequestClose={handleClose}>
       {open ? (
         <ConversationSettingsSheet
           speed={speed}
           level={level}
           teacher={teacher}
-          onSave={onSave}
-          onClose={onClose}
+          onSave={handleSave}
+          onClose={handleClose}
+          saving={saving}
         />
       ) : null}
     </Modal>
@@ -148,27 +163,19 @@ function ConversationSettingsSheet({
   teacher,
   onSave,
   onClose,
+  saving,
 }: {
   speed: string;
   level: string;
   teacher: Teacher;
   onSave: (settings: { speed: string; level: string; teacher: Teacher }) => void | Promise<void>;
   onClose: () => void;
+  saving: boolean;
 }) {
   const [draftSpeed, setDraftSpeed] = useState(speed);
   const [draftLevel, setDraftLevel] = useState(level);
   const [draftTeacher, setDraftTeacher] = useState(teacher);
-  const [saving, setSaving] = useState(false);
   const { playTeacher } = useTeacherPreview();
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await onSave({ speed: draftSpeed, level: draftLevel, teacher: draftTeacher });
-    } finally {
-      setSaving(false);
-    }
-  };
 
   return (
     <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -200,7 +207,7 @@ function ConversationSettingsSheet({
             <AppButton title="取消" variant="secondary" onPress={onClose} disabled={saving} style={styles.flex} />
             <AppButton
               title={saving ? '正在保存' : '保存设置'}
-              onPress={() => void handleSave()}
+              onPress={() => void onSave({ speed: draftSpeed, level: draftLevel, teacher: draftTeacher })}
               disabled={saving}
               style={styles.flex}
             />
