@@ -380,6 +380,9 @@ svg { display: block; }
 .conversation-settings__teachers button:hover { border-color: #c9c9c4; background: #fafaf8; transform: translateY(-1px); }
 .conversation-settings__teachers button:active { transform: translateY(0) scale(.985); }
 .conversation-settings__teachers button.is-active { border-color: #222; box-shadow: inset 0 0 0 1px #222; }
+.conversation-settings__teachers button.is-playing { background: #f2f2ef; }
+.conversation-settings__teachers button.is-playing > svg { color: #242423; animation: audio-toggle-playing 1.1s ease-in-out infinite; }
+.conversation-settings__teachers button.has-error > svg { color: #c3c3bf; }
 .conversation-settings__teachers img { width: 52px; height: 52px; display: block; object-fit: contain; object-position: center bottom; border-radius: 10px; background: var(--soft); transition: transform .28s cubic-bezier(.22,1,.36,1); }
 .conversation-settings__teachers button:hover img { transform: scale(1.055); }
 .conversation-settings__teachers strong, .conversation-settings__teachers small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
