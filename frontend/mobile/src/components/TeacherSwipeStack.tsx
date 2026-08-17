@@ -16,20 +16,12 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { colors, teachers, type Teacher } from '@/theme/tokens';
+import { useTeacherPreview } from '@/features/audio/useTeacherPreview';
 
 const DIAL_RADIUS = 164;
 const DIAL_STEP = 0.34;
 const DIAL_BUTTON_SIZE = 52;
 const DRAG_DISTANCE_PER_STEP = DIAL_RADIUS * DIAL_STEP;
-
-const teacherIntros: Record<string, string> = {
-  clara: "Hi, I'm Clara. Take your time — we'll make speaking feel natural.",
-  james: "Hi, I'm James. We'll make every sentence clear and confident.",
-  leo: "Hi, I'm Leo. Let's keep it relaxed, lively, and easy to start.",
-  david: "Hi, I'm David. We'll make your English concise, natural, and ready for work.",
-  emily: "Hi, I'm Emily. We'll build fluent English through warm, everyday conversation.",
-  arthur: "Hi, I'm Arthur. We'll slow down, think clearly, and express richer ideas.",
-};
 
 function modIndex(index: number, count: number) {
   'worklet';
@@ -125,6 +117,7 @@ export function TeacherSwipeStack({
 
   const active = teachers[activeIndex];
   const oppositeIndex = modIndex(activeIndex + 3, teachers.length);
+  const { playTeacher } = useTeacherPreview();
 
   const commitPosition = useCallback((nextPosition: number) => {
     setPosition(nextPosition);
@@ -190,10 +183,15 @@ export function TeacherSwipeStack({
         </Animated.View>
       </View>
 
-      <View style={styles.intro}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`试听 ${active.name}`}
+        onPress={() => playTeacher(active)}
+        style={({ pressed }) => [styles.intro, pressed && styles.introPressed]}
+      >
         <SpeakerHighIcon color={colors.subtle} size={18} weight="fill" />
-        <Text numberOfLines={2} style={styles.introText}>“{teacherIntros[active.id]}”</Text>
-      </View>
+        <Text numberOfLines={2} style={styles.introText}>“{active.intro}”</Text>
+      </Pressable>
 
       <GestureDetector gesture={dragGesture}>
         <Animated.View style={styles.dial} accessibilityLabel="拖动圆盘选择 AI 老师">
@@ -247,6 +245,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   introText: { maxWidth: 304, color: colors.muted, fontSize: 14, lineHeight: 21, fontWeight: '300', textAlign: 'center' },
+  introPressed: { opacity: 0.68 },
   dial: {
     position: 'relative',
     width: '100%',

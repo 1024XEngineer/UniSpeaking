@@ -38,6 +38,7 @@ import {
   SectionTitle,
 } from '@/components/ui';
 import { LevelSelector, SpeedSelector, TeacherSelector } from '@/components/ConversationSettings';
+import { useTeacherPreview } from '@/features/audio/useTeacherPreview';
 import {
   ProfileApi,
   type AchievementOverview,
@@ -1034,6 +1035,7 @@ export function Membership({ onBack }: { onBack: () => void }) {
 
 export function AssistantSettings({ onBack }: { onBack: () => void }) {
   const { speed, saveSpeed, level, saveLevel, teacher, saveTeacher } = useAppModel();
+  const { playTeacher } = useTeacherPreview();
   const [syncState, setSyncState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const save = async (operation: () => Promise<void>) => {
     setSyncState('saving');
@@ -1101,6 +1103,7 @@ export function AssistantSettings({ onBack }: { onBack: () => void }) {
             onSelect={(value) => {
               void save(() => saveTeacher(value));
             }}
+            onPreview={playTeacher}
           />
         </Card>
       </View>
