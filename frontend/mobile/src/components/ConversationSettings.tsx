@@ -124,7 +124,7 @@ export function ConversationSettings({
   speed: string;
   level: string;
   teacher: Teacher;
-  onSave: (settings: { speed: string; level: string; teacher: Teacher }) => void;
+  onSave: (settings: { speed: string; level: string; teacher: Teacher }) => void | Promise<void>;
   onClose: () => void;
 }) {
   return (
@@ -152,13 +152,23 @@ function ConversationSettingsSheet({
   speed: string;
   level: string;
   teacher: Teacher;
-  onSave: (settings: { speed: string; level: string; teacher: Teacher }) => void;
+  onSave: (settings: { speed: string; level: string; teacher: Teacher }) => void | Promise<void>;
   onClose: () => void;
 }) {
   const [draftSpeed, setDraftSpeed] = useState(speed);
   const [draftLevel, setDraftLevel] = useState(level);
   const [draftTeacher, setDraftTeacher] = useState(teacher);
+  const [saving, setSaving] = useState(false);
   const { playTeacher } = useTeacherPreview();
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave({ speed: draftSpeed, level: draftLevel, teacher: draftTeacher });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -187,10 +197,11 @@ function ConversationSettingsSheet({
             />
           </View>
           <View style={styles.actions}>
-            <AppButton title="取消" variant="secondary" onPress={onClose} style={styles.flex} />
+            <AppButton title="取消" variant="secondary" onPress={onClose} disabled={saving} style={styles.flex} />
             <AppButton
-              title="保存设置"
-              onPress={() => onSave({ speed: draftSpeed, level: draftLevel, teacher: draftTeacher })}
+              title={saving ? '正在保存' : '保存设置'}
+              onPress={() => void handleSave()}
+              disabled={saving}
               style={styles.flex}
             />
           </View>

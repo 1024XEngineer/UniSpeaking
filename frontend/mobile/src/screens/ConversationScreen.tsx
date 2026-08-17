@@ -5,7 +5,7 @@ import { MicrophoneSlashIcon } from 'phosphor-react-native/src/icons/MicrophoneS
 import { PhoneDisconnectIcon } from 'phosphor-react-native/src/icons/PhoneDisconnect';
 import { SubtitlesIcon } from 'phosphor-react-native/src/icons/Subtitles';
 import { type ComponentProps, useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -459,9 +459,7 @@ export function ConversationScreen({
     teacher,
     speed,
     level,
-    setSpeed,
-    setLevel,
-    setTeacher,
+    saveConversationSettings,
   } = useAppModel();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [inCall, setInCall] = useState(false);
@@ -597,11 +595,13 @@ export function ConversationScreen({
         level={level}
         teacher={teacher}
         onClose={() => setSettingsOpen(false)}
-        onSave={(settings) => {
-          setSpeed(settings.speed);
-          setLevel(settings.level);
-          setTeacher(settings.teacher);
-          setSettingsOpen(false);
+        onSave={async (settings) => {
+          try {
+            await saveConversationSettings(settings);
+            setSettingsOpen(false);
+          } catch (error) {
+            Alert.alert('设置保存失败', error instanceof Error ? error.message : '请稍后重试');
+          }
         }}
       />
     </>

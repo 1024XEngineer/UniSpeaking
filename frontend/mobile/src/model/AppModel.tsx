@@ -70,6 +70,11 @@ type AppModelValue = {
   teacher: Teacher;
   setTeacher: (value: Teacher) => void;
   saveTeacher: (value: Teacher) => Promise<void>;
+  saveConversationSettings: (settings: {
+    speed: string;
+    level: string;
+    teacher: Teacher;
+  }) => Promise<void>;
   sceneRecords: SceneLearningRecord[];
   ieltsRecords: IeltsLearningRecord[];
   interviewRecords: InterviewLearningRecord[];
@@ -206,6 +211,21 @@ export function AppModelProvider({
     [authController],
   );
 
+  const saveConversationSettings = useCallback(
+    async (settings: { speed: string; level: string; teacher: Teacher }) => {
+      const selectedLevel = levels.find((option) => option.id === settings.level) ?? levels[0];
+      const preference = await authController.updatePreference({
+        preferredAiSpeechSpeed: speedCodeForLabel(settings.speed),
+        cefrLevel: cefrLevelForLevel(selectedLevel),
+        preferredVoice: voiceForTeacher(settings.teacher),
+      });
+      setSpeed(speedLabelForCode(preference.preferredAiSpeechSpeed));
+      setLevel(levelForCefrLevel(preference.cefrLevel, levels).id);
+      setTeacher(teacherForVoice(preference.preferredVoice, teachers));
+    },
+    [authController],
+  );
+
   const signOut = useCallback(() => authController.logout(), [authController]);
 
   const isModelReady = authState.status !== 'booting';
@@ -237,6 +257,7 @@ export function AppModelProvider({
       teacher,
       setTeacher,
       saveTeacher,
+      saveConversationSettings,
       sceneRecords,
       ieltsRecords,
       interviewRecords,
@@ -267,6 +288,7 @@ export function AppModelProvider({
       removeSceneRecord,
       saveSpeed,
       saveTeacher,
+      saveConversationSettings,
       saveLevel,
       sceneRecords,
       signIn,
