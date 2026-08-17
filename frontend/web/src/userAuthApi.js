@@ -24,13 +24,16 @@ const messages = {
   AUTH_SESSION_SYNC_FAILED: "邮箱认证已通过，但学习服务账号同步失败，请稍后重试。",
 };
 
-export function validateRegistrationCredentials(email, password) {
+export function validateRegistrationCredentials(email, password, nickname = null) {
   const normalizedEmail = String(email || "").trim();
   if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
     return "INVALID_EMAIL";
   }
   if (typeof password !== "string" || password.length < 12 || password.length > 200) {
     return "WEAK_PASSWORD";
+  }
+  if (nickname !== null && !String(nickname || "").trim()) {
+    return "INVALID_NICKNAME";
   }
   return null;
 }
@@ -77,10 +80,10 @@ export function resetPasswordWithEmail({ email, password, challengeId, code }) {
   });
 }
 
-export async function registerWithEmail({ email, password, challengeId, code }) {
+export async function registerWithEmail({ email, password, nickname, challengeId, code }) {
   const auth = await request("/api/auth/email/register/token", {
     method: "POST",
-    body: JSON.stringify({ email, password, challengeId, code }),
+    body: JSON.stringify({ email, password, nickname, challengeId, code }),
   });
   saveAuthSession(auth);
   return auth;
