@@ -20,18 +20,35 @@ export function createAnalyticsClient(options = {}) {
   const enabled = options.enabled ?? false
   const tracker = options.tracker || (() => globalThis.window?.umami)
   const eventTarget = options.eventTarget || globalThis.window
+  const schedule = options.schedule || ((callback) => globalThis.setTimeout(callback, 100))
   const now = options.now || (() => Date.now())
   const pending = []
+  let flushScheduled = false
+  let remainingFlushAttempts = 50
+  let distinctId = null
+  let currentUrl = normalizeTrackedPath(options.initialPath || globalThis.window?.location?.pathname || '/')
+
+  function scheduleFlush() {
+    if (flushScheduled || remainingFlushAttempts <= 0) return
+    flushScheduled = true
+    const timer = schedule(() => {
+      flushScheduled = false
+      remainingFlushAttempts -= 1
+      flushPending()
+      if (pending.length > 0) scheduleFlush()
+    })
+    timer?.unref?.()
+  }
 
   function dispatch(send) {
     if (!enabled) return
     try {
       const instance = tracker()
-      if (typeof instance?.track === 'function') {
-        send(instance)
+      if (send(instance)) {
         return
       }
       if (pending.length < 50) pending.push(send)
+      scheduleFlush()
     } catch {
       // Analytics must never block product behavior.
     }
@@ -44,18 +61,32 @@ export function createAnalyticsClient(options = {}) {
     } catch {
       return
     }
-    if (typeof instance?.track !== 'function') return
     pending.splice(0).forEach((send) => {
-      try { send(instance) } catch { /* One event must not block the remaining queue. */ }
+      try {
+        if (!send(instance)) pending.push(send)
+      } catch { /* One event must not block the remaining queue. */ }
     })
   }
 
   if (enabled && typeof eventTarget?.addEventListener === 'function') {
-    eventTarget.addEventListener('umami:loaded', flushPending, { once: true })
+    eventTarget.addEventListener('load', flushPending, { once: true })
   }
 
   function emit(name, data = {}) {
-    dispatch((instance) => instance.track(name, safeData(data)))
+    const eventDistinctId = distinctId
+    const eventUrl = currentUrl
+    dispatch((instance) => {
+      if (typeof instance?.track !== 'function') return false
+      instance.track((properties) => ({
+        ...properties,
+        id: eventDistinctId || undefined,
+        name,
+        data: safeData(data),
+        title: 'UniSpeaking',
+        url: eventUrl,
+      }))
+      return true
+    })
   }
 
   function validTrainingContext(context = {}) {
@@ -101,9 +132,33 @@ export function createAnalyticsClient(options = {}) {
 
   return {
     training,
+    setDistinctId(value) {
+      const nextDistinctId = typeof value === 'string' && value.length > 0 && value.length <= 50
+        ? value
+        : null
+      if (nextDistinctId === distinctId) return
+      distinctId = nextDistinctId
+      const identity = distinctId
+      dispatch((instance) => {
+        if (typeof instance?.identify !== 'function') return false
+        instance.identify(identity || '')
+        return true
+      })
+    },
     trackPageView(pathname = '/') {
-      const url = normalizeTrackedPath(pathname)
-      dispatch((instance) => instance.track((properties) => ({ ...properties, url, title: 'UniSpeaking' })))
+      currentUrl = normalizeTrackedPath(pathname)
+      const pageDistinctId = distinctId
+      const pageUrl = currentUrl
+      dispatch((instance) => {
+        if (typeof instance?.track !== 'function') return false
+        instance.track((properties) => ({
+          ...properties,
+          id: pageDistinctId || undefined,
+          url: pageUrl,
+          title: 'UniSpeaking',
+        }))
+        return true
+      })
     },
     trackModeSelection(context = {}, source = 'navigation') {
       if (validTrainingContext(context)) emit('mode_selected', { ...contextData(context), source })

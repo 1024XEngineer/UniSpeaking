@@ -52,6 +52,10 @@ test("explicit mode choices and learning asset opens are instrumented without cu
   assert.doesNotMatch(interviewSource, /track\(["']page_view["']/);
 });
 
+test("authenticated web sessions set and clear the shared Umami Distinct ID", () => {
+  assert.match(appSource, /analytics\.setDistinctId\(user\?\.id \|\| null\)/);
+});
+
 test("IELTS ignores a late realtime start after the session effect was cleaned up", () => {
   assert.match(ieltsSource, /\.then\(\(started\) => \{\s+if \(cancelled\) return;/);
 });

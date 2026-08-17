@@ -2901,6 +2901,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    analytics.setDistinctId(user?.id || null);
+  }, [user?.id]);
+
+  useEffect(() => {
     let cancelled = false;
     const bootstrapAuth = async () => {
       const bootstrapToken = getAccessToken();
