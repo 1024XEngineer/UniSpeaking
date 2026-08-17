@@ -609,7 +609,7 @@ export function ConversationScreen({
 }
 
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: 18, paddingTop: 56, paddingBottom: 84, gap: 24 },
+  content: { paddingHorizontal: 18, paddingTop: 18, paddingBottom: 84, gap: 24 },
   brandHeader: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   settingsButton: { height: 36, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7, borderRadius: 18, backgroundColor: '#F0F0ED' },
   settingsLabel: { color: '#666662', fontSize: 12, fontWeight: '300' },
