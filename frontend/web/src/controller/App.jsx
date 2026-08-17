@@ -288,6 +288,72 @@ function StaticAudioToggle({ src, label = "播放试听音频", mini = false }) 
   );
 }
 
+function useTeacherPreviewPlayback() {
+  const audioRef = useRef(null);
+  const playbackVersionRef = useRef(0);
+  const [playingId, setPlayingId] = useState(null);
+  const [failedId, setFailedId] = useState(null);
+
+  useEffect(() => () => {
+    playbackVersionRef.current += 1;
+    const entry = audioRef.current;
+    if (!entry) return;
+    entry.audio.pause();
+    entry.audio.removeEventListener("ended", entry.onEnded);
+    entry.audio.removeEventListener("error", entry.onError);
+    audioRef.current = null;
+  }, []);
+
+  const playTeacher = async (teacher) => {
+    const version = playbackVersionRef.current + 1;
+    playbackVersionRef.current = version;
+    const current = audioRef.current;
+
+    if (current?.id === teacher.id && !current.audio.paused) {
+      current.audio.pause();
+      current.audio.currentTime = 0;
+      setPlayingId(null);
+      return;
+    }
+
+    if (current) {
+      current.audio.pause();
+      current.audio.currentTime = 0;
+      current.audio.removeEventListener("ended", current.onEnded);
+      current.audio.removeEventListener("error", current.onError);
+    }
+
+    const audio = new Audio(teacher.previewAudio);
+    audio.preload = "auto";
+    const onEnded = () => {
+      if (audioRef.current?.id === teacher.id) setPlayingId(null);
+    };
+    const onError = () => {
+      if (audioRef.current?.id !== teacher.id) return;
+      setPlayingId(null);
+      setFailedId(teacher.id);
+    };
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("error", onError);
+    audioRef.current = { id: teacher.id, audio, onEnded, onError };
+    setFailedId(null);
+
+    try {
+      await audio.play();
+      if (playbackVersionRef.current === version && audioRef.current?.id === teacher.id) {
+        setPlayingId(teacher.id);
+      }
+    } catch {
+      if (playbackVersionRef.current === version && audioRef.current?.id === teacher.id) {
+        setPlayingId(null);
+        setFailedId(teacher.id);
+      }
+    }
+  };
+
+  return { failedId, playTeacher, playingId };
+}
+
 function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
   const audioRef = useRef(null);
   const objectUrlRef = useRef("");
@@ -960,13 +1026,24 @@ function SpeedSelector({ value, onChange, className }) {
 }
 
 function TeacherSelector({ selectedId, onSelect, className }) {
+  const { failedId, playTeacher, playingId } = useTeacherPreviewPlayback();
+
   return (
     <div className={cx("conversation-settings__teachers", className)}>
       {teachers.map((item) => (
-        <button key={item.id} type="button" className={selectedId === item.id ? "is-active" : ""} onClick={() => onSelect(item)}>
+        <button
+          key={item.id}
+          type="button"
+          className={cx(selectedId === item.id && "is-active", playingId === item.id && "is-playing", failedId === item.id && "has-error")}
+          title={failedId === item.id ? "试听音频加载失败，再次点击可重试" : undefined}
+          onClick={() => {
+            onSelect(item);
+            void playTeacher(item);
+          }}
+        >
           <img src={item.image} alt="" />
           <span><strong>{item.name}</strong><small>{item.accent} · {item.personality}</small></span>
-          <Headphones aria-hidden="true" />
+          {playingId === item.id ? <Pause aria-hidden="true" weight="fill" /> : <Headphones aria-hidden="true" />}
         </button>
       ))}
     </div>
