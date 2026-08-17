@@ -49,6 +49,7 @@ import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
 import { ApiClient } from '@/infrastructure/http/ApiClient';
 import { sceneCategoryForLabel } from '@/data/sceneCategories';
 import { useAppModel } from '@/model/AppModel';
+import type { AnalyticsTrackerFactory } from '@/infrastructure/analytics/AnalyticsClient';
 import { useLearningStage } from '@/navigation/learningStage';
 import { forgetSpecialty } from '@/navigation/specialtyMemory';
 import { createTranscriptTranslationApi } from '@/features/conversation/TranscriptTranslationApi';
@@ -252,14 +253,20 @@ export function SceneCallStage({
   scene,
   progressCollapsed,
   onComplete,
+  analytics,
   createController = createDefaultSceneController,
 }: {
   scene: GeneratedScene;
   progressCollapsed: boolean;
   onComplete: (completion: DialogueCompletion) => void;
+  analytics?: AnalyticsTrackerFactory;
   createController?: SceneControllerFactory;
 }) {
   const { teacher, speed } = useAppModel();
+  const [trainingAnalytics] = useState(() => analytics?.training({
+    mode: 'SCENE',
+    pageCode: 'scene-training',
+  }));
   const deliveredCompletion = useRef<DialogueCompletion | null>(null);
   const autoEnding = useRef(false);
   const [evaluationPending, setEvaluationPending] = useState(false);
@@ -271,6 +278,7 @@ export function SceneCallStage({
       speechSpeed: speedCodeForLabel(speed),
     },
     (config) => createController(scene.sceneId, config),
+    trainingAnalytics,
   );
 
   useEffect(() => {
@@ -321,7 +329,7 @@ export function SceneCallStage({
   );
 }
 
-export function Training({ id, scene, trainingController: injectedTrainingController, wavRecorder: injectedWavRecorder, ttsPlayer: injectedTtsPlayer, initialStage = 'learn', onBack, onFinish, onViewDetails }: { id?: string; scene?: GeneratedScene; trainingController?: SceneTrainingController; wavRecorder?: Pick<WavRecorder, 'start' | 'stop' | 'cancel'>; ttsPlayer?: Pick<TtsPlayer, 'play' | 'stop'>; initialStage?: TrainingStage; onBack: () => void; onFinish: () => void; onViewDetails?: (id: string) => void }) {
+export function Training({ id, scene, analytics, trainingController: injectedTrainingController, wavRecorder: injectedWavRecorder, ttsPlayer: injectedTtsPlayer, initialStage = 'learn', onBack, onFinish, onViewDetails }: { id?: string; scene?: GeneratedScene; analytics?: AnalyticsTrackerFactory; trainingController?: SceneTrainingController; wavRecorder?: Pick<WavRecorder, 'start' | 'stop' | 'cancel'>; ttsPlayer?: Pick<TtsPlayer, 'play' | 'stop'>; initialStage?: TrainingStage; onBack: () => void; onFinish: () => void; onViewDetails?: (id: string) => void }) {
   const { setImmersiveLearning } = useLearningStage();
   const sceneId = scene?.sceneId ?? id ?? recommendations[0].id;
   const scenario = scene
@@ -656,6 +664,7 @@ export function Training({ id, scene, trainingController: injectedTrainingContro
         <View style={styles.sceneCallStage}>
           {scene ? (
             <SceneCallStage
+              analytics={analytics}
               scene={scene}
               progressCollapsed={progressCollapsed}
               onComplete={(completion) => {
@@ -1065,12 +1074,14 @@ export function ScenesScreen({
   onOpenIelts,
   onOpenInterview,
   onStartScene,
+  analytics,
 }: {
   onIeltsViewDetails?: (recordId: string) => void;
   onSceneViewDetails?: (sceneId: string) => void;
   onOpenIelts?: () => void;
   onOpenInterview?: () => void;
   onStartScene?: () => void;
+  analytics?: AnalyticsTrackerFactory;
 } = {}) {
   const [route, setRoute] = useState<SceneRoute>({ name: 'home' });
   const openRoute = (nextRoute: SceneRoute) => {
@@ -1088,7 +1099,7 @@ export function ScenesScreen({
     if (route.name === 'home') void forgetSpecialty();
   }, [route.name]);
   if (route.name === 'training') {
-    return <Training scene={route.scene} onBack={() => setRoute({ name: 'home' })} onFinish={() => setRoute({ name: 'home' })} onViewDetails={onSceneViewDetails} />;
+    return <Training analytics={analytics} scene={route.scene} onBack={() => setRoute({ name: 'home' })} onFinish={() => setRoute({ name: 'home' })} onViewDetails={onSceneViewDetails} />;
   }
   if (route.name === 'ielts') return <IeltsFlow onExit={() => setRoute({ name: 'home' })} onViewDetails={onIeltsViewDetails} />;
   if (route.name === 'interview') return <InterviewFlow onExit={() => setRoute({ name: 'home' })} />;

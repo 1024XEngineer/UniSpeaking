@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ContinuousTurnRecorder } from '@/features/audio/ContinuousTurnRecorder';
 import { ReactNativeWebRTCTransport } from '@/features/realtime/ReactNativeWebRTCTransport';
@@ -6,6 +6,7 @@ import { SessionMessageSocket } from '@/features/realtime/SessionMessageSocket';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
 import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
 import { ApiClient } from '@/infrastructure/http/ApiClient';
+import type { TrainingTracker } from '@/infrastructure/analytics/AnalyticsClient';
 
 import {
   InterviewSessionController,
@@ -43,7 +44,7 @@ export function useInterviewSession({
   sceneId: string;
   voice: string;
   model?: string;
-}) {
+}, analytics?: TrainingTracker) {
   // Keep native Audio Studio loading out of Jest's module graph while Metro
   // still includes the production hook in Android development builds.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -69,16 +70,49 @@ export function useInterviewSession({
   });
   const [snapshot, setSnapshot] = useState<InterviewSessionSnapshot>(initialSnapshot);
   const [elapsed, setElapsed] = useState(0);
-  const end = useCallback(() => controller.end(), [controller]);
+  const endPromise = useRef<Promise<unknown> | null>(null);
+  const lifecycleVersion = useRef(0);
+  const end = useCallback(() => {
+    if (!endPromise.current) {
+      endPromise.current = Promise.resolve(controller.end()).then((result) => {
+        analytics?.complete();
+        return result;
+      }).catch((error: unknown) => {
+        if (analytics?.isStarted()) analytics.abandon('REALTIME_ERROR');
+        else analytics?.fail('REALTIME_ERROR');
+        throw error;
+      });
+    }
+    return endPromise.current;
+  }, [analytics, controller]);
 
   useEffect(() => {
+    lifecycleVersion.current += 1;
     const unsubscribe = controller.subscribe(setSnapshot);
-    void controller.start().catch(() => undefined);
+    analytics?.attempt();
+    void controller.start().catch(() => analytics?.fail('REALTIME_ERROR'));
     return () => {
       unsubscribe();
-      void end().catch(() => undefined);
+      lifecycleVersion.current += 1;
+      const cleanupVersion = lifecycleVersion.current;
+      queueMicrotask(() => {
+        if (lifecycleVersion.current === cleanupVersion) {
+          analytics?.abandon('USER_EXIT');
+          void end().catch(() => undefined);
+        }
+      });
     };
-  }, [controller, end]);
+  }, [analytics, controller, end]);
+
+  useEffect(() => {
+    if (snapshot.state === 'active') {
+      analytics?.started();
+      analytics?.resume();
+    } else if (snapshot.state === 'error') {
+      if (analytics?.isStarted()) analytics.abandon('REALTIME_ERROR');
+      else analytics?.fail('REALTIME_ERROR');
+    }
+  }, [analytics, snapshot.state]);
 
   useEffect(() => {
     if (snapshot.state !== 'active') return;

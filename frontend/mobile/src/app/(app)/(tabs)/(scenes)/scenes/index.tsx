@@ -13,6 +13,7 @@ export default function ScenesHomeRoute() {
   };
   return (
     <ScenesScreen
+      analytics={analytics}
       onIeltsViewDetails={(recordId) => {
         analytics.trackLearningAsset({ mode: 'IELTS', pageCode: 'ielts-assets' }, 'REPORT');
         router.replace(routes.learning.ielts.record(recordId));

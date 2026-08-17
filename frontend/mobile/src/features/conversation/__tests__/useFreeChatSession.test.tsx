@@ -3,6 +3,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Pressable, Text, View } from 'react-native';
 
 import type { RealtimeSessionSnapshot } from '@/features/realtime/RealtimeSessionController';
+import type { TrainingTracker } from '@/infrastructure/analytics/AnalyticsClient';
 
 import {
   type FreeChatControllerPort,
@@ -50,8 +51,10 @@ function createController(): FreeChatControllerPort & {
 
 function SessionProbe({
   createController,
+  analytics,
 }: {
   createController: () => FreeChatControllerPort;
+  analytics?: TrainingTracker;
 }) {
   const session = useFreeChatSession(
     {
@@ -60,6 +63,7 @@ function SessionProbe({
       speechSpeed: 'NATURAL',
     },
     createController,
+    analytics,
   );
   return (
     <View>
@@ -83,10 +87,25 @@ function SessionProbe({
 describe('useFreeChatSession', () => {
   it('starts once and exposes live state, transcripts, mute and interrupt actions', async () => {
     const controller = createController();
+    const analytics = {
+      attempt: jest.fn(),
+      started: jest.fn(),
+      fail: jest.fn(),
+      pause: jest.fn(),
+      resume: jest.fn(),
+      setVisible: jest.fn(),
+      settle: jest.fn(),
+      complete: jest.fn(),
+      abandon: jest.fn(),
+      isStarted: jest.fn(() => true),
+      start: jest.fn(),
+      stop: jest.fn(),
+    } as unknown as TrainingTracker;
     const factory = jest.fn(() => controller);
-    const screen = await render(<SessionProbe createController={factory} />);
+    const screen = await render(<SessionProbe analytics={analytics} createController={factory} />);
 
     await waitFor(() => expect(controller.start).toHaveBeenCalledTimes(1));
+    expect(analytics.attempt).toHaveBeenCalledTimes(1);
     expect(factory).toHaveBeenCalledWith({
       voice: 'Harvey',
       model: 'qwen3.5-omni-flash-realtime',
@@ -107,11 +126,15 @@ describe('useFreeChatSession', () => {
         'AI 正在回答',
       ),
     );
+    expect(analytics.started).toHaveBeenCalledTimes(1);
+    expect(analytics.resume).toHaveBeenCalledTimes(1);
     await fireEvent.press(screen.getByLabelText('mute'));
     await fireEvent.press(screen.getByLabelText('interrupt'));
 
     expect(controller.setMuted).toHaveBeenCalledWith(true);
     expect(controller.interrupt).toHaveBeenCalledTimes(1);
+    await fireEvent.press(screen.getByLabelText('end'));
+    await waitFor(() => expect(analytics.complete).toHaveBeenCalledTimes(1));
   });
 
   it('does not end and restart the same controller during StrictMode effect replay', async () => {

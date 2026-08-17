@@ -86,11 +86,14 @@ export class AnalyticsClient {
   training(context: AnalyticsContext = {}) {
     const timer = createActivityTimer(this.dependencies.now);
     const base = contextData(context);
+    let attempted = false;
     let ended = false;
     const tracker: TrainingTracker = {
       ...timer,
       attempt: () => {
-        if (!ended && validTrainingContext(context)) this.send('training_start_attempt', base);
+        if (ended || attempted || !validTrainingContext(context)) return;
+        attempted = true;
+        this.send('training_start_attempt', base);
       },
       started: () => {
         if (ended || timer.isStarted() || !validTrainingContext(context)) return;
@@ -145,3 +148,5 @@ export class AnalyticsClient {
     }).catch(() => undefined);
   }
 }
+
+export type AnalyticsTrackerFactory = Pick<AnalyticsClient, 'training'>;
