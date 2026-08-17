@@ -14,6 +14,9 @@ import {
 test("rejects registration credentials before issuing an email challenge", () => {
   assert.equal(validateRegistrationCredentials("person@example.com", "short"), "WEAK_PASSWORD");
   assert.equal(validateRegistrationCredentials("not-an-email", "correct-password"), "INVALID_EMAIL");
+  assert.equal(validateRegistrationCredentials("person@example.com", "correct-password", ""), "INVALID_NICKNAME");
+  assert.equal(validateRegistrationCredentials("person@example.com", "correct-password", "  "), "INVALID_NICKNAME");
+  assert.equal(validateRegistrationCredentials("person@example.com", "correct-password", "Sunny"), null);
   assert.equal(validateRegistrationCredentials("person@example.com", "correct-password"), null);
 });
 
@@ -48,11 +51,47 @@ test("does not turn an invalid registration challenge into a password login", as
     await assert.rejects(() => registerWithEmail({
       email: "person@example.com",
       password: "correct-password",
+      nickname: "Sunny",
       challengeId: "00000000-0000-0000-0000-000000000001",
       code: "123456",
     }));
     assert.deepEqual(requests, ["/api/auth/email/register/token"]);
   } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("registration submits nickname without confirmPassword", async () => {
+  const previousFetch = globalThis.fetch;
+  let request;
+  globalThis.fetch = async (path, options) => {
+    request = { path, options };
+    return new Response(JSON.stringify({ data: { accessToken: "token" } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    globalThis.window = { localStorage: { setItem() {} } };
+    await registerWithEmail({
+      email: "person@example.com",
+      password: "correct-password",
+      nickname: "Sunny",
+      confirmPassword: "different-password",
+      challengeId: "00000000-0000-0000-0000-000000000001",
+      code: "123456",
+    });
+    assert.equal(request.path, "/api/auth/email/register/token");
+    assert.deepEqual(JSON.parse(request.options.body), {
+      email: "person@example.com",
+      password: "correct-password",
+      nickname: "Sunny",
+      challengeId: "00000000-0000-0000-0000-000000000001",
+      code: "123456",
+    });
+    assert.equal(Object.hasOwn(JSON.parse(request.options.body), "confirmPassword"), false);
+  } finally {
+    delete globalThis.window;
     globalThis.fetch = previousFetch;
   }
 });
@@ -202,4 +241,17 @@ test("login UI routes password login through human verification", async () => {
   const source = await readFile(new URL("../src/controller/App.jsx", import.meta.url), "utf8");
   assert.match(source, /<HumanVerification buttonId=\{captchaButtonId\} onVerify=\{verifyAndIssueChallenge\} \/>/);
   assert.match(source, /loginWithPassword\(normalizedEmail, password, captchaVerifyParam\)/);
+});
+
+test("signup UI includes nickname, confirmed password, and separate visibility toggle", async () => {
+  const source = await readFile(new URL("../src/controller/App.jsx", import.meta.url), "utf8");
+  for (const expected of [
+    'mode === "signup" && <label>昵称',
+    'mode === "signup" && <label>确认密码',
+    'showConfirmPassword ? "text" : "password"',
+    'setError("两次输入的密码不一致。")',
+    'nickname: draft.nickname',
+  ]) {
+    assert.match(source, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
 });
