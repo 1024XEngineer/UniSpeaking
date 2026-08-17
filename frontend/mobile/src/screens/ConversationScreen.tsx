@@ -5,7 +5,7 @@ import { MicrophoneSlashIcon } from 'phosphor-react-native/src/icons/MicrophoneS
 import { PhoneDisconnectIcon } from 'phosphor-react-native/src/icons/PhoneDisconnect';
 import { SubtitlesIcon } from 'phosphor-react-native/src/icons/Subtitles';
 import { type ComponentProps, useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -17,7 +17,7 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ConversationSettings } from '@/components/ConversationSettings';
 import { AppButton, AppIcon, AppScreen, Brand } from '@/components/ui';
@@ -464,6 +464,9 @@ export function ConversationScreen({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [inCall, setInCall] = useState(false);
   const [callTransitioning, setCallTransitioning] = useState(false);
+  const insets = useSafeAreaInsets();
+  const window = useWindowDimensions();
+  const compactHome = window.height < 820;
   const settingsInteractionCount = useRef(0);
   const settingsRotation = useSharedValue(0);
   const callTransitionProgress = useSharedValue(0);
@@ -513,6 +516,11 @@ export function ConversationScreen({
     };
   });
 
+  const conversationCardMinHeight = Math.max(
+    compactHome ? 390 : 420,
+    Math.min(compactHome ? 470 : 536, window.height - insets.top - insets.bottom - 300),
+  );
+
   const startCall = () => {
     if (onStartCall) {
       onStartCall();
@@ -545,7 +553,10 @@ export function ConversationScreen({
   return (
     <>
       <Animated.View pointerEvents={callTransitioning ? 'none' : 'auto'} style={[styles.homeContainer, homeTransitionStyle]}>
-        <AppScreen scrollEnabled={false} contentStyle={styles.content}>
+        <AppScreen
+          scrollEnabled={false}
+          contentStyle={[styles.content, compactHome && styles.contentCompact]}
+        >
           <View style={styles.brandHeader}>
           <Brand />
           <Pressable
@@ -568,21 +579,25 @@ export function ConversationScreen({
             <Text style={styles.greeting}>晚上好，{nickname}</Text>
             <Text style={styles.greetingCopy}>今天也来开口说英语吧，{'\n'}每一次练习，都是进步。</Text>
           </View>
-          <Animated.View style={styles.conversationModule}>
-            <Animated.View style={[styles.portrait, portraitTransitionStyle]}>
-              <Image source={teacher.image} style={styles.teacherImage} contentFit="contain" />
+          <Animated.View style={[styles.conversationModule, compactHome && styles.conversationModuleCompact, { minHeight: conversationCardMinHeight }]}>
+            <Animated.View style={[styles.portrait, compactHome && styles.portraitCompact, portraitTransitionStyle]}>
+              <Image
+                source={teacher.image}
+                style={[styles.teacherImage, compactHome && styles.teacherImageCompact]}
+                contentFit="contain"
+              />
             </Animated.View>
-            <Text style={styles.eyebrow}>{teacher.name.toUpperCase()} · {teacher.accent}</Text>
-            <Text style={styles.moduleTitle}>想聊什么都可以</Text>
-            <Text style={styles.moduleSubtitle}>像打电话一样自然开口</Text>
+            <Text style={[styles.eyebrow, compactHome && styles.eyebrowCompact]}>{teacher.name.toUpperCase()} · {teacher.accent}</Text>
+            <Text style={[styles.moduleTitle, compactHome && styles.moduleTitleCompact]}>想聊什么都可以</Text>
+            <Text style={[styles.moduleSubtitle, compactHome && styles.moduleSubtitleCompact]}>像打电话一样自然开口</Text>
             <AppButton
               title="开始对话"
               variant="primary"
               icon="arrow-right"
               onPress={startCall}
-              style={styles.startButton}
+              style={[styles.startButton, compactHome && styles.startButtonCompact]}
             />
-            <View style={styles.privacy}>
+            <View style={[styles.privacy, compactHome && styles.privacyCompact]}>
               <AppIcon name="lock" size={14} color={colors.subtle} />
               <Text style={styles.privacyText}>自由对话内容不会保存</Text>
             </View>
@@ -609,12 +624,13 @@ export function ConversationScreen({
 }
 
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: 18, paddingTop: 18, paddingBottom: 84, gap: 24 },
+  content: { paddingHorizontal: 18, paddingTop: 18, paddingBottom: 128, gap: 20 },
   brandHeader: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   settingsButton: { height: 36, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7, borderRadius: 18, backgroundColor: '#F0F0ED' },
   settingsLabel: { color: '#666662', fontSize: 12, fontWeight: '300' },
   greeting: { color: colors.ink, fontSize: 31, lineHeight: 38, fontWeight: '600', letterSpacing: -1.2 },
   greetingCopy: { marginTop: 8, color: colors.muted, fontSize: 16, lineHeight: 23, fontWeight: '300' },
+  contentCompact: { paddingTop: 12, paddingBottom: 128, gap: 14 },
   conversationModule: {
     minHeight: 536,
     paddingHorizontal: 22,
@@ -631,11 +647,17 @@ const styles = StyleSheet.create({
     elevation: 2,
     boxShadow: '0px 5px 18px rgba(21, 21, 20, 0.045)',
   },
+  conversationModuleCompact: { paddingVertical: 18, paddingHorizontal: 18 },
   portrait: { width: 212, height: 212, overflow: 'hidden', alignItems: 'center', justifyContent: 'flex-end', borderWidth: 1, borderColor: '#EDEDE9', borderRadius: 106, backgroundColor: colors.soft },
   teacherImage: { width: 212, height: 250, marginBottom: -29 },
+  portraitCompact: { width: 164, height: 164, borderRadius: 82 },
+  teacherImageCompact: { width: 164, height: 194, marginBottom: -24 },
   eyebrow: { marginTop: 20, color: colors.subtle, fontSize: 11, fontWeight: '500', letterSpacing: 2.1 },
+  eyebrowCompact: { marginTop: 12, fontSize: 10, letterSpacing: 1.6 },
   moduleTitle: { marginTop: 13, color: colors.ink, fontSize: 29, lineHeight: 37, fontWeight: '600', letterSpacing: -1.3 },
+  moduleTitleCompact: { marginTop: 8, fontSize: 24, lineHeight: 30, letterSpacing: -1 },
   moduleSubtitle: { marginTop: 4, color: colors.muted, fontSize: 16, fontWeight: '300' },
+  moduleSubtitleCompact: { marginTop: 2, fontSize: 14 },
   startButton: {
     marginTop: 20,
     paddingHorizontal: 24,
@@ -649,7 +671,9 @@ const styles = StyleSheet.create({
     elevation: 5,
     boxShadow: '0px 7px 18px rgba(21, 21, 20, 0.18)',
   },
+  startButtonCompact: { marginTop: 12, minHeight: 44 },
   privacy: { marginTop: 20, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  privacyCompact: { marginTop: 12 },
   privacyText: { color: colors.subtle, fontSize: 11, fontWeight: '300' },
   homeContainer: { flex: 1 },
   callScreen: { flex: 1, paddingHorizontal: 22, paddingTop: 24, paddingBottom: 22, backgroundColor: colors.white },
