@@ -105,7 +105,7 @@ export function AppModelProvider({
     () => injectedAuthController ?? createDefaultAuthController(),
   );
   const [authState, setAuthState] = useState<AuthSessionState>(() => authController.getSnapshot());
-  const [nickname, setNickname] = useState('Yufan');
+  const [nickname, setNickname] = useState('');
   const [speed, setSpeed] = useState('自然');
   const [level, setLevel] = useState('starter');
   const [teacher, setTeacher] = useState(teachers[0]);
