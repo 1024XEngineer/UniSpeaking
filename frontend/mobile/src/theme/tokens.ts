@@ -28,8 +28,10 @@ export type Teacher = {
   name: string;
   accent: string;
   personality: string;
+  intro: string;
   voiceId: 'Katerina' | 'Aiden' | 'Raymond' | 'Tina' | 'Harvey' | 'Dolce';
   image: ImageSourcePropType;
+  audio: number;
 };
 
 export const teachers: Teacher[] = [
@@ -38,48 +40,60 @@ export const teachers: Teacher[] = [
     name: 'Clara',
     accent: '美式口音',
     personality: '温柔耐心',
+    intro: "Hi, I'm Clara. Take your time — we'll make speaking feel natural.",
     voiceId: 'Katerina',
     image: require('../../assets/images/unispeaking/teachers/clara.png'),
+    audio: require('../../assets/audio/teachers/clara.wav'),
   },
   {
     id: 'james',
     name: 'James',
     accent: '英式口音',
     personality: '清晰理性',
+    intro: "Hi, I'm James. We'll make every sentence clear and confident.",
     voiceId: 'Harvey',
     image: require('../../assets/images/unispeaking/teachers/james.png'),
+    audio: require('../../assets/audio/teachers/james.wav'),
   },
   {
     id: 'leo',
     name: 'Leo',
     accent: '美式口音',
     personality: '开朗活力',
+    intro: "Hi, I'm Leo. Let's keep it relaxed, lively, and easy to start.",
     voiceId: 'Raymond',
     image: require('../../assets/images/unispeaking/teachers/leo.png'),
+    audio: require('../../assets/audio/teachers/leo.wav'),
   },
   {
     id: 'david',
     name: 'David',
     accent: '美式口音',
     personality: '沉稳直接',
+    intro: "Hi, I'm David. We'll make your English concise, natural, and ready for work.",
     voiceId: 'Aiden',
     image: require('../../assets/images/unispeaking/teachers/david.png'),
+    audio: require('../../assets/audio/teachers/david.wav'),
   },
   {
     id: 'emily',
     name: 'Emily',
     accent: '英式口音',
     personality: '自然亲切',
+    intro: "Hi, I'm Emily. We'll build fluent English through warm, everyday conversation.",
     voiceId: 'Tina',
     image: require('../../assets/images/unispeaking/teachers/emily.png'),
+    audio: require('../../assets/audio/teachers/emily.wav'),
   },
   {
     id: 'arthur',
     name: 'Arthur',
     accent: '英式口音',
     personality: '睿智从容',
+    intro: "Hi, I'm Arthur. We'll slow down, think clearly, and express richer ideas.",
     voiceId: 'Dolce',
     image: require('../../assets/images/unispeaking/teachers/arthur.png'),
+    audio: require('../../assets/audio/teachers/arthur.wav'),
   },
 ];
 
