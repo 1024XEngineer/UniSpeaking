@@ -87,6 +87,7 @@ describe('AuthFormScreen backend binding', () => {
     await fireEvent.changeText(screen.getByPlaceholderText('怎么称呼你'), 'Sunny');
     await fireEvent.changeText(screen.getByPlaceholderText('name@example.com'), 'learner@example.com');
     await fireEvent.changeText(screen.getByPlaceholderText('至少 12 位字符'), 'password123456');
+    await fireEvent.changeText(screen.getByPlaceholderText('再次输入密码'), 'password123456');
     await fireEvent.press(screen.getByRole('button', { name: '发送邮箱验证码' }));
 
     await waitFor(() => expect(screen.getByText('查看你的邮箱')).toBeTruthy());
@@ -103,6 +104,49 @@ describe('AuthFormScreen backend binding', () => {
       challengeId: 'challenge-1',
       code: '123456',
     }));
+  });
+
+  it('does not send an email code when the passwords do not match', async () => {
+    const controller = createController({
+      status: 'anonymous', user: null, preference: null, error: null,
+    });
+    const screen = await render(
+      <AppModelProvider authController={controller}>
+        <AuthFormScreen mode="signup" onBack={jest.fn()} onSwitch={jest.fn()} />
+      </AppModelProvider>,
+    );
+
+    await fireEvent.changeText(screen.getByPlaceholderText('怎么称呼你'), 'Sunny');
+    await fireEvent.changeText(screen.getByPlaceholderText('name@example.com'), 'learner@example.com');
+    await fireEvent.changeText(screen.getByPlaceholderText('至少 12 位字符'), 'password123456');
+    await fireEvent.changeText(screen.getByPlaceholderText('再次输入密码'), 'different123456');
+    await fireEvent.press(screen.getByRole('button', { name: '发送邮箱验证码' }));
+
+    expect(screen.getByText('两次输入的密码不一致')).toBeTruthy();
+    expect(controller.issueEmailChallenge).not.toHaveBeenCalled();
+  });
+
+  it('toggles visibility independently for both signup password fields', async () => {
+    const controller = createController({
+      status: 'anonymous', user: null, preference: null, error: null,
+    });
+    const screen = await render(
+      <AppModelProvider authController={controller}>
+        <AuthFormScreen mode="signup" onBack={jest.fn()} onSwitch={jest.fn()} />
+      </AppModelProvider>,
+    );
+
+    const passwordInput = screen.getByPlaceholderText('至少 12 位字符');
+    const confirmPasswordInput = screen.getByPlaceholderText('再次输入密码');
+    expect(passwordInput.props.secureTextEntry).toBe(true);
+    expect(confirmPasswordInput.props.secureTextEntry).toBe(true);
+
+    await fireEvent.press(screen.getByRole('button', { name: '显示密码' }));
+    expect(passwordInput.props.secureTextEntry).toBe(false);
+    expect(confirmPasswordInput.props.secureTextEntry).toBe(true);
+
+    await fireEvent.press(screen.getByRole('button', { name: '显示确认密码' }));
+    expect(confirmPasswordInput.props.secureTextEntry).toBe(false);
   });
 
   it('shows the backend authentication error without changing the layout flow', async () => {
