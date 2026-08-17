@@ -37,6 +37,7 @@ import java.util.List;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -181,6 +182,12 @@ public class CustomSceneController {
 	public ApiResponse<LearningAssetDetail> getLearningAsset(
 			@PathVariable String sceneId) {
 		return ApiResponse.success(learningAssetService.getAsset(sceneId));
+	}
+
+	@DeleteMapping("/{sceneId}/assets")
+	public ApiResponse<Void> deleteLearningAsset(@PathVariable String sceneId) {
+		learningAssetService.deleteAsset(sceneId);
+		return ApiResponse.success(null);
 	}
 
 	@GetMapping("/{sceneId}/sessions/{sessionId}/state")

@@ -13,6 +13,9 @@ public interface LearningAssetService {
 	/** Returns the complete learning asset for a scene. */
 	LearningAssetDetail getAsset(String sceneId);
 
+	/** Removes a learning asset owned by the current user. */
+	void deleteAsset(String sceneId);
+
 	/** Returns the evaluation report for a scene session. */
 	DialogueReportResult getReport(String sceneId, String sessionId);
 }

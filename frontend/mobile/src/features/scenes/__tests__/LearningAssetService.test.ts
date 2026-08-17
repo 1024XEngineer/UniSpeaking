@@ -164,6 +164,18 @@ describe('LearningAssetService', () => {
     );
   });
 
+  it('deletes an encoded learning asset through the authenticated endpoint', async () => {
+    const client = createClient([null]);
+    const service = new LearningAssetService(client);
+
+    await expect(service.deleteRecord('scene/airport')).resolves.toBeUndefined();
+
+    expect(client.request).toHaveBeenCalledWith(
+      '/api/custom-scenes/scene%2Fairport/assets',
+      { method: 'DELETE' },
+    );
+  });
+
   it('restores the complete generated scene needed by backend repractice', async () => {
     const client = createClient([detail]);
     const service = new LearningAssetService(client);

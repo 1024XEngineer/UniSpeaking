@@ -1,6 +1,7 @@
 package com.unispeaking.infrastructure.persistence.repository.scene;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -122,6 +123,20 @@ class MybatisSceneRepositoryTest {
 
 		assertEquals(3, count);
 		verify(sceneMapper).selectCount(any());
+	}
+
+	@Test
+	void softDeletesOnlyAnActiveOwnedScene() {
+		SceneMapper sceneMapper = mock(SceneMapper.class);
+		when(sceneMapper.update(any(), any())).thenReturn(1);
+		MybatisSceneRepository repository = repository(sceneMapper);
+
+		assertTrue(repository.softDelete(
+				"custom_1",
+				"11111111-1111-4111-8111-111111111111"));
+		assertFalse(repository.softDelete("custom_1", "invalid-user-id"));
+
+		verify(sceneMapper).update(any(), any());
 	}
 
 	@Test
