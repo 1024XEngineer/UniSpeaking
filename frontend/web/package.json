@@ -9,6 +9,7 @@
     "test:auth": "node --test scripts/check-auth-contract.mjs scripts/check-captcha-config.mjs scripts/check-api-client-auth.mjs",
     "test:analytics": "node --test scripts/check-umami-config.mjs scripts/check-analytics-client.mjs scripts/check-analytics-wiring.mjs",
     "test:assets": "node --test scripts/check-learning-asset-deletion.mjs",
+    "check:call-timer": "node scripts/check-call-timer-stop.mjs",
     "check:feedback-invitation": "node scripts/check-feedback-invitation.mjs",
     "check:realtime-events": "node scripts/check-realtime-events.mjs",
     "check:routes": "node scripts/check-routes.mjs",
