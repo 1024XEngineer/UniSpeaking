@@ -306,7 +306,21 @@ function ProfileEditModal({
   );
 }
 
-function CalendarCard({
+export function getShanghaiToday() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = parts.reduce<Record<string, string>>((result, { type, value }) => {
+    result[type] = value;
+    return result;
+  }, {});
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+export function CalendarCard({
   calendar,
   onMonthChange,
 }: {
@@ -314,8 +328,8 @@ function CalendarCard({
   onMonthChange: (month: string) => void;
 }) {
   const [year, monthNumber] = calendar.month.split('-').map(Number);
-  const today = new Date();
-  const todayDay = today.getFullYear() === year && today.getMonth() + 1 === monthNumber ? today.getDate() : null;
+  const today = getShanghaiToday();
+  const todayDay = today.startsWith(calendar.month) ? Number(today.slice(-2)) : null;
   const [selectedDay, setSelectedDay] = useState(todayDay ?? 1);
   const leadingDays = (new Date(year, monthNumber - 1, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(year, monthNumber, 0).getDate();
@@ -323,7 +337,7 @@ function CalendarCard({
   const checkedDates = new Set(calendar.checkedDates);
   const selectedDate = `${calendar.month}-${String(selectedDay).padStart(2, '0')}`;
   const selectedChecked = checkedDates.has(selectedDate);
-  const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  const currentMonth = today.slice(0, 7);
   const shiftMonth = (offset: number) => {
     const shifted = new Date(year, monthNumber - 1 + offset, 1);
     onMonthChange(`${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, '0')}`);
@@ -366,19 +380,33 @@ function CalendarCard({
         {days.map((day) => {
           const date = `${calendar.month}-${String(day).padStart(2, '0')}`;
           const checked = checkedDates.has(date);
+          const isFuture = date > today;
           return (
             <Pressable
               key={day}
               accessibilityRole="button"
+              accessibilityState={{ disabled: isFuture }}
               accessibilityLabel={`${monthNumber}月${day}日${checked ? '，已打卡' : '，未打卡'}`}
-              onPress={() => setSelectedDay(day)}
+              disabled={isFuture}
+              onPress={() => {
+                if (!isFuture) setSelectedDay(day);
+              }}
               style={[
                 styles.calendarCell,
                 selectedDay === day && styles.calendarCellSelected,
                 checked && styles.calendarCellChecked,
+                isFuture && styles.calendarCellDisabled,
               ]}
             >
-              <Text style={[styles.calendarDay, selectedDay === day && styles.calendarDaySelected]}>{day}</Text>
+              <Text
+                style={[
+                  styles.calendarDay,
+                  selectedDay === day && styles.calendarDaySelected,
+                  isFuture && styles.calendarDayDisabled,
+                ]}
+              >
+                {day}
+              </Text>
               {day === todayDay ? (
                 <Text style={styles.calendarToday}>今天</Text>
               ) : checked ? (
@@ -507,8 +535,7 @@ function AchievementSummary({
 
 export function Overview({ onBack }: { onBack: () => void }) {
   const api = useProfileApi();
-  const now = new Date();
-  const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+  const [month, setMonth] = useState(() => getShanghaiToday().slice(0, 7));
   const [overview, setOverview] = useState<ProfileOverview | null>(null);
   const [achievements, setAchievements] = useState<AchievementOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2001,8 +2028,10 @@ const styles = StyleSheet.create({
   },
   calendarCellChecked: { borderWidth: 1, borderColor: colors.green },
   calendarCellSelected: { backgroundColor: colors.ink },
+  calendarCellDisabled: { opacity: 0.4 },
   calendarDay: { color: colors.muted, fontSize: 12, fontWeight: '300' },
   calendarDaySelected: { color: colors.white, fontWeight: '600' },
+  calendarDayDisabled: { color: colors.subtle },
   calendarToday: { marginTop: 1, color: colors.white, fontSize: 7 },
   calendarCheckDot: {
     width: 4,
