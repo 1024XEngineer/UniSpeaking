@@ -129,6 +129,28 @@ class AuthControllerTest {
                 .andExpect(status().isForbidden());
     }
 
+	@Test
+	void readOnlyAdministratorCannotMutateAiProviderConfiguration() throws Exception {
+		adminIdentities.save(new AdminAccount(
+				java.util.UUID.fromString("44444444-4444-4444-8444-444444444444"),
+				"ai-auditor@unispeaking.local",
+				passwordEncoder.encode("auditor-test-password"),
+				AdminRole.AUDITOR,
+				true));
+		var login = mvc.perform(post("/api/admin/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"login\":\"ai-auditor@unispeaking.local\",\"password\":\"auditor-test-password\"}"))
+				.andExpect(status().isNoContent())
+				.andReturn();
+
+		mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(
+						"/api/admin/ai/providers/qwen")
+						.cookie(login.getResponse().getCookie("us-admin-session"))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"enabled\":false}"))
+				.andExpect(status().isForbidden());
+	}
+
     @Test
     void statusExceptionOnAdminRouteKeepsSessionAuthorization() throws Exception {
         var login = mvc.perform(post("/api/admin/auth/login")

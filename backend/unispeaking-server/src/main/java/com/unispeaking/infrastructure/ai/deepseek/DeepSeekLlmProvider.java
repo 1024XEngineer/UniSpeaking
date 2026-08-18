@@ -3,6 +3,9 @@ package com.unispeaking.infrastructure.ai.deepseek;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.LlmProvider;
+import com.unispeaking.provider.AiProviderResponse;
+import com.unispeaking.provider.ProviderUsage;
+import com.unispeaking.provider.ProviderCredentialOverride;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -85,15 +88,21 @@ public class DeepSeekLlmProvider extends LlmProvider {
 
 	@Override
 	public String executeLlmTask(String prompt, String token) {
-		if (apiKey.isBlank()) {
+		return executeLlmTaskMeasured(prompt, token).response();
+	}
+
+	@Override
+	public AiProviderResponse<String> executeLlmTaskMeasured(String prompt, String token) {
+		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		if (credential.isBlank()) {
 			throw retryableFailure(
 					"DEEPSEEK_LLM_CREDENTIAL_MISSING",
 					"Set DEEPSEEK_API_KEY before calling DeepSeek LLM");
 		}
-		return callForContent(prompt, apiKey);
+		return callForContent(prompt, credential);
 	}
 
-	private String callForContent(String promptValue, String credential) {
+	private AiProviderResponse<String> callForContent(String promptValue, String credential) {
 		String prompt = trim(promptValue);
 		if (prompt.isBlank()) {
 			throw nonRetryableFailure("INVALID_LLM_PROMPT", "LLM task prompt is required");
@@ -138,7 +147,13 @@ public class DeepSeekLlmProvider extends LlmProvider {
 						"DEEPSEEK_LLM_EMPTY_RESPONSE",
 						"DeepSeek LLM returned no message content");
 			}
-			return content;
+			JsonNode usage = root.path("usage");
+			long inputTokens = usage.path("prompt_tokens").longValue(usage.path("input_tokens").longValue(0));
+			long outputTokens = usage.path("completion_tokens").longValue(usage.path("output_tokens").longValue(0));
+			ProviderUsage measuredUsage = inputTokens > 0 || outputTokens > 0
+					? new ProviderUsage(inputTokens, outputTokens, prompt.length(), content.length(), 0, 0, "PROVIDER")
+					: ProviderUsage.estimatedText(prompt, content);
+			return new AiProviderResponse<>(content, root.path("id").asString(null), measuredUsage);
 		}
 		catch (BusinessException exception) {
 			throw exception;

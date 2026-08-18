@@ -4,6 +4,7 @@ import com.unispeaking.common.audio.PcmMp3Encoder;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.ScoringProvider;
+import com.unispeaking.provider.ProviderCredentialOverride;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -197,7 +198,7 @@ public class IflytekScoringProvider extends ScoringProvider {
 			RawSuntoneListener listener =
 					new RawSuntoneListener(result);
 			socket = connector.connect(
-					signedEndpoint(apiKey),
+					signedEndpoint(effectiveApiKey()),
 					listener).get(
 							remainingMillis(deadlineNanos),
 							TimeUnit.MILLISECONDS);
@@ -629,7 +630,7 @@ public class IflytekScoringProvider extends ScoringProvider {
 
 	private void requireCredentials() {
 		if (appId.isBlank()
-				|| apiKey.isBlank()
+				|| effectiveApiKey().isBlank()
 				|| apiSecret.isBlank()) {
 			throw retryableFailure(
 					"IFLYTEK_SUNTONE_CREDENTIAL_MISSING",
@@ -637,6 +638,10 @@ public class IflytekScoringProvider extends ScoringProvider {
 							+ "XFYUN_API_SECRET before calling "
 							+ "iFlytek Suntone");
 		}
+	}
+
+	private String effectiveApiKey() {
+		return ProviderCredentialOverride.currentOr(apiKey);
 	}
 
 	private void requireEndpoint() {

@@ -12,9 +12,20 @@ import com.unispeaking.domain.vo.provider.AiCapability;
 import com.unispeaking.domain.vo.provider.AiModelDefinition;
 import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.provider.config.AiConfigurationStore;
+import com.unispeaking.provider.config.AiModelConfiguration;
+import com.unispeaking.provider.config.AiProviderConfiguration;
+import com.unispeaking.provider.config.AiProviderCredentialStore;
+import com.unispeaking.provider.config.AiRuntimeConfiguration;
+import com.unispeaking.provider.usage.AiInvocationAttempt;
+import com.unispeaking.provider.usage.AiInvocationLedger;
+import com.unispeaking.service.auth.AuthService;
+import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
@@ -256,6 +267,101 @@ class AiProviderRegistryTest {
 		assertEquals("{\"totalScore\":99}", response);
 		assertEquals(0, iflytek.calls);
 		assertEquals(1, alternative.calls);
+	}
+
+	@Test
+	void databaseRouteUsesAdapterTypeAndSkipsDisabledProviders() {
+		StubQwenLlmProvider qwen = new StubQwenLlmProvider();
+		StubDeepSeekLlmProvider deepSeek = new StubDeepSeekLlmProvider();
+		AiProviderRegistry registry = registry(List.of(qwen, deepSeek), Map.of());
+		registry.configureDynamicRuntime(
+				() -> runtime(
+						Map.of(
+								"qwen-primary", provider("qwen-primary", "qwen", false),
+								"deepseek-backup", provider("deepseek-backup", "deepseek", true)),
+						Map.of(
+								AiProviderRegistry.QWEN_LLM_PLUS,
+								model(AiProviderRegistry.QWEN_LLM_PLUS, "qwen-primary"),
+								AiProviderRegistry.DEEPSEEK_CHAT,
+								model(AiProviderRegistry.DEEPSEEK_CHAT, "deepseek-backup"))),
+				attempt -> {},
+				new AuthService() {
+					@Override public com.unispeaking.domain.dto.auth.AuthResponse register(com.unispeaking.domain.dto.auth.RegisterRequest request) { return null; }
+					@Override public com.unispeaking.domain.dto.auth.AuthResponse login(com.unispeaking.domain.dto.auth.LoginRequest request) { return null; }
+					@Override public com.unispeaking.domain.dto.auth.UserAccountResponse currentUser() { return null; }
+					@Override public String requireUserId(String requestedUserId) { return requestedUserId; }
+				},
+				credentials());
+
+		assertEquals(List.of(AiProviderRegistry.DEEPSEEK_CHAT), registry.route(AiCapability.LLM));
+		assertEquals("deepseek", registry.executeLlmTask("hello", null));
+		assertEquals(0, qwen.calls);
+		assertEquals(1, deepSeek.calls);
+	}
+
+	@Test
+	void recordsFailedPrimaryAndSuccessfulFallbackAgainstTheSameUserRequest() {
+		StubQwenLlmProvider qwen = new StubQwenLlmProvider();
+		qwen.failure = new BusinessException("QWEN_LLM_IO_ERROR", "primary unavailable");
+		StubDeepSeekLlmProvider deepSeek = new StubDeepSeekLlmProvider();
+		AiProviderRegistry registry = registry(List.of(qwen, deepSeek), Map.of());
+		List<AiInvocationAttempt> attempts = new ArrayList<>();
+		registry.configureDynamicRuntime(
+				() -> runtime(
+						Map.of(
+								"qwen", provider("qwen", "qwen", true),
+								"deepseek", provider("deepseek", "deepseek", true)),
+						Map.of(
+								AiProviderRegistry.QWEN_LLM_PLUS,
+								model(AiProviderRegistry.QWEN_LLM_PLUS, "qwen"),
+								AiProviderRegistry.DEEPSEEK_CHAT,
+								model(AiProviderRegistry.DEEPSEEK_CHAT, "deepseek"))),
+				attempts::add,
+				null,
+				credentials());
+		UUID requestId = UUID.randomUUID();
+		String userId = "11111111-1111-4111-8111-111111111111";
+		AiInvocationContext context = new AiInvocationContext(
+				requestId, userId, "session-1", "evaluation", "default");
+
+		assertEquals("deepseek", registry.executeLlmTaskRouted(context, "hello", null).response());
+		assertEquals(2, attempts.size());
+		assertEquals(List.of("FAILED", "SUCCEEDED"), attempts.stream().map(AiInvocationAttempt::status).toList());
+		assertTrue(attempts.getFirst().retryable());
+		assertEquals(AiProviderRegistry.QWEN_LLM_PLUS, attempts.get(1).fallbackFromModelId());
+		assertTrue(attempts.stream().allMatch(attempt -> attempt.context().logicalRequestId().equals(requestId)));
+		assertTrue(attempts.stream().allMatch(attempt -> userId.equals(attempt.context().userId())));
+	}
+
+	private static AiRuntimeConfiguration runtime(
+			Map<String, AiProviderConfiguration> providers,
+			Map<String, AiModelConfiguration> models) {
+		return new AiRuntimeConfiguration(
+				providers,
+				models,
+				Map.of("default", Map.of(AiCapability.LLM, List.of(
+						AiProviderRegistry.QWEN_LLM_PLUS, AiProviderRegistry.DEEPSEEK_CHAT))),
+				true);
+	}
+
+	private static AiProviderConfiguration provider(String providerId, String adapterType, boolean enabled) {
+		return new AiProviderConfiguration(
+				providerId, providerId, adapterType, null, enabled, 10_000, 60_000, 1);
+	}
+
+	private static AiModelConfiguration model(String modelId, String providerId) {
+		return new AiModelConfiguration(
+				modelId, providerId, modelId, AiCapability.LLM, true, "TOKENS",
+				BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ZERO,
+				BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, "CNY");
+	}
+
+	private static AiProviderCredentialStore credentials() {
+		return new AiProviderCredentialStore() {
+			@Override public String credentialOrFallback(String providerId, String fallback) { return fallback; }
+			@Override public CredentialStatus status(String providerId) { return new CredentialStatus(false, null, false); }
+			@Override public CredentialStatus replace(String providerId, String plaintext) { throw new UnsupportedOperationException(); }
+		};
 	}
 
 	private AiProviderRegistry registry(RealtimeProvider realtimeProvider) {

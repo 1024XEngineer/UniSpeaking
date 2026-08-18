@@ -5,6 +5,8 @@ import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.session.RealtimeCredential;
 import com.unispeaking.infrastructure.config.RealtimeProperties;
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.provider.ProviderCredentialOverride;
+import com.unispeaking.provider.config.AiProviderCredentialStore;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -26,14 +28,25 @@ public class RealtimeCredentialIssuer {
 	private final HttpClient httpClient;
 	private final ObjectMapper objectMapper;
 	private final RealtimeProperties qwenProperties;
+	private final AiProviderCredentialStore credentialStore;
 
 	public RealtimeCredentialIssuer(
 			HttpClient realtimeHttpClient,
 			ObjectMapper objectMapper,
 			RealtimeProperties qwenProperties) {
+		this(realtimeHttpClient, objectMapper, qwenProperties, null);
+	}
+
+	@org.springframework.beans.factory.annotation.Autowired
+	public RealtimeCredentialIssuer(
+			HttpClient realtimeHttpClient,
+			ObjectMapper objectMapper,
+			RealtimeProperties qwenProperties,
+			AiProviderCredentialStore credentialStore) {
 		this.httpClient = realtimeHttpClient;
 		this.objectMapper = objectMapper;
 		this.qwenProperties = qwenProperties;
+		this.credentialStore = credentialStore;
 	}
 
 	public RealtimeCredential issue(ProviderType providerType) {
@@ -94,7 +107,10 @@ public class RealtimeCredentialIssuer {
 	}
 
 	private String parentApiKey() {
-		return qwenProperties.getApiKey();
+		String configured = credentialStore == null
+				? qwenProperties.getApiKey()
+				: credentialStore.credentialOrFallback("qwen", qwenProperties.getApiKey());
+		return ProviderCredentialOverride.currentOr(configured);
 	}
 
 	private JsonNode parsePayload(String body) {
