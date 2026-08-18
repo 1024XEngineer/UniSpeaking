@@ -8,6 +8,27 @@ import java.util.stream.Collectors;
 
 public abstract class AbstractAiProvider implements AiProvider {
 
+	public AiProviderResponse<String> executeLlmTaskMeasured(String prompt, String token) {
+		String response = executeLlmTask(prompt, token);
+		return new AiProviderResponse<>(response, null, ProviderUsage.estimatedText(prompt, response));
+	}
+
+	public AiProviderResponse<byte[]> generateSpeechAudioMeasured(String text, String token) {
+		byte[] response = generateSpeechAudio(text, token);
+		return new AiProviderResponse<>(response, null, ProviderUsage.tts(text, response));
+	}
+
+	public AiProviderResponse<String> convertAudioToTextMeasured(byte[] audio, String token) {
+		String response = convertAudioToText(audio, token);
+		return new AiProviderResponse<>(response, null, ProviderUsage.audioInput(audio, response));
+	}
+
+	public AiProviderResponse<String> evaluatePronunciationMeasured(
+			String text, byte[] audio, String token) {
+		String response = evaluatePronunciation(text, audio, token);
+		return new AiProviderResponse<>(response, null, ProviderUsage.scoring(text, audio));
+	}
+
 	@Override
 	public String exchangeRealtimeSdp(String offerSdp, String token) {
 		throw unsupported("Realtime");

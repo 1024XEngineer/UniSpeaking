@@ -16,15 +16,15 @@ public class RealtimeSessionTerminator {
 
 	public void stopBestEffort(AbstractSceneSession session, String reason) {
 		if (session == null
-				|| session.getProviderSessionId() == null
-				|| session.getProviderSessionId().isBlank()
 				|| session.getModel() == null
 				|| session.getModel().isBlank()) {
 			return;
 		}
 		try {
-			var provider = providerRegistry.getRealtimeProvider(session.getModel());
-			provider.stopSession(session.getProviderSessionId(), null, reason);
+			if (session.getProviderSessionId() != null && !session.getProviderSessionId().isBlank()) {
+				var provider = providerRegistry.getRealtimeProvider(session.getModel());
+				provider.stopSession(session.getProviderSessionId(), null, reason);
+			}
 		}
 		catch (RuntimeException exception) {
 			RealtimeFlowLog.warn(
@@ -33,6 +33,18 @@ public class RealtimeSessionTerminator {
 					session.getProviderSessionId(),
 					session.getProviderType(),
 					exception.getMessage());
+		}
+		finally {
+			try {
+				providerRegistry.recordRealtimeSession(
+						session.getUserId(), session.getId(), session.getModel(),
+						session.getCreatedAt(), session.getEndedAt() == null ? java.time.Instant.now() : session.getEndedAt());
+			}
+			catch (RuntimeException exception) {
+				RealtimeFlowLog.warn(
+						"realtime.usage.record.failed localSessionId={} model={} error={}",
+						session.getId(), session.getModel(), exception.getMessage());
+			}
 		}
 	}
 }

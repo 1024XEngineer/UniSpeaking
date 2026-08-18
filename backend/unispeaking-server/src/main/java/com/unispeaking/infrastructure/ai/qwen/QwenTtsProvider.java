@@ -3,6 +3,7 @@ package com.unispeaking.infrastructure.ai.qwen;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.TtsProvider;
+import com.unispeaking.provider.ProviderCredentialOverride;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -135,13 +136,14 @@ public class QwenTtsProvider extends TtsProvider {
 
 	@Override
 	public byte[] generateSpeechAudio(String text, String token) {
-		if (apiKey.isBlank()) {
+		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		if (credential.isBlank()) {
 			throw retryableFailure(
 					"QWEN_TTS_CREDENTIAL_MISSING",
 					"Set DASHSCOPE_API_KEY before calling Qwen TTS");
 		}
 		String normalizedText = trim(text);
-		return cachedSynthesize(normalizedText, apiKey);
+		return cachedSynthesize(normalizedText, credential);
 	}
 
 	private byte[] cachedSynthesize(String text, String credential) {

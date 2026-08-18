@@ -128,6 +128,7 @@ class PostgresPersistenceIT {
 	void clearBusinessTables() {
 		jdbcTemplate.execute("""
 				TRUNCATE TABLE
+				    ai_model_invocations,
 				    official_usage_records,
 				    auth_email_challenges,
 				    user_sessions,
@@ -151,7 +152,9 @@ class PostgresPersistenceIT {
 				    scene,
 				    user_preference,
 				    "user"
+				RESTART IDENTITY
 				""");
+		jdbcTemplate.update("update ai_providers set secret_ciphertext=null, secret_fingerprint=null");
 	}
 
 	@Test
@@ -200,6 +203,13 @@ class PostgresPersistenceIT {
 				String.class);
 
 		assertEquals(List.of("1"), migrationVersions);
+		assertEquals(7, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_providers", Integer.class));
+		assertEquals(10, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_models", Integer.class));
+		assertEquals(10, jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM ai_models WHERE route_priority IS NOT NULL", Integer.class));
+		assertEquals(3, jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'ai_%'",
+				Integer.class));
 		assertEquals(303, topicCount);
 		assertEquals(1771, questionCount);
 		assertEquals(0, questionLikeTitleCount);
@@ -687,7 +697,7 @@ class PostgresPersistenceIT {
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
 		assertEquals(
-				List.of("0", "1"),
+				List.of("0", "1", "2"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version

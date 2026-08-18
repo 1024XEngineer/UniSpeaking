@@ -4,6 +4,7 @@ import com.unispeaking.domain.vo.evaluation.AudioInput;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.TranscriptionProvider;
+import com.unispeaking.provider.ProviderCredentialOverride;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -114,11 +115,12 @@ public class DoubaoAsrProvider extends TranscriptionProvider {
 				requireAudio(audio, "Doubao ASR"),
 				"wav");
 		requireAudio(input);
-		requireCredentials();
-		return transcribe(input);
+		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		requireCredentials(credential);
+		return transcribe(input, credential);
 	}
 
-	private String transcribe(AudioInput audio) {
+	private String transcribe(AudioInput audio, String credential) {
 		requireTrustedEndpoint();
 
 		try {
@@ -135,8 +137,8 @@ public class DoubaoAsrProvider extends TranscriptionProvider {
 					.header("X-Api-Resource-Id", resourceId)
 					.header("X-Api-Request-Id", UUID.randomUUID().toString())
 					.header("X-Api-Sequence", "-1");
-			if (!apiKey.isBlank()) {
-				requestBuilder.header("X-Api-Key", apiKey);
+			if (!credential.isBlank()) {
+				requestBuilder.header("X-Api-Key", credential);
 			}
 			else {
 				requestBuilder
@@ -224,8 +226,8 @@ public class DoubaoAsrProvider extends TranscriptionProvider {
 		}
 	}
 
-	private void requireCredentials() {
-		boolean newCredential = !apiKey.isBlank();
+	private void requireCredentials(String credential) {
+		boolean newCredential = credential != null && !credential.isBlank();
 		boolean legacyCredential = !appKey.isBlank() && !accessKey.isBlank();
 		if (!newCredential && !legacyCredential) {
 			throw retryableFailure(

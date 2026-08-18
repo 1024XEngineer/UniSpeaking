@@ -9,6 +9,7 @@ import com.unispeaking.domain.vo.session.RealtimeConnectionResult;
 import com.unispeaking.domain.vo.session.RealtimeCredential;
 import com.unispeaking.domain.vo.session.SessionPrompt;
 import com.unispeaking.provider.AiProviderRegistry;
+import com.unispeaking.provider.AiInvocationContext;
 import org.springframework.stereotype.Component;
 
 /**
@@ -30,6 +31,7 @@ public class RealtimeSdpExchange {
 	public RealtimeConnectionResult exchangeSdp(
 			ProviderType type, AbstractSceneSession session, SessionPrompt prompt, StartCommand command) {
 		RealtimeAttempt attempt = providerRegistry.routeRealtime(
+				AiInvocationContext.create(command.userId(), session.getId(), "realtime_connect"),
 				type,
 				command.model(),
 				(model, provider) -> {

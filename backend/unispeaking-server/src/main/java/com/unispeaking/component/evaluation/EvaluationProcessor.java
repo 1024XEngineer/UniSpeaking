@@ -53,6 +53,8 @@ import com.unispeaking.common.evaluation.calculation.TurnSpeechScoreCalculator;
 import com.unispeaking.infrastructure.evaluation.client.EvaluationLlmClient;
 import com.unispeaking.infrastructure.evaluation.client.IeltsEvaluationLlmClient;
 import com.unispeaking.infrastructure.evaluation.client.PronunciationAssessmentClient;
+import com.unispeaking.provider.AiInvocationContext;
+import com.unispeaking.provider.AiInvocationContexts;
 import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.common.evaluation.model.ConversationLanguageAssessment;
@@ -552,11 +554,9 @@ public class EvaluationProcessor {
 		String cueCard = part == IeltsPart.PART_2
 				? formatCueCard(practice)
 				: null;
-		IeltsTextAssessment text = ieltsLlmClient.assessPart(
-				part,
-				transcript,
-				cueCard,
-				formatSpeechMetrics(scorableTurns));
+		IeltsTextAssessment text = AiInvocationContexts.call(
+				AiInvocationContext.create(practice.userId().toString(), sessionId, "ielts_part_evaluation"),
+				() -> ieltsLlmClient.assessPart(part, transcript, cueCard, formatSpeechMetrics(scorableTurns)));
 		BigDecimal pronunciation = scorableTurns.isEmpty()
 				? null
 				: pronunciationBand(scorableTurns);
@@ -1084,8 +1084,9 @@ public class EvaluationProcessor {
 		requireCompleteLearnerTurns(dialogue, savedTurns);
 		DialogueReportResult report;
 		try {
-			ConversationLanguageAssessment language =
-					llmClient.assessDialogue(dialogue);
+			ConversationLanguageAssessment language = AiInvocationContexts.call(
+					AiInvocationContext.create(session.getUserId(), sessionId, "dialogue_report"),
+					() -> llmClient.assessDialogue(dialogue));
 			ConversationScoreCalculation scores =
 					ConversationScoreCalculator.calculate(
 							scorableTurns.stream()
@@ -1172,11 +1173,13 @@ public class EvaluationProcessor {
 		}
 
 		PcmWavValidator.validate(command.audio());
-		PronunciationAssessmentResult assessment =
-				pronunciationClient.evaluate(command.transcript(), command.audio());
+		PronunciationAssessmentResult assessment = AiInvocationContexts.call(
+				AiInvocationContext.create(session.getUserId(), session.getId(), "dialogue_turn_pronunciation"),
+				() -> pronunciationClient.evaluate(command.transcript(), command.audio()));
 		TurnSpeechScoreCalculator.calculate(assessment);
-		TurnLanguageFeedback feedback = llmClient.assessTurn(
-				buildCustomTurnPrompt(session, command));
+		TurnLanguageFeedback feedback = AiInvocationContexts.call(
+				AiInvocationContext.create(session.getUserId(), session.getId(), "dialogue_turn_feedback"),
+				() -> llmClient.assessTurn(buildCustomTurnPrompt(session, command)));
 		DialogueTurnEvaluationResult result = new DialogueTurnEvaluationResult(
 				command.turnNo(),
 				command.transcript(),
@@ -1217,15 +1220,18 @@ public class EvaluationProcessor {
 		}
 
 		PcmWavValidator.validate(command.audio());
-		PronunciationAssessmentResult assessment =
-					pronunciationClient.evaluate(command.transcript(), command.audio());
+		PronunciationAssessmentResult assessment = AiInvocationContexts.call(
+				AiInvocationContext.create(session.getUserId(), session.getId(), "ielts_turn_pronunciation"),
+				() -> pronunciationClient.evaluate(command.transcript(), command.audio()));
 		TurnSpeechScoreCalculator.calculate(assessment);
 		DialogueTurnEvaluationPromptInput prompt = buildIeltsTurnPrompt(
 				session,
 				command);
 		TurnLanguageFeedback feedback;
 		try {
-			feedback = llmClient.assessTurn(prompt);
+			feedback = AiInvocationContexts.call(
+					AiInvocationContext.create(session.getUserId(), session.getId(), "ielts_turn_feedback"),
+					() -> llmClient.assessTurn(prompt));
 		}
 		catch (EvaluationException exception) {
 			if (!isProviderFeedbackFailure(exception)) {

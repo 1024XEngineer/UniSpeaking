@@ -40,6 +40,7 @@ coverage.out
 node_modules/
 dist/
 .vite/
+*.apk
 
 ### Env ###
 .env
