@@ -129,6 +129,15 @@ describe('ScenesHome backend generation binding', () => {
       />,
     );
 
+    expect(screen.getByText('IELTS SPEAKING')).toBeTruthy();
+    expect(screen.getByText('ENGLISH INTERVIEW')).toBeTruthy();
+    expect(screen.getByText('雅思口语').props.numberOfLines).toBe(1);
+    expect(screen.getByText('雅思口语').props.adjustsFontSizeToFit).toBe(true);
+    expect(screen.getByText('英文面试').props.numberOfLines).toBe(1);
+    expect(screen.getByText('英文面试').props.adjustsFontSizeToFit).toBe(true);
+    expect(screen.queryByText('模考与评分')).toBeNull();
+    expect(screen.queryByText('岗位模拟追问')).toBeNull();
+
     await fireEvent.press(screen.getByLabelText('进入雅思口语'));
     expect(onOpenIelts).toHaveBeenCalledTimes(1);
     await fireEvent.press(screen.getByLabelText('进入英文面试'));
