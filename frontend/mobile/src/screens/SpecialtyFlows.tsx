@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BackHandler, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, BackHandler, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -105,6 +105,7 @@ function IeltsSession({
   part,
   ieltsId,
   voiceId,
+  onExit,
   autoAdvance,
   onFinish,
   analytics,
@@ -113,6 +114,7 @@ function IeltsSession({
   part: 'p1' | 'p3';
   ieltsId: string;
   voiceId: string;
+  onExit: () => void;
   autoAdvance: boolean;
   analytics?: AnalyticsTrackerFactory;
   onFinish: (
@@ -144,6 +146,17 @@ function IeltsSession({
     if (!session.sessionId) return Promise.reject(new Error('会话尚未连接，暂时无法翻译'));
     return translationApi.translateFreeChat(session.sessionId, text);
   }, [session.sessionId, translationApi]);
+  const confirmExit = () => {
+    Alert.alert(
+      '退出当前训练？',
+      '退出后将返回场景广场。',
+      [
+        { text: '继续训练', style: 'cancel' },
+        { text: '确认退出', style: 'destructive', onPress: onExit },
+      ],
+      { cancelable: true },
+    );
+  };
 
   useEffect(() => {
     if (part !== 'p3') return undefined;
@@ -192,6 +205,9 @@ function IeltsSession({
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.ieltsCallScreen}>
+      <View style={styles.ieltsSessionHeader}>
+        <HeaderIconButton accessibilityLabel="退出雅思训练" color={ieltsPalette.purpleDark} icon="close" onPress={confirmExit} />
+      </View>
       <CallExperience
         endAccessibilityLabel="结束本题并进入下一题"
         endControlIcon="arrow"
@@ -239,6 +255,7 @@ function IeltsPart2Session({
   cueCard,
   ieltsId,
   voiceId,
+  onExit,
   onFinish,
   analytics,
 }: {
@@ -246,6 +263,7 @@ function IeltsPart2Session({
   cueCard: { title: string; points: string[] };
   ieltsId: string;
   voiceId: string;
+  onExit: () => void;
   analytics?: AnalyticsTrackerFactory;
   onFinish: (
     sessionId: string | null,
@@ -272,6 +290,17 @@ function IeltsPart2Session({
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastInputReadyTick = useRef(0);
+  const confirmExit = () => {
+    Alert.alert(
+      '退出当前训练？',
+      '退出后将返回场景广场。',
+      [
+        { text: '继续训练', style: 'cancel' },
+        { text: '确认退出', style: 'destructive', onPress: onExit },
+      ],
+      { cancelable: true },
+    );
+  };
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -489,6 +518,7 @@ function IeltsPart2Session({
                       : '请等待考官说明 Part 2 规则。'}
               </Text>
             </View>
+            <HeaderIconButton accessibilityLabel="退出雅思训练" color={ieltsPalette.purpleDark} icon="close" onPress={confirmExit} />
             {sessionError ? <Text style={styles.intakeError}>{sessionError}</Text> : null}
             {session.startupError ? <Text style={styles.intakeError}>{session.startupError}</Text> : null}
           </View>
@@ -1203,6 +1233,7 @@ export function IeltsFlow({ onExit, onViewDetails, analytics }: { onExit: () => 
           cueCard={cueCard}
           examiner={examiner}
           ieltsId={ieltsId}
+          onExit={onExit}
           onFinish={finishSession}
           voiceId={voiceId}
         />
@@ -1216,6 +1247,7 @@ export function IeltsFlow({ onExit, onViewDetails, analytics }: { onExit: () => 
         ieltsId={ieltsId}
         autoAdvance={fullMock}
         voiceId={voiceId}
+        onExit={onExit}
         onFinish={finishSession}
       />
     );
@@ -1646,6 +1678,7 @@ const styles = StyleSheet.create({
   ieltsSetupStartButton: { borderColor: ieltsPalette.purple, backgroundColor: ieltsPalette.purple, shadowColor: ieltsPalette.purple, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 14, elevation: 4 },
   ieltsStageScreen: { backgroundColor: ieltsPalette.canvas },
   ieltsCallScreen: { flex: 1, paddingHorizontal: 22, paddingTop: 24, paddingBottom: 22, backgroundColor: ieltsPalette.canvas },
+  ieltsSessionHeader: { height: 38, alignItems: 'flex-end', justifyContent: 'center' },
   part2Screen: { flex: 1, backgroundColor: ieltsPalette.canvas },
   part2KeyboardView: { flex: 1 },
   part2Content: { flexGrow: 1, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 120, gap: 12 },
