@@ -513,6 +513,12 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
   const transcriptRef = useRef(null);
   const onEndInterviewRef = useRef(onEndInterview);
   const teacherNameRef = useRef(teacher?.name || "面试官");
+  const detachInterviewRemoteAudio = () => {
+    const audio = remoteAudioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.srcObject = null;
+  };
   useEffect(() => { onEndInterviewRef.current = onEndInterview; });
   useEffect(() => { teacherNameRef.current = teacher?.name || "面试官"; });
 
@@ -585,6 +591,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       setEnding(true);
       setClosing(false);
       setStatus("面试已结束，正在生成报告");
+      detachInterviewRemoteAudio();
       onEndInterviewRef.current?.(sceneId, sessionIdRef.current, event.reportStatus || null);
     } else if (event.type === "local.interview_end_error") {
       setError(event.message || "面试自动结束失败");
@@ -682,6 +689,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       cancelled = true;
       document.removeEventListener("visibilitychange", syncVisibility);
       interviewAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
+      detachInterviewRemoteAudio();
       clientRef.current = null;
       void client.stop({ notifyBackend: false, reason: "component_unmount", emitEnded: false });
     };
@@ -713,6 +721,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     setEnding(true);
     setError("");
     setStatus("正在结束面试并生成报告");
+    detachInterviewRemoteAudio();
     try {
       const completion = await clientRef.current?.stop({ reason: "user_stop" });
       clientRef.current = null;
@@ -727,8 +736,11 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
   };
 
   const abandon = async () => {
+    if (endingRef.current) return;
+    endingRef.current = true;
     const client = clientRef.current;
     clientRef.current = null;
+    detachInterviewRemoteAudio();
     await client?.stop({ notifyBackend: false, reason: "user_exit", emitEnded: false });
     interviewAnalyticsRef.current?.abandon("USER_EXIT");
     onExit();
