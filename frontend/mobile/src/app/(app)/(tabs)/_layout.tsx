@@ -3,7 +3,8 @@ import { BookOpenTextIcon } from 'phosphor-react-native/src/icons/BookOpenText';
 import { SquaresFourIcon } from 'phosphor-react-native/src/icons/SquaresFour';
 import { UserIcon } from 'phosphor-react-native/src/icons/User';
 import { WaveformIcon } from 'phosphor-react-native/src/icons/Waveform';
-import { useState } from 'react';
+import { BackHandler, Platform } from 'react-native';
+import { useEffect, useState } from 'react';
 
 import { LiquidGlassTabBar } from '@/components/LiquidGlassTabBar';
 import { useAnalytics } from '@/model/AnalyticsProvider';
@@ -18,6 +19,22 @@ export default function TabsLayout() {
   const analytics = useAnalytics();
   const [immersiveLearning, setImmersiveLearning] = useState(false);
   const hideTabBar = immersiveLearning;
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const rootTab = pathname === '/conversation'
+      || pathname === '/learning'
+      || pathname === '/profile';
+    if (!rootTab) return;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      // A root tab has no parent screen to pop. Consuming the event prevents
+      // Android from closing the Activity; nested screens handle their own back.
+      return true;
+    });
+    return () => subscription.remove();
+  }, [pathname]);
 
   return (
     <LearningStageProvider immersiveLearning={immersiveLearning} setImmersiveLearning={setImmersiveLearning}>
