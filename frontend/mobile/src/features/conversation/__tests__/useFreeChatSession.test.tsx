@@ -75,6 +75,7 @@ function SessionProbe({
           user: session.userTranscript,
           assistant: session.assistantTranscript,
           error: session.error,
+          elapsed: session.elapsed,
         })}
       </Text>
       <Pressable accessibilityLabel="mute" onPress={session.toggleMuted} />
@@ -150,6 +151,39 @@ describe('useFreeChatSession', () => {
 
     screen.unmount();
     await waitFor(() => expect(controller.end).toHaveBeenCalledTimes(1));
+  });
+
+  it('stops incrementing elapsed time while the completed session is ending', async () => {
+    jest.useFakeTimers();
+    const controller = createController();
+    const screen = await render(
+      <SessionProbe createController={() => controller} />,
+    );
+
+    await act(async () => {
+      controller.emit({ ...idleSnapshot, state: 'ready' });
+      await Promise.resolve();
+    });
+    await act(() => {
+      jest.advanceTimersByTime(2_000);
+    });
+    expect(screen.getByTestId('snapshot').props.children).toContain(
+      '"elapsed":2',
+    );
+
+    await act(async () => {
+      controller.emit({ ...idleSnapshot, state: 'ending' });
+      await Promise.resolve();
+    });
+    await act(() => {
+      jest.advanceTimersByTime(2_000);
+    });
+    expect(screen.getByTestId('snapshot').props.children).toContain(
+      '"elapsed":2',
+    );
+
+    screen.unmount();
+    jest.useRealTimers();
   });
 
   it('exposes startup errors and performs idempotent cleanup after ending', async () => {

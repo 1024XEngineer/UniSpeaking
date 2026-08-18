@@ -443,16 +443,19 @@ const formatCallDuration = (totalSeconds) => {
   return `${minutes}:${seconds}`;
 };
 
-function CallTimer({ state = "active", paused = false, className }) {
+function CallTimer({ state = "active", paused = false, stopped = false, className }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const startedAt = useRef(Date.now());
 
   useEffect(() => {
-    const startedAt = Date.now();
-    const updateElapsed = () => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    const updateElapsed = () => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt.current) / 1000));
+    };
     updateElapsed();
+    if (stopped || state === "ended") return undefined;
     const interval = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [state, stopped]);
 
   const duration = formatCallDuration(elapsedSeconds);
   const label = state === "connecting"
@@ -1890,7 +1893,7 @@ function CustomSceneConversation({
           <div className="portrait portrait--small"><img src={teacher.image} alt={teacher.name} /></div>
           <div className="listening-state listening-state--compact">
             <VoiceWaveform active={!ended && !paused && !ending && !error} compact />
-            <CallTimer paused={paused} state={ended || error ? "ended" : "active"} />
+            <CallTimer paused={paused} state={ended || error ? "ended" : "active"} stopped={ending} />
             <span>{status}</span>
           </div>
         </div>
