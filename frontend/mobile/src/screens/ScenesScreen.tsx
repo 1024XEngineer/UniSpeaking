@@ -983,8 +983,8 @@ export function ScenesHome({
             >
               <Image source={require('../../assets/images/specialty/ielts.png')} style={[styles.specialtyOptionIcon, styles.specialtyIeltsIcon]} />
               <View style={styles.specialtyOptionCopy}>
-                <Text style={[styles.specialtyOptionTitle, styles.specialtyIeltsTitle]}>雅思口语</Text>
-                <Text numberOfLines={1} style={[styles.specialtyOptionNote, styles.specialtyIeltsNote]}>模考与评分</Text>
+                <Text adjustsFontSizeToFit minimumFontScale={0.75} numberOfLines={1} style={[styles.specialtyOptionEyebrow, styles.specialtyIeltsEyebrow]}>IELTS SPEAKING</Text>
+                <Text adjustsFontSizeToFit minimumFontScale={0.75} numberOfLines={1} style={[styles.specialtyOptionTitle, styles.specialtyIeltsTitle]}>雅思口语</Text>
               </View>
             </Pressable>
             <Pressable
@@ -999,8 +999,8 @@ export function ScenesHome({
             >
               <Image source={require('../../assets/images/specialty/interview.png')} style={[styles.specialtyOptionIcon, styles.specialtyInterviewIcon]} />
               <View style={styles.specialtyOptionCopy}>
-                <Text style={[styles.specialtyOptionTitle, styles.specialtyInterviewTitle]}>英文面试</Text>
-                <Text numberOfLines={1} style={[styles.specialtyOptionNote, styles.specialtyInterviewNote]}>岗位模拟追问</Text>
+                <Text adjustsFontSizeToFit minimumFontScale={0.75} numberOfLines={1} style={[styles.specialtyOptionEyebrow, styles.specialtyInterviewEyebrow]}>ENGLISH INTERVIEW</Text>
+                <Text adjustsFontSizeToFit minimumFontScale={0.75} numberOfLines={1} style={[styles.specialtyOptionTitle, styles.specialtyInterviewTitle]}>英文面试</Text>
               </View>
             </Pressable>
           </View>
@@ -1265,12 +1265,12 @@ const styles = StyleSheet.create({
   specialtyIeltsIcon: { backgroundColor: '#E8DEFF' },
   specialtyInterviewIcon: { backgroundColor: '#DCEEFF' },
   specialtyOptionCopy: { minWidth: 0, flex: 1 },
-  specialtyOptionTitle: { color: colors.ink, fontSize: 19, lineHeight: 24, fontWeight: '600' },
-  specialtyOptionNote: { marginTop: 4, color: colors.subtle, fontSize: 12, lineHeight: 17, fontWeight: '300' },
+  specialtyOptionEyebrow: { marginBottom: 4, fontSize: 9, lineHeight: 12, fontWeight: '700', letterSpacing: 0 },
+  specialtyOptionTitle: { color: colors.ink, fontSize: 18, lineHeight: 23, fontWeight: '600', letterSpacing: 0 },
+  specialtyIeltsEyebrow: { color: '#7B7485' },
   specialtyIeltsTitle: { color: '#292331' },
-  specialtyIeltsNote: { color: '#8C8498' },
+  specialtyInterviewEyebrow: { color: '#718091' },
   specialtyInterviewTitle: { color: '#202833' },
-  specialtyInterviewNote: { color: '#83909E' },
   recommendationHeader: { marginTop: 22, marginBottom: 9, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   recommendationHeading: { marginTop: 3, color: colors.ink, fontSize: 23, fontWeight: '600', letterSpacing: -0.7 },
   recommendationList: { gap: 8 },

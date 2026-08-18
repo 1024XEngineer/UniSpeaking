@@ -501,7 +501,6 @@ svg { display: block; }
 .specialty-card__copy { min-width: 0; display: grid; }
 .specialty-card__copy small { margin-bottom: 7px; color: currentColor; font-size: 10px; font-weight: 750; opacity: .58; }
 .specialty-card__copy strong { font-size: 24px; line-height: 1.15; }
-.specialty-card__copy > span { margin-top: 8px; overflow: hidden; color: currentColor; font-size: 13px; line-height: 1.5; opacity: .62; white-space: nowrap; text-overflow: ellipsis; }
 .specialty-card__action { width: 40px; height: 40px; display: grid; place-items: center; justify-self: end; border: 1px solid currentColor; border-radius: 50%; opacity: .72; transition: color .2s, background .2s, transform .2s; }
 .specialty-card:hover .specialty-card__action { border-color: var(--specialty-accent); color: #fff; background: var(--specialty-accent); transform: translateX(2px); opacity: 1; }
 .specialty-card__action svg { width: 17px; height: 17px; }
@@ -566,7 +565,6 @@ svg { display: block; }
   .specialty-card { min-height: 118px; padding: 14px; grid-template-columns: 74px minmax(0, 1fr) 38px; gap: 13px; }
   .specialty-card__art { width: 74px; height: 74px; }
   .specialty-card__copy strong { font-size: 20px; }
-  .specialty-card__copy > span { font-size: 12px; }
   .specialty-card__action { width: 36px; height: 36px; }
   .scene-card-cta { width: 36px; height: 36px; }
 }
@@ -576,7 +574,6 @@ svg { display: block; }
   .specialty-card__art { width: 64px; height: 64px; border-radius: 12px; }
   .specialty-card__copy small { margin-bottom: 4px; font-size: 9px; }
   .specialty-card__copy strong { font-size: 18px; white-space: nowrap; }
-  .specialty-card__copy > span { margin-top: 5px; font-size: 11px; }
   .specialty-card__action { width: 32px; height: 32px; }
   .specialty-card__action svg { width: 15px; height: 15px; }
   .recommendation-list > article { min-height: 132px; grid-template-columns: 38px minmax(0, 1fr); grid-template-rows: auto auto 1fr auto; }
