@@ -697,7 +697,7 @@ class PostgresPersistenceIT {
 						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
 						Integer.class));
 		assertEquals(
-				List.of("0", "1", "2"),
+				List.of("0", "1"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version
