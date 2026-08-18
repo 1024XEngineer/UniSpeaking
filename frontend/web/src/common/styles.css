@@ -1145,6 +1145,8 @@ svg { display: block; }
 .calendar-days .calendar-blank { min-height: 46px; }
 .calendar-days button { position: relative; min-width: 0; min-height: 46px; display: grid; place-items: center; padding: 4px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: #9a9a95; font-size: 12px; cursor: pointer; transition: color .18s, background .18s, border-color .18s, transform .18s, box-shadow .18s; }
 .calendar-days button:hover { color: var(--ink); background: #f5f5f2; transform: translateY(-1px); }
+.calendar-days button:disabled { color: #d0d0cb; cursor: not-allowed; }
+.calendar-days button:disabled:hover { background: transparent; transform: none; }
 .calendar-days button.is-practiced { color: #3a3a37; background: #f1f1ee; font-weight: 650; }
 .calendar-days button.is-today { border-color: #b7b7b1; }
 .calendar-days button.is-selected { border-color: #20201f; background: #20201f; color: #fff; box-shadow: 0 7px 18px rgba(20,20,19,.12); }
