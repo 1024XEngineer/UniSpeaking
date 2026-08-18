@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { BackHandler, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -596,6 +596,30 @@ export function IeltsFlow({ onExit, onViewDetails, analytics }: { onExit: () => 
     !ielts.settingsLoading &&
     ielts.settings?.targetScore != null &&
     hasCompletedOnboarding;
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (route === 'intake') {
+        if (intakeStep > 0) setIntakeStep(0);
+        else onExit();
+        return true;
+      }
+      if (route === 'home') {
+        onExit();
+      } else if (route === 'topics') {
+        setRoute('home');
+      } else if (route === 'examiner') {
+        setRoute('topics');
+      } else if (route === 'report') {
+        setRoute('home');
+      }
+      // Do not leave the Activity while a live session or evaluation is active.
+      return true;
+    });
+    return () => subscription.remove();
+  }, [intakeStep, onExit, route]);
 
   useEffect(() => {
     void rememberSpecialty('ielts');
@@ -1394,11 +1418,24 @@ export function InterviewFlow({ onExit, onViewDetails, practiceScene, analytics 
 
   useEffect(() => () => setImmersiveLearning(false), [setImmersiveLearning]);
 
-  const closeReport = () => {
+  const closeReport = useCallback(() => {
     setPreparation(null);
     setCompletedSession(null);
     setRoute('input');
-  };
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (route === 'input') onExit();
+      else if (route === 'review') setRoute('input');
+      else if (route === 'finalizing') closeReport();
+      // A live interview must be ended from its call control.
+      return true;
+    });
+    return () => subscription.remove();
+  }, [closeReport, onExit, route]);
 
   if (route === 'input') {
     return (

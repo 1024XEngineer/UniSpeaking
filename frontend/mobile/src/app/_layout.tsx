@@ -14,7 +14,11 @@ function RootNavigator() {
   if (!isModelReady) return null;
 
   return (
-    <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+    <Stack
+      // The protected app is a single root screen. Let nested stacks own back
+      // gestures so an edge swipe cannot pop the whole app and exit.
+      screenOptions={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: false }}
+    >
       <Stack.Screen name="index" />
       <Stack.Protected guard={!isAuthenticated}>
         <Stack.Screen name="(public)" />

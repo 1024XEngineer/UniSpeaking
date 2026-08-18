@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Image, PanResponder, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Animated, BackHandler, Image, PanResponder, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Reanimated, {
   cancelAnimation,
@@ -855,6 +855,16 @@ export function ScenesHome({
   const [generatingSource, setGeneratingSource] = useState<'custom' | string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const generating = generatingSource !== null;
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !preview) return;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setPreview(null);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [preview]);
+
   const generatePreview = async (sceneInput: string, source: 'custom' | string) => {
     if (!sceneInput.trim() || generating) return;
     setGeneratingSource(source);
@@ -1095,6 +1105,15 @@ export function ScenesScreen({
     }
     setRoute(nextRoute);
   };
+  useEffect(() => {
+    if (Platform.OS !== 'android' || route.name === 'home') return;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setRoute({ name: 'home' });
+      return true;
+    });
+    return () => subscription.remove();
+  }, [route.name]);
   useEffect(() => {
     if (route.name === 'home') void forgetSpecialty();
   }, [route.name]);
