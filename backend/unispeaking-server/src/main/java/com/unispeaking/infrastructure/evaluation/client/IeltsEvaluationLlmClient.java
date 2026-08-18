@@ -10,6 +10,7 @@ import com.unispeaking.common.prompt.evaluation.IeltsEvaluationPromptBuilder;
 import com.unispeaking.domain.vo.scene.IeltsPart;
 import com.unispeaking.common.evaluation.EvaluationProviderFailureTranslator;
 import com.unispeaking.provider.AiProviderRegistry;
+import com.unispeaking.provider.AiInvocationContext;
 import org.springframework.stereotype.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,11 +44,17 @@ public final class IeltsEvaluationLlmClient {
 			String transcript,
 			String cueCard,
 			String speechMetrics) {
+		return assessPart(part, transcript, cueCard, speechMetrics, null);
+	}
+
+	public IeltsTextAssessment assessPart(
+			IeltsPart part, String transcript, String cueCard, String speechMetrics,
+			AiInvocationContext context) {
 		return executeAndParse(promptBuilder.buildPart(
 				part,
 				transcript,
 				cueCard,
-				speechMetrics), part);
+				speechMetrics), part, context);
 	}
 
 	public IeltsTextAssessment assessFullTest(
@@ -57,12 +64,13 @@ public final class IeltsEvaluationLlmClient {
 		return executeAndParse(promptBuilder.buildFinal(
 				transcript,
 				speechMetrics,
-				pronunciationBand), null);
+				pronunciationBand), null, null);
 	}
 
 	private IeltsTextAssessment executeAndParse(
 			String prompt,
-			IeltsPart expectedPart) {
+			IeltsPart expectedPart,
+			AiInvocationContext context) {
 		EvaluationException lastFailure = null;
 		for (int attempt = 1; attempt <= MAX_PARSE_ATTEMPTS; attempt++) {
 			String effectivePrompt = attempt == 1
@@ -73,7 +81,7 @@ public final class IeltsEvaluationLlmClient {
 							+ "Use numeric whole bands, include every required field, "
 							+ "and output no Markdown or commentary.";
 			try {
-				return parser.parse(execute(effectivePrompt), expectedPart);
+				return parser.parse(execute(effectivePrompt, context), expectedPart);
 			}
 			catch (EvaluationException exception) {
 				if (!isRetryableParseFailure(exception)
@@ -96,9 +104,11 @@ public final class IeltsEvaluationLlmClient {
 						== EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE;
 	}
 
-	private String execute(String prompt) {
+	private String execute(String prompt, AiInvocationContext context) {
 		try {
-			return registry.executeLlmTaskRouted(prompt, null).response();
+			return context == null
+					? registry.executeLlmTaskRouted(prompt, null).response()
+					: registry.executeLlmTaskRouted(context, prompt, null).response();
 		}
 		catch (BusinessException exception) {
 			throw failureTranslator.translate(exception);

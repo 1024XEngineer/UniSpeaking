@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, BackHandler, Image, PanResponder, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, BackHandler, Image, PanResponder, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Reanimated, {
   cancelAnimation,
@@ -70,6 +70,13 @@ const stages = [
 ] as const;
 
 type TrainingStage = (typeof stages)[number]['key'];
+
+const chineseCharacterPattern = /[\u3400-\u9fff]/;
+
+function previewText(value: string, fallback: string, maxLength: number) {
+  const source = String(value ?? '').trim();
+  return chineseCharacterPattern.test(source) ? source.slice(0, maxLength) : fallback;
+}
 
 function StageProgressRail({
   stage,
@@ -420,6 +427,17 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   const readingResult = trainingSnapshot?.readingResult;
   const trainingTransitioning = trainingSnapshot?.status === 'loading';
   const completionMetrics = sceneMetricsForReport(dialogueCompletion?.evaluation);
+  const confirmExit = () => {
+    Alert.alert(
+      '退出当前训练？',
+      '退出后将返回场景广场。',
+      [
+        { text: '继续训练', style: 'cancel' },
+        { text: '确认退出', style: 'destructive', onPress: onBack },
+      ],
+      { cancelable: true },
+    );
+  };
 
   const toggleDemo = async (text: string) => {
     if (!scene || !ttsPlayer) {
@@ -549,7 +567,7 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
           <Text style={styles.trainingTitle}>{scenario.title}</Text>
           <Text style={styles.trainingSubtitle}>从语言到真实表达</Text>
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel="取消训练" onPress={onBack} style={styles.trainingCancel}>
+        <Pressable accessibilityRole="button" accessibilityLabel="退出训练" onPress={confirmExit} style={styles.trainingCancel}>
           <AppIcon name="close" size={19} color={colors.muted} />
         </Pressable>
       </View>
@@ -972,8 +990,8 @@ export function ScenesHome({
             >
               <Image source={require('../../assets/images/specialty/ielts.png')} style={[styles.specialtyOptionIcon, styles.specialtyIeltsIcon]} />
               <View style={styles.specialtyOptionCopy}>
-                <Text style={[styles.specialtyOptionTitle, styles.specialtyIeltsTitle]}>雅思口语</Text>
-                <Text numberOfLines={1} style={[styles.specialtyOptionNote, styles.specialtyIeltsNote]}>模考与评分</Text>
+                <Text adjustsFontSizeToFit minimumFontScale={0.75} numberOfLines={1} style={[styles.specialtyOptionEyebrow, styles.specialtyIeltsEyebrow]}>IELTS SPEAKING</Text>
+                <Text adjustsFontSizeToFit minimumFontScale={0.75} numberOfLines={1} style={[styles.specialtyOptionTitle, styles.specialtyIeltsTitle]}>雅思口语</Text>
               </View>
             </Pressable>
             <Pressable
@@ -988,8 +1006,8 @@ export function ScenesHome({
             >
               <Image source={require('../../assets/images/specialty/interview.png')} style={[styles.specialtyOptionIcon, styles.specialtyInterviewIcon]} />
               <View style={styles.specialtyOptionCopy}>
-                <Text style={[styles.specialtyOptionTitle, styles.specialtyInterviewTitle]}>英文面试</Text>
-                <Text numberOfLines={1} style={[styles.specialtyOptionNote, styles.specialtyInterviewNote]}>岗位模拟追问</Text>
+                <Text adjustsFontSizeToFit minimumFontScale={0.75} numberOfLines={1} style={[styles.specialtyOptionEyebrow, styles.specialtyInterviewEyebrow]}>ENGLISH INTERVIEW</Text>
+                <Text adjustsFontSizeToFit minimumFontScale={0.75} numberOfLines={1} style={[styles.specialtyOptionTitle, styles.specialtyInterviewTitle]}>英文面试</Text>
               </View>
             </Pressable>
           </View>
@@ -1037,16 +1055,18 @@ export function ScenesHome({
             </Pressable>
             <Text style={styles.previewEyebrow}>场景已准备好</Text>
             <View style={styles.previewTitleRow}>
-            <Text style={styles.previewTitle}>{previewDisplay?.title || preview.title}</Text>
+              <Text style={styles.previewTitle}>
+                {previewDisplay?.title || previewText(preview.title, '正在整理场景…', 18)}
+              </Text>
               <SceneCategoryTag category={sceneCategoryForLabel(preview.label)} />
             </View>
             <Text style={styles.previewLead}>场景已生成，确认后即可开始练习。</Text>
             <View style={styles.previewSummary}>
               {[
-                ['场景简介', previewDisplay?.background || preview.background],
-                ['AI 扮演', previewDisplay?.aiRole || preview.aiRole],
-                ['你将扮演', previewDisplay?.userRole || preview.userRole],
-                ['练习重点', previewDisplay?.learningGoal || preview.learningGoal],
+                ['场景简介', previewDisplay?.background || previewText(preview.background, '正在整理中文摘要…', 58)],
+                ['AI 扮演', previewDisplay?.aiRole || previewText(preview.aiRole, '正在整理…', 22)],
+                ['你将扮演', previewDisplay?.userRole || previewText(preview.userRole, '正在整理…', 22)],
+                ['练习重点', previewDisplay?.learningGoal || previewText(preview.learningGoal, '正在整理中文摘要…', 42)],
                 ['预计用时', `${preview.estimatedMinutes} 分钟`],
               ].map(([label, value]) => (
                 <View key={label} style={styles.previewSummaryRow}>
@@ -1254,12 +1274,12 @@ const styles = StyleSheet.create({
   specialtyIeltsIcon: { backgroundColor: '#E8DEFF' },
   specialtyInterviewIcon: { backgroundColor: '#DCEEFF' },
   specialtyOptionCopy: { minWidth: 0, flex: 1 },
-  specialtyOptionTitle: { color: colors.ink, fontSize: 19, lineHeight: 24, fontWeight: '600' },
-  specialtyOptionNote: { marginTop: 4, color: colors.subtle, fontSize: 12, lineHeight: 17, fontWeight: '300' },
+  specialtyOptionEyebrow: { marginBottom: 4, fontSize: 9, lineHeight: 12, fontWeight: '700', letterSpacing: 0 },
+  specialtyOptionTitle: { color: colors.ink, fontSize: 18, lineHeight: 23, fontWeight: '600', letterSpacing: 0 },
+  specialtyIeltsEyebrow: { color: '#7B7485' },
   specialtyIeltsTitle: { color: '#292331' },
-  specialtyIeltsNote: { color: '#8C8498' },
+  specialtyInterviewEyebrow: { color: '#718091' },
   specialtyInterviewTitle: { color: '#202833' },
-  specialtyInterviewNote: { color: '#83909E' },
   recommendationHeader: { marginTop: 22, marginBottom: 9, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   recommendationHeading: { marginTop: 3, color: colors.ink, fontSize: 23, fontWeight: '600', letterSpacing: -0.7 },
   recommendationList: { gap: 8 },

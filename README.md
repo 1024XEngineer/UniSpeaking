@@ -234,14 +234,13 @@ OCR_ACCESS_TOKEN='登录后 localStorage 中的 unispeaking.accessToken' \
 createdb -U postgres unispeaking
 ```
 
-启动后端时，Flyway 自动执行：
+启动后端时，Flyway 自动执行合并后的单一迁移：
 
 [`V1__baseline.sql`](backend/unispeaking-server/src/main/resources/db/migration/V1__baseline.sql)
 
-V1 是空库完整基线，包含业务表、索引、约束和 IELTS 题库种子数据；后续结构调整通过
-V2 及更高版本迁移增量执行。已存在旧版 Flyway 历史的开发数据库不能直接套用该基线，
-应先备份数据再重建。任何版本一旦进入共享环境，后续只能新增更高版本迁移，不能继续
-改写已执行文件。
+V1 包含完整业务结构、IELTS 题库种子数据、动态 AI Provider、路由、价格和调用账单。
+它用于初始化空数据库；已经记录过旧迁移历史的数据库需要先备份，再将结构和 Flyway
+历史归一化到当前 V1。
 
 主要表按领域分为：
 

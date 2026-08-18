@@ -27,6 +27,28 @@ class RealtimeSessionTerminatorTest {
 		new RealtimeSessionTerminator(registry).stopBestEffort(session, "client_completed");
 
 		verify(provider).stopSession("rti-session-1", null, "client_completed");
+		verify(registry).recordRealtimeSession(
+				org.mockito.ArgumentMatchers.eq("user-1"),
+				org.mockito.ArgumentMatchers.eq("local-1"),
+				org.mockito.ArgumentMatchers.eq("qwen3.5-omni-plus-realtime"),
+				org.mockito.ArgumentMatchers.any(),
+				org.mockito.ArgumentMatchers.any());
+	}
+
+	@Test
+	void recordsDirectSdpSessionsWithoutAnExternalProviderSession() {
+		AiProviderRegistry registry = mock(AiProviderRegistry.class);
+		FreeChatSceneSession session = new FreeChatSceneSession("local-1", "user-1");
+		session.setModel("qwen3.5-omni-flash-realtime");
+
+		new RealtimeSessionTerminator(registry).stopBestEffort(session, "client_completed");
+
+		verify(registry).recordRealtimeSession(
+				org.mockito.ArgumentMatchers.eq("user-1"),
+				org.mockito.ArgumentMatchers.eq("local-1"),
+				org.mockito.ArgumentMatchers.eq("qwen3.5-omni-flash-realtime"),
+				org.mockito.ArgumentMatchers.any(),
+				org.mockito.ArgumentMatchers.any());
 	}
 
 	@Test

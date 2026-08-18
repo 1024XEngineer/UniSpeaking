@@ -3,6 +3,7 @@ package com.unispeaking.infrastructure.evaluation.client;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
+import com.unispeaking.provider.AiInvocationContext;
 import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.common.evaluation.model.ConversationLanguageAssessment;
@@ -65,9 +66,14 @@ public final class EvaluationLlmClient {
 	}
 
 	public ConversationLanguageAssessment assessDialogue(List<Message> dialogue) {
+		return assessDialogue(dialogue, null);
+	}
+
+	public ConversationLanguageAssessment assessDialogue(
+			List<Message> dialogue, AiInvocationContext context) {
 		CompletableFuture<ConversationLanguageAssessment> task =
 				CompletableFuture.supplyAsync(() -> reportParser.parse(
-						execute(reportPromptBuilder.build(dialogue))));
+						execute(reportPromptBuilder.build(dialogue), context)));
 		try {
 			return task.get(REPORT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
 		}
@@ -94,12 +100,19 @@ public final class EvaluationLlmClient {
 
 	public TurnLanguageFeedback assessTurn(
 			DialogueTurnEvaluationPromptInput input) {
-		return turnParser.parse(execute(turnPromptBuilder.build(input)));
+		return assessTurn(input, null);
 	}
 
-	private String execute(String prompt) {
+	public TurnLanguageFeedback assessTurn(
+			DialogueTurnEvaluationPromptInput input, AiInvocationContext context) {
+		return turnParser.parse(execute(turnPromptBuilder.build(input), context));
+	}
+
+	private String execute(String prompt, AiInvocationContext context) {
 		try {
-			return registry.executeLlmTaskRouted(prompt, null).response();
+			return context == null
+					? registry.executeLlmTaskRouted(prompt, null).response()
+					: registry.executeLlmTaskRouted(context, prompt, null).response();
 		}
 		catch (BusinessException exception) {
 			throw failureTranslator.translate(exception);

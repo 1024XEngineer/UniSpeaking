@@ -4,6 +4,9 @@ import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.LlmProvider;
 import com.unispeaking.provider.LlmResponseFormat;
+import com.unispeaking.provider.AiProviderResponse;
+import com.unispeaking.provider.ProviderUsage;
+import com.unispeaking.provider.ProviderCredentialOverride;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -84,7 +87,7 @@ public class QwenLlmProvider extends LlmProvider {
 
 	@Override
 	public String executeLlmTask(String prompt, String token) {
-		return executeLlmTask(prompt, token, LlmResponseFormat.TEXT);
+		return executeLlmTaskMeasured(prompt, token).response();
 	}
 
 	@Override
@@ -92,15 +95,35 @@ public class QwenLlmProvider extends LlmProvider {
 			String prompt,
 			String token,
 			LlmResponseFormat responseFormat) {
-		if (apiKey.isBlank()) {
+		return executeLlmTaskMeasured(prompt, token, responseFormat).response();
+	}
+
+	@Override
+	public AiProviderResponse<String> executeLlmTaskMeasured(
+			String prompt,
+			String token,
+			LlmResponseFormat responseFormat) {
+		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		if (credential.isBlank()) {
 			throw retryableFailure(
 					"QWEN_LLM_CREDENTIAL_MISSING",
 					"Set DASHSCOPE_API_KEY before calling Qwen LLM");
 		}
-		return callForContent(prompt, apiKey, responseFormat);
+		return callForContent(prompt, credential, responseFormat);
 	}
 
-	private String callForContent(
+	@Override
+	public AiProviderResponse<String> executeLlmTaskMeasured(String prompt, String token) {
+		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		if (credential.isBlank()) {
+			throw retryableFailure(
+					"QWEN_LLM_CREDENTIAL_MISSING",
+					"Set DASHSCOPE_API_KEY before calling Qwen LLM");
+		}
+		return callForContent(prompt, credential, LlmResponseFormat.TEXT);
+	}
+
+	private AiProviderResponse<String> callForContent(
 			String promptValue,
 			String credential,
 			LlmResponseFormat responseFormat) {
@@ -150,7 +173,13 @@ public class QwenLlmProvider extends LlmProvider {
 						"QWEN_LLM_EMPTY_RESPONSE",
 						"Qwen LLM returned no message content");
 			}
-			return content;
+			JsonNode usage = root.path("usage");
+			long inputTokens = usage.path("prompt_tokens").longValue(usage.path("input_tokens").longValue(0));
+			long outputTokens = usage.path("completion_tokens").longValue(usage.path("output_tokens").longValue(0));
+			ProviderUsage measuredUsage = inputTokens > 0 || outputTokens > 0
+					? new ProviderUsage(inputTokens, outputTokens, prompt.length(), content.length(), 0, 0, "PROVIDER")
+					: ProviderUsage.estimatedText(prompt, content);
+			return new AiProviderResponse<>(content, root.path("id").asString(null), measuredUsage);
 		}
 		catch (BusinessException exception) {
 			throw exception;

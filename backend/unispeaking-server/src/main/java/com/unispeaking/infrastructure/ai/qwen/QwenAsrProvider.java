@@ -4,6 +4,7 @@ import com.unispeaking.domain.vo.evaluation.AudioInput;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.TranscriptionProvider;
+import com.unispeaking.provider.ProviderCredentialOverride;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -97,12 +98,13 @@ public class QwenAsrProvider extends TranscriptionProvider {
 				requireAudio(audio, "Qwen ASR"),
 				"wav");
 		requireAudio(input);
-		if (apiKey.isBlank()) {
+		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		if (credential.isBlank()) {
 			throw retryableFailure(
 					"QWEN_ASR_CREDENTIAL_MISSING",
 					"Set DASHSCOPE_API_KEY before calling Qwen ASR");
 		}
-		return transcribe(input, apiKey);
+		return transcribe(input, credential);
 	}
 
 	private String transcribe(AudioInput audio, String credential) {

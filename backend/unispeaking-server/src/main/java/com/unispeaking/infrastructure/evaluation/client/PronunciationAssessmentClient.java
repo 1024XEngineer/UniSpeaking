@@ -4,6 +4,7 @@ import com.unispeaking.domain.vo.provider.AiCapability;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.AiProviderRegistry.RoutedResult;
+import com.unispeaking.provider.AiInvocationContext;
 import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.common.evaluation.model.PronunciationAssessmentResult;
@@ -58,15 +59,21 @@ public final class PronunciationAssessmentClient {
 	public PronunciationAssessmentResult evaluate(
 			String referenceText,
 			byte[] wavAudio) {
+		return evaluate(referenceText, wavAudio, null);
+	}
+
+	public PronunciationAssessmentResult evaluate(
+			String referenceText,
+			byte[] wavAudio,
+			AiInvocationContext context) {
 		String requiredReferenceText = requireReferenceText(referenceText);
 		Byte[] requiredAudio = boxAudio(wavAudio);
 
 		RoutedResult<String> routedResult;
 		try {
-			routedResult = aiProviderRegistry.evaluatePronunciationRouted(
-					requiredReferenceText,
-					requiredAudio,
-					null);
+			routedResult = context == null
+					? aiProviderRegistry.evaluatePronunciationRouted(requiredReferenceText, requiredAudio, null)
+					: aiProviderRegistry.evaluatePronunciationRouted(context, requiredReferenceText, requiredAudio, null);
 		}
 		catch (BusinessException exception) {
 			throw failureTranslator.translate(exception);

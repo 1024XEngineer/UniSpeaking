@@ -24,4 +24,12 @@ public abstract class LlmProvider extends AbstractAiProvider {
 			LlmResponseFormat responseFormat) {
 		return executeLlmTask(prompt, token);
 	}
+
+	public AiProviderResponse<String> executeLlmTaskMeasured(
+			String prompt,
+			String token,
+			LlmResponseFormat responseFormat) {
+		String response = executeLlmTask(prompt, token, responseFormat);
+		return new AiProviderResponse<>(response, null, ProviderUsage.estimatedText(prompt, response));
+	}
 }

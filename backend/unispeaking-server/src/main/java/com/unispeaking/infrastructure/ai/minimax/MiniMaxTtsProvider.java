@@ -3,6 +3,7 @@ package com.unispeaking.infrastructure.ai.minimax;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.TtsProvider;
+import com.unispeaking.provider.ProviderCredentialOverride;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -111,12 +112,13 @@ public class MiniMaxTtsProvider extends TtsProvider {
 
 	@Override
 	public byte[] generateSpeechAudio(String text, String token) {
-		if (apiKey.isBlank()) {
+		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		if (credential.isBlank()) {
 			throw retryableFailure(
 					"MINIMAX_TTS_CREDENTIAL_MISSING",
 					"Set MINIMAX_API_KEY before calling MiniMax TTS");
 		}
-		return synthesize(text, apiKey);
+		return synthesize(text, credential);
 	}
 
 	private byte[] synthesize(String textValue, String credential) {
