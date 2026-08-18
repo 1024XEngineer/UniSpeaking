@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, BackHandler, Image, PanResponder, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, BackHandler, Image, PanResponder, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Reanimated, {
   cancelAnimation,
@@ -420,6 +420,17 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   const readingResult = trainingSnapshot?.readingResult;
   const trainingTransitioning = trainingSnapshot?.status === 'loading';
   const completionMetrics = sceneMetricsForReport(dialogueCompletion?.evaluation);
+  const confirmExit = () => {
+    Alert.alert(
+      '退出当前训练？',
+      '退出后将返回场景广场。',
+      [
+        { text: '继续训练', style: 'cancel' },
+        { text: '确认退出', style: 'destructive', onPress: onBack },
+      ],
+      { cancelable: true },
+    );
+  };
 
   const toggleDemo = async (text: string) => {
     if (!scene || !ttsPlayer) {
@@ -549,7 +560,7 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
           <Text style={styles.trainingTitle}>{scenario.title}</Text>
           <Text style={styles.trainingSubtitle}>从语言到真实表达</Text>
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel="取消训练" onPress={onBack} style={styles.trainingCancel}>
+        <Pressable accessibilityRole="button" accessibilityLabel="退出训练" onPress={confirmExit} style={styles.trainingCancel}>
           <AppIcon name="close" size={19} color={colors.muted} />
         </Pressable>
       </View>
