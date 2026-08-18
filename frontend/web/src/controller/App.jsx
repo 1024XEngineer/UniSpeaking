@@ -2051,6 +2051,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   const [readError, setReadError] = useState("");
   const [flowAdvancing, setFlowAdvancing] = useState(false);
   const [flowError, setFlowError] = useState("");
+  const [exitOpen, setExitOpen] = useState(false);
   const lessonItems = generatedMode
     ? (learningGroup === "words" ? generatedWordItems : generatedPhraseItems)
     : learningItems;
@@ -2061,6 +2062,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   const score = readScores[readIndex] ?? null;
   const readEvaluation = readEvaluations[readIndex] ?? null;
   const completeStep = (id) => setCompletedSteps((current) => current.includes(id) ? current : [...current, id]);
+  const exitConfirmation = exitOpen && <Modal dismissible={false}><p className="eyebrow">EXIT TRAINING</p><h2>确定要退出当前训练吗？</h2><p className="modal-lead">退出后将返回上一页。</p><div className="modal-actions"><Button variant="secondary" onClick={() => setExitOpen(false)}>继续训练</Button><Button onClick={onExit}>确认退出</Button></div></Modal>;
   const goToStep = (id) => {
     const targetIndex = steps.findIndex((item) => item.id === id);
     if (targetIndex > unlockedStepIndex) return;
@@ -2223,18 +2225,19 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   if (!item && displayedStep !== "speak") {
     return (
       <main className="training-page">
-        <header className="training-header"><div><strong>{sceneTitle || "自定义场景"}</strong><span>场景内容加载失败</span></div><button className="training-exit" aria-label="关闭训练" onClick={onExit}><span><X weight="bold" /></span></button></header>
+        <header className="training-header"><div><strong>{sceneTitle || "自定义场景"}</strong><span>场景内容加载失败</span></div><button className="training-exit" aria-label="关闭训练" onClick={() => setExitOpen(true)}><span><X weight="bold" /></span></button></header>
         <section className="training-empty" role="alert">
           <h1>场景学习内容为空</h1>
           <p>后端没有返回当前阶段需要的单词、词组或句子，请返回场景广场重新生成。</p>
           <ExpandingCta direction="back" onClick={onBack}>返回场景广场</ExpandingCta>
         </section>
+        {exitConfirmation}
       </main>
     );
   }
   return (
     <main className={cx("training-page", standaloneSpeak && "training-page--standalone")}>
-      <header className="training-header"><div><strong>{sceneTitle}</strong><span>从语言到真实表达</span></div><button className="training-exit" aria-label="关闭训练" onClick={onExit}><span><X weight="bold" /></span></button></header>
+      <header className="training-header"><div><strong>{sceneTitle}</strong><span>从语言到真实表达</span></div><button className="training-exit" aria-label="关闭训练" onClick={() => setExitOpen(true)}><span><X weight="bold" /></span></button></header>
       {!standaloneSpeak && <nav className="stepper" aria-label="练习进度">
         <span className="stepper__track" aria-hidden="true"><span style={{ width: `${unlockedStepIndex * 50}%` }} /></span>
         {steps.map((stepItem, index) => {
@@ -2252,6 +2255,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
       {(step === "speak" || result) && !generatedMode && <CustomSceneConversation sceneId={sceneId} teacher={teacher} speed={speed} ended={Boolean(result)} onSessionStarted={(startedSessionId) => onStageChange?.("session", startedSessionId)} onComplete={onComplete} />}
       {result && <ResultModal completed={result.completed} evaluation={result.evaluation} onBack={onBack} onAssets={onAssets} />}
       {!result && readFeedback && <ReadScoreModal feedback={readFeedback} item={readItems[readFeedback.index]} onClose={() => setReadFeedback(null)} />}
+      {exitConfirmation}
     </main>
   );
 }
