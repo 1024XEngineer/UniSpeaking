@@ -2636,8 +2636,10 @@ function LearningCalendar({ calendar, onMonthChange }) {
           const day = index + 1;
           const record = checkedDays.has(day);
           const isToday = todayDay === day;
+          const dateKey = `${monthKey}-${String(day).padStart(2, "0")}`;
+          const isFuture = dateKey > today;
           return (
-            <button key={day} type="button" role="gridcell" aria-label={`${label}${day}日${record ? "，已自动打卡" : "，无打卡记录"}`} className={cx(record && "is-practiced", isToday && "is-today", selectedDay === day && "is-selected")} onClick={() => setSelectedDay(day)}>
+            <button key={day} type="button" role="gridcell" disabled={isFuture} aria-label={`${label}${day}日${isFuture ? "，尚未到达" : record ? "，已自动打卡" : "，无打卡记录"}`} className={cx(record && "is-practiced", isToday && "is-today", isFuture && "is-future", selectedDay === day && "is-selected")} onClick={() => { if (!isFuture) setSelectedDay(day); }}>
               <span>{day}</span>{record && <i aria-hidden="true" />}{isToday && <small>今天</small>}
             </button>
           );
