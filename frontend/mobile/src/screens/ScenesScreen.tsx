@@ -71,6 +71,13 @@ const stages = [
 
 type TrainingStage = (typeof stages)[number]['key'];
 
+const chineseCharacterPattern = /[\u3400-\u9fff]/;
+
+function previewText(value: string, fallback: string, maxLength: number) {
+  const source = String(value ?? '').trim();
+  return chineseCharacterPattern.test(source) ? source.slice(0, maxLength) : fallback;
+}
+
 function StageProgressRail({
   stage,
   unlockedStage,
@@ -1048,16 +1055,18 @@ export function ScenesHome({
             </Pressable>
             <Text style={styles.previewEyebrow}>场景已准备好</Text>
             <View style={styles.previewTitleRow}>
-            <Text style={styles.previewTitle}>{previewDisplay?.title || preview.title}</Text>
+              <Text style={styles.previewTitle}>
+                {previewDisplay?.title || previewText(preview.title, '正在整理场景…', 18)}
+              </Text>
               <SceneCategoryTag category={sceneCategoryForLabel(preview.label)} />
             </View>
             <Text style={styles.previewLead}>场景已生成，确认后即可开始练习。</Text>
             <View style={styles.previewSummary}>
               {[
-                ['场景简介', previewDisplay?.background || preview.background],
-                ['AI 扮演', previewDisplay?.aiRole || preview.aiRole],
-                ['你将扮演', previewDisplay?.userRole || preview.userRole],
-                ['练习重点', previewDisplay?.learningGoal || preview.learningGoal],
+                ['场景简介', previewDisplay?.background || previewText(preview.background, '正在整理中文摘要…', 58)],
+                ['AI 扮演', previewDisplay?.aiRole || previewText(preview.aiRole, '正在整理…', 22)],
+                ['你将扮演', previewDisplay?.userRole || previewText(preview.userRole, '正在整理…', 22)],
+                ['练习重点', previewDisplay?.learningGoal || previewText(preview.learningGoal, '正在整理中文摘要…', 42)],
                 ['预计用时', `${preview.estimatedMinutes} 分钟`],
               ].map(([label, value]) => (
                 <View key={label} style={styles.previewSummaryRow}>
