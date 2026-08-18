@@ -385,4 +385,23 @@ assert.ok(
 assert.match(freeChatStopSource, /stopPromiseRef\.current/);
 assert.match(freeChatStopSource, /detachRemoteAudio\(\)/);
 
+assert.match(appSource, /const detachSceneRemoteAudio = \(\) => \{/);
+assert.match(appSource, /sceneAnalyticsRef\.current\?\.abandon\("COMPONENT_UNMOUNT"\);\s+detachSceneRemoteAudio\(\);/);
+
+const ieltsSource = await readFile(
+  new URL("../src/component/ielts/IeltsModule.jsx", import.meta.url),
+  "utf8",
+);
+assert.match(ieltsSource, /const finishingRef = useRef\(false\);/);
+assert.match(ieltsSource, /if \(finishingRef\.current\) return;\s+finishingRef\.current = true;/);
+assert.match(ieltsSource, /ieltsAnalyticsRef\.current\?\.abandon\("COMPONENT_UNMOUNT"\);[\s\S]*?detachIeltsRemoteAudio\(\);[\s\S]*?clientRef\.current = null;/);
+
+const interviewSource = await readFile(
+  new URL("../src/component/interview/InterviewModule.jsx", import.meta.url),
+  "utf8",
+);
+assert.match(interviewSource, /const detachInterviewRemoteAudio = \(\) => \{/);
+assert.match(interviewSource, /interviewAnalyticsRef\.current\?\.abandon\("COMPONENT_UNMOUNT"\);\s+detachInterviewRemoteAudio\(\);/);
+assert.match(interviewSource, /const abandon = async \(\) => \{\s+if \(endingRef\.current\) return;\s+endingRef\.current = true;/);
+
 console.log("Realtime event normalization checks passed.");

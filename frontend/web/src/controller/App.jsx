@@ -1707,6 +1707,12 @@ function CustomSceneConversation({
     lines,
     translated,
   });
+  const detachSceneRemoteAudio = () => {
+    const audio = remoteAudioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.srcObject = null;
+  };
 
   const updateLine = ({ id, who, text = "", delta = "", final = false }) => {
     const content = String(text || delta || "");
@@ -1789,6 +1795,7 @@ function CustomSceneConversation({
       setEnding(true);
     } else if (event.type === "local.ended" && event.reason === "state_machine") {
       sceneAnalyticsRef.current?.complete();
+      detachSceneRemoteAudio();
       clientRef.current = null;
       onComplete(
         true,
@@ -1797,6 +1804,7 @@ function CustomSceneConversation({
       );
     } else if (event.type === "local.scenario_completion_error") {
       sceneAnalyticsRef.current?.complete();
+      detachSceneRemoteAudio();
       clientRef.current = null;
       setError(event.message || "场景自动结束失败");
       onComplete(true, null, sessionIdRef.current);
@@ -1817,8 +1825,7 @@ function CustomSceneConversation({
     if (ended) {
       setEnding(true);
       setStatus("模拟对话已结束");
-      remoteAudioRef.current?.pause();
-      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+      detachSceneRemoteAudio();
       return undefined;
     }
     let cancelled = false;
@@ -1855,6 +1862,7 @@ function CustomSceneConversation({
       cancelled = true;
       document.removeEventListener("visibilitychange", syncVisibility);
       sceneAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
+      detachSceneRemoteAudio();
       clientRef.current = null;
       void client.stop({ notifyBackend: false, reason: "component_unmount", emitEnded: false });
     };
@@ -1877,6 +1885,7 @@ function CustomSceneConversation({
     endingRef.current = true;
     setEnding(true);
     setStatus("正在生成本次报告");
+    detachSceneRemoteAudio();
     try {
       const completion = await clientRef.current?.stop({ reason });
       clientRef.current = null;

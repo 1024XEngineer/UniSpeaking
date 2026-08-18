@@ -494,6 +494,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   const [partThreeRemaining, setPartThreeRemaining] = useState(null);
   const remoteAudioRef = useRef(null);
   const clientRef = useRef(null);
+  const finishingRef = useRef(false);
   const finishRef = useRef(null);
   const sessionIdRef = useRef(null);
   const ieltsAnalyticsRef = useRef(null);
@@ -506,6 +507,12 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   const transcriptRef = useRef(null);
   const subtitleQueueRef = useRef([]);
   const subtitleFrameRef = useRef(null);
+  const detachIeltsRemoteAudio = () => {
+    const audio = remoteAudioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.srcObject = null;
+  };
 
   const partTwoQuestion = generated?.content?.part2?.[0] || training?.questions?.[0] || null;
   const partTwoQuestionText = partTwoQuestion?.question || partTwoQuestion?.questionText || "";
@@ -835,6 +842,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
         subtitleFrameRef.current = null;
       }
       subtitleQueueRef.current = [];
+      detachIeltsRemoteAudio();
       clientRef.current = null;
       void client.stop({ notifyBackend: false, reason: "component_unmount", emitEnded: false });
     };
@@ -847,13 +855,15 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   }, [ending]);
 
   const finish = async () => {
-    if (ending) return;
+    if (finishingRef.current) return;
+    finishingRef.current = true;
     setEnding(true);
     setError("");
     clearPartTwoTimer();
     clearPartTwoCompletionTimer();
     clearPartTwoSilenceTimer();
     clearPartThreeTimer();
+    detachIeltsRemoteAudio();
     try {
       setStatus("正在结束本次练习…");
       const client = clientRef.current;
@@ -898,13 +908,17 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
       setStatus("结束失败");
       setError("结束练习失败，请稍后重试");
       setEnding(false);
+      finishingRef.current = false;
     }
   };
   finishRef.current = finish;
 
   const abandon = async () => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
     const client = clientRef.current;
     clientRef.current = null;
+    detachIeltsRemoteAudio();
     await client?.stop({ notifyBackend: false, reason: "user_exit", emitEnded: false });
     ieltsAnalyticsRef.current?.abandon("USER_EXIT");
     onExit();
