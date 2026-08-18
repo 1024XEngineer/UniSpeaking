@@ -1094,6 +1094,8 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   const clientRef = useRef(null);
   const sessionIdRef = useRef("");
   const clientGenerationRef = useRef(0);
+  const startPromiseRef = useRef(null);
+  const stopPromiseRef = useRef(null);
   const freeChatAnalyticsRef = useRef(null);
   const remoteAudioRef = useRef(null);
   const { transcriptRef, handleTranscriptScroll } = useTranscriptAutoFollow({
@@ -1101,6 +1103,12 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     lines,
     translated,
   });
+  const detachRemoteAudio = () => {
+    const audio = remoteAudioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.srcObject = null;
+  };
   const toggleTranslation = async (index) => {
     const line = lines[index];
     if (!line) return;
@@ -1238,8 +1246,10 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       return;
     }
     if (event.type === "local.ended") {
+      if (stopPromiseRef.current) return;
       freeChatAnalyticsRef.current?.complete();
       const completedSessionId = sessionIdRef.current;
+      detachRemoteAudio();
       setInCall(false);
       setSubtitles(false);
       setPaused(false);
@@ -1247,6 +1257,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       setCallStatus("准备开始");
       clientRef.current = null;
       sessionIdRef.current = "";
+      clientGenerationRef.current += 1;
       onSessionEnded?.(completedSessionId);
       return;
     }
@@ -1287,36 +1298,46 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   };
 
   const startConversation = async () => {
-    freeChatAnalyticsRef.current = analytics.training({ mode: "FREE_CHAT", pageCode: "conversation" });
-    freeChatAnalyticsRef.current.attempt();
-    await onBeforeStart?.();
-    setInCall(true);
-    setPaused(false);
-    setSubtitles(true);
-    setLines([]);
-    setTranslated([]);
-    setCallError("");
-    setCallState("connecting");
-    setCallStatus("正在请求麦克风");
-    const client = getClient();
-    const startGeneration = clientGenerationRef.current;
-    try {
-      const startedSession = await client.start({
-        voice: teacher.voiceId,
-        speechSpeed: speedCodeByLabel[speed] || "NATURAL",
-      });
-      if (clientRef.current !== client || clientGenerationRef.current !== startGeneration) return;
-      if (startedSession?.sessionId) {
-        freeChatAnalyticsRef.current.started();
-        sessionIdRef.current = startedSession.sessionId;
-        onSessionStarted?.(startedSession.sessionId);
+    if (startPromiseRef.current || stopPromiseRef.current) return;
+    let operation;
+    operation = (async () => {
+      freeChatAnalyticsRef.current = analytics.training({ mode: "FREE_CHAT", pageCode: "conversation" });
+      freeChatAnalyticsRef.current.attempt();
+      await onBeforeStart?.();
+      setInCall(true);
+      setPaused(false);
+      setSubtitles(true);
+      setLines([]);
+      setTranslated([]);
+      setCallError("");
+      setCallState("connecting");
+      setCallStatus("正在请求麦克风");
+      const client = getClient();
+      const startGeneration = clientGenerationRef.current;
+      try {
+        const startedSession = await client.start({
+          voice: teacher.voiceId,
+          speechSpeed: speedCodeByLabel[speed] || "NATURAL",
+        });
+        if (clientRef.current !== client || clientGenerationRef.current !== startGeneration) return;
+        if (startedSession?.sessionId) {
+          freeChatAnalyticsRef.current.started();
+          sessionIdRef.current = startedSession.sessionId;
+          onSessionStarted?.(startedSession.sessionId);
+        }
+      } catch (error) {
+        if (clientRef.current !== client) return;
+        freeChatAnalyticsRef.current.fail("REALTIME_ERROR");
+        setCallState("error");
+        setCallError(realtimeFailureMessage(error));
+        setCallStatus("连接失败");
       }
-    } catch (error) {
-      if (clientRef.current !== client) return;
-      freeChatAnalyticsRef.current.fail("REALTIME_ERROR");
-      setCallState("error");
-      setCallError(realtimeFailureMessage(error));
-      setCallStatus("连接失败");
+    })();
+    startPromiseRef.current = operation;
+    try {
+      await operation;
+    } finally {
+      if (startPromiseRef.current === operation) startPromiseRef.current = null;
     }
   };
 
@@ -1336,19 +1357,33 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   };
 
   const stopConversation = async () => {
+    if (stopPromiseRef.current) return stopPromiseRef.current;
     const client = clientRef.current;
     const completedSessionId = sessionIdRef.current;
-    clientRef.current = null;
-    sessionIdRef.current = "";
-    clientGenerationRef.current += 1;
-    setInCall(false);
-    setSubtitles(false);
-    setPaused(false);
-    setCallState("idle");
-    setCallStatus("准备开始");
-    await client?.stop({ reason: "user_stop" });
-    freeChatAnalyticsRef.current?.complete();
-    onSessionEnded?.(completedSessionId);
+    setCallState("ending");
+    setCallStatus("正在结束对话");
+    setPaused(true);
+    detachRemoteAudio();
+    let operation;
+    operation = (async () => {
+      await client?.stop({ reason: "user_stop" });
+      if (clientRef.current === client) clientRef.current = null;
+      sessionIdRef.current = "";
+      clientGenerationRef.current += 1;
+      setInCall(false);
+      setSubtitles(false);
+      setPaused(false);
+      setCallState("idle");
+      setCallStatus("准备开始");
+      freeChatAnalyticsRef.current?.complete();
+      onSessionEnded?.(completedSessionId);
+    })();
+    stopPromiseRef.current = operation;
+    try {
+      await operation;
+    } finally {
+      if (stopPromiseRef.current === operation) stopPromiseRef.current = null;
+    }
   };
 
   useEffect(() => {
@@ -1358,6 +1393,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     return () => {
       document.removeEventListener("visibilitychange", syncVisibility);
       freeChatAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
+      detachRemoteAudio();
       const client = clientRef.current;
       clientRef.current = null;
       clientGenerationRef.current += 1;
@@ -1396,7 +1432,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
         {subtitles && <CallTranscript lines={lines} translated={translated} onToggleTranslation={toggleTranslation} transcriptRef={transcriptRef} onScroll={handleTranscriptScroll} emptyStatus={callStatus} />}
         {callError && <p className="call-error">{callError}</p>}
       </section>
-      <CallControls paused={paused} onToggleMicrophone={togglePaused} onEnd={stopConversation} disabled={callState === "ended"} subtitles={subtitles} onToggleSubtitles={() => setSubtitles(!subtitles)} />
+      <CallControls paused={paused} onToggleMicrophone={togglePaused} onEnd={stopConversation} disabled={callState === "ending" || callState === "ended"} subtitles={subtitles} onToggleSubtitles={() => setSubtitles(!subtitles)} />
     </main>
   );
 }
