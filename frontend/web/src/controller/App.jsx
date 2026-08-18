@@ -1493,12 +1493,12 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
           <div className="specialty-training__grid">
             <button type="button" className="specialty-card specialty-card--ielts" onClick={onIelts}>
               <span className="specialty-card__art"><img src="/specialty/ielts.png" alt="" /></span>
-              <span className="specialty-card__copy"><small>IELTS SPEAKING</small><strong>雅思口语</strong><span>Part 1 / 2 / 3 专项练习与全真模考</span></span>
+              <span className="specialty-card__copy"><small>IELTS SPEAKING</small><strong>雅思口语</strong></span>
               <span className="specialty-card__action" aria-hidden="true"><ArrowRight weight="bold" /></span>
             </button>
             <button type="button" className="specialty-card specialty-card--interview" onClick={onInterview}>
               <span className="specialty-card__art"><img src="/specialty/interview.png" alt="" /></span>
-              <span className="specialty-card__copy"><small>ENGLISH INTERVIEW</small><strong>英文面试</strong><span>结合 JD 与简历，完成岗位模拟追问</span></span>
+              <span className="specialty-card__copy"><small>ENGLISH INTERVIEW</small><strong>英文面试</strong></span>
               <span className="specialty-card__action" aria-hidden="true"><ArrowRight weight="bold" /></span>
             </button>
           </div>
