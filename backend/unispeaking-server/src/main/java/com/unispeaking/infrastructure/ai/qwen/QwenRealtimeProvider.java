@@ -9,6 +9,7 @@ import com.unispeaking.domain.vo.session.RealtimeConnectionResult;
 import com.unispeaking.domain.vo.session.RealtimeCredential;
 import com.unispeaking.infrastructure.realtime.RealtimeCredentialIssuer;
 import com.unispeaking.provider.AiProviderRegistry;
+import com.unispeaking.provider.ProviderCredentialOverride;
 import com.unispeaking.provider.RealtimeProvider;
 import java.io.IOException;
 import java.net.URI;
@@ -73,7 +74,9 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 					"QWEN_REALTIME_MODEL_NOT_SUPPORTED",
 					"Qwen realtime model is not registered: " + model);
 		}
-		String sdpExchangeUrl = properties.getWebRtcSdpExchangeUrl(model);
+		String workspaceId = ProviderCredentialOverride.currentOr(
+				"workspaceId", properties.getWorkspaceId());
+		String sdpExchangeUrl = properties.getWebRtcSdpExchangeUrl(model, workspaceId);
 		if (sdpExchangeUrl.isBlank()) {
 			throw retryableFailure(
 					"QWEN_WORKSPACE_OR_MODEL_MISSING",

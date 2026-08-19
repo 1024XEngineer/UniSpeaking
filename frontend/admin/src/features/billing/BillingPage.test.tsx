@@ -21,6 +21,7 @@ const usage = {
   summary: {
     requests: 2, attempts: 2, succeededAttempts: 2, fallbackAttempts: 0,
     inputTokens: 1200, outputTokens: 300, totalTokens: 1500,
+    ttsCharacters: 51,
     audioInputSeconds: 12, audioOutputSeconds: 8, averageDurationMs: 860,
     estimatedCost: 0.0234, currency: 'CNY',
   },
@@ -34,7 +35,13 @@ const usage = {
     models: [{
       providerId: 'qwen', modelId: 'qwen3.5-plus', capability: 'LLM', requests: 2, attempts: 2,
       successes: 2, inputTokens: 1200, outputTokens: 300, totalTokens: 1500,
+      inputCharacters: 0, outputCharacters: 0,
       audioInputSeconds: 0, audioOutputSeconds: 0, totalDurationMs: 1720, estimatedCost: 0.0234,
+    }, {
+      providerId: 'qwen', modelId: 'qwen3-tts-flash', capability: 'TTS', requests: 1, attempts: 1,
+      successes: 1, inputTokens: 0, outputTokens: 0, totalTokens: 0,
+      inputCharacters: 51, outputCharacters: 0,
+      audioInputSeconds: 0, audioOutputSeconds: 0, totalDurationMs: 1000, estimatedCost: 0.00408,
     }],
   }],
   records: [
@@ -154,6 +161,7 @@ describe('BillingPage', () => {
     expect(screen.getByText('¥0.023400')).toBeInTheDocument()
     expect(screen.getByText('75.0%')).toBeInTheDocument()
     expect(screen.getByText('3 / 4 条已获取')).toBeInTheDocument()
+    expect(screen.getAllByText('TTS 51 Character')).toHaveLength(2)
     expect(screen.getByRole('button', { name: '用户账单' })).toHaveAttribute('aria-pressed', 'true')
 
     await userEvent.click(screen.getByRole('button', { name: '请求明细' }))
@@ -167,7 +175,7 @@ describe('BillingPage', () => {
     expect(screen.queryByText('handshake-only')).not.toBeInTheDocument()
     expect(screen.getByText('request-llm-official')).toBeInTheDocument()
     expect(screen.getByText('request-tts-official')).toBeInTheDocument()
-    expect(screen.getByText('51 字符')).toBeInTheDocument()
+    expect(screen.getByText('51 Character')).toBeInTheDocument()
     expect(screen.getByText('本地已计费')).toBeInTheDocument()
     expect(screen.getByText('1 次请求')).toBeInTheDocument()
     expect(screen.getByText('缓存命中，无需 SLS')).toBeInTheDocument()

@@ -654,11 +654,11 @@ public class AiProviderRegistry {
 					index + 1,
 					models.size());
 			try {
-				String dynamicCredential = credentialStore == null
-						? null
-						: credentialStore.credentialOrFallback(model.providerId(), null);
+				Map<String, String> dynamicCredentials = credentialStore == null
+						? Map.of()
+						: credentialStore.credentialsOrFallback(model.providerId(), Map.of());
 				AiProviderResponse<T> measured = ProviderCredentialOverride.call(
-						dynamicCredential, () -> operation.apply(modelId));
+						dynamicCredentials, () -> operation.apply(modelId));
 				Instant completedAt = Instant.now();
 				recordAttempt(context, index + 1, capability, model, measured.providerRequestId(),
 						startedAt, completedAt, elapsedMillis(startedNanos), measured.usage(),

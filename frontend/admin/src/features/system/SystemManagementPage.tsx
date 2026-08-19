@@ -79,12 +79,39 @@ function ProviderTable({ providers, onChanged }: { providers: ProviderView[]; on
 
 function CredentialDialog({ provider, onClose }: { provider: ProviderView; onClose: () => void }) {
   const status = useQuery({ queryKey: ['ai', 'credential', provider.providerId], queryFn: () => getCredentialStatus(provider.providerId) })
-  const [secret, setSecret] = useState('')
-  const mutation = useMutation({ mutationFn: () => replaceCredential(provider.providerId, secret), onSuccess: () => { setSecret(''); void status.refetch() } })
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="entitlement-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-title">
-    <header className="entitlement-dialog__header"><div><p className="eyebrow">PROVIDER CREDENTIAL</p><h2 id="credential-title">{provider.displayName} 密钥</h2><p className="entitlement-dialog__identity">数据库只保存加密内容<span>{status.data?.fingerprint || '尚未配置'}</span></p></div><button className="modal-close" type="button" aria-label="关闭密钥设置" onClick={onClose}><X size={18} /></button></header>
-    <div className="credential-form"><label>新密钥<input type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="输入后将覆盖旧密钥" /></label>{status.data && !status.data.writable && <p className="form-error">服务器尚未配置凭据加密主密钥，当前只能使用环境变量。</p>}{mutation.isSuccess && <p className="form-success" role="status">密钥已更新，后续调用立即生效。</p>}{mutation.isError && <p className="form-error">{mutation.error.message}</p>}</div>
-    <footer className="entitlement-dialog__footer"><span /><div className="entitlement-dialog__actions"><button className="quiet-button" type="button" onClick={onClose}>取消</button><button className="primary-button" type="button" disabled={!status.data?.writable || secret.length < 8 || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? '更新中…' : '更新密钥'}</button></div></footer>
+  const [values, setValues] = useState<Record<string, string>>({})
+  const changedValues = Object.fromEntries(Object.entries(values).filter(([, value]) => value.trim()))
+  const missingRequired = status.data?.fields.some((field) => field.required && !field.configured && !values[field.key]?.trim()) ?? true
+  const mutation = useMutation({
+    mutationFn: () => replaceCredential(provider.providerId, changedValues),
+    onSuccess: () => { setValues({}); void status.refetch() },
+  })
+  const updateValue = (key: string, value: string) => {
+    mutation.reset()
+    setValues((current) => ({ ...current, [key]: value }))
+  }
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="entitlement-dialog credential-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-title">
+    <header className="entitlement-dialog__header"><div><p className="eyebrow">PROVIDER CONFIGURATION</p><h2 id="credential-title">{provider.displayName} 凭据配置</h2><p className="entitlement-dialog__identity">所有字段加密保存，页面不回显原值<span>{status.data?.fingerprint || '尚未配置'}</span></p></div><button className="modal-close" type="button" aria-label="关闭凭据设置" onClick={onClose}><X size={18} /></button></header>
+    <div className="credential-form">
+      {status.isLoading && <p className="credential-form__loading">正在读取配置项…</p>}
+      {status.isError && <p className="form-error">配置项读取失败，请稍后重试。</p>}
+      {status.data?.fields.map((field) => <label key={field.key} className="credential-field">
+        <span className="credential-field__label">{field.label}{field.required ? <i>必填</i> : <i className="optional">选填</i>}</span>
+        <input
+          aria-label={field.label}
+          type={field.secret ? 'password' : 'text'}
+          autoComplete={field.secret ? 'new-password' : 'off'}
+          value={values[field.key] || ''}
+          onChange={(event) => updateValue(field.key, event.target.value)}
+          placeholder={field.configured ? '已配置，留空则保留当前值' : `请输入 ${field.label}`}
+        />
+        <small className="credential-field__meta"><span>{field.description}</span><code>{field.configured ? field.fingerprint : '未配置'}</code></small>
+      </label>)}
+      {status.data && !status.data.writable && <p className="form-error">服务器尚未配置凭据加密主密钥，当前只能使用环境变量。</p>}
+      {mutation.isSuccess && <p className="form-success" role="status">凭据配置已更新。</p>}
+      {mutation.isError && <p className="form-error">{mutation.error.message}</p>}
+    </div>
+    <footer className="entitlement-dialog__footer"><span /><div className="entitlement-dialog__actions"><button className="quiet-button" type="button" onClick={onClose}>取消</button><button className="primary-button" type="button" disabled={!status.data?.writable || missingRequired || Object.keys(changedValues).length === 0 || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? '更新中…' : '保存配置'}</button></div></footer>
   </section></div>
 }
 

@@ -1419,12 +1419,60 @@ input:disabled {
   padding: 26px 28px;
 }
 
+.credential-dialog {
+  width: min(100%, 640px);
+}
+
 .credential-form label {
   display: grid;
   gap: 7px;
   color: var(--muted-strong);
   font-size: 0.72rem;
   font-weight: 680;
+}
+
+.credential-field__label,
+.credential-field__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.credential-field__label i {
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--danger) 38%, var(--line));
+  border-radius: var(--radius-xs);
+  color: var(--danger);
+  font-size: 0.58rem;
+  font-style: normal;
+  font-weight: 650;
+}
+
+.credential-field__label i.optional {
+  border-color: var(--line-strong);
+  color: var(--muted);
+}
+
+.credential-field__meta {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 500;
+}
+
+.credential-field__meta span {
+  min-width: 0;
+}
+
+.credential-field__meta code {
+  flex: 0 0 auto;
+  color: var(--muted-strong);
+  font-size: 0.6rem;
+}
+
+.credential-form__loading {
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
 .credential-form input,
