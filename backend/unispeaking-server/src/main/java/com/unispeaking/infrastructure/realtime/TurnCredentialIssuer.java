@@ -8,6 +8,7 @@ import java.util.Base64;
 import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -16,6 +17,7 @@ public class TurnCredentialIssuer {
 	private final TurnProperties properties;
 	private final Clock clock;
 
+	@Autowired
 	public TurnCredentialIssuer(TurnProperties properties) {
 		this(properties, Clock.systemUTC());
 	}
