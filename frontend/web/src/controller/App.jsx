@@ -443,16 +443,19 @@ const formatCallDuration = (totalSeconds) => {
   return `${minutes}:${seconds}`;
 };
 
-function CallTimer({ state = "active", paused = false, className }) {
+function CallTimer({ state = "active", paused = false, stopped = false, className }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const startedAt = useRef(Date.now());
 
   useEffect(() => {
-    const startedAt = Date.now();
-    const updateElapsed = () => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    const updateElapsed = () => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt.current) / 1000));
+    };
     updateElapsed();
+    if (stopped || state === "ended") return undefined;
     const interval = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [state, stopped]);
 
   const duration = formatCallDuration(elapsedSeconds);
   const label = state === "connecting"
@@ -1094,6 +1097,8 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   const clientRef = useRef(null);
   const sessionIdRef = useRef("");
   const clientGenerationRef = useRef(0);
+  const startPromiseRef = useRef(null);
+  const stopPromiseRef = useRef(null);
   const freeChatAnalyticsRef = useRef(null);
   const remoteAudioRef = useRef(null);
   const { transcriptRef, handleTranscriptScroll } = useTranscriptAutoFollow({
@@ -1101,6 +1106,12 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     lines,
     translated,
   });
+  const detachRemoteAudio = () => {
+    const audio = remoteAudioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.srcObject = null;
+  };
   const toggleTranslation = async (index) => {
     const line = lines[index];
     if (!line) return;
@@ -1238,8 +1249,10 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       return;
     }
     if (event.type === "local.ended") {
+      if (stopPromiseRef.current) return;
       freeChatAnalyticsRef.current?.complete();
       const completedSessionId = sessionIdRef.current;
+      detachRemoteAudio();
       setInCall(false);
       setSubtitles(false);
       setPaused(false);
@@ -1247,6 +1260,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       setCallStatus("准备开始");
       clientRef.current = null;
       sessionIdRef.current = "";
+      clientGenerationRef.current += 1;
       onSessionEnded?.(completedSessionId);
       return;
     }
@@ -1287,36 +1301,46 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   };
 
   const startConversation = async () => {
-    freeChatAnalyticsRef.current = analytics.training({ mode: "FREE_CHAT", pageCode: "conversation" });
-    freeChatAnalyticsRef.current.attempt();
-    await onBeforeStart?.();
-    setInCall(true);
-    setPaused(false);
-    setSubtitles(true);
-    setLines([]);
-    setTranslated([]);
-    setCallError("");
-    setCallState("connecting");
-    setCallStatus("正在请求麦克风");
-    const client = getClient();
-    const startGeneration = clientGenerationRef.current;
-    try {
-      const startedSession = await client.start({
-        voice: teacher.voiceId,
-        speechSpeed: speedCodeByLabel[speed] || "NATURAL",
-      });
-      if (clientRef.current !== client || clientGenerationRef.current !== startGeneration) return;
-      if (startedSession?.sessionId) {
-        freeChatAnalyticsRef.current.started();
-        sessionIdRef.current = startedSession.sessionId;
-        onSessionStarted?.(startedSession.sessionId);
+    if (startPromiseRef.current || stopPromiseRef.current) return;
+    let operation;
+    operation = (async () => {
+      freeChatAnalyticsRef.current = analytics.training({ mode: "FREE_CHAT", pageCode: "conversation" });
+      freeChatAnalyticsRef.current.attempt();
+      await onBeforeStart?.();
+      setInCall(true);
+      setPaused(false);
+      setSubtitles(true);
+      setLines([]);
+      setTranslated([]);
+      setCallError("");
+      setCallState("connecting");
+      setCallStatus("正在请求麦克风");
+      const client = getClient();
+      const startGeneration = clientGenerationRef.current;
+      try {
+        const startedSession = await client.start({
+          voice: teacher.voiceId,
+          speechSpeed: speedCodeByLabel[speed] || "NATURAL",
+        });
+        if (clientRef.current !== client || clientGenerationRef.current !== startGeneration) return;
+        if (startedSession?.sessionId) {
+          freeChatAnalyticsRef.current.started();
+          sessionIdRef.current = startedSession.sessionId;
+          onSessionStarted?.(startedSession.sessionId);
+        }
+      } catch (error) {
+        if (clientRef.current !== client) return;
+        freeChatAnalyticsRef.current.fail("REALTIME_ERROR");
+        setCallState("error");
+        setCallError(realtimeFailureMessage(error));
+        setCallStatus("连接失败");
       }
-    } catch (error) {
-      if (clientRef.current !== client) return;
-      freeChatAnalyticsRef.current.fail("REALTIME_ERROR");
-      setCallState("error");
-      setCallError(realtimeFailureMessage(error));
-      setCallStatus("连接失败");
+    })();
+    startPromiseRef.current = operation;
+    try {
+      await operation;
+    } finally {
+      if (startPromiseRef.current === operation) startPromiseRef.current = null;
     }
   };
 
@@ -1336,19 +1360,33 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   };
 
   const stopConversation = async () => {
+    if (stopPromiseRef.current) return stopPromiseRef.current;
     const client = clientRef.current;
     const completedSessionId = sessionIdRef.current;
-    clientRef.current = null;
-    sessionIdRef.current = "";
-    clientGenerationRef.current += 1;
-    setInCall(false);
-    setSubtitles(false);
-    setPaused(false);
-    setCallState("idle");
-    setCallStatus("准备开始");
-    await client?.stop({ reason: "user_stop" });
-    freeChatAnalyticsRef.current?.complete();
-    onSessionEnded?.(completedSessionId);
+    setCallState("ending");
+    setCallStatus("正在结束对话");
+    setPaused(true);
+    detachRemoteAudio();
+    let operation;
+    operation = (async () => {
+      await client?.stop({ reason: "user_stop" });
+      if (clientRef.current === client) clientRef.current = null;
+      sessionIdRef.current = "";
+      clientGenerationRef.current += 1;
+      setInCall(false);
+      setSubtitles(false);
+      setPaused(false);
+      setCallState("idle");
+      setCallStatus("准备开始");
+      freeChatAnalyticsRef.current?.complete();
+      onSessionEnded?.(completedSessionId);
+    })();
+    stopPromiseRef.current = operation;
+    try {
+      await operation;
+    } finally {
+      if (stopPromiseRef.current === operation) stopPromiseRef.current = null;
+    }
   };
 
   useEffect(() => {
@@ -1358,6 +1396,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     return () => {
       document.removeEventListener("visibilitychange", syncVisibility);
       freeChatAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
+      detachRemoteAudio();
       const client = clientRef.current;
       clientRef.current = null;
       clientGenerationRef.current += 1;
@@ -1396,7 +1435,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
         {subtitles && <CallTranscript lines={lines} translated={translated} onToggleTranslation={toggleTranslation} transcriptRef={transcriptRef} onScroll={handleTranscriptScroll} emptyStatus={callStatus} />}
         {callError && <p className="call-error">{callError}</p>}
       </section>
-      <CallControls paused={paused} onToggleMicrophone={togglePaused} onEnd={stopConversation} disabled={callState === "ended"} subtitles={subtitles} onToggleSubtitles={() => setSubtitles(!subtitles)} />
+      <CallControls paused={paused} onToggleMicrophone={togglePaused} onEnd={stopConversation} disabled={callState === "ending" || callState === "ended"} subtitles={subtitles} onToggleSubtitles={() => setSubtitles(!subtitles)} />
     </main>
   );
 }
@@ -1490,12 +1529,12 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
           <div className="specialty-training__grid">
             <button type="button" className="specialty-card specialty-card--ielts" onClick={onIelts}>
               <span className="specialty-card__art"><img src="/specialty/ielts.png" alt="" /></span>
-              <span className="specialty-card__copy"><small>IELTS SPEAKING</small><strong>雅思口语</strong><span>Part 1 / 2 / 3 专项练习与全真模考</span></span>
+              <span className="specialty-card__copy"><small>IELTS SPEAKING</small><strong>雅思口语</strong></span>
               <span className="specialty-card__action" aria-hidden="true"><ArrowRight weight="bold" /></span>
             </button>
             <button type="button" className="specialty-card specialty-card--interview" onClick={onInterview}>
               <span className="specialty-card__art"><img src="/specialty/interview.png" alt="" /></span>
-              <span className="specialty-card__copy"><small>ENGLISH INTERVIEW</small><strong>英文面试</strong><span>结合 JD 与简历，完成岗位模拟追问</span></span>
+              <span className="specialty-card__copy"><small>ENGLISH INTERVIEW</small><strong>英文面试</strong></span>
               <span className="specialty-card__action" aria-hidden="true"><ArrowRight weight="bold" /></span>
             </button>
           </div>
@@ -1668,6 +1707,12 @@ function CustomSceneConversation({
     lines,
     translated,
   });
+  const detachSceneRemoteAudio = () => {
+    const audio = remoteAudioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.srcObject = null;
+  };
 
   const updateLine = ({ id, who, text = "", delta = "", final = false }) => {
     const content = String(text || delta || "");
@@ -1750,6 +1795,7 @@ function CustomSceneConversation({
       setEnding(true);
     } else if (event.type === "local.ended" && event.reason === "state_machine") {
       sceneAnalyticsRef.current?.complete();
+      detachSceneRemoteAudio();
       clientRef.current = null;
       onComplete(
         true,
@@ -1758,6 +1804,7 @@ function CustomSceneConversation({
       );
     } else if (event.type === "local.scenario_completion_error") {
       sceneAnalyticsRef.current?.complete();
+      detachSceneRemoteAudio();
       clientRef.current = null;
       setError(event.message || "场景自动结束失败");
       onComplete(true, null, sessionIdRef.current);
@@ -1778,8 +1825,7 @@ function CustomSceneConversation({
     if (ended) {
       setEnding(true);
       setStatus("模拟对话已结束");
-      remoteAudioRef.current?.pause();
-      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+      detachSceneRemoteAudio();
       return undefined;
     }
     let cancelled = false;
@@ -1816,6 +1862,7 @@ function CustomSceneConversation({
       cancelled = true;
       document.removeEventListener("visibilitychange", syncVisibility);
       sceneAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
+      detachSceneRemoteAudio();
       clientRef.current = null;
       void client.stop({ notifyBackend: false, reason: "component_unmount", emitEnded: false });
     };
@@ -1838,6 +1885,7 @@ function CustomSceneConversation({
     endingRef.current = true;
     setEnding(true);
     setStatus("正在生成本次报告");
+    detachSceneRemoteAudio();
     try {
       const completion = await clientRef.current?.stop({ reason });
       clientRef.current = null;
@@ -1890,7 +1938,7 @@ function CustomSceneConversation({
           <div className="portrait portrait--small"><img src={teacher.image} alt={teacher.name} /></div>
           <div className="listening-state listening-state--compact">
             <VoiceWaveform active={!ended && !paused && !ending && !error} compact />
-            <CallTimer paused={paused} state={ended || error ? "ended" : "active"} />
+            <CallTimer paused={paused} state={ended || error ? "ended" : "active"} stopped={ending} />
             <span>{status}</span>
           </div>
         </div>
@@ -2051,6 +2099,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   const [readError, setReadError] = useState("");
   const [flowAdvancing, setFlowAdvancing] = useState(false);
   const [flowError, setFlowError] = useState("");
+  const [exitOpen, setExitOpen] = useState(false);
   const lessonItems = generatedMode
     ? (learningGroup === "words" ? generatedWordItems : generatedPhraseItems)
     : learningItems;
@@ -2061,6 +2110,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   const score = readScores[readIndex] ?? null;
   const readEvaluation = readEvaluations[readIndex] ?? null;
   const completeStep = (id) => setCompletedSteps((current) => current.includes(id) ? current : [...current, id]);
+  const exitConfirmation = exitOpen && <Modal dismissible={false}><p className="eyebrow">EXIT TRAINING</p><h2>确定要退出当前训练吗？</h2><p className="modal-lead">退出后将返回上一页。</p><div className="modal-actions"><Button variant="secondary" onClick={() => setExitOpen(false)}>继续训练</Button><Button onClick={onExit}>确认退出</Button></div></Modal>;
   const goToStep = (id) => {
     const targetIndex = steps.findIndex((item) => item.id === id);
     if (targetIndex > unlockedStepIndex) return;
@@ -2223,18 +2273,19 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   if (!item && displayedStep !== "speak") {
     return (
       <main className="training-page">
-        <header className="training-header"><div><strong>{sceneTitle || "自定义场景"}</strong><span>场景内容加载失败</span></div><button className="training-exit" aria-label="关闭训练" onClick={onExit}><span><X weight="bold" /></span></button></header>
+        <header className="training-header"><div><strong>{sceneTitle || "自定义场景"}</strong><span>场景内容加载失败</span></div><button className="training-exit" aria-label="关闭训练" onClick={() => setExitOpen(true)}><span><X weight="bold" /></span></button></header>
         <section className="training-empty" role="alert">
           <h1>场景学习内容为空</h1>
           <p>后端没有返回当前阶段需要的单词、词组或句子，请返回场景广场重新生成。</p>
           <ExpandingCta direction="back" onClick={onBack}>返回场景广场</ExpandingCta>
         </section>
+        {exitConfirmation}
       </main>
     );
   }
   return (
     <main className={cx("training-page", standaloneSpeak && "training-page--standalone")}>
-      <header className="training-header"><div><strong>{sceneTitle}</strong><span>从语言到真实表达</span></div><button className="training-exit" aria-label="关闭训练" onClick={onExit}><span><X weight="bold" /></span></button></header>
+      <header className="training-header"><div><strong>{sceneTitle}</strong><span>从语言到真实表达</span></div><button className="training-exit" aria-label="关闭训练" onClick={() => setExitOpen(true)}><span><X weight="bold" /></span></button></header>
       {!standaloneSpeak && <nav className="stepper" aria-label="练习进度">
         <span className="stepper__track" aria-hidden="true"><span style={{ width: `${unlockedStepIndex * 50}%` }} /></span>
         {steps.map((stepItem, index) => {
@@ -2252,6 +2303,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
       {(step === "speak" || result) && !generatedMode && <CustomSceneConversation sceneId={sceneId} teacher={teacher} speed={speed} ended={Boolean(result)} onSessionStarted={(startedSessionId) => onStageChange?.("session", startedSessionId)} onComplete={onComplete} />}
       {result && <ResultModal completed={result.completed} evaluation={result.evaluation} onBack={onBack} onAssets={onAssets} />}
       {!result && readFeedback && <ReadScoreModal feedback={readFeedback} item={readItems[readFeedback.index]} onClose={() => setReadFeedback(null)} />}
+      {exitConfirmation}
     </main>
   );
 }
