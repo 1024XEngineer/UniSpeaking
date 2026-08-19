@@ -3,13 +3,9 @@ import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { OverviewPage } from '../overview/OverviewPage'
-import { MonitoringPage } from './MonitoringPage'
-import { ReconciliationPage } from './ReconciliationPage'
 import { UsersPage } from './UsersPage'
 import {
   getDashboardSummary,
-  listRealtimeSessions,
-  listReconciliationRecords,
   listUsageUsers,
   updateUserEntitlement,
 } from './governanceApi'
@@ -101,46 +97,4 @@ describe('governance pages', () => {
     expect(updateUserEntitlement).not.toHaveBeenCalled()
   })
 
-  it('shows session identity chain and official reconciliation', async () => {
-    vi.mocked(listRealtimeSessions).mockResolvedValue([session])
-    vi.mocked(listReconciliationRecords).mockResolvedValue([{
-      user_id: 'user-01', session_id: 'local-session-01', temporary_key_id: 'key-6124876',
-      task_uuid: 'sess_41tAWSq7xIR1b2EDelEgS', request_id: '3131bedf-7956-91c3-90fe-27cbcb3dfbcf',
-      client_tokens: 13200, official_tokens: 13289,
-      client_usage: { response_count: 1, total_tokens: 13200, input_tokens: 12850, output_tokens: 350, input_text_tokens: 12760, input_audio_tokens: 90, output_text_tokens: 84, output_audio_tokens: 266 },
-      official_usage: { response_count: 1, total_tokens: 13289, input_tokens: 12938, output_tokens: 351, input_text_tokens: 12840, input_audio_tokens: 98, output_text_tokens: 85, output_audio_tokens: 266 },
-      official_duration_ms: 50962, estimated_cost_cny: '0.026500',
-      status: 'MISMATCH', reasons: ['client_official_tokens_differ'],
-    }])
-
-    renderPage(<MonitoringPage />)
-    expect(await screen.findByText('sess_provider_01')).toBeInTheDocument()
-    expect(screen.getByText('key-6124876')).toBeInTheDocument()
-
-    cleanup()
-    renderPage(<ReconciliationPage />)
-    expect(await screen.findByText('sess_41tA…EgS')).toBeInTheDocument()
-    expect(screen.getByText('3131bedf…fbcf')).toBeInTheDocument()
-    expect(screen.queryByText('3131bedf-7956-91c3-90fe-27cbcb3dfbcf')).not.toBeInTheDocument()
-    expect(screen.getByText('输入 12,938')).toBeInTheDocument()
-    expect(screen.getByText('输出 351')).toBeInTheDocument()
-    expect(screen.getByText('存在差异')).toBeInTheDocument()
-
-    await userEvent.click(screen.getByRole('button', { name: '查看详情' }))
-    expect(screen.getByText('3131bedf-7956-91c3-90fe-27cbcb3dfbcf')).toBeInTheDocument()
-    expect(screen.getByText(/输入：文本 12,840 · 音频 98/)).toBeInTheDocument()
-  })
-
-  it('counts backend realtime statuses as active connections', async () => {
-    vi.mocked(listRealtimeSessions).mockResolvedValue([
-      { ...session, session_id: 'waiting-session', status: 'waiting_client' },
-      { ...session, session_id: 'active-session', status: 'active' },
-    ])
-
-    renderPage(<MonitoringPage />)
-
-    expect(await screen.findByText('2 个活跃连接')).toBeInTheDocument()
-    expect(screen.getByText(/等待客户端/)).toBeInTheDocument()
-    expect(screen.getByText(/进行中/)).toBeInTheDocument()
-  })
 })

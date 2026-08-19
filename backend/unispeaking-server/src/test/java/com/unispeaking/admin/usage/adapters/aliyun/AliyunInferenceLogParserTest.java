@@ -91,7 +91,7 @@ class AliyunInferenceLogParserTest {
                 .isInstanceOf(OfficialUsageSchemaException.class)
                 .hasMessageContaining("duration");
 
-        assertThatThrownBy(() -> parser.parse(validJson().replace("\"protocol\": \"ws\"", "\"protocol\": \"http\"")))
+        assertThatThrownBy(() -> parser.parse(validJson().replace("\"protocol\": \"ws\"", "\"protocol\": \"ftp\"")))
                 .isInstanceOf(OfficialUsageSchemaException.class)
                 .hasMessageContaining("protocol");
     }
@@ -115,6 +115,51 @@ class AliyunInferenceLogParserTest {
 
         assertThat(record.usage().inputTokens()).isEqualTo(12938);
         assertThat(record.protocol()).isEqualTo("ws");
+    }
+
+    @Test
+    void parsesHttpLlmUsageWithoutTaskUuid() {
+        var record = parser.parse("""
+                {
+                  "start_unix_timestamp":"1787106794285",
+                  "status_code":"200",
+                  "usage":{"input_tokens":970,"output_tokens":177,"total_tokens":1147,
+                    "input_tokens_details":{"text_tokens":970},
+                    "output_tokens_details":{"text_tokens":177}},
+                  "extras":{"protocol":"http"},
+                  "apikey_id":"6126227",
+                  "duration":"3566",
+                  "workspace_id":"ws-67zfnonsdn4x96ia",
+                  "model":"qwen3.5-plus",
+                  "request_id":"400cacba-b89c-959b-80cc-1aa25c4c6ff5"
+                }
+                """);
+
+        assertThat(record.taskUuid()).isNull();
+        assertThat(record.protocol()).isEqualTo("http");
+        assertThat(record.usage().totalTokens()).isEqualTo(1147);
+        assertThat(record.characters()).isZero();
+    }
+
+    @Test
+    void parsesHttpTtsCharactersWithoutTokenFields() {
+        var record = parser.parse("""
+                {
+                  "start_unix_timestamp":"1787106742708",
+                  "status_code":"200",
+                  "usage":{"characters":51},
+                  "extras":{"protocol":"HTTP"},
+                  "apikey_id":"6126227",
+                  "duration":"889",
+                  "workspace_id":"ws-67zfnonsdn4x96ia",
+                  "model":"qwen3-tts-flash",
+                  "request_id":"932b0d1e-3568-9b6a-8d9e-936e89418b54"
+                }
+                """);
+
+        assertThat(record.protocol()).isEqualTo("http");
+        assertThat(record.characters()).isEqualTo(51);
+        assertThat(record.usage().totalTokens()).isZero();
     }
 
     private static String validJson() {

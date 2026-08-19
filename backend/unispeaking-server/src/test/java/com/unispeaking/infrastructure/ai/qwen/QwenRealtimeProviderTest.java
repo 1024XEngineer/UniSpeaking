@@ -13,6 +13,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.domain.dto.session.RealtimeConnectCommand;
+import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.session.RealtimeCredential;
 import com.unispeaking.infrastructure.ai.aliyun.AliyunTtsProvider;
@@ -22,6 +24,7 @@ import com.unispeaking.infrastructure.ai.iflytek.IflytekScoringProvider;
 import com.unispeaking.infrastructure.ai.minimax.MiniMaxTtsProvider;
 import com.unispeaking.infrastructure.realtime.RealtimeCredentialIssuer;
 import com.unispeaking.provider.LlmResponseFormat;
+import com.unispeaking.provider.MeteredProviderException;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.Authenticator;
@@ -194,6 +197,23 @@ class QwenRealtimeProviderTest {
 	}
 
 	@Test
+	void capturesOfficialRequestIdFromRealtimeResponseHeaders() {
+		RecordingHttpClient httpClient = new RecordingHttpClient(new QueuedResponse(
+				200,
+				"answer-sdp",
+				Map.of("x-request-id", List.of("official-request-01"))));
+		QwenRealtimeProvider provider = provider(httpClient, mock(RealtimeCredentialIssuer.class));
+		RealtimeCredential credential = freshCredential("temporary-token");
+
+		var result = provider.connect(new RealtimeConnectCommand(
+				"qwen3.5-omni-flash-realtime", "offer-sdp", "user-1", "session-1",
+				"scene-1", SceneType.FREE_CHAT, "Cherry"), credential);
+
+		assertEquals("answer-sdp", result.answerSdp());
+		assertEquals("official-request-01", result.traceId());
+	}
+
+	@Test
 	void retriesTransientServerErrorOnceWithAFreshTemporaryKey()
 			throws IOException, InterruptedException {
 		RecordingHttpClient httpClient = new RecordingHttpClient(
@@ -350,6 +370,24 @@ class QwenRealtimeProviderTest {
 	}
 
 	@Test
+	void prefersOfficialResponseHeaderForQwenLlmRequestId() {
+		RecordingHttpClient httpClient = new RecordingHttpClient(new QueuedResponse(
+				200,
+				utf8("""
+				{"id":"body-request-id","choices":[{"message":{"content":"ok"}}]}
+				"""),
+				Map.of("x-request-id", List.of("header-request-id"))));
+		QwenLlmProvider provider = new QwenLlmProvider(
+				httpClient, new ObjectMapper(), "dashscope-key",
+				URI.create("https://workspace-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"),
+				"qwen3.5-plus", Duration.ofSeconds(20), 1_048_576);
+
+		var response = provider.executeLlmTaskMeasured("hello", null);
+
+		assertEquals("header-request-id", response.providerRequestId());
+	}
+
+	@Test
 	void addsJsonObjectResponseFormatOnlyWhenRequested() {
 		RecordingHttpClient httpClient = new RecordingHttpClient(
 				new QueuedResponse(200, utf8(
@@ -465,9 +503,12 @@ class QwenRealtimeProviderTest {
 				Duration.ofSeconds(20),
 				1_048_576);
 
-		byte[] response = provider.generateSpeechAudio("Practice makes progress.", null);
+		var measured = provider.generateSpeechAudioMeasured("Practice makes progress.", null);
+		byte[] response = measured.response();
 
 		assertArrayEquals(new byte[] {1, 2, 3, 4}, response);
+		assertEquals("req-1", measured.providerRequestId());
+		assertEquals(24, measured.usage().inputCharacters());
 		assertEquals(2, httpClient.requests.size());
 		String requestBody = readBody(httpClient.requests.getFirst());
 		assertTrue(requestBody.contains("\"model\":\"cosyvoice-v3-flash\""));
@@ -488,7 +529,7 @@ class QwenRealtimeProviderTest {
 				new QueuedResponse(
 						200,
 						utf8("""
-						{"output":{"finish_reason":"stop","audio":{"url":"%s"}}}
+						{"request_id":"qwen-tts-request-1","output":{"finish_reason":"stop","audio":{"url":"%s"}}}
 						""".formatted(audioUrl))),
 				new QueuedResponse(200, wav));
 		QwenTtsProvider provider = new QwenTtsProvider(
@@ -504,15 +545,18 @@ class QwenRealtimeProviderTest {
 				Duration.ofSeconds(20),
 				1_048_576);
 
-		byte[] response = provider.generateSpeechAudio(
+		var measured = provider.generateSpeechAudioMeasured(
 				"Practice makes progress.",
 				"must-not-be-used");
+		byte[] response = measured.response();
 		byte[] cachedResponse = provider.generateSpeechAudio(
 				"Practice makes progress.",
 				"must-not-be-used");
 
 		assertArrayEquals(wav, response);
 		assertArrayEquals(wav, cachedResponse);
+		assertEquals("qwen-tts-request-1", measured.providerRequestId());
+		assertEquals(24, measured.usage().inputCharacters());
 		assertEquals(2, httpClient.requests.size());
 		HttpRequest request = httpClient.requests.getFirst();
 		assertEquals(
@@ -529,6 +573,75 @@ class QwenRealtimeProviderTest {
 		assertTrue(body.contains("\"language_type\":\"English\""));
 		assertFalse(body.contains("dashscope-key"));
 		assertFalse(body.contains("must-not-be-used"));
+	}
+
+	@Test
+	void preservesQwenRequestIdAndCharactersWhenAudioDownloadFails() {
+		String audioUrl =
+				"https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/test/qwen.wav";
+		RecordingHttpClient httpClient = new RecordingHttpClient(
+				new QueuedResponse(
+						200,
+						utf8("""
+						{"request_id":"qwen-billed-request","output":{"finish_reason":"stop","audio":{"url":"%s"}}}
+						""".formatted(audioUrl))),
+				new QueuedResponse(502, utf8("bad gateway")));
+		QwenTtsProvider provider = new QwenTtsProvider(
+				httpClient,
+				new ObjectMapper(),
+				"dashscope-key",
+				URI.create(
+						"https://dashscope.aliyuncs.com/api/v1/services/aigc/"
+								+ "multimodal-generation/generation"),
+				"qwen3-tts-flash",
+				"Aiden",
+				"English",
+				Duration.ofSeconds(20),
+				1_048_576);
+
+		MeteredProviderException exception = assertThrows(
+				MeteredProviderException.class,
+				() -> provider.generateSpeechAudioMeasured("Practice makes progress.", null));
+
+		assertEquals("QWEN_TTS_AUDIO_DOWNLOAD_FAILED", exception.code());
+		assertEquals("qwen-billed-request", exception.providerRequestId());
+		assertEquals(24, exception.usage().inputCharacters());
+		assertEquals(0, exception.usage().audioOutputSeconds());
+		assertEquals(Boolean.TRUE, exception.retryable());
+	}
+
+	@Test
+	void preservesAliyunRequestIdAndCharactersWhenAudioDownloadFails() {
+		String audioUrl =
+				"https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/test/cosyvoice.mp3";
+		RecordingHttpClient httpClient = new RecordingHttpClient(
+				new QueuedResponse(
+						200,
+						utf8("""
+						{"request_id":"cosyvoice-billed-request","output":{"finish_reason":"stop","audio":{"url":"%s"}}}
+						""".formatted(audioUrl))),
+				new QueuedResponse(500, utf8("server error")));
+		AliyunTtsProvider provider = new AliyunTtsProvider(
+				httpClient,
+				new ObjectMapper(),
+				"dashscope-key",
+				URI.create("https://workspace-123.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"),
+				"cosyvoice-v3-flash",
+				"loongemily_v3",
+				"mp3",
+				24_000,
+				Duration.ofSeconds(20),
+				1_048_576);
+
+		MeteredProviderException exception = assertThrows(
+				MeteredProviderException.class,
+				() -> provider.generateSpeechAudioMeasured("Practice makes progress.", null));
+
+		assertEquals("ALIYUN_TTS_AUDIO_DOWNLOAD_FAILED", exception.code());
+		assertEquals("cosyvoice-billed-request", exception.providerRequestId());
+		assertEquals(24, exception.usage().inputCharacters());
+		assertEquals(0, exception.usage().audioOutputSeconds());
+		assertEquals(Boolean.TRUE, exception.retryable());
 	}
 
 	@Test

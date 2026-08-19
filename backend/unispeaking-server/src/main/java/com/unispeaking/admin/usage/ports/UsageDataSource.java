@@ -1,9 +1,12 @@
 package com.unispeaking.admin.usage.ports;
 
 import com.unispeaking.admin.usage.domain.UsageSnapshot;
+import java.util.Set;
 
 public interface UsageDataSource {
     UsageSnapshot loadSnapshot();
+
+    default Set<String> localProviderRequestIds() { return Set.of(); }
 
     default String sourceCode() { return "POSTGRES"; }
 

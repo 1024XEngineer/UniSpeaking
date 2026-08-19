@@ -4,6 +4,8 @@ import com.unispeaking.infrastructure.config.RealtimeProperties;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.logging.RealtimeFlowLog;
 import com.unispeaking.domain.vo.provider.ProviderType;
+import com.unispeaking.domain.dto.session.RealtimeConnectCommand;
+import com.unispeaking.domain.vo.session.RealtimeConnectionResult;
 import com.unispeaking.domain.vo.session.RealtimeCredential;
 import com.unispeaking.infrastructure.realtime.RealtimeCredentialIssuer;
 import com.unispeaking.provider.AiProviderRegistry;
@@ -37,6 +39,26 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 
 	@Override
 	public String exchangeRealtimeSdp(String modelId, String offerSdp, String token) {
+		return exchangeRealtime(modelId, offerSdp, token).answerSdp();
+	}
+
+	@Override
+	public RealtimeConnectionResult connect(
+			RealtimeConnectCommand command,
+			RealtimeCredential credential) {
+		ExchangeResult exchange = exchangeRealtime(
+				command.modelId(), command.offerSdp(), credential.bearerToken());
+		return new RealtimeConnectionResult(
+				null,
+				type(),
+				command.modelId(),
+				command.voiceId(),
+				exchange.requestId(),
+				exchange.answerSdp(),
+				credential.expiresAt());
+	}
+
+	private ExchangeResult exchangeRealtime(String modelId, String offerSdp, String token) {
 		if (offerSdp == null || offerSdp.isBlank()) {
 			throw nonRetryableFailure("INVALID_SDP", "WebRTC offer SDP is required");
 		}
@@ -76,7 +98,7 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 		}
 	}
 
-	private String attemptExchange(
+	private ExchangeResult attemptExchange(
 			String model,
 			String sdpExchangeUrl,
 			String offerSdp,
@@ -128,7 +150,15 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 		RealtimeFlowLog.info("flow.3.sdp.response status={} answerSdp={}",
 				statusCode,
 				RealtimeFlowLog.sdpSummary(response.body()));
-		return response.body();
+		return new ExchangeResult(response.body(), officialRequestId(response));
+	}
+
+	private static String officialRequestId(HttpResponse<?> response) {
+		return response.headers().firstValue("x-request-id")
+				.or(() -> response.headers().firstValue("x-dashscope-request-id"))
+				.map(String::trim)
+				.filter(value -> !value.isBlank())
+				.orElse(null);
 	}
 
 	private String signalingFailureMessage(int statusCode, String body) {
@@ -154,5 +184,7 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 			return failure;
 		}
 	}
+
+	private record ExchangeResult(String answerSdp, String requestId) {}
 
 }

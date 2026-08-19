@@ -1,9 +1,11 @@
 package com.unispeaking.infrastructure.ai.aliyun;
 
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.provider.AiProviderResponse;
 import com.unispeaking.provider.AiProviderRegistry;
-import com.unispeaking.provider.TtsProvider;
 import com.unispeaking.provider.ProviderCredentialOverride;
+import com.unispeaking.provider.ProviderUsage;
+import com.unispeaking.provider.TtsProvider;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -44,6 +46,7 @@ public class AliyunTtsProvider extends TtsProvider {
 	private final int sampleRate;
 	private final Duration readTimeout;
 	private final int maxAudioBytes;
+	private final ThreadLocal<String> requestIdCapture = new ThreadLocal<>();
 
 	@Autowired
 	public AliyunTtsProvider(
@@ -108,6 +111,29 @@ public class AliyunTtsProvider extends TtsProvider {
 		return synthesize(text, credential);
 	}
 
+	@Override
+	public AiProviderResponse<byte[]> generateSpeechAudioMeasured(String text, String token) {
+		requestIdCapture.remove();
+		try {
+			byte[] audio = generateSpeechAudio(text, token);
+			String requestId = requestIdCapture.get();
+			ProviderUsage usage = requestId == null
+					? new ProviderUsage(0, 0, 0, 0, 0, 0, "NONE")
+					: ProviderUsage.tts(text, audio);
+			return new AiProviderResponse<>(audio, requestId, usage);
+		}
+		catch (BusinessException exception) {
+			String requestId = requestIdCapture.get();
+			if (requestId != null && !requestId.isBlank()) {
+				throw meteredFailure(exception, requestId, ProviderUsage.ttsInput(text));
+			}
+			throw exception;
+		}
+		finally {
+			requestIdCapture.remove();
+		}
+	}
+
 	private byte[] synthesize(String textValue, String credential) {
 		String text = trim(textValue);
 		if (text.isBlank()) {
@@ -151,6 +177,7 @@ public class AliyunTtsProvider extends TtsProvider {
 			String responseBody = new String(
 					synthesisResponse.body(),
 					StandardCharsets.UTF_8);
+			requestIdCapture.set(officialRequestId(synthesisResponse, responseBody));
 			URI audioUri = audioUri(responseBody);
 			HttpRequest audioRequest = HttpRequest.newBuilder()
 					.uri(audioUri)
@@ -199,6 +226,19 @@ public class AliyunTtsProvider extends TtsProvider {
 					"ALIYUN_TTS_INTERRUPTED",
 					"Aliyun TTS call was interrupted");
 		}
+	}
+
+	private String officialRequestId(HttpResponse<byte[]> response, String responseBody) throws JacksonException {
+		String header = response.headers().firstValue("x-request-id")
+				.or(() -> response.headers().firstValue("x-dashscope-request-id"))
+				.orElse("")
+				.trim();
+		if (!header.isBlank()) return header;
+		String bodyRequestId = objectMapper.readTree(responseBody)
+				.path("request_id")
+				.asString("")
+				.trim();
+		return bodyRequestId.isBlank() ? null : bodyRequestId;
 	}
 
 	private URI audioUri(String responseBody) throws JacksonException {

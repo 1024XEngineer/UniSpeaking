@@ -15,6 +15,8 @@ import org.springframework.stereotype.Service;
 @Service
 public final class AiInvocationQueryService {
 	private static final String SYSTEM_USER_KEY = "";
+	private static final String DISPLAY_RECORD_SQL = "(i.capability <> 'REALTIME' or "
+			+ "(i.business_scene = 'realtime_session' and i.usage_source = 'OFFICIAL'))";
 
 	private final JdbcTemplate jdbc;
 
@@ -33,13 +35,37 @@ public final class AiInvocationQueryService {
 		List<ModelSummary> byModel = byModel(filter);
 		Map<String, List<UserModelSummary>> modelsByUser = modelsByUser(filter);
 		List<UserSummary> byUser = byUser(filter, modelsByUser);
-		long totalRecords = summary.attempts();
+		RequestIdCoverage requestIdCoverage = requestIdCoverage(filter);
+		long totalRecords = recordCount(filter);
 		int totalPages = totalRecords == 0 ? 0 : (int) Math.ceil((double) totalRecords / normalized.limit());
 		int normalizedPage = totalPages == 0 ? 1 : Math.min(Math.max(1, page), totalPages);
 		int offset = Math.multiplyExact(normalizedPage - 1, normalized.limit());
 		List<InvocationRecord> records = records(filter, normalized.limit(), offset);
 		return new UsageResponse(normalized, summary, byModel, byUser, records,
+				requestIdCoverage,
 				new RecordPage(normalizedPage, normalized.limit(), totalRecords, totalPages));
+	}
+
+	private long recordCount(SqlFilter filter) {
+		Long count = jdbc.queryForObject(
+				"select count(*) from ai_model_invocations i where " + filter.sql()
+						+ " and " + DISPLAY_RECORD_SQL,
+				Long.class,
+				filter.arguments().toArray());
+		return count == null ? 0 : count;
+	}
+
+	private RequestIdCoverage requestIdCoverage(SqlFilter filter) {
+		String eligible = "lower(i.provider_id) <> 'iflytek' "
+				+ "and not (i.status = 'SUCCEEDED' and i.usage_source = 'NONE') and " + DISPLAY_RECORD_SQL;
+		return jdbc.queryForObject(
+				"select count(*) filter (where " + eligible + ") eligible_records, "
+						+ "count(*) filter (where " + eligible
+						+ " and i.provider_request_id is not null and i.provider_request_id <> '') records_with_id "
+						+ "from ai_model_invocations i where " + filter.sql(),
+				(rs, row) -> new RequestIdCoverage(
+						rs.getLong("records_with_id"), rs.getLong("eligible_records")),
+				filter.arguments().toArray());
 	}
 
 	private Summary summary(SqlFilter filter) {
@@ -138,6 +164,7 @@ public final class AiInvocationQueryService {
 						+ "i.audio_input_seconds, i.audio_output_seconds, i.usage_source, i.status, i.error_code, "
 						+ "i.retryable, i.fallback_from_model_id, i.estimated_cost, i.price_currency "
 						+ "from ai_model_invocations i left join users u on u.id=i.user_id where " + filter.sql()
+						+ " and " + DISPLAY_RECORD_SQL
 						+ " order by i.started_at desc limit ? offset ?",
 				(rs, row) -> new InvocationRecord(
 						rs.getObject("invocation_id", UUID.class), rs.getObject("logical_request_id", UUID.class),
@@ -223,9 +250,11 @@ public final class AiInvocationQueryService {
 			String priceCurrency) {}
 
 	public record RecordPage(int page, int pageSize, long totalRecords, int totalPages) {}
+	public record RequestIdCoverage(long recordsWithRequestId, long eligibleRecords) {}
 
 	public record UsageResponse(Query query, Summary summary, List<ModelSummary> byModel,
-			List<UserSummary> byUser, List<InvocationRecord> records, RecordPage recordPage) {}
+			List<UserSummary> byUser, List<InvocationRecord> records,
+			RequestIdCoverage requestIdCoverage, RecordPage recordPage) {}
 
 	private record SqlFilter(String sql, List<Object> arguments) {}
 }

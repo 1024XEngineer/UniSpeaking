@@ -7,7 +7,9 @@ import com.unispeaking.admin.usage.domain.UsageUser;
 import com.unispeaking.admin.usage.ports.UsageDataSource;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.PropertyNamingStrategies;
@@ -97,11 +99,19 @@ public final class AdminUsageQueryService {
             userDatabase = new DataSourceState(
                     usageDataSource.sourceCode(), usageDataSource.sourceName(), "OFFLINE", exception.getMessage());
         }
-        var slsState = alibaba.credentialsConfigured() ? "READY" : "CONFIGURATION_REQUIRED";
-        var slsLocation = alibaba.region() + " · " + alibaba.project() + " · " + alibaba.inferenceLogstore();
-        var slsDetail = alibaba.credentialsConfigured()
+        var missingSlsConfiguration = new ArrayList<String>();
+        if (!alibaba.credentialsConfigured()) {
+            missingSlsConfiguration.add("缺少 RAM AccessKey");
+        }
+        if (!configured(alibaba.project())) {
+            missingSlsConfiguration.add("缺少 SLS Project");
+        }
+        var slsState = missingSlsConfiguration.isEmpty() ? "READY" : "CONFIGURATION_REQUIRED";
+        var project = configured(alibaba.project()) ? alibaba.project() : "未配置";
+        var slsLocation = alibaba.region() + " · " + project + " · " + alibaba.inferenceLogstore();
+        var slsDetail = missingSlsConfiguration.isEmpty()
                 ? slsLocation
-                : "缺少 RAM AccessKey · " + slsLocation;
+                : String.join("、", missingSlsConfiguration) + " · " + slsLocation;
         var prometheusState = alibaba.prometheusEnabled() ? "ENABLED" : "DISABLED";
         return new DataSourcesResponse(List.of(
                 userDatabase,
@@ -131,6 +141,14 @@ public final class AdminUsageQueryService {
 
     private static double round(double value) {
         return Math.round(value * 1000d) / 1000d;
+    }
+
+    private static boolean configured(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return !normalized.startsWith("replace-with-");
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)

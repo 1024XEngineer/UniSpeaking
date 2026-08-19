@@ -41,6 +41,10 @@ public record ProviderUsage(
 		return new ProviderUsage(0, 0, length(input), 0, 0, wavSeconds(output), "ESTIMATED");
 	}
 
+	public static ProviderUsage ttsInput(String input) {
+		return new ProviderUsage(0, 0, length(input), 0, 0, 0, "ESTIMATED");
+	}
+
 	public static ProviderUsage audioInput(byte[] input, String output) {
 		return new ProviderUsage(0, estimatedTokens(length(output)), 0, length(output), wavSeconds(input), 0, "ESTIMATED");
 	}

@@ -14,6 +14,26 @@ import org.junit.jupiter.api.Test;
 
 class AdminUsageQueryServiceTest {
 	@Test
+	void reportsMissingSlsProjectSeparatelyFromConfiguredRamCredentials() {
+		var source = (com.unispeaking.admin.usage.ports.UsageDataSource) () ->
+				new UsageSnapshot(
+						List.of(), null,
+						new ProviderStatus(null, Map.of(), List.of(), 0, "postgres", null, false));
+		var alibaba = new AlibabaObservabilityStatus(
+				"cn-beijing", "replace-with-sls-project", "audit", "bailian-model-audit-log", true, false);
+
+		var sls = new AdminUsageQueryService(source, alibaba).dataSources().sources().stream()
+				.filter(item -> item.code().equals("ALIYUN_SLS"))
+				.findFirst()
+				.orElseThrow();
+
+		assertThat(sls.state()).isEqualTo("CONFIGURATION_REQUIRED");
+		assertThat(sls.detail()).contains("缺少 SLS Project");
+		assertThat(sls.detail()).doesNotContain("缺少 RAM AccessKey");
+		assertThat(sls.detail()).contains("bailian-model-audit-log");
+	}
+
+	@Test
 	void countsCanonicalBackendConnectionStatusesInTheDashboard() {
 		var emptyUsage = new ModelUsage(0, 0, 0, 0, 0, 0, 0, 0);
 		var sessions = List.of(
