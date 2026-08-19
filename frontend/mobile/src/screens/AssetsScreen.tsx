@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ArrowLeftIcon } from 'phosphor-react-native/src/icons/ArrowLeft';
 import { ArrowRightIcon } from 'phosphor-react-native/src/icons/ArrowRight';
 import { BookOpenTextIcon } from 'phosphor-react-native/src/icons/BookOpenText';
@@ -12,6 +12,7 @@ import { LearningAssetsHeader } from '@/components/LearningAssetsHeader';
 import { AppButton, AppScreen, Card, HeaderIconButton, PageHeader, Pill } from '@/components/ui';
 import { SceneCategoryTag } from '@/components/SceneCategoryTag';
 import type { LearningExpression, SceneLearningRecord } from '@/data/learningAssets';
+import { sceneCategories, type SceneCategory } from '@/data/sceneCategories';
 import { LearningAssetService } from '@/features/scenes/LearningAssetService';
 import { SceneSpeechClient, TtsPlayer } from '@/features/audio/TtsPlayer';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
@@ -34,6 +35,7 @@ function createLearningAssetService(): LearningAssetService {
 }
 
 const PAGE_SIZE = 8;
+const sceneCategoryEntries = Object.entries(sceneCategories) as [SceneCategory, (typeof sceneCategories)[SceneCategory]][];
 
 function SceneRecordRow({ record, onPress }: { record: SceneLearningRecord; onPress: () => void }) {
   return (
@@ -47,6 +49,36 @@ function SceneRecordRow({ record, onPress }: { record: SceneLearningRecord; onPr
       </View>
       <Text style={styles.recordScore}>{record.score === null ? '待练习' : `${Math.round(record.score)} 分`}</Text>
       <ArrowRightIcon color={colors.subtle} size={18} weight="bold" />
+    </Pressable>
+  );
+}
+
+function CategoryFilter({
+  category,
+  active,
+  onPress,
+}: {
+  category: SceneCategory | 'all';
+  active: boolean;
+  onPress: () => void;
+}) {
+  const palette = category === 'all' ? null : sceneCategories[category];
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={category === 'all' ? '显示全部学习资产' : `按${palette?.label}筛选`}
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.categoryFilter,
+        category === 'all' ? styles.categoryFilterAll : { backgroundColor: active ? palette?.backgroundColor : colors.soft },
+        active && (category === 'all' ? styles.categoryFilterAllActive : { borderColor: palette?.backgroundColor }),
+        pressed && styles.pressed,
+      ]}
+    >
+      <Text style={[styles.categoryFilterText, category === 'all' ? active && styles.categoryFilterTextActive : { color: active ? palette?.textColor : colors.muted }]}>
+        {category === 'all' ? '全部' : palette?.label}
+      </Text>
     </Pressable>
   );
 }
@@ -68,21 +100,29 @@ export function AssetsScreen({
   const [sceneRecords, setSceneRecords] = useState<SceneLearningRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [selectedCategory, setSelectedCategory] = useState<SceneCategory | 'all'>('all');
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     let active = true;
-    void assetService.listRecords().then(
-      (records) => {
-        if (active) setSceneRecords(records);
-      },
-      (cause: unknown) => {
-        if (active) {
-          setError(cause instanceof Error ? cause.message : '学习资产加载失败');
-        }
-      },
-    );
+    const loadRecords = () => {
+      void assetService.listRecords().then(
+        (records) => {
+          if (active) {
+            setSceneRecords(records);
+            setError(null);
+          }
+        },
+        (cause: unknown) => {
+          if (active) setError(cause instanceof Error ? cause.message : '学习资产加载失败');
+        },
+      );
+    };
+    loadRecords();
+    const refreshTimer = setInterval(loadRecords, 5000);
     return () => {
       active = false;
+      clearInterval(refreshTimer);
     };
   }, [assetService, reloadKey]);
 
@@ -93,10 +133,17 @@ export function AssetsScreen({
   };
 
   const records = sceneRecords ?? [];
-  const [page, setPage] = useState(0);
-  const pageCount = Math.max(1, Math.ceil(records.length / PAGE_SIZE));
+  const filteredRecords = selectedCategory === 'all'
+    ? records
+    : records.filter((record) => record.category === selectedCategory);
+  const pageCount = Math.max(1, Math.ceil(filteredRecords.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
-  const visibleRecords = records.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const visibleRecords = filteredRecords.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+
+  const selectCategory = (category: SceneCategory | 'all') => {
+    setSelectedCategory(category);
+    setPage(0);
+  };
 
   return (
     <AppScreen
@@ -106,6 +153,18 @@ export function AssetsScreen({
       <View style={styles.assetIntro}>
         <Text style={styles.assetHeadingSubtitle}>把场景练习中真正用过的表达，留在这里继续复习。</Text>
       </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.categoryFiltersScroll}
+        contentContainerStyle={styles.categoryFilters}
+        accessibilityLabel="学习资产标签筛选"
+      >
+        <CategoryFilter category="all" active={selectedCategory === 'all'} onPress={() => selectCategory('all')} />
+        {sceneCategoryEntries.map(([category]) => (
+          <CategoryFilter key={category} category={category} active={selectedCategory === category} onPress={() => selectCategory(category)} />
+        ))}
+      </ScrollView>
       <Card style={styles.recordsCard}>
         {visibleRecords.map((record) => <SceneRecordRow key={record.id} record={record} onPress={() => onOpenRecord(record)} />)}
         {sceneRecords === null && !error ? (
@@ -128,8 +187,15 @@ export function AssetsScreen({
             <Text style={styles.emptyText}>完成一次场景训练后，语言资产和最近对话会保存在这里。</Text>
           </View>
         ) : null}
+        {sceneRecords && sceneRecords.length > 0 && filteredRecords.length === 0 ? (
+          <View style={styles.empty}>
+            <BookOpenTextIcon color={colors.subtle} size={30} />
+            <Text style={styles.emptyTitle}>没有匹配的学习资产</Text>
+            <Text style={styles.emptyText}>换一个标签，继续查看其他场景学习记录。</Text>
+          </View>
+        ) : null}
       </Card>
-      {pageCount > 1 ? (
+      {filteredRecords.length > 0 && pageCount > 1 ? (
         <View style={styles.pagination}>
           <Pressable
             accessibilityRole="button"
@@ -389,6 +455,13 @@ const styles = StyleSheet.create({
   mainContent: {},
   assetIntro: { alignItems: 'flex-start' },
   assetHeadingSubtitle: { color: colors.muted, fontSize: 15, lineHeight: 23, fontWeight: '300' },
+  categoryFiltersScroll: { height: 44, flexGrow: 0 },
+  categoryFilters: { alignItems: 'center', gap: 8, paddingVertical: 6, paddingRight: 8 },
+  categoryFilter: { height: 32, minHeight: 32, alignSelf: 'center', paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'transparent', borderRadius: 16 },
+  categoryFilterAll: { borderColor: colors.line, backgroundColor: colors.white },
+  categoryFilterAllActive: { borderColor: colors.ink, backgroundColor: colors.ink },
+  categoryFilterText: { fontSize: 12, fontWeight: '500' },
+  categoryFilterTextActive: { color: colors.white },
   recordsCard: { paddingHorizontal: 16, paddingVertical: 2 },
   pagination: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 },
   paginationButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 20, backgroundColor: colors.white },
