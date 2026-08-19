@@ -28,11 +28,18 @@ services:
     env_file:
       - path: ./env/.env
         required: false
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-unispeaking-backend}
     expose:
       - "8080"
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - default
+      - monitoring
     restart: unless-stopped
 
   frontend:
@@ -49,6 +56,8 @@ services:
         VITE_UMAMI_SCRIPT_URL: ${VITE_UMAMI_SCRIPT_URL:-https://cloud.umami.is/script.js}
         VITE_UMAMI_WEBSITE_ID: ${VITE_UMAMI_WEBSITE_ID:-}
         VITE_UMAMI_DOMAINS: ${VITE_UMAMI_DOMAINS:-}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_APP_RELEASE: ${VITE_APP_RELEASE:-web@production}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     expose:
       - "80"
@@ -81,3 +90,8 @@ services:
 
 volumes:
   postgres_data:
+
+networks:
+  monitoring:
+    name: ${MONITORING_NETWORK_NAME:-monitoring_default}
+    external: true

@@ -59,25 +59,17 @@ public final class JdbcEmailAuthStore implements EmailAuthStore {
                 try {
                     connection.setAutoCommit(false);
                     try (var userStatement = connection.prepareStatement(
-                            "insert into \"user\" (id, username, password_hash, nickname, role, status, auth_version, created_at, updated_at) "
-                                    + "values (?, ?, ?, ?, 'USER', 'ACTIVE', 0, ?, ?)")) {
+                            "insert into users (id, username, password_hash, nickname, role, status, auth_version, "
+                                    + "email_verified_at, created_at, updated_at) "
+                                    + "values (?, ?, ?, ?, 'USER', 'ACTIVE', 0, ?, ?, ?)")) {
                         userStatement.setObject(1, id);
                         userStatement.setString(2, email);
                         userStatement.setString(3, passwordHash);
                         userStatement.setString(4, nickname);
-                        userStatement.setTimestamp(5, Timestamp.from(createdAt));
+                        userStatement.setTimestamp(5, Timestamp.from(emailVerifiedAt));
                         userStatement.setTimestamp(6, Timestamp.from(createdAt));
+                        userStatement.setTimestamp(7, Timestamp.from(createdAt));
                         userStatement.executeUpdate();
-                    }
-                    try (var identityStatement = connection.prepareStatement(
-                            "insert into app_users (id, email, password_hash, created_at, email_verified_at) "
-                                    + "values (?, ?, ?, ?, ?)")) {
-                        identityStatement.setObject(1, id);
-                        identityStatement.setString(2, email);
-                        identityStatement.setString(3, passwordHash);
-                        identityStatement.setTimestamp(4, Timestamp.from(createdAt));
-                        identityStatement.setTimestamp(5, Timestamp.from(emailVerifiedAt));
-                        identityStatement.executeUpdate();
                     }
                     try (var entitlementStatement = connection.prepareStatement(
                             "insert into user_entitlements (user_id, plan_code, plan_name, quota_date, quota_seconds, used_seconds, status, updated_at) "
@@ -111,16 +103,12 @@ public final class JdbcEmailAuthStore implements EmailAuthStore {
 
     @Override
     public void ensureGovernance(UserRecord user, Instant now) {
-        int updated = jdbc.update("update app_users set email = ?, password_hash = ?, email_verified_at = ? where id = ?",
-                user.email(), user.passwordHash(), Timestamp.from(now), user.id());
+        int updated = jdbc.update(
+                "update users set email_verified_at = coalesce(email_verified_at, ?) "
+                        + "where id = ? and lower(username) = lower(?)",
+                Timestamp.from(now), user.id(), user.email());
         if (updated == 0) {
-            try {
-                jdbc.update("insert into app_users (id, email, password_hash, created_at, email_verified_at) "
-                                + "values (?, ?, ?, ?, ?)",
-                        user.id(), user.email(), user.passwordHash(), Timestamp.from(now), Timestamp.from(now));
-            } catch (DataIntegrityViolationException ignored) {
-                // A concurrent login already created the projection; the identity is still valid.
-            }
+            throw new DataIntegrityViolationException("User identity no longer exists");
         }
         if (jdbc.update("update user_entitlements set updated_at = updated_at where user_id = ?", user.id()) == 0) {
             try {
@@ -136,12 +124,7 @@ public final class JdbcEmailAuthStore implements EmailAuthStore {
     @Override
     public Optional<UserRecord> findUserByEmail(String email) {
         var rows = jdbc.query(
-                "select id, email, password_hash from app_users where email = ?",
-                (rs, row) -> new UserRecord(rs.getObject("id", UUID.class), rs.getString("email"), rs.getString("password_hash")),
-                email);
-        if (!rows.isEmpty()) return rows.stream().findFirst();
-        rows = jdbc.query(
-                "select id, username as email, password_hash from \"user\" where username = ?",
+                "select id, username as email, password_hash from users where lower(username) = lower(?)",
                 (rs, row) -> new UserRecord(rs.getObject("id", UUID.class), rs.getString("email"), rs.getString("password_hash")),
                 email);
         return rows.stream().findFirst();
@@ -150,12 +133,7 @@ public final class JdbcEmailAuthStore implements EmailAuthStore {
     @Override
     public Optional<UserRecord> findUserById(UUID id) {
         var rows = jdbc.query(
-                "select id, username as email, password_hash from \"user\" where id = ?",
-                (rs, row) -> new UserRecord(rs.getObject("id", UUID.class), rs.getString("email"), rs.getString("password_hash")),
-                id);
-        if (!rows.isEmpty()) return rows.stream().findFirst();
-        rows = jdbc.query(
-                "select id, email, password_hash from app_users where id = ?",
+                "select id, username as email, password_hash from users where id = ?",
                 (rs, row) -> new UserRecord(rs.getObject("id", UUID.class), rs.getString("email"), rs.getString("password_hash")),
                 id);
         return rows.stream().findFirst();
@@ -163,14 +141,10 @@ public final class JdbcEmailAuthStore implements EmailAuthStore {
 
     @Override
     public void updatePassword(String email, String passwordHash, Instant updatedAt) {
-        int identityUpdates = jdbc.update(
-                "update app_users set password_hash = ? where lower(email) = lower(?)",
-                passwordHash, email);
-        int businessUpdates = jdbc.update(
-                "update \"user\" set password_hash = ?, auth_version = auth_version + 1, updated_at = ? "
+        int updated = jdbc.update(
+                "update users set password_hash = ?, auth_version = auth_version + 1, updated_at = ? "
                         + "where lower(username) = lower(?)",
                 passwordHash, Timestamp.from(updatedAt), email);
-        int updated = identityUpdates + businessUpdates;
         if (updated == 0) {
             throw new DataIntegrityViolationException("Email identity no longer exists");
         }
@@ -180,9 +154,8 @@ public final class JdbcEmailAuthStore implements EmailAuthStore {
     public void revokeSessionsByEmail(String email, Instant revokedAt) {
         jdbc.update(
                 "update user_sessions set revoked_at = ? where revoked_at is null and user_id in ("
-                        + "select id from app_users where lower(email) = lower(?) "
-                        + "union select id from \"user\" where lower(username) = lower(?))",
-                Timestamp.from(revokedAt), email, email);
+                        + "select id from users where lower(username) = lower(?))",
+                Timestamp.from(revokedAt), email);
     }
 
     @Override

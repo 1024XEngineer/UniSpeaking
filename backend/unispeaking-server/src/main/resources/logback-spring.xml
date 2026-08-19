@@ -21,8 +21,19 @@
 		</rollingPolicy>
 	</appender>
 
+	<appender name="CLIENT_TELEMETRY_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+		<encoder>
+			<pattern>%msg%n</pattern>
+			<charset>UTF-8</charset>
+		</encoder>
+	</appender>
+
 	<logger name="com.unispeaking.realtimeflow" level="INFO" additivity="false">
 		<appender-ref ref="REALTIME_FLOW_FILE"/>
+	</logger>
+
+	<logger name="com.unispeaking.clienttelemetry" level="INFO" additivity="false">
+		<appender-ref ref="CLIENT_TELEMETRY_CONSOLE"/>
 	</logger>
 
 	<root level="INFO">

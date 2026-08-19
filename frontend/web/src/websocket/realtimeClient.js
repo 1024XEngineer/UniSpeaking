@@ -12,6 +12,7 @@ import {
   submitInterviewTurn,
 } from "../infrastructure/http/apiClient.js";
 import { createPcmWavSegmentRecorder } from "../infrastructure/audio/audioRecorder.js";
+import { createRtcTelemetryMonitor } from "../telemetry/rtcTelemetry.js";
 
 const DEFAULT_API_BASE = "";
 const DEFAULT_VOICE = "Tina";
@@ -536,6 +537,7 @@ export function createRealtimeClient({
   const interviewSceneId = sceneType === "interview" ? sceneId : null;
   const manualTurnResponses = Boolean(customSceneId || ieltsSceneId || interviewSceneId);
   let peer = null;
+  let rtcTelemetry = null;
   let channel = null;
   let dataChannels = new Set();
   let sessionSocket = null;
@@ -1530,6 +1532,10 @@ export function createRealtimeClient({
 
     try {
       peer = new RTCPeerConnection({ iceServers: defaultIceServers() });
+      rtcTelemetry = createRtcTelemetryMonitor(peer, {
+        sessionId: () => sessionId,
+        model: DEFAULT_MODEL,
+      });
       peer.ontrack = (event) => {
         const stream = event.streams?.[0];
         if (stream) {
@@ -1539,6 +1545,10 @@ export function createRealtimeClient({
       };
       peer.onconnectionstatechange = () => {
         emit({ type: "local.connection_state", state: peer?.connectionState });
+        rtcTelemetry?.stateChanged("connection", peer?.connectionState);
+      };
+      peer.oniceconnectionstatechange = () => {
+        rtcTelemetry?.stateChanged("ice", peer?.iceConnectionState);
       };
 
       stage = "microphone";
@@ -1636,6 +1646,7 @@ export function createRealtimeClient({
       stage = "data_channel";
       await waitForChannel(channel, peer);
       assertCurrentStart(attempt);
+      rtcTelemetry?.connected();
       started = true;
       const connectedAudioTrack = localStream?.getAudioTracks?.()[0];
       if (connectedAudioTrack && audioSender?.track !== connectedAudioTrack) {
@@ -1801,6 +1812,7 @@ export function createRealtimeClient({
     started = false;
     inputReady = false;
     setTrackEnabled();
+    rtcTelemetry?.stop(reason);
     releaseCurrentTransport();
 
     // IELTS 的整场评分依赖逐轮发音评分已落库；结束会话前给评分请求
@@ -1910,6 +1922,7 @@ export function createRealtimeClient({
       if (scenarioCompletionTimer) window.clearTimeout(scenarioCompletionTimer);
       if (scenarioAudioDrainTimer) window.clearTimeout(scenarioAudioDrainTimer);
       peer = null;
+      rtcTelemetry = null;
       channel = null;
       dataChannels = new Set();
       sessionSocket = null;
