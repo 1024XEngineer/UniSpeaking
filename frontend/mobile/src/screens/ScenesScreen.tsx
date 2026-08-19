@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, BackHandler, Image, PanResponder, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, BackHandler, Image, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Reanimated, {
   cancelAnimation,
@@ -354,6 +354,8 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   const [readFeedbackOpen, setReadFeedbackOpen] = useState(false);
   const [demoPlaying, setDemoPlaying] = useState(false);
   const demoActive = useRef(false);
+  const [readViewportHeight, setReadViewportHeight] = useState(0);
+  const [overflowingReadContent, setOverflowingReadContent] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [completionOpen, setCompletionOpen] = useState(false);
@@ -420,6 +422,8 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   const learnItem = learnItems[displayedIndex] ?? learnItems[0] ?? learningItems[0];
   const displayedReadIndex = scene && trainingSnapshot ? trainingSnapshot.index : readIndex;
   const readItem = displayedReadItems[displayedReadIndex] ?? displayedReadItems[0] ?? learningItems[3];
+  const readContentKey = `${displayedReadIndex}:${readItem.en}:${readItem.zh}`;
+  const readContentOverflows = overflowingReadContent === readContentKey;
   const displayedReadPassed = scene && trainingSnapshot
     ? Boolean(trainingSnapshot.readingResult?.passed)
     : readPassed;
@@ -639,22 +643,57 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
             <Text style={styles.stageHeading}>场景句子</Text>
             <Text style={styles.stageCount}>{displayedReadIndex + 1} / {displayedReadItems.length}</Text>
           </View>
-          <View style={styles.readCard}>
-            {displayedReadPassed ? <View style={styles.scoreBadge}><Text style={styles.scoreBadgeValue}>{Math.round(trainingSnapshot?.readingResult?.overallScore ?? 86)}</Text><Text style={styles.scoreBadgeMax}>/100</Text></View> : null}
-            <Text style={styles.readSentence}>
-              {displayedReadPassed ? readItem.en : readItem.en}
-            </Text>
-            <Text style={styles.readTranslation}>{readItem.zh}</Text>
-            <Pressable accessibilityRole="button" accessibilityLabel={recording ? '结束朗读' : '开始朗读'} onPress={() => void toggleReadRecording()} style={[styles.readRecordButton, recording && styles.readRecordButtonActive]}>
-              <AppIcon name={recording ? 'microphone' : 'microphone-off'} size={28} color={recording ? '#B94D44' : colors.subtle} />
-            </Pressable>
-            <Text style={styles.readStatus}>{recording ? '正在听你朗读' : displayedReadPassed ? '朗读通过' : '点击麦克风开始朗读'}</Text>
-            <Text style={styles.readInstruction}>{recording ? '再次点击麦克风结束录音并提交评分，最长录制 30 秒。' : displayedReadPassed ? '本句已达到通过标准，可以进入下一步。' : '再次点击麦克风结束录音并提交评分，最长录制 30 秒。'}</Text>
-            {audioError ? <Text style={styles.generationError}>{audioError}</Text> : null}
-            <Pressable accessibilityRole="button" accessibilityLabel="听标准示范" onPress={() => void toggleDemo(readItem.en)} style={styles.readDemoButton}>
-              <Text style={styles.readDemoText}>{demoPlaying ? '正在播放' : '听标准示范'}</Text>
-              <AppIcon name="volume" size={18} color={colors.subtle} />
-            </Pressable>
+          <View
+            onLayout={(event) => {
+              const nextHeight = event.nativeEvent.layout.height;
+              setReadViewportHeight((currentHeight) => currentHeight === nextHeight ? currentHeight : nextHeight);
+            }}
+            style={styles.readCard}
+          >
+            <ScrollView
+              key={readContentKey}
+              accessibilityLabel="朗读内容"
+              alwaysBounceVertical={false}
+              bounces={false}
+              contentContainerStyle={styles.readCardContent}
+              nestedScrollEnabled
+              overScrollMode="never"
+              scrollEnabled={readContentOverflows}
+              showsVerticalScrollIndicator={readContentOverflows}
+              style={styles.readCardScroll}
+            >
+              <View
+                onLayout={(event) => {
+                  const availableHeight = Math.max(0, readViewportHeight - 48);
+                  const overflows = availableHeight > 0 && event.nativeEvent.layout.height > availableHeight + 1;
+                  setOverflowingReadContent((current) => {
+                    const next = overflows ? readContentKey : null;
+                    return current === next ? current : next;
+                  });
+                }}
+                style={[
+                  styles.readCardInner,
+                  { minHeight: Math.max(0, readViewportHeight - 48) },
+                  !readContentOverflows && styles.readCardInnerCentered,
+                ]}
+              >
+                {displayedReadPassed ? <View style={styles.scoreBadge}><Text style={styles.scoreBadgeValue}>{Math.round(trainingSnapshot?.readingResult?.overallScore ?? 86)}</Text><Text style={styles.scoreBadgeMax}>/100</Text></View> : null}
+                <Text style={styles.readSentence}>
+                  {displayedReadPassed ? readItem.en : readItem.en}
+                </Text>
+                <Text style={styles.readTranslation}>{readItem.zh}</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel={recording ? '结束朗读' : '开始朗读'} onPress={() => void toggleReadRecording()} style={[styles.readRecordButton, recording && styles.readRecordButtonActive]}>
+                  <AppIcon name={recording ? 'microphone' : 'microphone-off'} size={28} color={recording ? '#B94D44' : colors.subtle} />
+                </Pressable>
+                <Text style={styles.readStatus}>{recording ? '正在听你朗读' : displayedReadPassed ? '朗读通过' : '点击麦克风开始朗读'}</Text>
+                <Text style={styles.readInstruction}>{recording ? '再次点击麦克风结束录音并提交评分，最长录制 30 秒。' : displayedReadPassed ? '本句已达到通过标准，可以进入下一步。' : '再次点击麦克风结束录音并提交评分，最长录制 30 秒。'}</Text>
+                {audioError ? <Text style={styles.generationError}>{audioError}</Text> : null}
+                <Pressable accessibilityRole="button" accessibilityLabel="听标准示范" onPress={() => void toggleDemo(readItem.en)} style={styles.readDemoButton}>
+                  <Text style={styles.readDemoText}>{demoPlaying ? '正在播放' : '听标准示范'}</Text>
+                  <AppIcon name="volume" size={18} color={colors.subtle} />
+                </Pressable>
+              </View>
+            </ScrollView>
           </View>
           <View style={styles.stageFooterRow}>
             <Pressable accessibilityRole="button" onPress={() => setStage('learn')} style={styles.roundNavButton}>
@@ -1375,33 +1414,37 @@ const styles = StyleSheet.create({
   stageMetaRow: { minHeight: 34, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   stageHeading: { marginTop: 3, color: colors.ink, fontSize: 20, lineHeight: 25, fontWeight: '600', letterSpacing: -0.5 },
   stageCount: { color: colors.subtle, fontSize: 11, fontWeight: '500' },
-  languageCard: { flex: 1, minHeight: 250, position: 'relative', paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 22, backgroundColor: colors.white },
+  languageCard: { width: '100%', minWidth: 0, minHeight: 0, flex: 1, paddingHorizontal: 24, paddingVertical: 24, position: 'relative', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 22, backgroundColor: colors.white },
   languageCount: { position: 'absolute', top: 17, right: 18, color: colors.subtle, fontSize: 11, fontWeight: '500' },
   languageType: { color: colors.subtle, fontSize: 10, fontWeight: '600', letterSpacing: 1.4 },
-  languageEnglish: { marginTop: 14, color: colors.ink, fontSize: 34, lineHeight: 40, fontWeight: '600', textAlign: 'center', letterSpacing: -1.2 },
-  pronunciationRow: { minHeight: 34, marginTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
-  phoneticText: { color: colors.muted, fontSize: 16, lineHeight: 24, fontWeight: '300' },
+  languageEnglish: { width: '100%', maxWidth: 350, marginTop: 14, flexShrink: 1, color: colors.ink, fontSize: 34, lineHeight: 40, fontWeight: '600', textAlign: 'center', letterSpacing: -1.2 },
+  pronunciationRow: { width: '100%', minHeight: 34, marginTop: 14, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  phoneticText: { flexShrink: 1, color: colors.muted, fontSize: 16, lineHeight: 24, fontWeight: '300', textAlign: 'center' },
   speakerButton: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 16 },
   speakerButtonActive: { opacity: 0.58, transform: [{ scale: 0.94 }] },
-  languageChinese: { marginTop: 12, color: colors.muted, fontSize: 16, lineHeight: 24, fontWeight: '300', textAlign: 'center' },
+  languageChinese: { width: '100%', maxWidth: 350, marginTop: 12, flexShrink: 1, color: colors.muted, fontSize: 16, lineHeight: 24, fontWeight: '300', textAlign: 'center' },
   stageFooterRow: { minHeight: 52, paddingTop: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   roundNavButton: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 23, backgroundColor: colors.white },
   roundNavDisabled: { opacity: 0.28 },
   primaryPillButton: { minWidth: 132, height: 46, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 23, backgroundColor: colors.ink },
   primaryPillDisabled: { opacity: 0.28 },
   primaryPillText: { color: colors.white, fontSize: 14, fontWeight: '600' },
-  readCard: { flex: 1, minHeight: 350, paddingHorizontal: 22, paddingVertical: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 22, backgroundColor: colors.white },
+  readCard: { width: '100%', minWidth: 0, minHeight: 0, flex: 1, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: colors.line, borderRadius: 22, backgroundColor: colors.white },
+  readCardScroll: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+  readCardContent: { paddingHorizontal: 22, paddingVertical: 24 },
+  readCardInner: { width: '100%', position: 'relative', alignItems: 'center' },
+  readCardInnerCentered: { justifyContent: 'center' },
   scoreBadge: { position: 'absolute', top: 16, right: 17, flexDirection: 'row', alignItems: 'baseline' },
   scoreBadgeValue: { color: colors.ink, fontSize: 24, fontWeight: '600' },
   scoreBadgeMax: { color: colors.subtle, fontSize: 9, fontWeight: '500' },
-  readSentence: { maxWidth: 350, color: colors.ink, fontSize: 29, lineHeight: 37, fontWeight: '600', textAlign: 'center', letterSpacing: -1 },
-  readTranslation: { marginTop: 12, color: colors.muted, fontSize: 14, fontWeight: '300', textAlign: 'center' },
+  readSentence: { width: '100%', maxWidth: 350, flexShrink: 1, color: colors.ink, fontSize: 29, lineHeight: 37, fontWeight: '600', textAlign: 'center', letterSpacing: -1 },
+  readTranslation: { width: '100%', maxWidth: 350, marginTop: 12, flexShrink: 1, color: colors.muted, fontSize: 14, lineHeight: 21, fontWeight: '300', textAlign: 'center' },
   scoreCorrect: { color: '#278B5B' },
   scoreIncorrect: { color: '#D65349' },
   readRecordButton: { width: 62, height: 62, marginTop: 28, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 31, backgroundColor: colors.white },
   readRecordButtonActive: { borderColor: '#E2AAA5', backgroundColor: '#FFF7F6', shadowColor: '#C75950', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 3 },
   readStatus: { marginTop: 15, color: colors.ink, fontSize: 15, fontWeight: '600' },
-  readInstruction: { marginTop: 7, color: colors.muted, fontSize: 11, lineHeight: 17, fontWeight: '300', textAlign: 'center' },
+  readInstruction: { width: '100%', maxWidth: 350, marginTop: 7, flexShrink: 1, color: colors.muted, fontSize: 11, lineHeight: 17, fontWeight: '300', textAlign: 'center' },
   readDemoButton: { minHeight: 36, marginTop: 18, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7 },
   readDemoText: { color: colors.subtle, fontSize: 12, fontWeight: '500' },
   sceneCallStage: { flex: 1, minHeight: 0, marginHorizontal: -2 },
