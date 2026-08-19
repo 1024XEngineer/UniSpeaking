@@ -789,11 +789,13 @@ function createDefaultTtsPlayer() {
 function ScenePromptInput({
   value,
   onChangeText,
+  editable = true,
   placeholder,
   placeholderTextColor,
 }: {
   value: string;
   onChangeText: (value: string) => void;
+  editable?: boolean;
   placeholder: string;
   placeholderTextColor: string;
 }) {
@@ -837,6 +839,7 @@ function ScenePromptInput({
       ) : null}
       <TextInput
         accessibilityLabel="描述想练习的场景"
+        editable={editable}
         multiline
         maxLength={200}
         onBlur={() => setFocused(false)}
@@ -873,6 +876,7 @@ export function ScenesHome({
   const [generatingSource, setGeneratingSource] = useState<'custom' | string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const generating = generatingSource !== null;
+  const promptLocked = generating || Boolean(preview);
   useEffect(() => {
     if (Platform.OS !== 'android' || !preview) return;
 
@@ -948,6 +952,7 @@ export function ScenesHome({
             </View>
           </View>
           <ScenePromptInput
+            editable={!promptLocked}
             onChangeText={setPrompt}
             placeholder={`你今天想练习什么？例如：${promptExample.prompt}`}
             placeholderTextColor="#8D8D88"
@@ -958,16 +963,16 @@ export function ScenesHome({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="生成练习场景"
-              disabled={!prompt.trim() || generating}
+              disabled={!prompt.trim() || promptLocked}
               onPress={() => void generatePreview(prompt, 'custom')}
               style={({ pressed }) => [
                 styles.generateButton,
-                prompt.trim() && !generating ? styles.generateButtonReady : styles.generateButtonDisabled,
-                pressed && prompt.trim() && !generating && styles.generateButtonPressed,
+                prompt.trim() && !promptLocked ? styles.generateButtonReady : styles.generateButtonDisabled,
+                pressed && prompt.trim() && !promptLocked && styles.generateButtonPressed,
               ]}
             >
-              <Text style={[styles.generateButtonText, prompt.trim() && !generating ? styles.generateButtonTextActive : styles.generateButtonTextDisabled]}>{generatingSource === 'custom' ? '正在生成…' : '生成练习场景'}</Text>
-              <AppIcon name="arrow-right" size={18} color={prompt.trim() && !generating ? colors.white : '#7896B8'} />
+              <Text style={[styles.generateButtonText, prompt.trim() && !promptLocked ? styles.generateButtonTextActive : styles.generateButtonTextDisabled]}>{generatingSource === 'custom' ? '正在生成…' : '生成练习场景'}</Text>
+              <AppIcon name="arrow-right" size={18} color={prompt.trim() && !promptLocked ? colors.white : '#7896B8'} />
             </Pressable>
           </View>
         </View>

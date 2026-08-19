@@ -68,9 +68,9 @@ class AiInvocationQueryServiceTest {
 				+ ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
 		JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 		jdbc.execute("""
-				create table app_users (
+				create table users (
 				    id uuid primary key,
-				    email varchar(320) not null
+				    username varchar(320) not null
 				)
 				""");
 		jdbc.execute("""
@@ -106,7 +106,7 @@ class AiInvocationQueryServiceTest {
 				    price_currency varchar(8) not null
 				)
 				""");
-		jdbc.update("insert into app_users values (?, ?)",
+		jdbc.update("insert into users values (?, ?)",
 				java.util.UUID.fromString("10000000-0000-0000-0000-000000000001"), "learner@example.com");
 		jdbc.update("""
 				insert into ai_model_invocations values

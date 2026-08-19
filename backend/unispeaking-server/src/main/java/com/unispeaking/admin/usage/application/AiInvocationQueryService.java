@@ -98,7 +98,7 @@ public final class AiInvocationQueryService {
 
 	private List<UserSummary> byUser(SqlFilter filter, Map<String, List<UserModelSummary>> modelsByUser) {
 		return jdbc.query(
-				"select i.user_id, u.email, count(distinct i.logical_request_id) requests, "
+				"select i.user_id, u.username email, count(distinct i.logical_request_id) requests, "
 						+ "count(distinct i.session_id) sessions, count(*) attempts, "
 						+ "count(*) filter (where i.status='SUCCEEDED') successes, "
 						+ "count(*) filter (where i.status='FAILED') failures, "
@@ -110,8 +110,8 @@ public final class AiInvocationQueryService {
 						+ "coalesce(sum(i.audio_output_seconds),0) audio_output_seconds, "
 						+ "coalesce(sum(i.duration_ms),0) total_duration_ms, coalesce(avg(i.duration_ms),0) average_duration_ms, "
 						+ "coalesce(sum(i.estimated_cost),0) estimated_cost, max(i.started_at) last_invoked_at "
-						+ "from ai_model_invocations i left join app_users u on u.id=i.user_id where " + filter.sql()
-						+ " group by i.user_id, u.email order by estimated_cost desc, attempts desc",
+						+ "from ai_model_invocations i left join users u on u.id=i.user_id where " + filter.sql()
+						+ " group by i.user_id, u.username order by estimated_cost desc, attempts desc",
 				(rs, row) -> {
 					String userId = string(rs.getObject("user_id"));
 					return new UserSummary(userId, rs.getString("email"), rs.getLong("requests"),
@@ -131,13 +131,13 @@ public final class AiInvocationQueryService {
 		arguments.add(limit);
 		arguments.add(offset);
 		return jdbc.query(
-				"select i.invocation_id, i.logical_request_id, i.attempt_no, i.user_id, u.email user_email, "
+				"select i.invocation_id, i.logical_request_id, i.attempt_no, i.user_id, u.username user_email, "
 						+ "i.session_id, i.business_scene, i.route_key, i.capability, i.provider_id, i.model_id, "
 						+ "i.provider_request_id, i.started_at, i.completed_at, i.duration_ms, i.first_token_latency_ms, "
 						+ "i.input_tokens, i.output_tokens, i.total_tokens, i.input_characters, i.output_characters, "
 						+ "i.audio_input_seconds, i.audio_output_seconds, i.usage_source, i.status, i.error_code, "
 						+ "i.retryable, i.fallback_from_model_id, i.estimated_cost, i.price_currency "
-						+ "from ai_model_invocations i left join app_users u on u.id=i.user_id where " + filter.sql()
+						+ "from ai_model_invocations i left join users u on u.id=i.user_id where " + filter.sql()
 						+ " order by i.started_at desc limit ? offset ?",
 				(rs, row) -> new InvocationRecord(
 						rs.getObject("invocation_id", UUID.class), rs.getObject("logical_request_id", UUID.class),

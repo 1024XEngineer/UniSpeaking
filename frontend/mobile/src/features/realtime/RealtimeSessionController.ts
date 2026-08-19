@@ -29,6 +29,7 @@ export type RealtimeTransport = {
   prepare(): Promise<void>;
   createOffer(): Promise<string>;
   applyAnswer(answerSdp: string): Promise<void>;
+  bindSession?(sessionId: string): void;
   waitForDataChannel(): Promise<void>;
   sendProviderEvent(event: Record<string, unknown>): void;
   setAudioEnabled(enabled: boolean): void;
@@ -327,6 +328,7 @@ export class RealtimeSessionController {
       if (!backend.answerSdp?.trim()) throw new Error('后端没有返回 Answer SDP');
       if (!backend.systemPrompt?.trim()) throw new Error('后端没有返回会话提示词');
       this.backendSession = backend;
+	  this.dependencies.transport.bindSession?.(backend.sessionId);
       if (this.options.mode === 'ielts') {
         this.ieltsActivePart =
           backend.currentStage ?? this.options.ieltsPart ?? null;

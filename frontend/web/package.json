@@ -8,6 +8,7 @@
     "build": "vite build",
     "test:auth": "node --test scripts/check-auth-contract.mjs scripts/check-captcha-config.mjs scripts/check-api-client-auth.mjs",
     "test:analytics": "node --test scripts/check-umami-config.mjs scripts/check-analytics-client.mjs scripts/check-analytics-wiring.mjs",
+    "test:telemetry": "node --test scripts/check-telemetry.mjs",
     "test:assets": "node --test scripts/check-learning-asset-deletion.mjs",
     "check:call-timer": "node scripts/check-call-timer-stop.mjs",
     "check:feedback-invitation": "node scripts/check-feedback-invitation.mjs",
@@ -18,6 +19,7 @@
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
+    "@sentry/react": "^10.70.0",
     "@vitejs/plugin-react": "5.0.4",
     "lucide-react": "^1.25.0",
     "react": "19.2.0",

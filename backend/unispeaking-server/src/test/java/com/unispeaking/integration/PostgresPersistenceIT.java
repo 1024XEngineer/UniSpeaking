@@ -134,7 +134,6 @@ class PostgresPersistenceIT {
 				    user_sessions,
 				    admin_sessions,
 				    user_entitlements,
-				    app_users,
 				    admin_accounts,
 				    user_feedback,
 				    ielts_part_evaluation,
@@ -151,7 +150,7 @@ class PostgresPersistenceIT {
 				    "word",
 				    scene,
 				    user_preference,
-				    "user"
+				    users
 				RESTART IDENTITY
 				""");
 		jdbcTemplate.update("update ai_providers set secret_ciphertext=null, secret_fingerprint=null");
@@ -203,6 +202,17 @@ class PostgresPersistenceIT {
 				String.class);
 
 		assertEquals(List.of("1"), migrationVersions);
+		assertEquals(
+				List.of("users"),
+				jdbcTemplate.queryForList(
+						"""
+						SELECT table_name
+						FROM information_schema.tables
+						WHERE table_schema = 'public'
+						  AND table_name IN ('user', 'app_user', 'app_users', 'users')
+						ORDER BY table_name
+						""",
+						String.class));
 		assertEquals(7, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_providers", Integer.class));
 		assertEquals(10, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_models", Integer.class));
 		assertEquals(10, jdbcTemplate.queryForObject(
@@ -348,10 +358,10 @@ class PostgresPersistenceIT {
 		UUID firstUserId = UUID.randomUUID();
 		UUID secondUserId = UUID.randomUUID();
 		jdbcTemplate.update(
-				"insert into \"user\" (id, username, password_hash) values (?::uuid, ?, 'hash')",
+				"insert into users (id, username, password_hash) values (?::uuid, ?, 'hash')",
 				firstUserId.toString(), "sls-first@example.com");
 		jdbcTemplate.update(
-				"insert into \"user\" (id, username, password_hash) values (?::uuid, ?, 'hash')",
+				"insert into users (id, username, password_hash) values (?::uuid, ?, 'hash')",
 				secondUserId.toString(), "sls-second@example.com");
 		jdbcTemplate.update(
 				"""
@@ -668,6 +678,37 @@ class PostgresPersistenceIT {
 				    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 				)
 				""");
+		jdbcTemplate.execute("""
+				CREATE TABLE legacy_ci.app_users (
+				    id UUID PRIMARY KEY,
+				    email VARCHAR(320) NOT NULL UNIQUE,
+				    password_hash VARCHAR(1000) NOT NULL,
+				    created_at TIMESTAMPTZ NOT NULL,
+				    email_verified_at TIMESTAMPTZ
+				)
+				""");
+		jdbcTemplate.execute("""
+				CREATE TABLE legacy_ci.user_sessions (
+				    token_digest VARCHAR(128) PRIMARY KEY,
+				    user_id UUID NOT NULL REFERENCES legacy_ci.app_users(id),
+				    created_at TIMESTAMPTZ NOT NULL,
+				    last_seen_at TIMESTAMPTZ NOT NULL,
+				    expires_at TIMESTAMPTZ NOT NULL,
+				    revoked_at TIMESTAMPTZ
+				)
+				""");
+		jdbcTemplate.execute("""
+				CREATE TABLE legacy_ci.user_entitlements (
+				    user_id UUID PRIMARY KEY REFERENCES legacy_ci.app_users(id),
+				    plan_code VARCHAR(64) NOT NULL,
+				    plan_name VARCHAR(128) NOT NULL,
+				    quota_date DATE NOT NULL,
+				    quota_seconds NUMERIC(12,3) NOT NULL,
+				    used_seconds NUMERIC(12,3) NOT NULL,
+				    status VARCHAR(32) NOT NULL,
+				    updated_at TIMESTAMPTZ NOT NULL
+				)
+				""");
 		jdbcTemplate.update(
 				"""
 				INSERT INTO legacy_ci."user"
@@ -677,6 +718,31 @@ class PostgresPersistenceIT {
 				"22222222-2222-4222-8222-222222222222",
 				"legacy@example.com",
 				"legacy-password");
+		jdbcTemplate.update(
+				"""
+				INSERT INTO legacy_ci.app_users
+				    (id, email, password_hash, created_at, email_verified_at)
+				VALUES (?::uuid, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+				""",
+				"22222222-2222-4222-8222-222222222222",
+				"legacy@example.com",
+				"identity-password");
+		jdbcTemplate.update(
+				"""
+				INSERT INTO legacy_ci.user_sessions
+				    (token_digest, user_id, created_at, last_seen_at, expires_at)
+				VALUES ('legacy-session', ?::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+				        CURRENT_TIMESTAMP + INTERVAL '1 hour')
+				""",
+				"22222222-2222-4222-8222-222222222222");
+		jdbcTemplate.update(
+				"""
+				INSERT INTO legacy_ci.user_entitlements
+				    (user_id, plan_code, plan_name, quota_date, quota_seconds,
+				     used_seconds, status, updated_at)
+				VALUES (?::uuid, 'pro', 'Pro', CURRENT_DATE, 3600, 120, 'active', CURRENT_TIMESTAMP)
+				""",
+				"22222222-2222-4222-8222-222222222222");
 
 		Flyway.configure()
 				.dataSource(
@@ -694,8 +760,21 @@ class PostgresPersistenceIT {
 		assertEquals(
 				1,
 				jdbcTemplate.queryForObject(
-						"SELECT COUNT(*) FROM legacy_ci.\"user\" WHERE username = 'legacy@example.com'",
+						"SELECT COUNT(*) FROM legacy_ci.users WHERE username = 'legacy@example.com'",
 						Integer.class));
+		assertFalse(jdbcTemplate.queryForObject(
+				"SELECT to_regclass('legacy_ci.\"user\"') IS NOT NULL",
+				Boolean.class));
+		assertFalse(jdbcTemplate.queryForObject(
+				"SELECT to_regclass('legacy_ci.app_users') IS NOT NULL",
+				Boolean.class));
+		assertEquals("pro", jdbcTemplate.queryForObject(
+				"SELECT plan_code FROM legacy_ci.user_entitlements WHERE user_id = ?::uuid",
+				String.class,
+				"22222222-2222-4222-8222-222222222222"));
+		assertEquals(1, jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM legacy_ci.user_sessions WHERE token_digest = 'legacy-session'",
+				Integer.class));
 		assertEquals(
 				List.of("0", "1"),
 				jdbcTemplate.queryForList(

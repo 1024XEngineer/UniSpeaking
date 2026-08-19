@@ -34,6 +34,20 @@ EXPO_PUBLIC_UMAMI_ENDPOINT=https://cloud.umami.is/api/send
 EXPO_PUBLIC_UMAMI_WEBSITE_ID=3ae2dee9-d585-43a9-93f3-fcafcd14b258
 ```
 
+## Error monitoring
+
+Client errors, API failures, device metadata, and RTC quality are always sent to the
+authenticated UniSpeaking telemetry endpoint for Grafana/Loki. Sentry is enabled when
+`EXPO_PUBLIC_SENTRY_DSN` is present.
+
+For native symbol and JavaScript source-map uploads, also provide `SENTRY_ORG`,
+`SENTRY_PROJECT`, and `SENTRY_AUTH_TOKEN` in the build environment.
+
+Firebase Crashlytics is enabled only in a native development/release build that includes
+`google-services.json` (Android) or `GoogleService-Info.plist` (iOS). Keep these files out
+of Git. Their paths can be provided with `GOOGLE_SERVICES_JSON` and
+`GOOGLE_SERVICE_INFO_PLIST` before running Expo prebuild/EAS Build.
+
 已登录用户使用后端返回的用户 UUID 作为 Distinct ID，以关联 Web 和移动端会话。事件数据
 不包含邮箱、昵称、口令、JWT、对话文本、音频、简历或岗位描述。生产统计主机名固定为
 `unispeaking.qnsdk.com`，不要为移动端创建第二个 Website ID。

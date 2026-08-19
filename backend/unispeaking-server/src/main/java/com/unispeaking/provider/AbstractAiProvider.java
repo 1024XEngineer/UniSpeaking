@@ -18,6 +18,18 @@ public abstract class AbstractAiProvider implements AiProvider {
 		return new AiProviderResponse<>(response, null, ProviderUsage.tts(text, response));
 	}
 
+	public AiProviderResponse<byte[]> generateSpeechAudioMeasured(
+			String text,
+			String token,
+			String voice) {
+		byte[] response = generateSpeechAudio(text, token, voice);
+		return new AiProviderResponse<>(response, null, ProviderUsage.tts(text, response));
+	}
+
+	public byte[] generateSpeechAudio(String text, String token, String voice) {
+		return generateSpeechAudio(text, token);
+	}
+
 	public AiProviderResponse<String> convertAudioToTextMeasured(byte[] audio, String token) {
 		String response = convertAudioToText(audio, token);
 		return new AiProviderResponse<>(response, null, ProviderUsage.audioInput(audio, response));

@@ -1,4 +1,5 @@
 import type { TokenStore } from '../auth/SecureTokenStore';
+import { mobileTelemetry } from '../telemetry/MobileTelemetry';
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -79,6 +80,8 @@ export class ApiClient {
     if (externalSignal?.aborted) controller.abort();
     else externalSignal?.addEventListener('abort', abortFromExternalSignal, { once: true });
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+	const startedAt = Date.now();
+	const method = requestOptions.method || 'GET';
 
     let response: Response;
     try {
@@ -92,12 +95,27 @@ export class ApiClient {
       );
     } catch (error) {
       if (controller.signal.aborted && !externalSignal?.aborted) {
+		void mobileTelemetry.recordApiRequest({
+		  path,
+		  method,
+		  durationMs: Date.now() - startedAt,
+		  outcome: 'timeout',
+		  status: 408,
+		  message: '请求超时',
+		});
         throw new ApiError(
           '请求超时，请检查网络后重试',
           408,
           'REQUEST_TIMEOUT',
         );
       }
+	  void mobileTelemetry.recordApiRequest({
+		path,
+		method,
+		durationMs: Date.now() - startedAt,
+		outcome: 'network_error',
+		message: error instanceof Error ? error.message : 'Network request failed',
+	  });
       throw error;
     } finally {
       clearTimeout(timeout);
@@ -116,12 +134,28 @@ export class ApiClient {
 
     if (!response.ok || (isApiEnvelope(body) && !body.success)) {
       const envelope = isApiEnvelope(body) ? body : undefined;
+	  void mobileTelemetry.recordApiRequest({
+		path,
+		method,
+		durationMs: Date.now() - startedAt,
+		outcome: 'error',
+		status: response.status,
+		message: envelope?.message ?? envelope?.code ?? `请求失败（${response.status}）`,
+	  });
       throw new ApiError(
         envelope?.message ?? envelope?.code ?? `请求失败（${response.status}）`,
         response.status,
         envelope?.code,
       );
     }
+
+	void mobileTelemetry.recordApiRequest({
+	  path,
+	  method,
+	  durationMs: Date.now() - startedAt,
+	  outcome: 'success',
+	  status: response.status,
+	});
 
     return (isApiEnvelope<T>(body) ? body.data : body) as T;
   }

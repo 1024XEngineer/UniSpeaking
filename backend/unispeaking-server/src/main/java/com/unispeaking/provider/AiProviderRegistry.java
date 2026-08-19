@@ -359,6 +359,30 @@ public class AiProviderRegistry {
 				id -> getTtsProvider(id).generateSpeechAudioMeasured(text, credential(id, token)));
 	}
 
+	public byte[] generateSpeechAudioBytes(
+			String modelId,
+			String text,
+			String token,
+			String voice) {
+		return generateSpeechAudioBytes(automaticContext("tts"), modelId, text, token, voice);
+	}
+
+	public byte[] generateSpeechAudioBytes(
+			AiInvocationContext context,
+			String modelId,
+			String text,
+			String token,
+			String voice) {
+		if (modelId == null || modelId.isBlank()) {
+			throw new BusinessException(
+					"AI_TTS_MODEL_REQUIRED",
+					"A voice-specific TTS request requires an explicit model");
+		}
+		return invokeExplicitMeasured(context, AiCapability.TTS, modelId,
+				id -> getTtsProvider(id).generateSpeechAudioMeasured(
+						text, credential(id, token), voice));
+	}
+
 	public String executeLlmTask(String modelId, String prompt, String token) {
 		return executeLlmTask(automaticContext("llm"), modelId, prompt, token);
 	}

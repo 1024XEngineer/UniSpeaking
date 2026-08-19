@@ -1,3 +1,5 @@
+import { recordTelemetry, setTelemetryUser } from "../../telemetry/clientTelemetry.js";
+
 const API_BASE = (import.meta.env?.VITE_BACKEND_URL || "").replace(/\/$/, "");
 const ACCESS_TOKEN_KEY = "unispeaking.accessToken";
 export const AUTH_SESSION_EXPIRED_EVENT = "unispeaking:auth-session-expired";
@@ -16,15 +18,32 @@ async function unwrap(response) {
 async function request(path, options = {}) {
   const token = getAccessToken();
   const formDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    credentials: "include",
-    headers: {
-      ...(options.body && !formDataBody ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
+  const startedAt = performance.now();
+  const apiPath = path.split("?", 1)[0];
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      credentials: "include",
+      headers: {
+        ...(options.body && !formDataBody ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    });
+  } catch (error) {
+    recordTelemetry("api.request", {
+      severity: "ERROR",
+      message: error instanceof Error ? error.message : "Network request failed",
+      attributes: {
+        api_path: apiPath,
+        api_method: options.method || "GET",
+        outcome: "network_error",
+        duration_ms: performance.now() - startedAt,
+      },
+    });
+    throw error;
+  }
   if (response.status === 401 && !path.startsWith("/api/auth/")) {
     // Bind cleanup to the token captured by this request so a delayed 401
     // cannot erase a newer session established in the same browser tab.
@@ -33,7 +52,32 @@ async function request(path, options = {}) {
       window.dispatchEvent(new Event(AUTH_SESSION_EXPIRED_EVENT));
     }
   }
-  return unwrap(response);
+  try {
+    const result = await unwrap(response);
+    recordTelemetry("api.request", {
+      attributes: {
+        api_path: apiPath,
+        api_method: options.method || "GET",
+        http_status: response.status,
+        outcome: "success",
+        duration_ms: performance.now() - startedAt,
+      },
+    });
+    return result;
+  } catch (error) {
+    recordTelemetry("api.request", {
+      severity: "ERROR",
+      message: error instanceof Error ? error.message : "API request failed",
+      attributes: {
+        api_path: apiPath,
+        api_method: options.method || "GET",
+        http_status: response.status,
+        outcome: "error",
+        duration_ms: performance.now() - startedAt,
+      },
+    });
+    throw error;
+  }
 }
 
 export async function fetchAuthenticatedMedia(pathOrUrl) {
@@ -60,11 +104,13 @@ export function hasAuthSession() {
 
 export function saveAuthSession(authResponse) {
   window.localStorage.setItem(ACCESS_TOKEN_KEY, authResponse.accessToken);
+  setTelemetryUser(authResponse.user?.id || null);
 }
 
 export function clearAuthSession(expectedToken = null) {
   if (expectedToken !== null && getAccessToken() !== expectedToken) return;
   window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+  setTelemetryUser(null);
 }
 
 export async function register({ username, password, nickname = null }) {
@@ -85,8 +131,10 @@ export async function login({ username, password }) {
   return auth;
 }
 
-export function getCurrentUser() {
-  return request("/api/auth/me");
+export async function getCurrentUser() {
+  const user = await request("/api/auth/me");
+  setTelemetryUser(user?.id || null);
+  return user;
 }
 
 export function getProfileOverview(month) {

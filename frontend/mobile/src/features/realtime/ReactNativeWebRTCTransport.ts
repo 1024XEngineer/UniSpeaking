@@ -2,6 +2,8 @@ import type {
   RealtimeTransport,
   RealtimeTransportEvent,
 } from './RealtimeSessionController';
+import { summarizeRtcStats } from './RtcStatsTelemetry';
+import { mobileTelemetry, type MobileTelemetryEvent } from '@/infrastructure/telemetry/MobileTelemetry';
 
 export type MediaStreamTrackLike = {
   enabled: boolean;
@@ -41,6 +43,7 @@ export type PeerConnectionLike = {
   createOffer(): Promise<SdpDescription>;
   setLocalDescription(description: SdpDescription): Promise<void>;
   setRemoteDescription(description: SdpDescription): Promise<void>;
+  getStats?(): Promise<unknown>;
   close(): void;
 };
 
@@ -60,6 +63,8 @@ export type ReactNativeWebRTCAdapter = {
 type TransportOptions = ReactNativeWebRTCAdapter & {
   iceGatheringTimeoutMs?: number;
   dataChannelTimeoutMs?: number;
+  rtcStatsIntervalMs?: number;
+  telemetry?: { record(event: MobileTelemetryEvent): void };
 };
 
 function createDefaultAdapter(): ReactNativeWebRTCAdapter {
@@ -92,11 +97,19 @@ export class ReactNativeWebRTCTransport implements RealtimeTransport {
   private readonly adapter: ReactNativeWebRTCAdapter;
   private readonly iceGatheringTimeoutMs: number;
   private readonly dataChannelTimeoutMs: number;
+  private readonly rtcStatsIntervalMs: number;
+  private readonly telemetry: { record(event: MobileTelemetryEvent): void };
   private readonly listeners = new Set<Listener>();
   private readonly channels = new Set<RTCDataChannelLike>();
   private peer: PeerConnectionLike | null = null;
   private stream: MediaStreamLike | null = null;
   private channel: RTCDataChannelLike | null = null;
+  private telemetrySessionId: string | null = null;
+  private rtcStatsTimer: ReturnType<typeof setInterval> | null = null;
+  private rtcStartedAt = 0;
+  private rtcConnected = false;
+  private rtcIceConnected = false;
+  private previousRtcTotals: { packetsReceived?: number; packetsLost?: number } = {};
 
   constructor(options?: Partial<TransportOptions>) {
     const defaults = options ? null : createDefaultAdapter();
@@ -112,6 +125,8 @@ export class ReactNativeWebRTCTransport implements RealtimeTransport {
     this.adapter = (options ?? defaults) as ReactNativeWebRTCAdapter;
     this.iceGatheringTimeoutMs = options?.iceGatheringTimeoutMs ?? 10_000;
     this.dataChannelTimeoutMs = options?.dataChannelTimeoutMs ?? 10_000;
+    this.rtcStatsIntervalMs = options?.rtcStatsIntervalMs ?? 10_000;
+    this.telemetry = options?.telemetry ?? mobileTelemetry;
   }
 
   subscribe(listener: Listener) {
@@ -132,6 +147,11 @@ export class ReactNativeWebRTCTransport implements RealtimeTransport {
     const peer = this.adapter.createPeerConnection();
     this.stream = stream;
     this.peer = peer;
+    this.rtcStartedAt = Date.now();
+    this.rtcConnected = false;
+    this.rtcIceConnected = false;
+    this.previousRtcTotals = {};
+	this.telemetry.record({ eventType: 'rtc.started' });
 
     for (const track of stream.getAudioTracks()) {
       track.enabled = false;
@@ -139,6 +159,7 @@ export class ReactNativeWebRTCTransport implements RealtimeTransport {
     }
 
     peer.onconnectionstatechange = () => {
+	  this.recordRtcState('connection', peer.connectionState);
       if (peer.connectionState === 'failed') {
         this.emit({
           type: 'connection.failed',
@@ -147,12 +168,18 @@ export class ReactNativeWebRTCTransport implements RealtimeTransport {
       }
     };
     peer.oniceconnectionstatechange = () => {
+	  this.recordRtcState('ice', peer.iceConnectionState);
       if (peer.iceConnectionState === 'failed') {
         this.emit({ type: 'ice.failed', message: 'ICE 连接失败' });
       }
     };
     peer.ondatachannel = ({ channel }) => this.bindChannel(channel);
     this.bindChannel(peer.createDataChannel('oai-events'));
+	if (peer.getStats) {
+	  this.rtcStatsTimer = setInterval(() => {
+		void this.collectRtcStats(peer);
+	  }, this.rtcStatsIntervalMs);
+	}
   }
 
   async createOffer() {
@@ -174,6 +201,10 @@ export class ReactNativeWebRTCTransport implements RealtimeTransport {
     await peer.setRemoteDescription(answer);
   }
 
+  bindSession(sessionId: string) {
+	this.telemetrySessionId = sessionId;
+  }
+
   waitForDataChannel() {
     const channel = this.channel;
     if (!channel) return Promise.reject(new Error('实时数据通道尚未创建'));
@@ -187,6 +218,7 @@ export class ReactNativeWebRTCTransport implements RealtimeTransport {
       channel.onopen = () => {
         previousOpen?.();
         clearTimeout(timer);
+		this.markRtcConnected();
         resolve();
       };
       channel.onerror = () => {
@@ -217,6 +249,18 @@ export class ReactNativeWebRTCTransport implements RealtimeTransport {
     this.stream = null;
     this.peer = null;
     this.channel = null;
+	if (this.rtcStatsTimer) clearInterval(this.rtcStatsTimer);
+	this.rtcStatsTimer = null;
+	if (peer) void this.collectRtcStats(peer, 'rtc.final_quality');
+	if (this.rtcStartedAt) {
+	  this.telemetry.record({
+		eventType: 'rtc.ended',
+		sessionId: this.telemetrySessionId,
+		attributes: { duration_ms: Date.now() - this.rtcStartedAt },
+	  });
+	}
+	this.telemetrySessionId = null;
+	this.rtcStartedAt = 0;
 
     for (const track of stream?.getTracks() ?? []) track.stop();
     for (const channel of this.channels) channel.close();
@@ -236,6 +280,66 @@ export class ReactNativeWebRTCTransport implements RealtimeTransport {
         message: '实时数据通道连接失败',
       });
     };
+  }
+
+  private markRtcConnected() {
+	if (this.rtcConnected) return;
+	this.rtcConnected = true;
+	this.telemetry.record({
+	  eventType: 'rtc.connected',
+	  sessionId: this.telemetrySessionId,
+	  attributes: { connect_duration_ms: Math.max(0, Date.now() - this.rtcStartedAt) },
+	});
+	if (this.peer) void this.collectRtcStats(this.peer);
+  }
+
+  private recordRtcState(kind: 'connection' | 'ice', state: string) {
+	const failed = state === 'failed';
+	this.telemetry.record({
+	  eventType: `rtc.${kind}_state`,
+	  severity: failed ? 'ERROR' : state === 'disconnected' ? 'WARN' : 'INFO',
+	  sessionId: this.telemetrySessionId,
+	  message: failed ? `${kind} failed` : null,
+	  attributes: { state },
+	});
+	if (kind === 'ice' && !this.rtcIceConnected && ['connected', 'completed'].includes(state)) {
+	  this.rtcIceConnected = true;
+	  this.telemetry.record({
+		eventType: 'rtc.ice_connected',
+		sessionId: this.telemetrySessionId,
+		attributes: { connect_duration_ms: Math.max(0, Date.now() - this.rtcStartedAt) },
+	  });
+	}
+	if (failed && this.peer) void this.collectRtcStats(this.peer, 'rtc.failure', 'ERROR');
+  }
+
+  private async collectRtcStats(
+	peer: PeerConnectionLike,
+	eventType = 'rtc.quality',
+	severity: MobileTelemetryEvent['severity'] = 'INFO',
+  ) {
+	if (!peer.getStats) return;
+	try {
+	  const summary = summarizeRtcStats(await peer.getStats(), this.previousRtcTotals);
+	  this.previousRtcTotals = summary.totals;
+	  this.telemetry.record({
+		eventType,
+		severity,
+		sessionId: this.telemetrySessionId,
+		attributes: {
+		  ...summary.attributes,
+		  ice_state: peer.iceConnectionState,
+		  connection_state: peer.connectionState,
+		},
+	  });
+	} catch (error) {
+	  this.telemetry.record({
+		eventType: 'rtc.stats_failed',
+		severity: 'WARN',
+		sessionId: this.telemetrySessionId,
+		message: error instanceof Error ? error.message : 'RTC getStats failed',
+	  });
+	}
   }
 
   private waitForIceGathering(peer: PeerConnectionLike) {
