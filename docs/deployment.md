@@ -46,17 +46,53 @@ upload, download, and delete permissions required for this bucket.
 
 Before deploying the profile feature to an existing database, apply:
 
+If the database still contains `"user"` or `app_users`, complete the user table
+consolidation in the next section first.
+
 ```bash
 psql "$DATABASE_URL" -f deploy/postgres/profile.sql
 ```
 
-The migration adds `user.avatar_object_key` and the `practice_session` session
+The migration adds `users.avatar_object_key` and the `practice_session` session
 fact table. Check-in dates continue to be derived from persisted
 `session_evaluation` reports, so no check-in table and no Redis data structure
 are required. Learning duration is calculated from completed practice sessions;
 sessions shorter than 30 seconds are excluded at query time. New databases use
 the Flyway migrations in
 `backend/unispeaking-server/src/main/resources/db/migration`.
+
+## User table consolidation
+
+PostgreSQL reserves `USER`, so the canonical account table is the unquoted
+`users` table. It contains both the business account fields and email
+verification state; the former `"user"` and `app_users` tables are not part of
+the final schema.
+
+For an existing database, back it up and run the transactional consolidation
+before deploying backend code that queries `users`:
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f deploy/postgres/consolidate-users.sql
+```
+
+The script preserves matching IDs, profiles, sessions and entitlements. It
+stops without committing when the same case-insensitive email maps to different
+user IDs, because that conflict requires an explicit identity decision. Verify
+the final account tables with:
+
+```sql
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = current_schema()
+  AND table_name IN ('user', 'app_user', 'app_users', 'users')
+ORDER BY table_name;
+```
+
+The result must contain only `users`. A fresh database receives the same shape
+directly from `V1__baseline.sql`. Because this repository intentionally keeps a
+single squashed V1, an existing Flyway installation must also repair the V1
+checksum with its normal Flyway release tooling after applying the script, or
+recreate a disposable local database from the new baseline.
 
 The consolidated `V1__baseline.sql` creates `practice_session` automatically
 for a fresh database. Environments that used the former multi-version migration
