@@ -15,6 +15,8 @@ import {
   normalizeIceTransportPolicy,
   realtimeIceTransportPolicy,
   realtimePeerConnectionConfig,
+  realtimeTurnEnabled,
+  resolveRealtimePeerConnectionConfig,
   collectIceConnectionDiagnostics,
   releaseRealtimeTransport,
   waitForIceGathering,
@@ -120,9 +122,67 @@ assert.equal(
   "wss://app.example.com/backend/ws/session-messages?access_token=signed-token",
 );
 assert.equal(realtimeIceTransportPolicy(), "all");
+assert.equal(realtimeTurnEnabled(), false);
 assert.equal(normalizeIceTransportPolicy("relay"), "relay");
 assert.equal(normalizeIceTransportPolicy("invalid"), "all");
 assert.equal(realtimePeerConnectionConfig().iceTransportPolicy, "all");
+
+let turnConfigurationRequests = 0;
+const unchangedPeerConfiguration = await resolveRealtimePeerConnectionConfig({
+  turnEnabled: false,
+  loadConfiguration: async () => {
+    turnConfigurationRequests += 1;
+    throw new Error("must not load");
+  },
+});
+assert.equal(turnConfigurationRequests, 0);
+assert.equal(unchangedPeerConfiguration.iceTransportPolicy, "all");
+
+const grayPeerConfiguration = await resolveRealtimePeerConnectionConfig({
+  turnEnabled: true,
+  loadConfiguration: async (forceRelay) => {
+    assert.equal(forceRelay, false);
+    return {
+      turnEnabled: true,
+      iceServers: [{
+        urls: ["turn:turn.example.cn:443?transport=udp"],
+        username: "temporary-user",
+        credential: "temporary-credential",
+      }],
+    };
+  },
+});
+assert.equal(grayPeerConfiguration.iceTransportPolicy, "all");
+assert.equal(grayPeerConfiguration.iceServers.at(-1).username, "temporary-user");
+
+const relayPeerConfiguration = await resolveRealtimePeerConnectionConfig({
+  turnEnabled: true,
+  forceRelay: true,
+  loadConfiguration: async () => ({
+    turnEnabled: true,
+    iceServers: [{
+      urls: "turn:turn.example.cn:443?transport=udp",
+      username: "temporary-user",
+      credential: "temporary-credential",
+    }],
+  }),
+});
+assert.equal(relayPeerConfiguration.iceTransportPolicy, "relay");
+assert.equal(relayPeerConfiguration.iceServers.length, 1);
+
+await assert.rejects(
+  resolveRealtimePeerConnectionConfig({
+    forceRelay: true,
+    loadConfiguration: async () => ({ turnEnabled: false, iceServers: [] }),
+  }),
+  (error) => error.code === "WEBRTC_TURN_NOT_CONFIGURED",
+);
+
+const fallbackPeerConfiguration = await resolveRealtimePeerConnectionConfig({
+  turnEnabled: true,
+  loadConfiguration: async () => { throw new Error("TURN endpoint unavailable"); },
+});
+assert.equal(fallbackPeerConfiguration.iceTransportPolicy, "all");
 
 assert.deepEqual(
   extractCompletedAssistantMessage({

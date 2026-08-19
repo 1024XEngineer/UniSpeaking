@@ -9,6 +9,7 @@ import {
   evaluateIeltsDialogueTurn,
   getCustomDialogueEvaluation,
   getInterviewReport,
+  getRealtimeIceConfiguration,
   submitInterviewTurn,
 } from "../infrastructure/http/apiClient.js";
 import { createPcmWavSegmentRecorder } from "../infrastructure/audio/audioRecorder.js";
@@ -97,13 +98,56 @@ export function realtimeIceTransportPolicy() {
   return normalizeIceTransportPolicy(import.meta.env?.VITE_REALTIME_ICE_TRANSPORT_POLICY);
 }
 
-export function realtimePeerConnectionConfig() {
+export function realtimeTurnEnabled() {
+  return String(import.meta.env?.VITE_REALTIME_TURN_ENABLED || "").trim().toLowerCase() === "true";
+}
+
+export function realtimePeerConnectionConfig(
+  iceServers = defaultIceServers(),
+  iceTransportPolicy = realtimeIceTransportPolicy(),
+) {
   return {
-    iceServers: defaultIceServers(),
+    iceServers,
     // The default remains browser-native ICE selection. `relay` is an explicit
     // test-only switch used to validate a TURN deployment in a controlled build.
-    iceTransportPolicy: realtimeIceTransportPolicy(),
+    iceTransportPolicy,
   };
+}
+
+function isTurnIceServer(server) {
+  const urls = Array.isArray(server?.urls) ? server.urls : [server?.urls];
+  return urls.some((url) => /^turns?:/i.test(String(url || "")));
+}
+
+export async function resolveRealtimePeerConnectionConfig({
+  turnEnabled = realtimeTurnEnabled(),
+  forceRelay = realtimeIceTransportPolicy() === "relay",
+  loadConfiguration = getRealtimeIceConfiguration,
+} = {}) {
+  const base = realtimePeerConnectionConfig();
+  if (!turnEnabled && !forceRelay) return base;
+  try {
+    const configuration = await loadConfiguration(forceRelay);
+    const turnServers = Array.isArray(configuration?.iceServers)
+      ? configuration.iceServers.filter(isTurnIceServer)
+      : [];
+    if (!configuration?.turnEnabled || turnServers.length === 0) {
+      if (forceRelay) {
+        throw createRealtimeError(
+          "WEBRTC_TURN_NOT_CONFIGURED",
+          "TURN 强制测试已启用，但服务端未返回可用的中继配置",
+        );
+      }
+      return base;
+    }
+    return realtimePeerConnectionConfig(
+      forceRelay ? turnServers : [...base.iceServers, ...turnServers],
+      forceRelay ? "relay" : "all",
+    );
+  } catch (error) {
+    if (forceRelay) throw error;
+    return base;
+  }
 }
 
 export function buildResponseCreateEvent({ id, instructions = "" } = {}) {
@@ -707,6 +751,7 @@ export function createRealtimeClient({
       ? "WEBRTC_MICROPHONE_UNAVAILABLE"
       : {
         microphone: "WEBRTC_MICROPHONE_UNAVAILABLE",
+        ice_configuration: "WEBRTC_ICE_CONFIGURATION_FAILED",
         ice_gathering: "WEBRTC_ICE_GATHERING_FAILED",
         backend_start: "WEBRTC_SIGNALING_FAILED",
         session_websocket: "SESSION_WEBSOCKET_FAILED",
@@ -1625,10 +1670,15 @@ export function createRealtimeClient({
     const startedAt = Date.now();
     let stage = "peer_connection";
     let iceResult = null;
+    let peerConfiguration = null;
     emit({ type: "local.connecting" });
 
     try {
-      peer = new RTCPeerConnection(realtimePeerConnectionConfig());
+      stage = "ice_configuration";
+      peerConfiguration = await resolveRealtimePeerConnectionConfig();
+      assertCurrentStart(attempt);
+      stage = "peer_connection";
+      peer = new RTCPeerConnection(peerConfiguration);
       rtcTelemetry = createRtcTelemetryMonitor(peer, {
         sessionId: () => sessionId,
         model: DEFAULT_MODEL,
@@ -1761,7 +1811,8 @@ export function createRealtimeClient({
       }, 2_000);
       const networkDiagnostics = await collectIceConnectionDiagnostics(peer, iceResult?.candidates);
       const connectedDiagnostic = {
-        iceTransportPolicy: realtimeIceTransportPolicy(),
+        iceTransportPolicy: peerConfiguration?.iceTransportPolicy || realtimeIceTransportPolicy(),
+        turnConfigured: peerConfiguration?.iceServers?.some(isTurnIceServer) || false,
         iceGatheringState: peer?.iceGatheringState || "unknown",
         iceConnectionState: peer?.iceConnectionState || "unknown",
         connectionState: peer?.connectionState || "unknown",
