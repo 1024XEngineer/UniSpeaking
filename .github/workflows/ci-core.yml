@@ -470,7 +470,8 @@ jobs:
   dependency_review:
     name: 审查新增依赖漏洞
     needs: changes
-    if: needs.changes.outputs.dependencies == 'true'
+    # GitHub does not provide Dependency Graph data for fork repositories.
+    if: needs.changes.outputs.dependencies == 'true' && github.event.repository.fork == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -526,7 +527,7 @@ jobs:
           DOCKER_FRONTEND_REQUIRED: ${{ needs.changes.outputs.docker_frontend }}
           COMPOSE_REQUIRED: ${{ needs.changes.outputs.compose }}
           NGINX_REQUIRED: ${{ needs.changes.outputs.nginx }}
-          DEPENDENCY_REQUIRED: ${{ needs.changes.outputs.dependencies }}
+          DEPENDENCY_REQUIRED: ${{ needs.changes.outputs.dependencies == 'true' && github.event.repository.fork == false }}
         shell: bash
         run: |
           set -euo pipefail
