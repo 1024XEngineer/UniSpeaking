@@ -109,7 +109,7 @@ services:
       TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
       TURN_PUBLIC_IP: ${TURN_PUBLIC_IP:-}
       TURN_PRIVATE_IP: ${TURN_PRIVATE_IP:-}
-      TURN_REALM: ${TURN_REALM:-turn.unispeaking.cn}
+      TURN_REALM: ${TURN_REALM:-turn.unispeaking.qnsdk.com}
     volumes:
       - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
     restart: unless-stopped

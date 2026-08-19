@@ -96,7 +96,7 @@ intentionally starts with UDP 443 only.
 Before enabling it, complete these cloud-side changes without changing the
 application container:
 
-1. Create or verify DNS `turn.unispeaking.cn` pointing to the server public IP.
+1. Create or verify DNS `turn.unispeaking.qnsdk.com` pointing to the server public IP.
 2. Allow inbound **UDP 443** and **UDP 49160-49200** in the cloud security
    group. Keep TCP 443 assigned to Nginx; Coturn uses host networking and UDP
    443 only.
@@ -116,9 +116,9 @@ Set the following values, keeping the rollout at zero initially:
 VITE_REALTIME_ICE_TRANSPORT_POLICY=all
 VITE_REALTIME_TURN_ENABLED=true
 TURN_ENABLED=true
-TURN_URLS=turn:turn.unispeaking.cn:443?transport=udp
+TURN_URLS=turn:turn.unispeaking.qnsdk.com:443?transport=udp
 TURN_SHARED_SECRET=replace-with-a-random-secret
-TURN_REALM=turn.unispeaking.cn
+TURN_REALM=turn.unispeaking.qnsdk.com
 TURN_PUBLIC_IP=replace-with-public-ip
 TURN_PRIVATE_IP=replace-with-private-ip
 TURN_CREDENTIAL_TTL=5m
