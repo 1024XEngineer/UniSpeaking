@@ -33,11 +33,11 @@ public record TurnProperties(
 		if (rolloutPercentage < 0 || rolloutPercentage > 100) {
 			throw new IllegalStateException("realtime.turn.rollout-percentage must be between 0 and 100");
 		}
+		if (!enabled) return;
 		if (credentialTtl == null || credentialTtl.compareTo(Duration.ofMinutes(1)) < 0
 				|| credentialTtl.compareTo(Duration.ofHours(1)) > 0) {
 			throw new IllegalStateException("realtime.turn.credential-ttl must be between 1 minute and 1 hour");
 		}
-		if (!enabled) return;
 		if (urls.isEmpty()) {
 			throw new IllegalStateException("realtime.turn.urls must not be empty when TURN is enabled");
 		}

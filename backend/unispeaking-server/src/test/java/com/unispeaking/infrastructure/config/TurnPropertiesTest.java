@@ -14,7 +14,7 @@ class TurnPropertiesTest {
 
 	@Test
 	void acceptsDisabledConfigurationWithoutCredentials() {
-		TurnProperties properties = new TurnProperties(false, List.of(), "", Duration.ofMinutes(5), 0, Set.of());
+		TurnProperties properties = new TurnProperties(false, List.of(), "", null, 0, Set.of());
 
 		assertDoesNotThrow(properties::validate);
 		assertEquals(List.of(), properties.urls());
@@ -27,6 +27,19 @@ class TurnPropertiesTest {
 
 		assertDoesNotThrow(properties::validate);
 		assertEquals(25, properties.rolloutPercentage());
+	}
+
+	@Test
+	void rejectsEnabledConfigurationWithoutCredentialTtl() {
+		TurnProperties properties = new TurnProperties(
+				true,
+				List.of("turn:turn.example.cn:443?transport=udp"),
+				"01234567890123456789012345678901",
+				null,
+				10,
+				Set.of());
+
+		assertThrows(IllegalStateException.class, properties::validate);
 	}
 
 	@Test
