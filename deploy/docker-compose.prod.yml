@@ -58,6 +58,7 @@ services:
         VITE_UMAMI_DOMAINS: ${VITE_UMAMI_DOMAINS:-}
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
         VITE_APP_RELEASE: ${VITE_APP_RELEASE:-web@production}
+        VITE_REALTIME_ICE_TRANSPORT_POLICY: ${VITE_REALTIME_ICE_TRANSPORT_POLICY:-all}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     expose:
       - "80"

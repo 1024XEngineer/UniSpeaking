@@ -12,6 +12,10 @@ import {
   isActiveResponseConflict,
   normalizeProviderEvent,
   normalizeBaseUrl,
+  normalizeIceTransportPolicy,
+  realtimeIceTransportPolicy,
+  realtimePeerConnectionConfig,
+  collectIceConnectionDiagnostics,
   releaseRealtimeTransport,
   waitForIceGathering,
   websocketUrl,
@@ -115,6 +119,10 @@ assert.equal(
   websocketUrl("/backend", "signed-token", "https://app.example.com"),
   "wss://app.example.com/backend/ws/session-messages?access_token=signed-token",
 );
+assert.equal(realtimeIceTransportPolicy(), "all");
+assert.equal(normalizeIceTransportPolicy("relay"), "relay");
+assert.equal(normalizeIceTransportPolicy("invalid"), "all");
+assert.equal(realtimePeerConnectionConfig().iceTransportPolicy, "all");
 
 assert.deepEqual(
   extractCompletedAssistantMessage({
@@ -337,6 +345,7 @@ try {
   assert.equal(partialGathering.complete, false);
   assert.equal(partialGathering.timedOut, true);
   assert.equal(partialGathering.candidates.host, 1);
+  assert.equal(partialGathering.candidates.protocols.udp, 1);
 
   await assert.rejects(
     waitForIceGathering({
@@ -355,6 +364,48 @@ try {
 } finally {
   globalThis.window = previousWindow;
 }
+
+const statsDiagnostics = await collectIceConnectionDiagnostics({
+  async getStats() {
+    return new Map([
+      ["local-1", {
+        id: "local-1",
+        type: "local-candidate",
+        candidateType: "relay",
+        protocol: "udp",
+        relayProtocol: "udp",
+      }],
+      ["remote-1", {
+        id: "remote-1",
+        type: "remote-candidate",
+        candidateType: "host",
+      }],
+      ["pair-1", {
+        type: "candidate-pair",
+        state: "succeeded",
+        nominated: true,
+        localCandidateId: "local-1",
+        remoteCandidateId: "remote-1",
+      }],
+    ]);
+  },
+}, {
+  host: 0,
+  srflx: 0,
+  prflx: 0,
+  relay: 1,
+  unknown: 0,
+  protocols: { udp: 1, tcp: 0, unknown: 0 },
+});
+assert.deepEqual(statsDiagnostics.selectedCandidatePair, {
+  state: "succeeded",
+  nominated: true,
+  localCandidateType: "relay",
+  localProtocol: "udp",
+  relayProtocol: "udp",
+  remoteCandidateType: "host",
+});
+assert.equal(statsDiagnostics.relayProtocols.udp, 1);
 
 const realtimeSource = await readFile(
   new URL("../src/websocket/realtimeClient.js", import.meta.url),
