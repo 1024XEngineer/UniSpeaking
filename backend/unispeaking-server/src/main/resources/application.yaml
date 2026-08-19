@@ -95,6 +95,13 @@ auth:
 realtime:
   flow:
     log-file: ${REALTIME_FLOW_LOG_FILE:logs/realtime-flow.log}
+  turn:
+    enabled: ${TURN_ENABLED:false}
+    urls: ${TURN_URLS:}
+    shared-secret: ${TURN_SHARED_SECRET:}
+    credential-ttl: ${TURN_CREDENTIAL_TTL:5m}
+    rollout-percentage: ${TURN_ROLLOUT_PERCENTAGE:0}
+    relay-test-user-ids: ${TURN_RELAY_TEST_USER_IDS:}
   qwen:
     api-key: ${DASHSCOPE_API_KEY:}
     workspace-id: ${BAILIAN_WORKSPACE_ID:}

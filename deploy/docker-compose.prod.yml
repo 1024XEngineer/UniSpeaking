@@ -57,6 +57,7 @@ services:
         VITE_UMAMI_WEBSITE_ID: ${VITE_UMAMI_WEBSITE_ID:-}
         VITE_UMAMI_DOMAINS: ${VITE_UMAMI_DOMAINS:-}
         VITE_REALTIME_ICE_TRANSPORT_POLICY: ${VITE_REALTIME_ICE_TRANSPORT_POLICY:-all}
+        VITE_REALTIME_TURN_ENABLED: ${VITE_REALTIME_TURN_ENABLED:-false}
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
         VITE_APP_RELEASE: ${VITE_APP_RELEASE:-web@production}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
@@ -87,6 +88,30 @@ services:
       - backend
       - frontend
       - admin
+    restart: unless-stopped
+
+  turn:
+    image: ${DOCKER_IMAGE_REGISTRY:-docker.m.daocloud.io}/coturn/coturn:4.6.3-alpine
+    profiles: ["turn"]
+    network_mode: host
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        test -n "$$TURN_SHARED_SECRET"
+        test -n "$$TURN_PUBLIC_IP"
+        test -n "$$TURN_PRIVATE_IP"
+        exec turnserver -c /etc/coturn/turnserver.conf \
+          --realm="$$TURN_REALM" \
+          --static-auth-secret="$$TURN_SHARED_SECRET" \
+          --external-ip="$$TURN_PUBLIC_IP/$$TURN_PRIVATE_IP" \
+          --relay-ip="$$TURN_PRIVATE_IP"
+    environment:
+      TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
+      TURN_PUBLIC_IP: ${TURN_PUBLIC_IP:-}
+      TURN_PRIVATE_IP: ${TURN_PRIVATE_IP:-}
+      TURN_REALM: ${TURN_REALM:-turn.unispeaking.cn}
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
     restart: unless-stopped
 
 volumes:
