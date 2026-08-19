@@ -103,7 +103,7 @@ export function recordTelemetry(eventType, options = {}) {
 export async function flushTelemetry({ keepalive = false } = {}) {
   if (!queue.length) return;
   const events = queue.splice(0, MAX_BATCH_SIZE);
-  const token = window.localStorage.getItem(ACCESS_TOKEN_KEY);
+  const token = window.sessionStorage.getItem(ACCESS_TOKEN_KEY);
   try {
     const response = await fetch(ENDPOINT, {
       method: "POST",

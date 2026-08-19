@@ -95,7 +95,8 @@ export async function fetchAuthenticatedMedia(pathOrUrl) {
 }
 
 export function getAccessToken() {
-  return window.localStorage.getItem(ACCESS_TOKEN_KEY);
+  window.localStorage?.removeItem?.(ACCESS_TOKEN_KEY);
+  return window.sessionStorage?.getItem?.(ACCESS_TOKEN_KEY) || null;
 }
 
 export function hasAuthSession() {
@@ -103,13 +104,15 @@ export function hasAuthSession() {
 }
 
 export function saveAuthSession(authResponse) {
-  window.localStorage.setItem(ACCESS_TOKEN_KEY, authResponse.accessToken);
+  window.localStorage?.removeItem?.(ACCESS_TOKEN_KEY);
+  window.sessionStorage?.setItem?.(ACCESS_TOKEN_KEY, authResponse.accessToken);
   setTelemetryUser(authResponse.user?.id || null);
 }
 
 export function clearAuthSession(expectedToken = null) {
   if (expectedToken !== null && getAccessToken() !== expectedToken) return;
-  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+  window.localStorage?.removeItem?.(ACCESS_TOKEN_KEY);
+  window.sessionStorage?.removeItem?.(ACCESS_TOKEN_KEY);
   setTelemetryUser(null);
 }
 

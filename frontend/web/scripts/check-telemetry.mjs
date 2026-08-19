@@ -8,9 +8,13 @@ test("client telemetry works when a test window has no location", async () => {
   const previousWindow = globalThis.window;
   const previousFetch = globalThis.fetch;
   const requests = [];
+  const sessionStorage = new Map([["unispeaking.accessToken", "tab-token"]]);
   globalThis.window = {
-    localStorage: { getItem: () => null, setItem: () => {} },
-    sessionStorage: { getItem: () => null, setItem: () => {} },
+    localStorage: { getItem: () => "legacy-token", setItem: () => {} },
+    sessionStorage: {
+      getItem: (key) => sessionStorage.get(key) || null,
+      setItem: (key, value) => sessionStorage.set(key, value),
+    },
   };
   globalThis.fetch = async (url, options) => {
     requests.push({ url, options });
@@ -24,6 +28,7 @@ test("client telemetry works when a test window has no location", async () => {
     assert.equal(requests.length, 1);
     const payload = JSON.parse(requests[0].options.body);
     assert.equal(payload.events[0].route, "/");
+    assert.equal(requests[0].options.headers.Authorization, "Bearer tab-token");
   } finally {
     globalThis.window = previousWindow;
     globalThis.fetch = previousFetch;

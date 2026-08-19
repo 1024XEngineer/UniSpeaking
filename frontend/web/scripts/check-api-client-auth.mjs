@@ -1,17 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { getUserPreference, saveAuthSession } from "../src/infrastructure/http/apiClient.js";
+import {
+  getAccessToken,
+  getUserPreference,
+  saveAuthSession,
+} from "../src/infrastructure/http/apiClient.js";
 
 test("a stale 401 must not clear a newer authentication session", async () => {
   const previousWindow = globalThis.window;
   const previousFetch = globalThis.fetch;
-  const storage = new Map([["unispeaking.accessToken", "stale-token"]]);
+  const localStorage = new Map();
+  const sessionStorage = new Map([["unispeaking.accessToken", "stale-token"]]);
   globalThis.window = {
     localStorage: {
-      getItem: (key) => storage.get(key) || null,
-      setItem: (key, value) => storage.set(key, value),
-      removeItem: (key) => storage.delete(key),
+      getItem: (key) => localStorage.get(key) || null,
+      setItem: (key, value) => localStorage.set(key, value),
+      removeItem: (key) => localStorage.delete(key),
+    },
+    sessionStorage: {
+      getItem: (key) => sessionStorage.get(key) || null,
+      setItem: (key, value) => sessionStorage.set(key, value),
+      removeItem: (key) => sessionStorage.delete(key),
     },
   };
   globalThis.fetch = async () => {
@@ -26,10 +36,39 @@ test("a stale 401 must not clear a newer authentication session", async () => {
 
   try {
     await assert.rejects(() => getUserPreference());
-    assert.equal(storage.get("unispeaking.accessToken"), "fresh-token");
+    assert.equal(sessionStorage.get("unispeaking.accessToken"), "fresh-token");
   } finally {
     globalThis.window = previousWindow;
     globalThis.fetch = previousFetch;
+  }
+});
+
+test("web authentication uses tab storage and removes legacy persistent tokens", () => {
+  const previousWindow = globalThis.window;
+  const localStorage = new Map([["unispeaking.accessToken", "legacy-token"]]);
+  const sessionStorage = new Map();
+  globalThis.window = {
+    localStorage: {
+      getItem: (key) => localStorage.get(key) || null,
+      setItem: (key, value) => localStorage.set(key, value),
+      removeItem: (key) => localStorage.delete(key),
+    },
+    sessionStorage: {
+      getItem: (key) => sessionStorage.get(key) || null,
+      setItem: (key, value) => sessionStorage.set(key, value),
+      removeItem: (key) => sessionStorage.delete(key),
+    },
+  };
+
+  try {
+    assert.equal(getAccessToken(), null);
+    assert.equal(localStorage.has("unispeaking.accessToken"), false);
+
+    saveAuthSession({ accessToken: "tab-token" });
+    assert.equal(sessionStorage.get("unispeaking.accessToken"), "tab-token");
+    assert.equal(localStorage.has("unispeaking.accessToken"), false);
+  } finally {
+    globalThis.window = previousWindow;
   }
 });
 
