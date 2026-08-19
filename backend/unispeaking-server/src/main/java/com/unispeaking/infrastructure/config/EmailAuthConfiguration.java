@@ -13,8 +13,7 @@ public class EmailAuthConfiguration {
 
     @Bean(name = "userPasswordEncoder")
     PasswordEncoder userPasswordEncoder() {
-        // The legacy business login already stores BCrypt hashes in "user".
-        // Email login must use the same encoder so both flows share one identity.
+        // Business and email login share the same BCrypt identity in users.
         return new BCryptPasswordEncoder();
     }
 

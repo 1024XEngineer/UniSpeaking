@@ -12,7 +12,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@TableName("\"user\"")
+@TableName("users")
 public class UserAccountEntity {
 
 	@TableId(value = "id", type = IdType.INPUT)

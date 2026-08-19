@@ -34,7 +34,7 @@ public final class JdbcUsageDataSource implements UsageDataSource {
                         + "coalesce(e.plan_name, 'Free') plan_name, current_date quota_date, "
                         + "coalesce(e.status, 'active') status, coalesce(e.quota_seconds, 600) quota_seconds, "
                         + "case when e.quota_date = current_date then coalesce(e.used_seconds, 0) else 0 end used_seconds "
-                        + "from \"user\" u left join user_entitlements e "
+                        + "from users u left join user_entitlements e "
                         + "on e.user_id = u.id "
                         + "order by u.created_at desc",
                 (rs, row) -> {

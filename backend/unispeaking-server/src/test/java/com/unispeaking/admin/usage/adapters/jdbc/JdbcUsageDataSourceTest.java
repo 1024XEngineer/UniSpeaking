@@ -17,7 +17,7 @@ class JdbcUsageDataSourceTest {
         JdbcDataSource dataSource = new JdbcDataSource();
         dataSource.setURL("jdbc:h2:mem:admin-daily;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-        jdbc.execute("create table \"user\" (id uuid primary key, username varchar(320) not null, "
+        jdbc.execute("create table users (id uuid primary key, username varchar(320) not null, "
                 + "password_hash varchar(1000) not null, nickname varchar(32), role varchar(16), status varchar(16), "
                 + "auth_version bigint, last_login_at timestamp with time zone, created_at timestamp with time zone not null, "
                 + "updated_at timestamp with time zone not null)");
@@ -28,7 +28,7 @@ class JdbcUsageDataSourceTest {
                 + "status varchar(16) not null, started_at timestamp with time zone not null, "
                 + "ended_at timestamp with time zone, provider_session_id varchar(128))");
         UUID userId = UUID.fromString("22222222-2222-4222-8222-222222222222");
-        jdbc.update("insert into \"user\" (id, username, password_hash, created_at, updated_at) "
+        jdbc.update("insert into users (id, username, password_hash, created_at, updated_at) "
                         + "values (?, ?, 'hash', current_timestamp, current_timestamp)",
                 userId, "learner@example.com");
         jdbc.update("insert into user_entitlements "
@@ -48,13 +48,13 @@ class JdbcUsageDataSourceTest {
         JdbcDataSource dataSource = new JdbcDataSource();
         dataSource.setURL("jdbc:h2:mem:admin-storage-failure;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-        jdbc.execute("create table \"user\" (id uuid primary key, username varchar(320) not null, "
+        jdbc.execute("create table users (id uuid primary key, username varchar(320) not null, "
                 + "password_hash varchar(1000) not null, created_at timestamp with time zone not null)");
         jdbc.execute("create table user_entitlements (user_id uuid not null, quota_date date not null, "
                 + "plan_code varchar(64), plan_name varchar(128), quota_seconds numeric(12,3), "
                 + "used_seconds numeric(12,3), status varchar(32))");
         UUID userId = UUID.randomUUID();
-        jdbc.update("insert into \"user\" (id, username, password_hash, created_at) "
+        jdbc.update("insert into users (id, username, password_hash, created_at) "
                         + "values (?, 'broken@example.com', 'hash', current_timestamp)", userId);
         jdbc.update("insert into user_entitlements values (?, current_date, 'free', 'Free', 600, 0, 'active')", userId);
 
@@ -68,7 +68,7 @@ class JdbcUsageDataSourceTest {
         JdbcDataSource dataSource = new JdbcDataSource();
         dataSource.setURL("jdbc:h2:mem:admin-current-day;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-        jdbc.execute("create table \"user\" (id uuid primary key, username varchar(320) not null, "
+        jdbc.execute("create table users (id uuid primary key, username varchar(320) not null, "
                 + "password_hash varchar(1000) not null, nickname varchar(32), role varchar(16), status varchar(16), "
                 + "auth_version bigint, last_login_at timestamp with time zone, created_at timestamp with time zone not null, "
                 + "updated_at timestamp with time zone not null)");
@@ -87,7 +87,7 @@ class JdbcUsageDataSourceTest {
                 + "output_text_tokens bigint not null, output_audio_tokens bigint not null, "
                 + "imported_at timestamp with time zone not null)");
         UUID userId = UUID.fromString("33333333-3333-4333-8333-333333333333");
-        jdbc.update("insert into \"user\" (id, username, password_hash, created_at, updated_at) "
+        jdbc.update("insert into users (id, username, password_hash, created_at, updated_at) "
                         + "values (?, ?, 'hash', current_timestamp, current_timestamp)",
                 userId, "daily@example.com");
         jdbc.update("insert into user_entitlements "
@@ -126,7 +126,7 @@ class JdbcUsageDataSourceTest {
         JdbcDataSource dataSource = new JdbcDataSource();
         dataSource.setURL("jdbc:h2:mem:admin-stale-entitlement;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-        jdbc.execute("create table \"user\" (id uuid primary key, username varchar(320) not null, "
+        jdbc.execute("create table users (id uuid primary key, username varchar(320) not null, "
                 + "password_hash varchar(1000) not null, nickname varchar(32), role varchar(16), status varchar(16), "
                 + "auth_version bigint, last_login_at timestamp with time zone, created_at timestamp with time zone not null, "
                 + "updated_at timestamp with time zone not null)");
@@ -137,7 +137,7 @@ class JdbcUsageDataSourceTest {
                 + "status varchar(16) not null, started_at timestamp with time zone not null, "
                 + "ended_at timestamp with time zone, provider_session_id varchar(128))");
         UUID userId = UUID.randomUUID();
-        jdbc.update("insert into \"user\" (id, username, password_hash, created_at, updated_at) "
+        jdbc.update("insert into users (id, username, password_hash, created_at, updated_at) "
                         + "values (?, ?, 'hash', current_timestamp, current_timestamp)",
                 userId, "stale@example.com");
         jdbc.update("insert into user_entitlements "
