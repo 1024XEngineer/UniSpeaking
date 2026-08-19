@@ -49,6 +49,10 @@ class SceneServiceContractTest {
 	void flowServicesExplicitlyOverrideEverySharedOperation() throws Exception {
 		assertFlowOverrides(CustomSceneFlowService.class, CustomStage.class);
 		assertFlowOverrides(IeltsSceneFlowService.class, IeltsStage.class);
+		assertFalse(Arrays.stream(IeltsSceneFlowService.class.getMethods())
+				.anyMatch(method -> method.getName().equals("next")
+						&& method.getParameterCount() > 1),
+				"IELTS flow must not expose stage rewind or resynchronization");
 	}
 
 	private void assertFlowOverrides(Class<?> service, Class<?> stageType)

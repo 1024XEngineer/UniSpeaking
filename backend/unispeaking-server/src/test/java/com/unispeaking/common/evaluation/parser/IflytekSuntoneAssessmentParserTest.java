@@ -138,6 +138,47 @@ class IflytekSuntoneAssessmentParserTest {
 				incomplete.errorCode());
 	}
 
+	@Test
+	void preservesUnmatchedPhonemeSpanSentinel() {
+		PronunciationAssessmentResult result =
+				parser.parse(envelope("""
+						{
+						  "result": {
+						    "overall": 82,
+						    "rhythm": 80,
+						    "integrity": 85,
+						    "pronunciation": 81,
+						    "fluency": 83,
+						    "words": [{
+						      "word": "test",
+						      "scores": {
+						        "overall": 82,
+						        "pronunciation": 81
+						      },
+						      "phonemes": [{
+						        "phone": "t",
+						        "phoneme": "t",
+						        "pronunciation": 0,
+						        "span": {"start": -1, "end": -1}
+						      }]
+						    }]
+						  }
+						}
+						"""));
+
+		assertAll(
+				() -> assertEquals(
+						-1,
+						result.words().getFirst()
+								.phonemes().getFirst()
+								.startPosition()),
+				() -> assertEquals(
+						-1,
+						result.words().getFirst()
+								.phonemes().getFirst()
+								.endPosition()));
+	}
+
 	private String envelope(String decodedResult) {
 		String encoded = Base64.getEncoder().encodeToString(
 				decodedResult.getBytes(StandardCharsets.UTF_8));
