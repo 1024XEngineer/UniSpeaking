@@ -161,6 +161,21 @@ a duplicated provider session.
 
 ## Start and verify the application
 
+For an existing production database, create a full backup before rebuilding any
+application container. Record row counts for account-owned tables before and
+after the release. The `V2__ai_provider_tables.sql` migration is additive: it
+creates or completes only `ai_providers`, `ai_models`, and
+`ai_model_invocations`, preserves invocation history, and never reads or writes
+account, session, entitlement, achievement, or profile tables.
+
+```bash
+mkdir -p backups/postgres
+docker compose --env-file deploy/env/.env \
+  -f deploy/docker-compose.prod.yml exec -T postgres \
+  pg_dump -U unispeaking -d unispeaking -Fc \
+  > "backups/postgres/pre-release-$(date -u +%Y%m%dT%H%M%SZ).dump"
+```
+
 ```bash
 docker compose --env-file deploy/env/.env \
   -f deploy/docker-compose.prod.yml up -d --build
@@ -184,6 +199,33 @@ docker compose --env-file deploy/env/.env \
 
 Visit `https://unispeaking.qnsdk.com` and verify registration, login, microphone
 permission, WebSocket sessions, IELTS topics, and audio features.
+
+## Verify Java monitoring and logs
+
+The production backend mounts the OpenTelemetry Java Agent from
+`/opt/monitoring/opentelemetry-javaagent.jar`. It sends JVM, HTTP, and trace
+telemetry to `otel-collector:4318` on the private `monitoring_default` network.
+Application logs remain on stdout/stderr and are collected from Docker by
+Grafana Alloy into Loki. The Actuator health and Prometheus endpoints are
+enabled for internal diagnostics; Nginx blocks public `/backend/actuator/`
+requests.
+
+After rebuilding the backend, verify the agent, telemetry target, logs, and
+metrics before opening Grafana:
+
+```bash
+docker compose --env-file deploy/env/.env \
+  -f deploy/docker-compose.prod.yml logs --tail=200 backend
+
+curl -fsS 'http://127.0.0.1:9090/api/v1/query?query=jvm_memory_used_bytes'
+curl -fsS 'http://127.0.0.1:9090/api/v1/query?query=http_server_request_duration_seconds_count'
+curl -fsS 'http://127.0.0.1:3001/api/health'
+```
+
+In Grafana, confirm that the UniSpeaking Java dashboard shows JVM memory,
+threads, GC, and HTTP request metrics, and that the UniSpeaking Logs dashboard
+returns `{service="backend"}` entries. A public request to
+`https://unispeaking.qnsdk.com/backend/actuator/prometheus` must return 404.
 
 Then verify the LLM migration with one request from each business path:
 
