@@ -1,13 +1,37 @@
-import { ApiClient, ApiError, type ApiRequestOptions } from '../ApiClient';
+import {
+  ApiClient,
+  ApiError,
+  setApiUnauthorizedHandler,
+  type ApiRequestOptions,
+} from '../ApiClient';
 import type { TokenStore } from '../../auth/SecureTokenStore';
 
-function createTokenStore(token: string | null): TokenStore & {
+function createTokenStore(
+  token: string | null,
+  refreshToken: string | null = null,
+): TokenStore & {
+  get: jest.Mock<Promise<string | null>, []>;
+  getRefreshToken: jest.Mock<Promise<string | null>, []>;
+  set: jest.Mock<Promise<void>, [string]>;
+  setSession: jest.Mock<Promise<void>, [string, string]>;
   clear: jest.Mock<Promise<void>, []>;
 } {
+  let accessToken = token;
+  let persistentToken = refreshToken;
   return {
-    get: jest.fn(async () => token),
-    set: jest.fn(async () => undefined),
-    clear: jest.fn(async () => undefined),
+    get: jest.fn(async () => accessToken),
+    getRefreshToken: jest.fn(async () => persistentToken),
+    set: jest.fn(async (nextToken: string) => {
+      accessToken = nextToken;
+    }),
+    setSession: jest.fn(async (nextAccessToken: string, nextRefreshToken: string) => {
+      accessToken = nextAccessToken;
+      persistentToken = nextRefreshToken;
+    }),
+    clear: jest.fn(async () => {
+      accessToken = null;
+      persistentToken = null;
+    }),
   };
 }
 
@@ -25,6 +49,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe('ApiClient', () => {
+  afterEach(() => setApiUnauthorizedHandler(undefined));
+
   it('adds the bearer token and unwraps a successful API envelope', async () => {
     const tokenStore = createTokenStore('jwt-token');
     const fetchImpl = jest.fn<Promise<Response>, [string, RequestInit?]>(
@@ -87,8 +113,54 @@ describe('ApiClient', () => {
     );
   });
 
-  it('clears the token and notifies auth state after a protected 401', async () => {
+  it('clears the token and notifies the global auth state after a protected 401', async () => {
     const tokenStore = createTokenStore('expired-token');
+    const onUnauthorized = jest.fn(async () => undefined);
+    setApiUnauthorizedHandler(onUnauthorized);
+    const client = new ApiClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      tokenStore,
+      fetchImpl: jest.fn(async () =>
+        jsonResponse({ success: false, message: '登录已过期' }, 401),
+      ),
+    });
+
+    await expect(client.request('/api/user-preferences')).rejects.toThrow('登录已过期');
+    expect(tokenStore.clear).toHaveBeenCalledTimes(1);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes an expired access token and retries the protected request once', async () => {
+    const tokenStore = createTokenStore('expired-token', 'refresh-token');
+    const fetchImpl = jest.fn<Promise<Response>, [string, RequestInit?]>(
+      async (url) => {
+        if (url.endsWith('/api/auth/mobile/email/refresh')) {
+          return jsonResponse({ success: true, data: { accessToken: 'new-access-token' } });
+        }
+        if (fetchImpl.mock.calls.filter(([calledUrl]) => calledUrl.endsWith('/api/auth/me')).length === 1) {
+          return jsonResponse({ success: false, message: '登录已过期' }, 401);
+        }
+        return jsonResponse({ success: true, data: { id: 'user-1' } });
+      },
+    );
+    const client = new ApiClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      tokenStore,
+      fetchImpl,
+    });
+
+    await expect(client.request('/api/auth/me')).resolves.toEqual({ id: 'user-1' });
+
+    expect(tokenStore.set).toHaveBeenCalledWith('new-access-token');
+    expect(tokenStore.clear).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl.mock.calls[2][1]?.headers).toEqual(
+      expect.objectContaining({ Authorization: 'Bearer new-access-token' }),
+    );
+  });
+
+  it('clears the session when the refresh token is invalid', async () => {
+    const tokenStore = createTokenStore('expired-token', 'invalid-refresh-token');
     const onUnauthorized = jest.fn(async () => undefined);
     const client = new ApiClient({
       baseUrl: 'http://127.0.0.1:8080',
@@ -100,8 +172,32 @@ describe('ApiClient', () => {
     });
 
     await expect(client.request('/api/user-preferences')).rejects.toThrow('登录已过期');
+
     expect(tokenStore.clear).toHaveBeenCalledTimes(1);
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the persistent session when refresh fails because of the network', async () => {
+    const tokenStore = createTokenStore('expired-token', 'refresh-token');
+    const fetchImpl = jest.fn<Promise<Response>, [string, RequestInit?]>(
+      async (url) => {
+        if (url.endsWith('/api/auth/mobile/email/refresh')) {
+          throw new Error('Network request failed');
+        }
+        return jsonResponse({ success: false, message: '登录已过期' }, 401);
+      },
+    );
+    const client = new ApiClient({
+      baseUrl: 'http://127.0.0.1:8080',
+      tokenStore,
+      fetchImpl,
+    });
+
+    await expect(client.request('/api/user-preferences')).rejects.toThrow(
+      'Network request failed',
+    );
+
+    expect(tokenStore.clear).not.toHaveBeenCalled();
   });
 
   it('aborts a request after its configured timeout', async () => {

@@ -10,6 +10,20 @@ type ApiEnvelope<T> = {
   message?: string;
 };
 
+type AuthRefreshResponse = {
+  accessToken: string;
+};
+
+type UnauthorizedHandler = () => void | Promise<void>;
+
+const mobileAuthBasePath = '/api/auth/mobile/email';
+let apiUnauthorizedHandler: UnauthorizedHandler | undefined;
+let refreshInFlight: Promise<void> | null = null;
+
+export function setApiUnauthorizedHandler(handler: UnauthorizedHandler | undefined) {
+  apiUnauthorizedHandler = handler;
+}
+
 export type ApiClientOptions = {
   baseUrl: string;
   tokenStore: TokenStore;
@@ -64,6 +78,14 @@ export class ApiClient {
   }
 
   async request<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+    return this.requestInternal<T>(path, options, true);
+  }
+
+  private async requestInternal<T>(
+    path: string,
+    options: ApiRequestOptions,
+    allowRefresh: boolean,
+  ): Promise<T> {
     const { timeoutMs = 15_000, ...requestOptions } = options;
     const token = await this.tokenStore.get();
     const isFormData =
@@ -127,9 +149,11 @@ export class ApiClient {
       ? await response.json()
       : await response.text();
 
-    if (response.status === 401 && !path.startsWith('/api/auth/')) {
-      await this.tokenStore.clear();
-      await this.onUnauthorized?.();
+    if (response.status === 401 && isProtectedRequest(path)) {
+      if (allowRefresh && await this.refreshAccessToken()) {
+        return this.requestInternal<T>(path, options, false);
+      }
+      await this.invalidateSession();
     }
 
     if (!response.ok || (isApiEnvelope(body) && !body.success)) {
@@ -159,4 +183,58 @@ export class ApiClient {
 
     return (isApiEnvelope<T>(body) ? body.data : body) as T;
   }
+
+  private async refreshAccessToken() {
+    const refreshToken = await this.tokenStore.getRefreshToken();
+    if (!refreshToken) return false;
+
+    if (!refreshInFlight) {
+      refreshInFlight = this.performRefresh(refreshToken).finally(() => {
+        refreshInFlight = null;
+      });
+    }
+
+    try {
+      await refreshInFlight;
+      return true;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        await this.invalidateSession();
+      }
+      throw error;
+    }
+  }
+
+  private async performRefresh(refreshToken: string) {
+    const auth = await this.requestInternal<AuthRefreshResponse>(
+      `${mobileAuthBasePath}/refresh`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken }),
+      },
+      false,
+    );
+    await this.tokenStore.set(auth.accessToken);
+  }
+
+  private async invalidateSession() {
+    await this.tokenStore.clear();
+    await (this.onUnauthorized ?? apiUnauthorizedHandler)?.();
+  }
+}
+
+function isProtectedRequest(path: string) {
+  const normalizedPath = path.split('?', 1)[0];
+  if (normalizedPath === '/api/auth/login' || normalizedPath === '/api/auth/register') {
+    return false;
+  }
+  if (normalizedPath.startsWith('/api/auth/email/')) return false;
+  return ![
+    `${mobileAuthBasePath}/challenges`,
+    `${mobileAuthBasePath}/login`,
+    `${mobileAuthBasePath}/register`,
+    `${mobileAuthBasePath}/refresh`,
+    `${mobileAuthBasePath}/logout`,
+    '/api/auth/logout',
+  ].includes(normalizedPath);
 }

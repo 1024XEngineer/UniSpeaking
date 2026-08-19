@@ -19,7 +19,7 @@ import {
 } from '@/data/learningAssets';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
 import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
-import { ApiClient } from '@/infrastructure/http/ApiClient';
+import { ApiClient, setApiUnauthorizedHandler } from '@/infrastructure/http/ApiClient';
 import { levels, teachers, type Teacher } from '@/theme/tokens';
 
 export type AppModelAuthController = {
@@ -100,6 +100,7 @@ function createDefaultAuthController(): AppModelAuthController {
     tokenStore,
     authService: new AuthService(apiClient),
   });
+  setApiUnauthorizedHandler(() => controller.unauthorized());
   return controller;
 }
 

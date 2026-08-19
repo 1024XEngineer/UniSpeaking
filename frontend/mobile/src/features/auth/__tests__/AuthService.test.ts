@@ -65,6 +65,18 @@ describe('AuthService', () => {
     });
   });
 
+  it('revokes the persistent session on logout', async () => {
+    const client = createClient();
+    const service = new AuthService(client);
+
+    await service.logout('refresh-token');
+
+    expect(client.request).toHaveBeenCalledWith('/api/auth/mobile/email/logout', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken: 'refresh-token' }),
+    });
+  });
+
   it('loads the current account and preference from protected endpoints', async () => {
     const client = createClient();
     const service = new AuthService(client);

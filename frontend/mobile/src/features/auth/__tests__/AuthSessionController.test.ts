@@ -29,19 +29,23 @@ const authResponse: AuthResponse = {
   accessToken: 'jwt-token',
   expiresAt: '2026-08-06T00:00:00Z',
   user,
+  refreshToken: 'refresh-token',
 };
 
 function createDependencies(
   token: string | null = null,
+  refreshToken: string | null = null,
 ): AuthSessionDependencies & {
   tokenStore: AuthSessionDependencies['tokenStore'] & {
     set: jest.Mock;
+    setSession: jest.Mock;
     clear: jest.Mock;
   };
   authService: AuthSessionDependencies['authService'] & {
     login: jest.Mock;
     issueEmailChallenge: jest.Mock;
     register: jest.Mock;
+    logout: jest.Mock;
     currentUser: jest.Mock;
     getPreference: jest.Mock;
     updatePreference: jest.Mock;
@@ -50,7 +54,9 @@ function createDependencies(
   return {
     tokenStore: {
       get: jest.fn(async () => token),
+      getRefreshToken: jest.fn(async () => refreshToken),
       set: jest.fn(async () => undefined),
+      setSession: jest.fn(async () => undefined),
       clear: jest.fn(async () => undefined),
     },
     authService: {
@@ -61,6 +67,7 @@ function createDependencies(
         resendAfterSeconds: 60,
       })),
       register: jest.fn(async () => authResponse),
+      logout: jest.fn(async () => undefined),
       currentUser: jest.fn(async () => user),
       getPreference: jest.fn(async () => preference),
       updatePreference: jest.fn(async (patch: Partial<UserPreference>) => ({
@@ -115,6 +122,16 @@ describe('AuthSessionController', () => {
     });
   });
 
+  it('attempts restoration when only a refresh token is stored', async () => {
+    const dependencies = createDependencies(null, 'saved-refresh-token');
+    const controller = new AuthSessionController(dependencies);
+
+    await controller.bootstrap();
+
+    expect(dependencies.authService.currentUser).toHaveBeenCalledTimes(1);
+    expect(controller.getSnapshot().status).toBe('authenticated');
+  });
+
   it('clears an invalid saved token after a 401 bootstrap response', async () => {
     const dependencies = createDependencies('expired-token');
     dependencies.authService.currentUser.mockRejectedValue(
@@ -152,7 +169,10 @@ describe('AuthSessionController', () => {
       password: 'password123456',
     });
 
-    expect(dependencies.tokenStore.set).toHaveBeenCalledWith('jwt-token');
+    expect(dependencies.tokenStore.setSession).toHaveBeenCalledWith(
+      'jwt-token',
+      'refresh-token',
+    );
     expect(controller.getSnapshot()).toEqual({
       status: 'authenticated',
       user,
@@ -172,11 +192,24 @@ describe('AuthSessionController', () => {
   });
 
   it('clears local authentication on logout or unauthorized notification', async () => {
-    const dependencies = createDependencies('saved-token');
+    const dependencies = createDependencies('saved-token', 'refresh-token');
     const controller = new AuthSessionController(dependencies);
     await controller.bootstrap();
 
-    await controller.unauthorized();
+    await controller.logout();
+
+    expect(dependencies.authService.logout).toHaveBeenCalledWith('refresh-token');
+    expect(dependencies.tokenStore.clear).toHaveBeenCalledTimes(1);
+    expect(controller.getSnapshot().status).toBe('anonymous');
+  });
+
+  it('clears local authentication when server logout fails', async () => {
+    const dependencies = createDependencies('saved-token', 'refresh-token');
+    dependencies.authService.logout.mockRejectedValue(new Error('Network request failed'));
+    const controller = new AuthSessionController(dependencies);
+    await controller.bootstrap();
+
+    await controller.logout();
 
     expect(dependencies.tokenStore.clear).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot().status).toBe('anonymous');

@@ -31,6 +31,7 @@ type AuthServicePort = {
     challengeId: string;
     code: string;
   }): Promise<AuthResponse>;
+  logout(refreshToken: string): Promise<void>;
   currentUser(): Promise<UserAccount>;
   getPreference(): Promise<UserPreference>;
   updatePreference(patch: Partial<UserPreference>): Promise<UserPreference>;
@@ -80,8 +81,11 @@ export class AuthSessionController {
 
   async bootstrap() {
     this.setState({ ...initialState, status: 'booting' });
-    const token = await this.dependencies.tokenStore.get();
-    if (!token) {
+    const [accessToken, refreshToken] = await Promise.all([
+      this.dependencies.tokenStore.get(),
+      this.dependencies.tokenStore.getRefreshToken(),
+    ]);
+    if (!accessToken && !refreshToken) {
       this.setAnonymous();
       return;
     }
@@ -142,7 +146,14 @@ export class AuthSessionController {
   }
 
   async logout() {
-    await this.unauthorized();
+    const refreshToken = await this.dependencies.tokenStore.getRefreshToken();
+    try {
+      if (refreshToken) await this.dependencies.authService.logout(refreshToken);
+    } catch {
+      // Local logout must succeed even when the server cannot be reached.
+    } finally {
+      await this.unauthorized();
+    }
   }
 
   async unauthorized() {
@@ -151,7 +162,7 @@ export class AuthSessionController {
   }
 
   private async finishAuthentication(auth: AuthResponse) {
-    await this.dependencies.tokenStore.set(auth.accessToken);
+    await this.dependencies.tokenStore.setSession(auth.accessToken, auth.refreshToken);
     const preference = await this.dependencies.authService.getPreference();
     this.setAuthenticated(auth.user, preference);
   }

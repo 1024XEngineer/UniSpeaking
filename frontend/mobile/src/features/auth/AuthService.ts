@@ -13,6 +13,7 @@ export type AuthResponse = {
   accessToken: string;
   expiresAt: string;
   user: UserAccount;
+  refreshToken: string;
 };
 
 export type PreferredVoice =
@@ -86,6 +87,13 @@ export class AuthService {
         code: input.code,
       }),
     }) as Promise<AuthResponse>;
+  }
+
+  logout(refreshToken: string) {
+    return this.client.request('/api/auth/mobile/email/logout', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+    }) as Promise<void>;
   }
 
   currentUser() {
