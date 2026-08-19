@@ -33,6 +33,14 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class QwenTtsProvider extends TtsProvider {
 
+	private static final Map<String, String> PRODUCT_VOICE_MAPPING = Map.of(
+			"Katerina", "Katerina",
+			"Aiden", "Aiden",
+			"Dolce", "Dolce",
+			"Harvey", "Neil",
+			"Raymond", "Ryan",
+			"Tina", "Serena");
+
 	private static final int MAX_TEXT_LENGTH = 5_000;
 	private static final int DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
 	private static final int DEFAULT_MAX_AUDIO_BYTES = 10 * 1024 * 1024;
@@ -136,6 +144,11 @@ public class QwenTtsProvider extends TtsProvider {
 
 	@Override
 	public byte[] generateSpeechAudio(String text, String token) {
+		return generateSpeechAudio(text, token, voice);
+	}
+
+	@Override
+	public byte[] generateSpeechAudio(String text, String token, String requestedVoice) {
 		String credential = ProviderCredentialOverride.currentOr(apiKey);
 		if (credential.isBlank()) {
 			throw retryableFailure(
@@ -143,21 +156,23 @@ public class QwenTtsProvider extends TtsProvider {
 					"Set DASHSCOPE_API_KEY before calling Qwen TTS");
 		}
 		String normalizedText = trim(text);
-		return cachedSynthesize(normalizedText, credential);
+		String qwenVoice = resolveVoice(requestedVoice);
+		return cachedSynthesize(normalizedText, credential, qwenVoice);
 	}
 
-	private byte[] cachedSynthesize(String text, String credential) {
+	private byte[] cachedSynthesize(String text, String credential, String qwenVoice) {
+		String cacheKey = qwenVoice + ":" + text;
 		long now = System.nanoTime();
-		CachedAudio cached = audioCache.get(text);
+		CachedAudio cached = audioCache.get(cacheKey);
 		if (cached != null && now - cached.createdAtNanos() < CACHE_TTL_NANOS) {
 			return cached.audio();
 		}
 		if (cached != null) {
-			audioCache.remove(text, cached);
+			audioCache.remove(cacheKey, cached);
 		}
 
 		CompletableFuture<byte[]> pending = new CompletableFuture<>();
-		CompletableFuture<byte[]> existing = inFlightAudio.putIfAbsent(text, pending);
+		CompletableFuture<byte[]> existing = inFlightAudio.putIfAbsent(cacheKey, pending);
 		if (existing != null) {
 			try {
 				return existing.join();
@@ -171,8 +186,8 @@ public class QwenTtsProvider extends TtsProvider {
 		}
 
 		try {
-			byte[] audio = synthesize(text, credential);
-			cacheAudio(text, audio, System.nanoTime());
+			byte[] audio = synthesize(text, credential, qwenVoice);
+			cacheAudio(cacheKey, audio, System.nanoTime());
 			pending.complete(audio);
 			return audio;
 		}
@@ -181,7 +196,7 @@ public class QwenTtsProvider extends TtsProvider {
 			throw exception;
 		}
 		finally {
-			inFlightAudio.remove(text, pending);
+			inFlightAudio.remove(cacheKey, pending);
 		}
 	}
 
@@ -197,7 +212,7 @@ public class QwenTtsProvider extends TtsProvider {
 		audioCache.put(text, new CachedAudio(audio, createdAtNanos));
 	}
 
-	private byte[] synthesize(String textValue, String credential) {
+	private byte[] synthesize(String textValue, String credential, String qwenVoice) {
 		String text = trim(textValue);
 		if (text.isBlank()) {
 			throw nonRetryableFailure(
@@ -215,7 +230,7 @@ public class QwenTtsProvider extends TtsProvider {
 		try {
 			Map<String, Object> input = Map.of(
 					"text", text,
-					"voice", voice,
+					"voice", qwenVoice,
 					"language_type", languageType);
 			HttpRequest synthesisRequest = HttpRequest.newBuilder()
 					.uri(endpoint)
@@ -282,6 +297,12 @@ public class QwenTtsProvider extends TtsProvider {
 					"QWEN_TTS_INTERRUPTED",
 					"Qwen TTS call was interrupted");
 		}
+	}
+
+	private String resolveVoice(String requestedVoice) {
+		String candidate = trim(requestedVoice);
+		if (candidate.isBlank()) return voice;
+		return PRODUCT_VOICE_MAPPING.getOrDefault(candidate, voice);
 	}
 
 	private URI audioUri(byte[] responseBody) throws JacksonException {

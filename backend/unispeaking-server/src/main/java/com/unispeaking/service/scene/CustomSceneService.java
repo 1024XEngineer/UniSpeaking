@@ -89,13 +89,16 @@ public class CustomSceneService {
 				generated.scenePrompt());
 	}
 	public byte[] synthesizeSpeech(String sceneId, String text, String model) {
-		requireOwnedCustomScene(sceneId);
+		CustomSceneDefinition definition = requireOwnedCustomScene(sceneId);
 		if (text == null || text.isBlank()) {
 			throw new BusinessException("TTS_TEXT_REQUIRED", "朗读文本不能为空");
 		}
-		byte[] audio = model == null || model.isBlank()
-				? providerRegistry.generateSpeechAudioBytes(text.strip(), null)
-				: providerRegistry.generateSpeechAudioBytes(model, text.strip(), null);
+		UserProfile profile = profileService.getProfile(definition.userId());
+		byte[] audio = providerRegistry.generateSpeechAudioBytes(
+				AiProviderRegistry.QWEN_TTS,
+				text.strip(),
+				null,
+				profile == null ? null : profile.voiceId());
 		if (audio == null || audio.length == 0) {
 			throw new BusinessException("TTS_AUDIO_EMPTY", "TTS 未返回音频");
 		}
