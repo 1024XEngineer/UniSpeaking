@@ -173,6 +173,7 @@ describe('ScenesHome backend generation binding', () => {
 
     await waitFor(() => expect(screen.getByText('机场行李托运')).toBeTruthy());
     expect(sceneService.generate).toHaveBeenCalledWith('我想练习机场托运行李');
+    expect(screen.getByLabelText('描述想练习的场景').props.editable).toBe(false);
     expect(screen.getByText('AI 扮演')).toBeTruthy();
     expect(screen.getByText('航空公司工作人员')).toBeTruthy();
     expect(screen.getByText('你将扮演')).toBeTruthy();
@@ -241,6 +242,7 @@ describe('ScenesHome backend generation binding', () => {
     await fireEvent.press(screen.getByLabelText('生成练习场景'));
 
     await waitFor(() => expect(screen.getByText('模型生成超时')).toBeTruthy());
+    expect(screen.getByLabelText('描述想练习的场景').props.editable).toBe(true);
     expect(screen.queryByText('确认进入')).toBeNull();
   });
 
