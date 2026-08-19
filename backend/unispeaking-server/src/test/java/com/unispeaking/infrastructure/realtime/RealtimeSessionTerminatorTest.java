@@ -23,6 +23,7 @@ class RealtimeSessionTerminatorTest {
 		session.setProviderType(ProviderType.QINIU);
 		session.setModel("qwen3.5-omni-plus-realtime");
 		session.bindProviderSession("rti-session-1");
+		session.setProviderTraceId("official-request-01");
 
 		new RealtimeSessionTerminator(registry).stopBestEffort(session, "client_completed");
 
@@ -31,6 +32,7 @@ class RealtimeSessionTerminatorTest {
 				org.mockito.ArgumentMatchers.eq("user-1"),
 				org.mockito.ArgumentMatchers.eq("local-1"),
 				org.mockito.ArgumentMatchers.eq("qwen3.5-omni-plus-realtime"),
+				org.mockito.ArgumentMatchers.eq("official-request-01"),
 				org.mockito.ArgumentMatchers.any(),
 				org.mockito.ArgumentMatchers.any());
 	}
@@ -40,6 +42,7 @@ class RealtimeSessionTerminatorTest {
 		AiProviderRegistry registry = mock(AiProviderRegistry.class);
 		FreeChatSceneSession session = new FreeChatSceneSession("local-1", "user-1");
 		session.setModel("qwen3.5-omni-flash-realtime");
+		session.setProviderTraceId("official-request-02");
 
 		new RealtimeSessionTerminator(registry).stopBestEffort(session, "client_completed");
 
@@ -47,6 +50,7 @@ class RealtimeSessionTerminatorTest {
 				org.mockito.ArgumentMatchers.eq("user-1"),
 				org.mockito.ArgumentMatchers.eq("local-1"),
 				org.mockito.ArgumentMatchers.eq("qwen3.5-omni-flash-realtime"),
+				org.mockito.ArgumentMatchers.eq("official-request-02"),
 				org.mockito.ArgumentMatchers.any(),
 				org.mockito.ArgumentMatchers.any());
 	}

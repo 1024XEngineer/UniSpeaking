@@ -54,7 +54,88 @@ class OfficialUsageSyncServiceTest {
         assertThat(source.to).isEqualTo(Instant.parse("2026-07-20T08:10:01Z"));
     }
 
-    private static UsageDataSource snapshot(String taskUuid) {
+    @Test
+    void importsRealtimeAuditLogWhenZeroValuedAudioDetailIsOmitted() {
+        var accepted = new ArrayList<com.unispeaking.admin.usage.domain.OfficialUsageRecord>();
+        var source = new StubOfficialUsageLogSource(List.of("""
+                {
+                  "start_unix_timestamp":"1787104110590",
+                  "status_code":"200",
+                  "usage":{
+                    "input_tokens_details":{"text_tokens":736},
+                    "total_tokens":793,
+                    "output_tokens":57,
+                    "input_tokens":736,
+                    "output_tokens_details":{"audio_tokens":41,"text_tokens":16}
+                  },
+                  "extras":{"protocol":"ws"},
+                  "apikey_id":"6126227",
+                  "duration":"51014",
+                  "workspace_id":"ws-67zfnonsdn4x96ia",
+                  "model":"qwen3.5-omni-flash-realtime",
+                  "task_uuid":"sess_9tCc7hYPDCZPM7jmiPI3t",
+                  "request_id":"cff4d5fd-67e0-926c-bfea-1f2750db8c72"
+                }
+                """));
+        OfficialUsageSink sink = records -> {
+            accepted.addAll(records);
+            return new OfficialUsageSink.ImportResult(records.size(), 0, records.size(), 0);
+        };
+        var service = new OfficialUsageSyncService(
+                source,
+                sink,
+                snapshot("sess_9tCc7hYPDCZPM7jmiPI3t"),
+                new AliyunInferenceLogParser(new ObjectMapper()),
+                Clock.fixed(Instant.parse("2026-08-19T01:50:00Z"), ZoneOffset.UTC),
+                "ws-67zfnonsdn4x96ia",
+                "qwen3.5-omni-flash-realtime",
+                600);
+
+        var result = service.syncNow();
+
+        assertThat(result.accepted()).isEqualTo(1);
+        assertThat(result.rejectedSchema()).isZero();
+        assertThat(result.matched()).isEqualTo(1);
+        assertThat(accepted).singleElement().satisfies(record -> {
+            assertThat(record.requestId()).isEqualTo("cff4d5fd-67e0-926c-bfea-1f2750db8c72");
+            assertThat(record.taskUuid()).isEqualTo("sess_9tCc7hYPDCZPM7jmiPI3t");
+            assertThat(record.usage().inputAudioTokens()).isZero();
+            assertThat(record.usage().totalTokens()).isEqualTo(793);
+        });
+    }
+
+    @Test
+    void acceptsSuccessfulHttpLlmAndTtsLogsButRejectsRateLimitedTts() {
+        var accepted = new ArrayList<com.unispeaking.admin.usage.domain.OfficialUsageRecord>();
+        var source = new StubOfficialUsageLogSource(List.of(
+                httpJson("request-llm", "qwen3.5-plus", "200",
+                        "{\"input_tokens\":970,\"output_tokens\":177,\"total_tokens\":1147,"
+                                + "\"input_tokens_details\":{\"text_tokens\":970},"
+                                + "\"output_tokens_details\":{\"text_tokens\":177}}"),
+                httpJson("request-tts", "qwen3-tts-flash", "200", "{\"characters\":51}"),
+                httpJson("request-rate-limit", "qwen3-tts-flash", "429", "{}")));
+        OfficialUsageSink sink = records -> {
+            accepted.addAll(records);
+            return new OfficialUsageSink.ImportResult(records.size(), 0, records.size(), 0);
+        };
+        var service = new OfficialUsageSyncService(
+                source,
+                sink,
+                snapshot("sess_local_01", "request-llm", "request-tts"),
+                new AliyunInferenceLogParser(new ObjectMapper()),
+                Clock.fixed(Instant.parse("2026-08-19T02:40:00Z"), ZoneOffset.UTC),
+                "ws-67zfnonsdn4x96ia",
+                "qwen3.5-omni-flash-realtime",
+                600);
+
+        var result = service.syncNow();
+
+        assertThat(accepted).extracting(record -> record.requestId())
+                .containsExactly("request-llm", "request-tts");
+        assertThat(result.rejectedContext()).isEqualTo(1);
+    }
+
+    private static UsageDataSource snapshot(String taskUuid, String... requestIds) {
         ModelUsage empty = new ModelUsage(0, 0, 0, 0, 0, 0, 0, 0);
         UsageSession session = new UsageSession(
                 "local-01", "user-01", "free", "ended", 50, 130,
@@ -64,9 +145,19 @@ class OfficialUsageSyncServiceTest {
                 "user-01", "User 01", "free", "Free", "active", "2026-07-20",
                 180, 50, 0, 50, 130, 1784563200d, null, 1,
                 List.of(session), empty, empty, null, Map.of("PENDING", 1));
-        return () -> new UsageSnapshot(
-                List.of(user), null,
-                new ProviderStatus(null, Map.of(), List.of(), 0, "/tmp/inbox", 3d, true));
+        return new UsageDataSource() {
+            @Override
+            public UsageSnapshot loadSnapshot() {
+                return new UsageSnapshot(
+                        List.of(user), null,
+                        new ProviderStatus(null, Map.of(), List.of(), 0, "/tmp/inbox", 3d, true));
+            }
+
+            @Override
+            public java.util.Set<String> localProviderRequestIds() {
+                return java.util.Set.of(requestIds);
+            }
+        };
     }
 
     private static String json(String requestId, String taskUuid, String workspaceId, String model) {
@@ -90,6 +181,22 @@ class OfficialUsageSyncServiceTest {
                   "request_id":"%s"
                 }
                 """.formatted(workspaceId, model, taskUuid, requestId);
+    }
+
+    private static String httpJson(String requestId, String model, String status, String usage) {
+        return """
+                {
+                  "start_unix_timestamp":"1787106742708",
+                  "status_code":"%s",
+                  "usage":%s,
+                  "extras":{"protocol":"HTTP"},
+                  "apikey_id":"6126227",
+                  "duration":"889",
+                  "workspace_id":"ws-67zfnonsdn4x96ia",
+                  "model":"%s",
+                  "request_id":"%s"
+                }
+                """.formatted(status, usage, model, requestId);
     }
 
     private static final class StubOfficialUsageLogSource implements com.unispeaking.admin.usage.ports.OfficialUsageLogSource {

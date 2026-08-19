@@ -51,6 +51,7 @@ export interface CredentialStatus {
 export interface InvocationUsage {
   query: { from: string; to: string; userId: string | null; providerId: string | null; modelId: string | null; limit: number }
   recordPage: { page: number; pageSize: number; totalRecords: number; totalPages: number }
+  requestIdCoverage: { recordsWithRequestId: number; eligibleRecords: number }
   summary: {
     requests: number; attempts: number; succeededAttempts: number; fallbackAttempts: number
     inputTokens: number; outputTokens: number; totalTokens: number

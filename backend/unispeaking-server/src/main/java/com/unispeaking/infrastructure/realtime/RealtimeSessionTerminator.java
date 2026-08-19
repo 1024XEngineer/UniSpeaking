@@ -38,6 +38,7 @@ public class RealtimeSessionTerminator {
 			try {
 				providerRegistry.recordRealtimeSession(
 						session.getUserId(), session.getId(), session.getModel(),
+						session.getProviderTraceId(),
 						session.getCreatedAt(), session.getEndedAt() == null ? java.time.Instant.now() : session.getEndedAt());
 			}
 			catch (RuntimeException exception) {

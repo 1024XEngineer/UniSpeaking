@@ -18,10 +18,12 @@ describe('AppShell', () => {
       </MemoryRouter>,
     )
 
-    const labels = ['总览', '用户与权益', 'Realtime 监测', '用量对账', '系统管理']
+    const labels = ['总览', '用户与权益', '用量与计费', '系统管理']
     for (const label of labels) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
+    expect(screen.queryByRole('link', { name: 'Realtime 监测' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '用量对账' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '用户与权益' })).toHaveAttribute('aria-current', 'page')
   })
 
