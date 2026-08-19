@@ -109,7 +109,7 @@ describe('LearningAssetService', () => {
       expect.objectContaining({
         id: 'scene/airport',
         title: '机场行李托运',
-        date: '2026-08-05',
+        date: '2026年8月5日',
         status: '已完成',
         score: 88,
         category: 'transit',
