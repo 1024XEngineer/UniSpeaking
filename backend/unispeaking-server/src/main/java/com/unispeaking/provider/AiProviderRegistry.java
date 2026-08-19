@@ -4,6 +4,17 @@ import com.unispeaking.domain.vo.provider.AiCapability;
 import com.unispeaking.domain.vo.provider.AiModelDefinition;
 import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.provider.config.AiConfigurationStore;
+import com.unispeaking.provider.config.AiModelConfiguration;
+import com.unispeaking.provider.config.AiProviderCredentialStore;
+import com.unispeaking.provider.config.AiRuntimeConfiguration;
+import com.unispeaking.provider.usage.AiInvocationAttempt;
+import com.unispeaking.provider.usage.AiInvocationLedger;
+import com.unispeaking.service.auth.AuthService;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -70,6 +81,22 @@ public class AiProviderRegistry {
 	private final Map<String, ScoringProvider> scoringProviders;
 	private final Map<String, TtsProvider> ttsProviders;
 	private final Map<String, TranscriptionProvider> transcriptionProviders;
+	private AiConfigurationStore configurationStore;
+	private AiInvocationLedger invocationLedger;
+	private AuthService authService;
+	private AiProviderCredentialStore credentialStore;
+
+	@Autowired
+	void configureDynamicRuntime(
+			AiConfigurationStore configurationStore,
+			AiInvocationLedger invocationLedger,
+			AuthService authService,
+			AiProviderCredentialStore credentialStore) {
+		this.configurationStore = configurationStore;
+		this.invocationLedger = invocationLedger;
+		this.authService = authService;
+		this.credentialStore = credentialStore;
+	}
 
 	@Autowired
 	public AiProviderRegistry(
@@ -137,10 +164,31 @@ public class AiProviderRegistry {
 	}
 
 	public List<AiModelDefinition> models() {
+		AiRuntimeConfiguration runtime = runtimeConfiguration();
+		if (!runtime.databaseBacked()) return models;
+		return runtime.models().values().stream()
+				.filter(this::available)
+				.map(model -> new AiModelDefinition(
+						model.modelId(), model.providerId(), model.capability(),
+						model.modelId().equals(defaultModel(model.capability()))))
+				.toList();
+	}
+
+	/** Models backed by adapters in this deployment, independent of database enablement. */
+	public List<AiModelDefinition> deployedModels() {
 		return models;
 	}
 
 	public AiModelDefinition getModel(String modelId) {
+		AiRuntimeConfiguration runtime = runtimeConfiguration();
+		if (runtime.databaseBacked()) {
+			AiModelConfiguration configured = runtime.models().get(AbstractAiProvider.normalizeModelId(modelId));
+			if (configured == null || !available(configured)) {
+				throw new BusinessException("AI_MODEL_NOT_AVAILABLE", "AI model is disabled or unavailable: " + modelId);
+			}
+			return new AiModelDefinition(configured.modelId(), configured.providerId(), configured.capability(),
+					configured.modelId().equals(defaultModel(configured.capability())));
+		}
 		AiModelDefinition definition = modelDefinitions.get(AbstractAiProvider.normalizeModelId(modelId));
 		if (definition == null) {
 			throw new BusinessException("AI_MODEL_NOT_FOUND", "AI model is not registered: " + modelId);
@@ -149,7 +197,7 @@ public class AiProviderRegistry {
 	}
 
 	public String defaultModel(AiCapability capability) {
-		List<String> route = modelRoutes.get(capability);
+		List<String> route = resolveRoute("default", capability);
 		if (route == null || route.isEmpty()) {
 			throw new BusinessException(
 					"AI_DEFAULT_MODEL_NOT_FOUND",
@@ -159,7 +207,11 @@ public class AiProviderRegistry {
 	}
 
 	public List<String> route(AiCapability capability) {
-		List<String> route = modelRoutes.get(capability);
+		return route("default", capability);
+	}
+
+	public List<String> route(String routeKey, AiCapability capability) {
+		List<String> route = resolveRoute(routeKey, capability);
 		if (route == null || route.isEmpty()) {
 			throw new BusinessException(
 					"AI_PROVIDER_ROUTE_NOT_FOUND",
@@ -182,9 +234,17 @@ public class AiProviderRegistry {
 			ProviderType requestedProvider,
 			String requestedModel,
 			BiFunction<String, RealtimeProvider, T> operation) {
+		return routeRealtime(automaticContext("realtime_connect"), requestedProvider, requestedModel, operation);
+	}
+
+	public <T> T routeRealtime(
+			AiInvocationContext context,
+			ProviderType requestedProvider,
+			String requestedModel,
+			BiFunction<String, RealtimeProvider, T> operation) {
 		String model = AbstractAiProvider.normalizeModelId(requestedModel);
 		List<String> models = model.isBlank()
-				? route(AiCapability.REALTIME)
+				? route(context.routeKey(), AiCapability.REALTIME)
 				: List.of(model);
 		if (!model.isBlank()) {
 			RealtimeProvider provider = getRealtimeProvider(model);
@@ -195,10 +255,13 @@ public class AiProviderRegistry {
 								+ " does not own realtime model " + model);
 			}
 		}
-		return invokeModels(
+		return invokeMeasuredModels(
+				context,
 				AiCapability.REALTIME,
 				models,
-				modelId -> operation.apply(modelId, getRealtimeProvider(modelId)));
+				modelId -> new AiProviderResponse<>(
+						operation.apply(modelId, getRealtimeProvider(modelId)), null,
+						new ProviderUsage(0, 0, 0, 0, 0, 0, "NONE")));
 	}
 
 	public LlmProvider getLlmProvider(String modelId) {
@@ -217,10 +280,32 @@ public class AiProviderRegistry {
 		return requiredProvider(transcriptionProviders, modelId, AiCapability.TRANSCRIPTION);
 	}
 
+	public void recordRealtimeSession(
+			String userId,
+			String sessionId,
+			String modelId,
+			Instant startedAt,
+			Instant endedAt) {
+		if (invocationLedger == null || sessionId == null || sessionId.isBlank()
+				|| modelId == null || modelId.isBlank() || startedAt == null || endedAt == null) return;
+		double seconds = Math.max(0, java.time.Duration.between(startedAt, endedAt).toMillis() / 1000d);
+		UUID stableId = UUID.nameUUIDFromBytes(("realtime-session:" + sessionId).getBytes(StandardCharsets.UTF_8));
+		AiInvocationContext context = new AiInvocationContext(
+				stableId, userId, sessionId, "realtime_session", "default");
+		invocationLedger.record(new AiInvocationAttempt(
+				stableId, context, 1, AiCapability.REALTIME,
+				modelConfigurationForLedger(AbstractAiProvider.normalizeModelId(modelId), AiCapability.REALTIME),
+				null, startedAt, endedAt, Math.max(0, java.time.Duration.between(startedAt, endedAt).toMillis()),
+				new ProviderUsage(0, 0, 0, 0, seconds, 0, "ESTIMATED"),
+				"SUCCEEDED", null, false, null));
+	}
+
 	public String exchangeRealtimeSdp(String modelId, String offerSdp, String token) {
-		String registeredModelId = getModel(modelId).modelId();
-		return getRealtimeProvider(registeredModelId)
-				.exchangeRealtimeSdp(registeredModelId, offerSdp, token);
+		return routeRealtime(
+				automaticContext("realtime_connect"),
+				null,
+				modelId,
+				(id, provider) -> provider.exchangeRealtimeSdp(id, offerSdp, token));
 	}
 
 	public String exchangeRealtimeSdp(String offerSdp, String token) {
@@ -234,7 +319,7 @@ public class AiProviderRegistry {
 	}
 
 	public Byte[] generateSpeechAudio(String modelId, String text, String token) {
-		return boxAudio(getTtsProvider(modelId).generateSpeechAudio(text, token));
+		return boxAudio(generateSpeechAudioBytes(automaticContext("tts"), modelId, text, token));
 	}
 
 	public Byte[] generateSpeechAudio(String text, String token) {
@@ -242,21 +327,64 @@ public class AiProviderRegistry {
 	}
 
 	public RoutedResult<Byte[]> generateSpeechAudioRouted(String text, String token) {
+		return generateSpeechAudioRouted(automaticContext("tts"), text, token);
+	}
+
+	public RoutedResult<Byte[]> generateSpeechAudioRouted(
+			AiInvocationContext context, String text, String token) {
 		return invokeRouteWithResult(
+				context,
 				AiCapability.TTS,
-				modelId -> generateSpeechAudio(modelId, text, token));
+				modelId -> {
+					AiProviderResponse<byte[]> measured = getTtsProvider(modelId)
+							.generateSpeechAudioMeasured(text, credential(modelId, token));
+					return new AiProviderResponse<>(boxAudio(measured.response()), measured.providerRequestId(), measured.usage());
+				});
 	}
 
 	public byte[] generateSpeechAudioBytes(String modelId, String text, String token) {
-		return getTtsProvider(modelId).generateSpeechAudio(text, token);
+		return generateSpeechAudioBytes(automaticContext("tts"), modelId, text, token);
 	}
 
 	public byte[] generateSpeechAudioBytes(String text, String token) {
 		return unboxAudio(generateSpeechAudio(text, token));
 	}
 
+	public byte[] generateSpeechAudioBytes(
+			AiInvocationContext context, String modelId, String text, String token) {
+		if (modelId == null || modelId.isBlank()) {
+			return unboxAudio(generateSpeechAudioRouted(context, text, token).response());
+		}
+		return invokeExplicitMeasured(context, AiCapability.TTS, modelId,
+				id -> getTtsProvider(id).generateSpeechAudioMeasured(text, credential(id, token)));
+	}
+
+	public byte[] generateSpeechAudioBytes(
+			String modelId,
+			String text,
+			String token,
+			String voice) {
+		return generateSpeechAudioBytes(automaticContext("tts"), modelId, text, token, voice);
+	}
+
+	public byte[] generateSpeechAudioBytes(
+			AiInvocationContext context,
+			String modelId,
+			String text,
+			String token,
+			String voice) {
+		if (modelId == null || modelId.isBlank()) {
+			throw new BusinessException(
+					"AI_TTS_MODEL_REQUIRED",
+					"A voice-specific TTS request requires an explicit model");
+		}
+		return invokeExplicitMeasured(context, AiCapability.TTS, modelId,
+				id -> getTtsProvider(id).generateSpeechAudioMeasured(
+						text, credential(id, token), voice));
+	}
+
 	public String executeLlmTask(String modelId, String prompt, String token) {
-		return getLlmProvider(modelId).executeLlmTask(prompt, token);
+		return executeLlmTask(automaticContext("llm"), modelId, prompt, token);
 	}
 
 	public String executeLlmTask(
@@ -264,7 +392,12 @@ public class AiProviderRegistry {
 			String prompt,
 			String token,
 			LlmResponseFormat responseFormat) {
-		return getLlmProvider(modelId).executeLlmTask(prompt, token, responseFormat);
+		return invokeExplicitMeasured(
+				automaticContext("llm"),
+				AiCapability.LLM,
+				modelId,
+				id -> getLlmProvider(id).executeLlmTaskMeasured(
+						prompt, credential(id, token), responseFormat));
 	}
 
 	public String executeLlmTask(String prompt, String token) {
@@ -272,9 +405,24 @@ public class AiProviderRegistry {
 	}
 
 	public RoutedResult<String> executeLlmTaskRouted(String prompt, String token) {
+		return executeLlmTaskRouted(automaticContext("llm"), prompt, token);
+	}
+
+	public RoutedResult<String> executeLlmTaskRouted(
+			AiInvocationContext context, String prompt, String token) {
 		return invokeRouteWithResult(
+				context,
 				AiCapability.LLM,
-				modelId -> executeLlmTask(modelId, prompt, token));
+				modelId -> getLlmProvider(modelId).executeLlmTaskMeasured(prompt, credential(modelId, token)));
+	}
+
+	public String executeLlmTask(
+			AiInvocationContext context, String modelId, String prompt, String token) {
+		if (modelId == null || modelId.isBlank()) {
+			return executeLlmTaskRouted(context, prompt, token).response();
+		}
+		return invokeExplicitMeasured(context, AiCapability.LLM, modelId,
+				id -> getLlmProvider(id).executeLlmTaskMeasured(prompt, credential(id, token)));
 	}
 
 	public RoutedResult<String> executeLlmTaskRouted(
@@ -282,14 +430,17 @@ public class AiProviderRegistry {
 			String token,
 			LlmResponseFormat responseFormat) {
 		return invokeRouteWithResult(
+				automaticContext("llm"),
 				AiCapability.LLM,
-				modelId -> executeLlmTask(modelId, prompt, token, responseFormat));
+				modelId -> getLlmProvider(modelId).executeLlmTaskMeasured(
+						prompt, credential(modelId, token), responseFormat));
 	}
 
 	public String convertAudioToText(String modelId, Byte[] audio, String token) {
-		return getTranscriptionProvider(modelId).convertAudioToText(
-				unboxAudio(audio),
-				token);
+		byte[] input = unboxAudio(audio);
+		return invokeExplicitMeasured(automaticContext("transcription"), AiCapability.TRANSCRIPTION,
+				modelId, id -> getTranscriptionProvider(id).convertAudioToTextMeasured(
+						input, credential(id, token)));
 	}
 
 	public String convertAudioToText(Byte[] audio, String token) {
@@ -297,9 +448,16 @@ public class AiProviderRegistry {
 	}
 
 	public RoutedResult<String> convertAudioToTextRouted(Byte[] audio, String token) {
+		return convertAudioToTextRouted(automaticContext("transcription"), audio, token);
+	}
+
+	public RoutedResult<String> convertAudioToTextRouted(
+			AiInvocationContext context, Byte[] audio, String token) {
+		byte[] input = unboxAudio(audio);
 		return invokeRouteWithResult(
+				context,
 				AiCapability.TRANSCRIPTION,
-				modelId -> convertAudioToText(modelId, audio, token));
+				modelId -> getTranscriptionProvider(modelId).convertAudioToTextMeasured(input, credential(modelId, token)));
 	}
 
 	public String evaluatePronunciation(
@@ -307,10 +465,10 @@ public class AiProviderRegistry {
 			String text,
 			Byte[] audio,
 			String token) {
-		return getScoringProvider(modelId).evaluatePronunciation(
-				text,
-				unboxAudio(audio),
-				token);
+		byte[] input = unboxAudio(audio);
+		return invokeExplicitMeasured(automaticContext("pronunciation_scoring"), AiCapability.SCORING,
+				modelId, id -> getScoringProvider(id).evaluatePronunciationMeasured(
+						text, input, credential(id, token)));
 	}
 
 	public String evaluatePronunciation(String text, Byte[] audio, String token) {
@@ -321,9 +479,19 @@ public class AiProviderRegistry {
 			String text,
 			Byte[] audio,
 			String token) {
+		return evaluatePronunciationRouted(automaticContext("pronunciation_scoring"), text, audio, token);
+	}
+
+	public RoutedResult<String> evaluatePronunciationRouted(
+			AiInvocationContext context,
+			String text,
+			Byte[] audio,
+			String token) {
+		byte[] input = unboxAudio(audio);
 		return invokeRouteWithResult(
+				context,
 				AiCapability.SCORING,
-				modelId -> evaluatePronunciation(modelId, text, audio, token));
+				modelId -> getScoringProvider(modelId).evaluatePronunciationMeasured(text, input, credential(modelId, token)));
 	}
 
 	private Map<String, AiModelDefinition> buildModelDefinitions() {
@@ -438,30 +606,45 @@ public class AiProviderRegistry {
 	}
 
 	private <T> RoutedResult<T> invokeRouteWithResult(
+			AiInvocationContext context,
 			AiCapability capability,
-			Function<String, T> operation) {
-		return invokeModels(
+			Function<String, AiProviderResponse<T>> operation) {
+		return invokeMeasuredModels(
+				context,
 				capability,
-				route(capability),
+				route(context.routeKey(), capability),
 				modelId -> {
+					AiProviderResponse<T> measured = operation.apply(modelId);
 					AiModelDefinition definition = getModel(modelId);
-					return new RoutedResult<>(
-							definition.modelId(),
-							definition.providerId(),
-							capability,
-							operation.apply(modelId));
+					return new AiProviderResponse<>(new RoutedResult<>(
+							definition.modelId(), definition.providerId(), capability, measured.response()),
+							measured.providerRequestId(), measured.usage());
 				});
 	}
 
-	private <T> T invokeModels(
+	private <T> T invokeExplicitMeasured(
+			AiInvocationContext context,
+			AiCapability capability,
+			String modelId,
+			Function<String, AiProviderResponse<T>> operation) {
+		return invokeMeasuredModels(context, capability, List.of(modelId), operation);
+	}
+
+	private <T> T invokeMeasuredModels(
+			AiInvocationContext suppliedContext,
 			AiCapability capability,
 			List<String> models,
-			Function<String, T> operation) {
+			Function<String, AiProviderResponse<T>> operation) {
+		AiInvocationContext context = suppliedContext == null
+				? automaticContext(capability.name().toLowerCase(java.util.Locale.ROOT))
+				: suppliedContext;
 		BusinessException lastFailure = null;
 		for (int index = 0; index < models.size(); index++) {
-			String modelId = models.get(index);
+			String modelId = AbstractAiProvider.normalizeModelId(models.get(index));
+			AiModelConfiguration model = modelConfiguration(modelId, capability);
+			Instant startedAt = Instant.now();
+			long startedNanos = System.nanoTime();
 			AiModelDefinition definition = getModel(modelId);
-			long startedAt = System.nanoTime();
 			LOGGER.info(
 					"AI provider attempt capability={} model={} provider={} attempt={}/{}",
 					capability,
@@ -470,17 +653,31 @@ public class AiProviderRegistry {
 					index + 1,
 					models.size());
 			try {
-				T response = operation.apply(modelId);
+				String dynamicCredential = credentialStore == null
+						? null
+						: credentialStore.credentialOrFallback(model.providerId(), null);
+				AiProviderResponse<T> measured = ProviderCredentialOverride.call(
+						dynamicCredential, () -> operation.apply(modelId));
+				Instant completedAt = Instant.now();
+				recordAttempt(context, index + 1, capability, model, measured.providerRequestId(),
+						startedAt, completedAt, elapsedMillis(startedNanos), measured.usage(),
+						"SUCCEEDED", null, false, index == 0 ? null : models.get(index - 1));
 				LOGGER.info(
 						"AI provider selected capability={} model={} provider={} durationMs={}",
 						capability,
 						definition.modelId(),
 						definition.providerId(),
-						elapsedMillis(startedAt));
-				return response;
+						elapsedMillis(startedNanos));
+				return measured.response();
 			}
 			catch (BusinessException exception) {
-				if (!shouldFailOver(exception)) {
+				boolean retryable = shouldFailOver(exception);
+				Instant completedAt = Instant.now();
+				recordAttempt(context, index + 1, capability, model, null,
+						startedAt, completedAt, elapsedMillis(startedNanos), null,
+						"FAILED", exception.code(), retryable,
+						index == 0 ? null : models.get(index - 1));
+				if (!retryable) {
 					throw exception;
 				}
 				lastFailure = exception;
@@ -490,7 +687,7 @@ public class AiProviderRegistry {
 							capability,
 							modelId,
 							definition.providerId(),
-							elapsedMillis(startedAt),
+							elapsedMillis(startedNanos),
 							exception.code(),
 							models.get(index + 1));
 				}
@@ -500,7 +697,7 @@ public class AiProviderRegistry {
 							capability,
 							modelId,
 							definition.providerId(),
-							elapsedMillis(startedAt),
+							elapsedMillis(startedNanos),
 							exception.code());
 				}
 			}
@@ -513,8 +710,112 @@ public class AiProviderRegistry {
 				"No AI provider completed the " + capability + " request");
 	}
 
-	private static long elapsedMillis(long startedAt) {
-		return (System.nanoTime() - startedAt) / 1_000_000;
+	private void recordAttempt(
+			AiInvocationContext context,
+			int attemptNo,
+			AiCapability capability,
+			AiModelConfiguration model,
+			String providerRequestId,
+			Instant startedAt,
+			Instant completedAt,
+			long durationMs,
+			ProviderUsage usage,
+			String status,
+			String errorCode,
+			boolean retryable,
+			String fallbackFromModelId) {
+		if (invocationLedger == null) return;
+		invocationLedger.record(new AiInvocationAttempt(
+				null, context, attemptNo, capability, model, providerRequestId,
+				startedAt, completedAt, durationMs, usage, status, errorCode,
+				retryable, fallbackFromModelId));
+	}
+
+	private AiRuntimeConfiguration runtimeConfiguration() {
+		return configurationStore == null
+				? new AiRuntimeConfiguration(Map.of(), Map.of(), Map.of(), false)
+				: configurationStore.load();
+	}
+
+	private List<String> resolveRoute(String routeKey, AiCapability capability) {
+		AiRuntimeConfiguration runtime = runtimeConfiguration();
+		if (!runtime.databaseBacked()) return modelRoutes.getOrDefault(capability, List.of());
+		return runtime.route(routeKey, capability).stream()
+				.map(AbstractAiProvider::normalizeModelId)
+				.filter(modelId -> {
+					AiModelConfiguration model = runtime.models().get(modelId);
+					return model != null && model.capability() == capability && available(model, runtime);
+				})
+				.toList();
+	}
+
+	private boolean available(AiModelConfiguration model) {
+		return available(model, runtimeConfiguration());
+	}
+
+	private boolean available(AiModelConfiguration model, AiRuntimeConfiguration runtime) {
+		if (model == null || !model.enabled()) return false;
+		var providerConfiguration = runtime.providers().get(model.providerId());
+		if (providerConfiguration == null || !providerConfiguration.enabled()) return false;
+		AbstractAiProvider adapter = providers(model.capability()).get(model.modelId());
+		return adapter != null
+				&& adapter.providerId().equalsIgnoreCase(providerConfiguration.adapterType());
+	}
+
+	private AiModelConfiguration modelConfiguration(String modelId, AiCapability capability) {
+		AiRuntimeConfiguration runtime = runtimeConfiguration();
+		if (runtime.databaseBacked()) {
+			AiModelConfiguration model = runtime.models().get(modelId);
+			if (model == null || model.capability() != capability || !available(model, runtime)) {
+				throw new BusinessException("AI_MODEL_NOT_AVAILABLE", "AI model is disabled or unavailable: " + modelId);
+			}
+			return model;
+		}
+		AiModelDefinition definition = modelDefinitions.get(modelId);
+		if (definition == null || definition.capability() != capability) {
+			throw new BusinessException("AI_MODEL_NOT_FOUND", "AI model is not registered: " + modelId);
+		}
+		return new AiModelConfiguration(modelId, definition.providerId(), modelId, capability, true,
+				"TOKENS", BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+				BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, "CNY");
+	}
+
+	private AiModelConfiguration modelConfigurationForLedger(String modelId, AiCapability capability) {
+		AiRuntimeConfiguration runtime = runtimeConfiguration();
+		if (runtime.databaseBacked()) {
+			AiModelConfiguration model = runtime.models().get(modelId);
+			if (model != null && model.capability() == capability) return model;
+		}
+		AiModelDefinition definition = modelDefinitions.get(modelId);
+		if (definition == null || definition.capability() != capability) {
+			throw new BusinessException("AI_MODEL_NOT_FOUND", "AI model is not registered: " + modelId);
+		}
+		return new AiModelConfiguration(modelId, definition.providerId(), modelId, capability, true,
+				"AUDIO_MINUTES", BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+				BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, "CNY");
+	}
+
+	private AiInvocationContext automaticContext(String businessScene) {
+		AiInvocationContext scoped = AiInvocationContexts.current();
+		if (scoped != null) return scoped;
+		String userId = null;
+		try {
+			if (authService != null) userId = authService.currentUserIdOrNull();
+		}
+		catch (RuntimeException ignored) {
+			// Background work and tests may not have an authenticated request.
+		}
+		return AiInvocationContext.create(userId, null, businessScene);
+	}
+
+	private String credential(String modelId, String supplied) {
+		if (supplied != null && !supplied.isBlank()) return supplied;
+		AiModelDefinition model = getModel(modelId);
+		return credentialStore == null ? supplied : credentialStore.credentialOrFallback(model.providerId(), supplied);
+	}
+
+	private static long elapsedMillis(long startedNanos) {
+		return Math.max(0, (System.nanoTime() - startedNanos) / 1_000_000);
 	}
 
 	private boolean shouldFailOver(BusinessException exception) {

@@ -19,6 +19,8 @@ import com.unispeaking.infrastructure.persistence.repository.evaluation.Intervie
 import com.unispeaking.infrastructure.persistence.repository.scene.InterviewSceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.provider.AiProviderRegistry;
+import com.unispeaking.provider.AiInvocationContext;
+import com.unispeaking.provider.AiInvocationContexts;
 import com.unispeaking.component.recording.RecordingStore;
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
@@ -218,16 +220,16 @@ public class InterviewReportCoordinator {
 		try {
 			List<LearnerMessageRecord> turns =
 					sessionMessageRepository.findMessagesWithAudioObjectKeys(sessionId);
-			AudioScoring audio = scoreAudioDimensions(sessionId, turns);
+			AudioScoring audio = scoreAudioDimensions(sessionId, userId, turns);
 			if (shouldRetryAudioBeforeDegrade(sessionId, audio)) {
 				throw new ReportTaskException(FailureReason.PROVIDER_RETRYABLE);
 			}
 			List<String> topics = readTopics(sceneId);
-			LlmAssessment llm = assessTextDimensions(
-					sessionMessageRepository.findMessages(sessionId),
-					topics,
-					audio.fluency(),
-					audio.pronunciation());
+			LlmAssessment llm = AiInvocationContexts.call(
+					AiInvocationContext.create(userId, sessionId, "interview_report"),
+					() -> assessTextDimensions(
+							sessionMessageRepository.findMessages(sessionId), topics,
+							audio.fluency(), audio.pronunciation()));
 			InterviewReportRecord completed = toCompletedRecord(
 					sessionId,
 					sceneId,
@@ -330,6 +332,7 @@ public class InterviewReportCoordinator {
 
 	private AudioScoring scoreAudioDimensions(
 			String sessionId,
+			String userId,
 			List<LearnerMessageRecord> turns) {
 		List<ScoringTask> tasks = new ArrayList<>();
 		for (LearnerMessageRecord turn : turns) {
@@ -347,7 +350,7 @@ public class InterviewReportCoordinator {
 		List<Future<TurnScore>> futures = new ArrayList<>();
 		for (ScoringTask task : tasks) {
 			futures.add(audioScoringExecutor.submit(
-					() -> scoreTurn(sessionId, task)));
+					() -> scoreTurn(sessionId, userId, task)));
 		}
 		AtomicReference<BigDecimal> fluencySum =
 				new AtomicReference<>(BigDecimal.ZERO);
@@ -402,10 +405,11 @@ public class InterviewReportCoordinator {
 
 	private TurnScore scoreTurn(
 			String sessionId,
+			String userId,
 			ScoringTask task) {
-		PronunciationAssessmentResult assessment = pronunciationClient.evaluate(
-				task.turn().content(),
-				task.audio());
+		PronunciationAssessmentResult assessment = AiInvocationContexts.call(
+				AiInvocationContext.create(userId, sessionId, "interview_pronunciation"),
+				() -> pronunciationClient.evaluate(task.turn().content(), task.audio()));
 		try {
 			TurnSpeechScoreCalculation calculation =
 					TurnSpeechScoreCalculator.calculate(assessment);

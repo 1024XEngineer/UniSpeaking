@@ -2,7 +2,10 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { AchievementNotificationProvider } from "../component/achievement/AchievementNotifications.jsx";
 import { App } from "./App.jsx";
+import { captureException, initializeBrowserTelemetry } from "../telemetry/clientTelemetry.js";
 import "../common/styles.css";
+
+initializeBrowserTelemetry();
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -16,6 +19,11 @@ class AppErrorBoundary extends React.Component {
 
   componentDidCatch(error, info) {
     console.error("UniSpeaking render failed", error, info);
+    captureException(error, {
+      eventType: "react.render_crash",
+      severity: "FATAL",
+      attributes: { component_stack: info?.componentStack || "" },
+    });
   }
 
   render() {

@@ -16,9 +16,9 @@ create table if not exists admin_sessions (
     revoked boolean not null
 );
 
-create table if not exists app_users (
+create table if not exists users (
     id uuid primary key,
-    email varchar(320) not null unique,
+    username varchar(320) not null unique,
     password_hash varchar(1000) not null,
     created_at timestamp with time zone not null
 );

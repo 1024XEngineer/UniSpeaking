@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, BackHandler, Image, PanResponder, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, BackHandler, Image, PanResponder, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Reanimated, {
   cancelAnimation,
@@ -70,6 +70,13 @@ const stages = [
 ] as const;
 
 type TrainingStage = (typeof stages)[number]['key'];
+
+const chineseCharacterPattern = /[\u3400-\u9fff]/;
+
+function previewText(value: string, fallback: string, maxLength: number) {
+  const source = String(value ?? '').trim();
+  return chineseCharacterPattern.test(source) ? source.slice(0, maxLength) : fallback;
+}
 
 function StageProgressRail({
   stage,
@@ -420,6 +427,17 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   const readingResult = trainingSnapshot?.readingResult;
   const trainingTransitioning = trainingSnapshot?.status === 'loading';
   const completionMetrics = sceneMetricsForReport(dialogueCompletion?.evaluation);
+  const confirmExit = () => {
+    Alert.alert(
+      '退出当前训练？',
+      '退出后将返回场景广场。',
+      [
+        { text: '继续训练', style: 'cancel' },
+        { text: '确认退出', style: 'destructive', onPress: onBack },
+      ],
+      { cancelable: true },
+    );
+  };
 
   const toggleDemo = async (text: string) => {
     if (!scene || !ttsPlayer) {
@@ -549,7 +567,7 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
           <Text style={styles.trainingTitle}>{scenario.title}</Text>
           <Text style={styles.trainingSubtitle}>从语言到真实表达</Text>
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel="取消训练" onPress={onBack} style={styles.trainingCancel}>
+        <Pressable accessibilityRole="button" accessibilityLabel="退出训练" onPress={confirmExit} style={styles.trainingCancel}>
           <AppIcon name="close" size={19} color={colors.muted} />
         </Pressable>
       </View>
@@ -771,11 +789,13 @@ function createDefaultTtsPlayer() {
 function ScenePromptInput({
   value,
   onChangeText,
+  editable = true,
   placeholder,
   placeholderTextColor,
 }: {
   value: string;
   onChangeText: (value: string) => void;
+  editable?: boolean;
   placeholder: string;
   placeholderTextColor: string;
 }) {
@@ -819,6 +839,7 @@ function ScenePromptInput({
       ) : null}
       <TextInput
         accessibilityLabel="描述想练习的场景"
+        editable={editable}
         multiline
         maxLength={200}
         onBlur={() => setFocused(false)}
@@ -855,6 +876,7 @@ export function ScenesHome({
   const [generatingSource, setGeneratingSource] = useState<'custom' | string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const generating = generatingSource !== null;
+  const promptLocked = generating || Boolean(preview);
   useEffect(() => {
     if (Platform.OS !== 'android' || !preview) return;
 
@@ -930,6 +952,7 @@ export function ScenesHome({
             </View>
           </View>
           <ScenePromptInput
+            editable={!promptLocked}
             onChangeText={setPrompt}
             placeholder={`你今天想练习什么？例如：${promptExample.prompt}`}
             placeholderTextColor="#8D8D88"
@@ -940,16 +963,16 @@ export function ScenesHome({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="生成练习场景"
-              disabled={!prompt.trim() || generating}
+              disabled={!prompt.trim() || promptLocked}
               onPress={() => void generatePreview(prompt, 'custom')}
               style={({ pressed }) => [
                 styles.generateButton,
-                prompt.trim() && !generating ? styles.generateButtonReady : styles.generateButtonDisabled,
-                pressed && prompt.trim() && !generating && styles.generateButtonPressed,
+                prompt.trim() && !promptLocked ? styles.generateButtonReady : styles.generateButtonDisabled,
+                pressed && prompt.trim() && !promptLocked && styles.generateButtonPressed,
               ]}
             >
-              <Text style={[styles.generateButtonText, prompt.trim() && !generating ? styles.generateButtonTextActive : styles.generateButtonTextDisabled]}>{generatingSource === 'custom' ? '正在生成…' : '生成练习场景'}</Text>
-              <AppIcon name="arrow-right" size={18} color={prompt.trim() && !generating ? colors.white : '#7896B8'} />
+              <Text style={[styles.generateButtonText, prompt.trim() && !promptLocked ? styles.generateButtonTextActive : styles.generateButtonTextDisabled]}>{generatingSource === 'custom' ? '正在生成…' : '生成练习场景'}</Text>
+              <AppIcon name="arrow-right" size={18} color={prompt.trim() && !promptLocked ? colors.white : '#7896B8'} />
             </Pressable>
           </View>
         </View>
@@ -1037,16 +1060,18 @@ export function ScenesHome({
             </Pressable>
             <Text style={styles.previewEyebrow}>场景已准备好</Text>
             <View style={styles.previewTitleRow}>
-            <Text style={styles.previewTitle}>{previewDisplay?.title || preview.title}</Text>
+              <Text style={styles.previewTitle}>
+                {previewDisplay?.title || previewText(preview.title, '正在整理场景…', 18)}
+              </Text>
               <SceneCategoryTag category={sceneCategoryForLabel(preview.label)} />
             </View>
             <Text style={styles.previewLead}>场景已生成，确认后即可开始练习。</Text>
             <View style={styles.previewSummary}>
               {[
-                ['场景简介', previewDisplay?.background || preview.background],
-                ['AI 扮演', previewDisplay?.aiRole || preview.aiRole],
-                ['你将扮演', previewDisplay?.userRole || preview.userRole],
-                ['练习重点', previewDisplay?.learningGoal || preview.learningGoal],
+                ['场景简介', previewDisplay?.background || previewText(preview.background, '正在整理中文摘要…', 58)],
+                ['AI 扮演', previewDisplay?.aiRole || previewText(preview.aiRole, '正在整理…', 22)],
+                ['你将扮演', previewDisplay?.userRole || previewText(preview.userRole, '正在整理…', 22)],
+                ['练习重点', previewDisplay?.learningGoal || previewText(preview.learningGoal, '正在整理中文摘要…', 42)],
                 ['预计用时', `${preview.estimatedMinutes} 分钟`],
               ].map(([label, value]) => (
                 <View key={label} style={styles.previewSummaryRow}>

@@ -84,7 +84,7 @@ class AuthControllerTest {
     @Test
     void superAdminCanUpdateUserEntitlementWithoutResettingCurrentUsage() throws Exception {
         var userId = java.util.UUID.fromString("11111111-1111-4111-8111-111111111111");
-        jdbc.update("insert into app_users (id, email, password_hash, created_at) values (?, ?, ?, current_timestamp)",
+        jdbc.update("insert into users (id, username, password_hash, created_at) values (?, ?, ?, current_timestamp)",
                 userId, "entitlement@example.com", "not-used");
         jdbc.update("insert into user_entitlements (user_id, quota_date, plan_code, plan_name, quota_seconds, used_seconds, status, updated_at) "
                         + "values (?, current_date, 'free', 'Free', 600, 125.5, 'active', current_timestamp)", userId);
@@ -128,6 +128,28 @@ class AuthControllerTest {
                         .content("{\"planCode\":\"pro\",\"planName\":\"Pro\",\"quotaSeconds\":3600,\"status\":\"active\"}"))
                 .andExpect(status().isForbidden());
     }
+
+	@Test
+	void readOnlyAdministratorCannotMutateAiProviderConfiguration() throws Exception {
+		adminIdentities.save(new AdminAccount(
+				java.util.UUID.fromString("44444444-4444-4444-8444-444444444444"),
+				"ai-auditor@unispeaking.local",
+				passwordEncoder.encode("auditor-test-password"),
+				AdminRole.AUDITOR,
+				true));
+		var login = mvc.perform(post("/api/admin/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"login\":\"ai-auditor@unispeaking.local\",\"password\":\"auditor-test-password\"}"))
+				.andExpect(status().isNoContent())
+				.andReturn();
+
+		mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(
+						"/api/admin/ai/providers/qwen")
+						.cookie(login.getResponse().getCookie("us-admin-session"))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"enabled\":false}"))
+				.andExpect(status().isForbidden());
+	}
 
     @Test
     void statusExceptionOnAdminRouteKeepsSessionAuthorization() throws Exception {

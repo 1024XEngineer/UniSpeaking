@@ -8,6 +8,12 @@ import type {
 } from '@/features/realtime/RealtimeSessionController';
 import type { FreeChatControllerPort } from '@/features/conversation/useFreeChatSession';
 
+const mockTranslateScene = jest.fn();
+
+jest.mock('@/features/conversation/TranscriptTranslationApi', () => ({
+  createTranscriptTranslationApi: () => ({ translateScene: mockTranslateScene }),
+}));
+
 jest.mock('react-native-reanimated', () => {
   const { View } = require('react-native');
   return {
@@ -167,6 +173,7 @@ describe('ScenesHome backend generation binding', () => {
 
     await waitFor(() => expect(screen.getByText('机场行李托运')).toBeTruthy());
     expect(sceneService.generate).toHaveBeenCalledWith('我想练习机场托运行李');
+    expect(screen.getByLabelText('描述想练习的场景').props.editable).toBe(false);
     expect(screen.getByText('AI 扮演')).toBeTruthy();
     expect(screen.getByText('航空公司工作人员')).toBeTruthy();
     expect(screen.getByText('你将扮演')).toBeTruthy();
@@ -174,6 +181,45 @@ describe('ScenesHome backend generation binding', () => {
     await fireEvent.press(screen.getByText('开始练习'));
     expect(onStartScene).toHaveBeenCalledTimes(1);
     expect(onOpen).toHaveBeenCalledWith({ name: 'training', scene });
+  });
+
+  it('does not show untranslated English in the preview', async () => {
+    const resolveTranslations: Array<(value: string) => void> = [];
+    mockTranslateScene.mockImplementation(
+      () => new Promise<string>((resolve) => resolveTranslations.push(resolve)),
+    );
+    const englishScene = {
+      ...scene,
+      title: 'Coffee Shop Order',
+      background: 'Order a coffee and customize the drink.',
+      aiRole: 'Barista',
+      userRole: 'Customer',
+      learningGoal: 'Practice ordering and confirming details.',
+    };
+    const screen = await render(
+      <ScenesHome
+        onOpen={jest.fn()}
+        sceneService={{ generate: jest.fn(async () => englishScene) }}
+      />,
+    );
+
+    await fireEvent.changeText(
+      screen.getByLabelText('描述想练习的场景'),
+      '咖啡店点单',
+    );
+    await fireEvent.press(screen.getByLabelText('生成练习场景'));
+
+    await waitFor(() => expect(screen.getByText('正在整理场景…')).toBeTruthy());
+    expect(screen.queryByText('Coffee Shop Order')).toBeNull();
+    expect(screen.queryByText('Barista')).toBeNull();
+    expect(screen.getAllByText('正在整理中文摘要…')).toHaveLength(2);
+    expect(screen.getAllByText('正在整理…')).toHaveLength(2);
+
+    await act(async () => {
+      resolveTranslations.forEach((resolve) => resolve('咖啡店点单'));
+    });
+    await waitFor(() => expect(screen.getAllByText('咖啡店点单').length).toBeGreaterThan(0));
+    expect(mockTranslateScene).toHaveBeenCalled();
   });
 
   it('shows a generation error without opening a fake preview', async () => {
@@ -196,6 +242,7 @@ describe('ScenesHome backend generation binding', () => {
     await fireEvent.press(screen.getByLabelText('生成练习场景'));
 
     await waitFor(() => expect(screen.getByText('模型生成超时')).toBeTruthy());
+    expect(screen.getByLabelText('描述想练习的场景').props.editable).toBe(true);
     expect(screen.queryByText('确认进入')).toBeNull();
   });
 

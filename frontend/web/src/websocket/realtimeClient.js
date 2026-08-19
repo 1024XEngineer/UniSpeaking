@@ -12,6 +12,7 @@ import {
   submitInterviewTurn,
 } from "../infrastructure/http/apiClient.js";
 import { createPcmWavSegmentRecorder } from "../infrastructure/audio/audioRecorder.js";
+import { createRtcTelemetryMonitor } from "../telemetry/rtcTelemetry.js";
 
 const DEFAULT_API_BASE = "";
 const DEFAULT_VOICE = "Tina";
@@ -19,7 +20,7 @@ const DEFAULT_MODEL = "qwen3.5-omni-plus-realtime";
 const DATA_CHANNEL_LABEL = "oai-events";
 const DEFAULT_SPEECH_SPEED = "NATURAL";
 const DEFAULT_ICE_SERVERS = [
-  { urls: "stun:stun.aliyun.com:3478" },
+  { urls: "stun:stun.cloudflare.com:3478" },
   { urls: "stun:stun.l.google.com:19302" },
 ];
 const SCENARIO_CLOSING_TIMEOUT_MS = 20_000;
@@ -187,19 +188,158 @@ function normalizeSdp(sdp) {
   return normalized.endsWith("\r\n") ? normalized : `${normalized}\r\n`;
 }
 
-function waitForIceGathering(peer) {
-  if (peer.iceGatheringState === "complete") return Promise.resolve();
+function candidateType(candidate) {
+  const structuredType = String(candidate?.type || "").toLowerCase();
+  if (["host", "srflx", "prflx", "relay"].includes(structuredType)) return structuredType;
+  const match = String(candidate?.candidate || candidate || "")
+    .match(/\btyp\s+(host|srflx|prflx|relay)\b/i);
+  return match?.[1]?.toLowerCase() || "unknown";
+}
+
+function candidateSummaryFromSdp(sdp) {
+  const summary = { host: 0, srflx: 0, prflx: 0, relay: 0, unknown: 0 };
+  String(sdp || "").split(/\r?\n/).forEach((line) => {
+    if (!line.startsWith("a=candidate:")) return;
+    summary[candidateType(line)] += 1;
+  });
+  return summary;
+}
+
+function candidateTotal(summary) {
+  return Object.values(summary).reduce((total, count) => total + count, 0);
+}
+
+function createRealtimeError(code, message, diagnostics = null) {
+  const error = new Error(message);
+  error.code = code;
+  if (diagnostics) error.realtimeDiagnostics = diagnostics;
+  return error;
+}
+
+export function waitForIceGathering(peer, { timeoutMs = 10_000 } = {}) {
+  const initialCandidates = candidateSummaryFromSdp(peer?.localDescription?.sdp);
+  if (peer?.iceGatheringState === "complete") {
+    return Promise.resolve({
+      complete: true,
+      timedOut: false,
+      candidates: initialCandidates,
+    });
+  }
   return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error("ICE 候选收集超时")), 10_000);
-    const previous = peer.onicegatheringstatechange;
-    peer.onicegatheringstatechange = () => {
-      previous?.();
-      if (peer.iceGatheringState === "complete") {
-        window.clearTimeout(timer);
-        resolve();
+    const candidates = { ...initialCandidates };
+    let settled = false;
+    const supportsEventListeners = typeof peer?.addEventListener === "function";
+    const previousGatheringHandler = peer?.onicegatheringstatechange;
+    const previousCandidateHandler = peer?.onicecandidate;
+
+    const cleanup = () => {
+      window.clearTimeout(timer);
+      if (supportsEventListeners) {
+        peer.removeEventListener?.("icegatheringstatechange", handleGatheringState);
+        peer.removeEventListener?.("icecandidate", handleCandidate);
+      } else {
+        peer.onicegatheringstatechange = previousGatheringHandler || null;
+        peer.onicecandidate = previousCandidateHandler || null;
       }
     };
+    const finish = (result, error = null) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      error ? reject(error) : resolve(result);
+    };
+    const currentSummary = () => {
+      const fromDescription = candidateSummaryFromSdp(peer?.localDescription?.sdp);
+      const merged = {};
+      Object.keys(candidates).forEach((type) => {
+        merged[type] = Math.max(candidates[type], fromDescription[type]);
+      });
+      return merged;
+    };
+    const handleGatheringState = (event) => {
+      if (!supportsEventListeners) previousGatheringHandler?.call(peer, event);
+      if (peer?.signalingState === "closed") {
+        finish(null, createRealtimeError("WEBRTC_START_CANCELLED", "实时会话启动已取消"));
+        return;
+      }
+      if (peer?.iceGatheringState === "complete") {
+        finish({ complete: true, timedOut: false, candidates: currentSummary() });
+      }
+    };
+    const handleCandidate = (event) => {
+      if (!supportsEventListeners) previousCandidateHandler?.call(peer, event);
+      if (!event?.candidate) return;
+      candidates[candidateType(event.candidate)] += 1;
+    };
+
+    const timer = window.setTimeout(() => {
+      const summary = currentSummary();
+      const diagnostics = {
+        iceGatheringState: peer?.iceGatheringState || "unknown",
+        candidates: summary,
+      };
+      if (candidateTotal(summary) > 0) {
+        finish({ complete: false, timedOut: true, candidates: summary });
+        return;
+      }
+      finish(null, createRealtimeError(
+        "WEBRTC_ICE_GATHERING_NO_CANDIDATE",
+        "ICE 候选收集超时，未发现可用候选",
+        diagnostics,
+      ));
+    }, timeoutMs);
+
+    if (supportsEventListeners) {
+      peer.addEventListener("icegatheringstatechange", handleGatheringState);
+      peer.addEventListener("icecandidate", handleCandidate);
+    } else {
+      peer.onicegatheringstatechange = handleGatheringState;
+      peer.onicecandidate = handleCandidate;
+    }
+    handleGatheringState();
   });
+}
+
+export function releaseRealtimeTransport({
+  peer = null,
+  channels = [],
+  localStream = null,
+  remoteStreams = [],
+  audioSender = null,
+} = {}) {
+  try {
+    const replacement = audioSender?.replaceTrack?.(null);
+    replacement?.catch?.(() => undefined);
+  } catch {
+    // The sender may already have been detached by the browser.
+  }
+  localStream?.getTracks?.().forEach((track) => {
+    try { track.stop(); } catch { /* already stopped */ }
+  });
+  remoteStreams.forEach((stream) => stream?.getTracks?.().forEach((track) => {
+    try { track.stop(); } catch { /* already stopped */ }
+  }));
+  channels.forEach((dataChannel) => {
+    try {
+      dataChannel.onopen = null;
+      dataChannel.onmessage = null;
+      dataChannel.onerror = null;
+      dataChannel.onclose = null;
+      dataChannel.close?.();
+    } catch {
+      // The data channel may already be closed.
+    }
+  });
+  try {
+    if (peer) {
+      peer.ontrack = null;
+      peer.ondatachannel = null;
+      peer.onconnectionstatechange = null;
+      peer.close?.();
+    }
+  } catch {
+    // The peer connection may already be closed.
+  }
 }
 
 function waitForChannel(channel, peer) {
@@ -210,6 +350,7 @@ function waitForChannel(channel, peer) {
       window.clearTimeout(timer);
       channel.removeEventListener?.("open", handleOpen);
       channel.removeEventListener?.("error", handleError);
+      channel.removeEventListener?.("close", handleClose);
       peer?.removeEventListener?.("iceconnectionstatechange", handleIceState);
     };
     const finish = (error) => {
@@ -220,6 +361,10 @@ function waitForChannel(channel, peer) {
     };
     const handleOpen = () => finish();
     const handleError = () => finish(new Error("实时数据通道连接失败"));
+    const handleClose = () => finish(createRealtimeError(
+      "WEBRTC_START_CANCELLED",
+      "实时会话启动已取消",
+    ));
     const handleIceState = () => {
       const state = peer?.iceConnectionState;
       if (state === "failed" || state === "disconnected") {
@@ -236,8 +381,12 @@ function waitForChannel(channel, peer) {
     channel.onerror = () => {
       handleError();
     };
+    channel.onclose = () => {
+      handleClose();
+    };
     channel.addEventListener?.("open", handleOpen);
     channel.addEventListener?.("error", handleError);
+    channel.addEventListener?.("close", handleClose);
     peer?.addEventListener?.("iceconnectionstatechange", handleIceState);
     handleIceState();
   });
@@ -388,9 +537,12 @@ export function createRealtimeClient({
   const interviewSceneId = sceneType === "interview" ? sceneId : null;
   const manualTurnResponses = Boolean(customSceneId || ieltsSceneId || interviewSceneId);
   let peer = null;
+  let rtcTelemetry = null;
   let channel = null;
+  let dataChannels = new Set();
   let sessionSocket = null;
   let localStream = null;
+  let remoteStreams = new Set();
   let audioSender = null;
   let sessionId = null;
   let sessionConfig = null;
@@ -404,7 +556,10 @@ export function createRealtimeClient({
   let sessionUpdateRetryTimer = null;
   let initialResponseStarted = false;
   let initialResponseFallbackTimer = null;
+  let startPromise = null;
   let stopPromise = null;
+  let lifecycleState = "idle";
+  let startSequence = 0;
   let segmentRecorder = null;
   let learnerTurnNo = 0;
   let pendingOperations = new Set();
@@ -433,6 +588,54 @@ export function createRealtimeClient({
   let providerSessionBound = false;
 
   const emit = (event) => onEvent(event);
+
+  function releaseCurrentTransport() {
+    const transport = {
+      peer,
+      channels: [...dataChannels],
+      localStream,
+      remoteStreams: [...remoteStreams],
+      audioSender,
+    };
+    peer = null;
+    channel = null;
+    dataChannels = new Set();
+    localStream = null;
+    remoteStreams = new Set();
+    audioSender = null;
+    releaseRealtimeTransport(transport);
+  }
+
+  function assertCurrentStart(attempt) {
+    if (attempt === startSequence && lifecycleState === "starting") return;
+    throw createRealtimeError("WEBRTC_START_CANCELLED", "实时会话启动已取消");
+  }
+
+  function startFailureDiagnostic(error, stage, startedAt, iceResult) {
+    const code = error?.code || (isMicFailure(error)
+      ? "WEBRTC_MICROPHONE_UNAVAILABLE"
+      : {
+        microphone: "WEBRTC_MICROPHONE_UNAVAILABLE",
+        ice_gathering: "WEBRTC_ICE_GATHERING_FAILED",
+        backend_start: "WEBRTC_SIGNALING_FAILED",
+        session_websocket: "SESSION_WEBSOCKET_FAILED",
+        remote_description: "WEBRTC_REMOTE_DESCRIPTION_FAILED",
+        data_channel: "WEBRTC_DATA_CHANNEL_FAILED",
+      }[stage] || "WEBRTC_START_FAILED");
+    return {
+      code,
+      stage,
+      elapsedMs: Math.max(0, Date.now() - startedAt),
+      errorName: error?.name || "Error",
+      iceGatheringState: peer?.iceGatheringState || error?.realtimeDiagnostics?.iceGatheringState || "unknown",
+      iceConnectionState: peer?.iceConnectionState || "unknown",
+      connectionState: peer?.connectionState || "unknown",
+      signalingState: peer?.signalingState || "unknown",
+      dataChannelState: channel?.readyState || "unknown",
+      candidates: iceResult?.candidates || error?.realtimeDiagnostics?.candidates
+        || { host: 0, srflx: 0, prflx: 0, relay: 0, unknown: 0 },
+    };
+  }
 
   function setTrackEnabled() {
     const track = localStream?.getAudioTracks?.()[0];
@@ -1315,35 +1518,52 @@ export function createRealtimeClient({
     }
   }
 
-  async function start({
+  async function performStart({
     voice = DEFAULT_VOICE,
     speechSpeed = DEFAULT_SPEECH_SPEED,
     silenceDurationMs = null,
     turnDetectionType = null,
     interruptResponse = null,
-  } = {}) {
-    if (peer) return { sessionId };
+  } = {}, attempt) {
+    const startedAt = Date.now();
+    let stage = "peer_connection";
+    let iceResult = null;
     emit({ type: "local.connecting" });
 
     try {
       peer = new RTCPeerConnection({ iceServers: defaultIceServers() });
+      rtcTelemetry = createRtcTelemetryMonitor(peer, {
+        sessionId: () => sessionId,
+        model: DEFAULT_MODEL,
+      });
       peer.ontrack = (event) => {
         const stream = event.streams?.[0];
-        if (stream) onRemoteStream(stream);
+        if (stream) {
+          remoteStreams.add(stream);
+          onRemoteStream(stream);
+        }
       };
       peer.onconnectionstatechange = () => {
         emit({ type: "local.connection_state", state: peer?.connectionState });
+        rtcTelemetry?.stateChanged("connection", peer?.connectionState);
+      };
+      peer.oniceconnectionstatechange = () => {
+        rtcTelemetry?.stateChanged("ice", peer?.iceConnectionState);
       };
 
+      stage = "microphone";
       localStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
+      assertCurrentStart(attempt);
       if (customSceneId || ieltsSceneId || interviewSceneId) {
         try {
           segmentRecorder = await withTimeout(
             createPcmWavSegmentRecorder(localStream), 3_000, "录音器初始化超时");
+          assertCurrentStart(attempt);
           turnAudioCapture = createTurnAudioCaptureController(segmentRecorder);
         } catch (recorderError) {
+          if (recorderError?.code === "WEBRTC_START_CANCELLED") throw recorderError;
           segmentRecorder = null;
           turnAudioCapture = null;
           emit({ type: "local.provider_warning", message: "逐轮录音不可用，本轮评分将仅基于文本" });
@@ -1353,22 +1573,33 @@ export function createRealtimeClient({
       audioTrack.enabled = false;
       audioSender = peer.addTrack(audioTrack, localStream);
       await audioSender.replaceTrack(null);
+      assertCurrentStart(attempt);
 
       channel = peer.createDataChannel(DATA_CHANNEL_LABEL);
+      dataChannels.add(channel);
       channel.onmessage = (message) => { void handleProviderEvent(message.data); };
       peer.ondatachannel = (event) => {
         const incoming = event.channel;
+        dataChannels.add(incoming);
         incoming.onmessage = (message) => { void handleProviderEvent(message.data); };
+        incoming.addEventListener?.("close", () => dataChannels.delete(incoming), { once: true });
       };
 
+      stage = "offer";
       const offer = await peer.createOffer();
+      assertCurrentStart(attempt);
       await peer.setLocalDescription(offer);
-      await waitForIceGathering(peer);
+      assertCurrentStart(attempt);
+      stage = "ice_gathering";
+      iceResult = await waitForIceGathering(peer);
+      assertCurrentStart(attempt);
 
+      stage = "backend_start";
       const backend = await postStart({
         offerSdp: peer.localDescription?.sdp || offer.sdp || "",
         voice,
       });
+      assertCurrentStart(attempt);
       sessionId = backend.sessionId;
       providerSessionId = extractProviderSessionId(backend);
       providerSessionBound = Boolean(providerSessionId);
@@ -1406,14 +1637,23 @@ export function createRealtimeClient({
       });
       baseSessionInstructions = sessionConfig.instructions;
 
+      stage = "session_websocket";
       await connectSessionSocket();
+      assertCurrentStart(attempt);
+      stage = "remote_description";
       await peer.setRemoteDescription({ type: "answer", sdp: normalizeSdp(backend.answerSdp) });
+      assertCurrentStart(attempt);
+      stage = "data_channel";
       await waitForChannel(channel, peer);
+      assertCurrentStart(attempt);
+      rtcTelemetry?.connected();
       started = true;
       const connectedAudioTrack = localStream?.getAudioTracks?.()[0];
       if (connectedAudioTrack && audioSender?.track !== connectedAudioTrack) {
         await audioSender?.replaceTrack(connectedAudioTrack);
+        assertCurrentStart(attempt);
       }
+      lifecycleState = "active";
       setTrackEnabled();
       sendSessionUpdate();
       sessionUpdateRetryTimer = window.setTimeout(() => {
@@ -1425,17 +1665,43 @@ export function createRealtimeClient({
       emit({ type: "local.connected", sessionId, backend });
       return { sessionId, backend };
     } catch (error) {
+      const diagnostic = startFailureDiagnostic(error, stage, startedAt, iceResult);
+      releaseCurrentTransport();
       await stop({ notifyBackend: false, reason: "start_failed", emitEnded: false });
+      if (diagnostic.code === "WEBRTC_START_CANCELLED") throw error;
       const mic = isMicFailure(error);
-		const message = mic
-		  ? micFailureMessage(error) || "无法访问麦克风"
-		  : realtimeFailureMessage(error);
+      const message = mic
+        ? micFailureMessage(error) || "无法访问麦克风"
+        : realtimeFailureMessage(error);
+      console.warn("realtime.start.failed", diagnostic);
       emit({
         type: mic ? "local.mic_error" : "local.error",
         message,
+        code: diagnostic.code,
+        diagnostic,
       });
       throw mic ? error : new Error(message, { cause: error });
     }
+  }
+
+  function start(options = {}) {
+    if (lifecycleState === "active") return Promise.resolve({ sessionId });
+    if (startPromise) return startPromise;
+    if (stopPromise) {
+      return stopPromise.then(
+        () => start(options),
+        () => start(options),
+      );
+    }
+    lifecycleState = "starting";
+    const attempt = ++startSequence;
+    const operation = performStart(options, attempt);
+    const trackedOperation = operation.finally(() => {
+      if (startPromise === trackedOperation) startPromise = null;
+      if (lifecycleState === "starting") lifecycleState = peer ? "active" : "idle";
+    });
+    startPromise = trackedOperation;
+    return trackedOperation;
   }
 
   function setMuted(value) {
@@ -1546,7 +1812,8 @@ export function createRealtimeClient({
     started = false;
     inputReady = false;
     setTrackEnabled();
-    localStream?.getTracks?.().forEach((track) => track.stop());
+    rtcTelemetry?.stop(reason);
+    releaseCurrentTransport();
 
     // IELTS 的整场评分依赖逐轮发音评分已落库；结束会话前给评分请求
     // 足够时间完成，避免总评先于最后一轮 turn_evaluation 查询。
@@ -1567,8 +1834,6 @@ export function createRealtimeClient({
           : sendSessionFrame("end", null, stopTime)
       : Promise.resolve(null);
 
-    try { channel?.close?.(); } catch { /* already closed */ }
-    try { peer?.close?.(); } catch { /* already closed */ }
     let completion = null;
     let completionError = null;
     try {
@@ -1657,9 +1922,12 @@ export function createRealtimeClient({
       if (scenarioCompletionTimer) window.clearTimeout(scenarioCompletionTimer);
       if (scenarioAudioDrainTimer) window.clearTimeout(scenarioAudioDrainTimer);
       peer = null;
+      rtcTelemetry = null;
       channel = null;
+      dataChannels = new Set();
       sessionSocket = null;
       localStream = null;
+      remoteStreams = new Set();
       audioSender = null;
       sessionId = null;
       providerSessionId = null;
@@ -1695,6 +1963,7 @@ export function createRealtimeClient({
       initialResponseStarted = false;
       paused = false;
       muted = false;
+      lifecycleState = "idle";
     }
     if (completionError && (customSceneId || ieltsSceneId || interviewSceneId)) throw completionError;
     if (emitEnded) emit({ type: "local.ended", reason, completion });
@@ -1703,9 +1972,14 @@ export function createRealtimeClient({
 
   function stop(options = {}) {
     if (!stopPromise) {
-      stopPromise = performStop(options).finally(() => {
-        stopPromise = null;
+      startSequence += 1;
+      lifecycleState = "stopping";
+      const operation = performStop(options);
+      const trackedOperation = operation.finally(() => {
+        if (stopPromise === trackedOperation) stopPromise = null;
+        lifecycleState = "idle";
       });
+      stopPromise = trackedOperation;
     }
     return stopPromise;
   }
@@ -1723,6 +1997,6 @@ export function createRealtimeClient({
     waitForEvaluations,
     stop,
     setMuted,
-    isActive: () => Boolean(peer || sessionId),
+    isActive: () => lifecycleState !== "idle" || Boolean(peer || sessionId),
   };
 }

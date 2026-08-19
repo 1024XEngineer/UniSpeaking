@@ -7,6 +7,10 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { DevicePreviewFrame } from '@/components/DevicePreviewFrame';
 import { AnalyticsProvider } from '@/model/AnalyticsProvider';
 import { AppModelProvider, useAppModel } from '@/model/AppModel';
+import { TelemetryProvider } from '@/model/TelemetryProvider';
+import { initializeMobileTelemetry, wrapTelemetryRoot } from '@/infrastructure/telemetry/MobileTelemetry';
+
+initializeMobileTelemetry();
 
 function RootNavigator() {
   const { isModelReady, isAuthenticated, hasCompletedOnboarding } = useAppModel();
@@ -33,21 +37,25 @@ function RootNavigator() {
   );
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const [fontsLoaded] = useFonts(MaterialIcons.font);
 
   if (!fontsLoaded) return null;
 
   return (
     <AppModelProvider>
-      <AnalyticsProvider>
-        <StatusBar style="dark" />
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <DevicePreviewFrame>
-            <RootNavigator />
-          </DevicePreviewFrame>
-        </GestureHandlerRootView>
-      </AnalyticsProvider>
+	  <TelemetryProvider>
+		<AnalyticsProvider>
+		  <StatusBar style="dark" />
+		  <GestureHandlerRootView style={{ flex: 1 }}>
+			<DevicePreviewFrame>
+			  <RootNavigator />
+			</DevicePreviewFrame>
+		  </GestureHandlerRootView>
+		</AnalyticsProvider>
+	  </TelemetryProvider>
     </AppModelProvider>
   );
 }
+
+export default wrapTelemetryRoot(RootLayout);

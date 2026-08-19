@@ -7,15 +7,18 @@
 
 -- ===== Core accounts, scenes, learning content and evaluations =====
 -- Flyway V1: current production schema plus idempotent legacy upgrades.
-CREATE TABLE IF NOT EXISTS "user" (
+-- PostgreSQL reserves USER, so the single unquoted account table is named users.
+CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username VARCHAR(254) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
+    username VARCHAR(320) NOT NULL UNIQUE,
+    password_hash VARCHAR(1000) NOT NULL,
     nickname VARCHAR(32),
+    avatar_object_key VARCHAR(512),
     role VARCHAR(16) NOT NULL DEFAULT 'USER',
     status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
     auth_version BIGINT NOT NULL DEFAULT 0,
     last_login_at TIMESTAMPTZ,
+    email_verified_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT user_role_check CHECK (role IN ('USER', 'ADMIN')),
@@ -23,21 +26,78 @@ CREATE TABLE IF NOT EXISTS "user" (
     CONSTRAINT user_auth_version_check CHECK (auth_version >= 0)
 );
 
-ALTER TABLE "user"
-ALTER COLUMN username TYPE VARCHAR(254);
+ALTER TABLE users
+ALTER COLUMN username TYPE VARCHAR(320);
 
-ALTER TABLE "user"
+ALTER TABLE users
 ADD COLUMN IF NOT EXISTS avatar_object_key VARCHAR(512);
 
-ALTER TABLE "user"
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+
+ALTER TABLE users
 DROP CONSTRAINT IF EXISTS user_avatar_object_key_check;
 
-ALTER TABLE "user"
+ALTER TABLE users
 ADD CONSTRAINT user_avatar_object_key_check
 CHECK (avatar_object_key IS NULL OR BTRIM(avatar_object_key) <> '');
 
-COMMENT ON COLUMN "user".avatar_object_key IS
+CREATE UNIQUE INDEX IF NOT EXISTS users_username_ci_uq
+ON users (LOWER(username));
+
+COMMENT ON COLUMN users.avatar_object_key IS
 '用户头像在对象存储中的对象 Key；不保存签名 URL、Bucket 密钥或完整访问地址';
+
+-- A schema baselined from an older installation can still contain the quoted
+-- legacy table. Copy it once, then remove it so all later DDL targets users.
+DO $migration$
+BEGIN
+    IF to_regclass('"user"') IS NOT NULL THEN
+        IF EXISTS (
+            SELECT 1
+            FROM users current_user_row
+            JOIN "user" legacy_user
+              ON LOWER(current_user_row.username) = LOWER(legacy_user.username)
+             AND current_user_row.id <> legacy_user.id
+        ) THEN
+            RAISE EXCEPTION 'Cannot merge legacy user table: one username belongs to different user IDs';
+        END IF;
+
+        INSERT INTO users (
+            id, username, password_hash, nickname, avatar_object_key, role, status,
+            auth_version, last_login_at, email_verified_at, created_at, updated_at
+        )
+        SELECT
+            legacy_user.id,
+            legacy_user.username,
+            legacy_user.password_hash,
+            NULLIF(to_jsonb(legacy_user)->>'nickname', ''),
+            NULLIF(to_jsonb(legacy_user)->>'avatar_object_key', ''),
+            COALESCE(NULLIF(to_jsonb(legacy_user)->>'role', ''), 'USER'),
+            COALESCE(NULLIF(to_jsonb(legacy_user)->>'status', ''), 'ACTIVE'),
+            COALESCE((to_jsonb(legacy_user)->>'auth_version')::BIGINT, 0),
+            (to_jsonb(legacy_user)->>'last_login_at')::TIMESTAMPTZ,
+            (to_jsonb(legacy_user)->>'email_verified_at')::TIMESTAMPTZ,
+            COALESCE((to_jsonb(legacy_user)->>'created_at')::TIMESTAMPTZ, CURRENT_TIMESTAMP),
+            COALESCE((to_jsonb(legacy_user)->>'updated_at')::TIMESTAMPTZ, CURRENT_TIMESTAMP)
+        FROM "user" legacy_user
+        ON CONFLICT (id) DO UPDATE SET
+            username = EXCLUDED.username,
+            password_hash = EXCLUDED.password_hash,
+            nickname = COALESCE(EXCLUDED.nickname, users.nickname),
+            avatar_object_key = COALESCE(EXCLUDED.avatar_object_key, users.avatar_object_key),
+            role = EXCLUDED.role,
+            status = EXCLUDED.status,
+            auth_version = GREATEST(users.auth_version, EXCLUDED.auth_version),
+            last_login_at = COALESCE(EXCLUDED.last_login_at, users.last_login_at),
+            email_verified_at = COALESCE(users.email_verified_at, EXCLUDED.email_verified_at),
+            created_at = LEAST(users.created_at, EXCLUDED.created_at),
+            updated_at = GREATEST(users.updated_at, EXCLUDED.updated_at);
+
+        DROP TABLE "user";
+    END IF;
+END
+$migration$;
 
 CREATE TABLE IF NOT EXISTS user_preference (
     user_id UUID PRIMARY KEY,
@@ -113,7 +173,7 @@ COMMENT ON TABLE scene IS
 '用户创建的自定义场景定义；学习内容和练习结果由其他业务实体保存';
 
 COMMENT ON COLUMN scene.user_id IS
-'逻辑关联 user.id，不设置数据库外键';
+'逻辑关联 users.id，不设置数据库外键';
 
 COMMENT ON COLUMN scene.success_factor IS
 '状态机用于判断场景是否成功完成的 JSON 条件对象';
@@ -701,7 +761,7 @@ COMMENT ON TABLE practice_session IS
 '全场景练习会话事实；学习时长由 started_at 与 ended_at 计算，不保存聚合统计值';
 
 COMMENT ON COLUMN practice_session.user_id IS
-'逻辑关联 user.id，不设置数据库外键';
+'逻辑关联 users.id，不设置数据库外键';
 
 COMMENT ON COLUMN practice_session.scene_id IS
 '场景业务 ID；自由对话和后续无需持久化场景定义的类型也允许记录';
@@ -1571,7 +1631,7 @@ COMMENT ON TABLE user_ielts IS
 '用户 IELTS 配置及当日训练次数；today_completed_count 达到 5 后禁止创建新的 IELTS 练习';
 
 COMMENT ON COLUMN user_ielts.user_id IS
-'逻辑关联 user.id，不设置数据库外键';
+'逻辑关联 users.id，不设置数据库外键';
 
 COMMENT ON COLUMN user_ielts.target_score IS
 '用户目标 IELTS Speaking Band，取值 0 至 9';
@@ -1638,7 +1698,7 @@ COMMENT ON COLUMN ielts.ielts_id IS
 '生成后的 IELTS 场景 ID；practice_session 通过 scene_id 关联该记录，会话使用独立的 session_id';
 
 COMMENT ON COLUMN ielts.user_id IS
-'练习所属用户，逻辑关联 user.id，不设置数据库外键';
+'练习所属用户，逻辑关联 users.id，不设置数据库外键';
 
 COMMENT ON COLUMN ielts.mode IS
 '训练模式：PART_PRACTICE 为单 Part 练习，MOCK_TEST 为完整模考';
@@ -3620,7 +3680,7 @@ COMMENT ON TABLE user_achievement_unlock IS
 '用户已解锁的成就节点及中央达成弹窗展示确认状态';
 
 COMMENT ON COLUMN user_achievement_unlock.user_id IS
-'逻辑关联 user.id，不设置数据库外键';
+'逻辑关联 users.id，不设置数据库外键';
 
 COMMENT ON COLUMN user_achievement_unlock.achievement_id IS
 '服务端成就目录中的稳定节点 ID，例如 conversation-1';
@@ -3642,7 +3702,7 @@ COMMENT ON TABLE user_achievement_state IS
 '用户成就系统首次历史初始化状态';
 
 COMMENT ON COLUMN user_achievement_state.user_id IS
-'逻辑关联 user.id，不设置数据库外键';
+'逻辑关联 users.id，不设置数据库外键';
 
 COMMENT ON COLUMN user_achievement_state.initialized_at IS
 '首次完成历史成就静默初始化的时间';
@@ -3697,7 +3757,7 @@ COMMENT ON TABLE user_feedback IS
 '帮助中心用户反馈、处理状态及工作人员回复';
 
 COMMENT ON COLUMN user_feedback.user_id IS
-'登录用户的逻辑关联 user.id；匿名反馈为空，不设置数据库外键';
+'登录用户的逻辑关联 users.id；匿名反馈为空，不设置数据库外键';
 
 COMMENT ON COLUMN user_feedback.lookup_code_hash IS
 '匿名查询码的 SHA-256 摘要，不保存查询码明文';
@@ -4163,37 +4223,113 @@ CREATE INDEX IF NOT EXISTS idx_session_message_audio_url
 ALTER TABLE practice_session DROP CONSTRAINT IF EXISTS practice_session_scene_type_check;
 ALTER TABLE practice_session ADD CONSTRAINT practice_session_scene_type_check
     CHECK (scene_type IN ('FREE_CHAT', 'CUSTOM_SCENE', 'IELTS_SCENE', 'INTERVIEW_SCENE'));
-ALTER TABLE "user" ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
-CREATE TABLE IF NOT EXISTS app_users (
-    id UUID PRIMARY KEY, email VARCHAR(320) NOT NULL UNIQUE,
-    password_hash VARCHAR(1000) NOT NULL, created_at TIMESTAMPTZ NOT NULL,
-    email_verified_at TIMESTAMPTZ
-);
-INSERT INTO app_users (id, email, password_hash, created_at, email_verified_at)
-SELECT id, username, password_hash, created_at, email_verified_at FROM "user"
-WHERE position('@' IN username) > 1
-ON CONFLICT (id) DO UPDATE SET email = excluded.email, password_hash = excluded.password_hash,
-    email_verified_at = coalesce(app_users.email_verified_at, excluded.email_verified_at);
+
+-- Merge the former email-auth projection when baselining a legacy schema.
+-- IDs and case-insensitive usernames must agree; ambiguous identities are not
+-- merged automatically because doing so could attach one user's data to another.
+DO $migration$
+BEGIN
+    IF to_regclass('app_users') IS NOT NULL THEN
+        IF EXISTS (
+            SELECT LOWER(email)
+            FROM app_users
+            GROUP BY LOWER(email)
+            HAVING COUNT(DISTINCT id) > 1
+        ) THEN
+            RAISE EXCEPTION 'Cannot merge app_users: duplicate case-insensitive emails have different IDs';
+        END IF;
+
+        IF EXISTS (
+            SELECT 1
+            FROM users unified_user
+            JOIN app_users legacy_identity
+              ON LOWER(unified_user.username) = LOWER(legacy_identity.email)
+             AND unified_user.id <> legacy_identity.id
+        ) OR EXISTS (
+            SELECT 1
+            FROM users unified_user
+            JOIN app_users legacy_identity ON unified_user.id = legacy_identity.id
+            WHERE LOWER(unified_user.username) <> LOWER(legacy_identity.email)
+        ) THEN
+            RAISE EXCEPTION 'Cannot merge app_users: username/email and user ID mappings disagree';
+        END IF;
+
+        INSERT INTO users (
+            id, username, password_hash, role, status, auth_version,
+            email_verified_at, created_at, updated_at
+        )
+        SELECT
+            legacy_identity.id,
+            legacy_identity.email,
+            legacy_identity.password_hash,
+            'USER',
+            'ACTIVE',
+            0,
+            (to_jsonb(legacy_identity)->>'email_verified_at')::TIMESTAMPTZ,
+            legacy_identity.created_at,
+            legacy_identity.created_at
+        FROM app_users legacy_identity
+        WHERE NOT EXISTS (SELECT 1 FROM users unified_user WHERE unified_user.id = legacy_identity.id)
+        ON CONFLICT (username) DO NOTHING;
+
+        UPDATE users unified_user
+        SET email_verified_at = COALESCE(
+                unified_user.email_verified_at,
+                (to_jsonb(legacy_identity)->>'email_verified_at')::TIMESTAMPTZ)
+        FROM app_users legacy_identity
+        WHERE unified_user.id = legacy_identity.id;
+    END IF;
+END
+$migration$;
+
 CREATE TABLE IF NOT EXISTS auth_email_challenges (
     id UUID PRIMARY KEY, email VARCHAR(320) NOT NULL, code_digest BYTEA NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL, consumed_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_auth_email_challenges_email_created ON auth_email_challenges (email, created_at DESC);
 CREATE TABLE IF NOT EXISTS user_sessions (
-    token_digest VARCHAR(128) PRIMARY KEY, user_id UUID NOT NULL REFERENCES app_users(id),
+    token_digest VARCHAR(128) PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL, last_seen_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE TABLE IF NOT EXISTS user_entitlements (
-    user_id UUID PRIMARY KEY REFERENCES app_users(id), plan_code VARCHAR(64) NOT NULL DEFAULT 'free',
+    user_id UUID PRIMARY KEY REFERENCES users(id), plan_code VARCHAR(64) NOT NULL DEFAULT 'free',
     plan_name VARCHAR(128) NOT NULL DEFAULT 'Free', quota_date DATE NOT NULL DEFAULT current_date,
     quota_seconds NUMERIC(12,3) NOT NULL DEFAULT 600, used_seconds NUMERIC(12,3) NOT NULL DEFAULT 0,
     status VARCHAR(32) NOT NULL DEFAULT 'active', updated_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
 );
 INSERT INTO user_entitlements (user_id, plan_code, plan_name, quota_date, quota_seconds, used_seconds, status, updated_at)
-SELECT id, 'free', 'Free', current_date, 600, 0, 'active', current_timestamp FROM app_users
+SELECT id, 'free', 'Free', current_date, 600, 0, 'active', current_timestamp FROM users
 ON CONFLICT (user_id) DO NOTHING;
+
+-- Existing user session/entitlement foreign keys may still point at the
+-- projection table. Recreate those constraints against the unified table.
+DO $migration$
+DECLARE
+    legacy_fk RECORD;
+BEGIN
+    IF to_regclass('app_users') IS NOT NULL THEN
+        FOR legacy_fk IN
+            SELECT conrelid::REGCLASS AS table_name, conname
+            FROM pg_constraint
+            WHERE contype = 'f'
+              AND confrelid = to_regclass('app_users')
+        LOOP
+            EXECUTE FORMAT('ALTER TABLE %s DROP CONSTRAINT %I', legacy_fk.table_name, legacy_fk.conname);
+        END LOOP;
+
+        DROP TABLE app_users;
+    END IF;
+END
+$migration$;
+
+ALTER TABLE user_sessions DROP CONSTRAINT IF EXISTS user_sessions_user_id_fkey;
+ALTER TABLE user_sessions
+ADD CONSTRAINT user_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE user_entitlements DROP CONSTRAINT IF EXISTS user_entitlements_user_id_fkey;
+ALTER TABLE user_entitlements
+ADD CONSTRAINT user_entitlements_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
 CREATE TABLE IF NOT EXISTS admin_accounts (
     id UUID PRIMARY KEY, login VARCHAR(320) NOT NULL UNIQUE, password_hash VARCHAR(1000) NOT NULL,
     role VARCHAR(64) NOT NULL, enabled BOOLEAN NOT NULL, created_at TIMESTAMPTZ NOT NULL
@@ -4259,3 +4395,126 @@ CREATE TABLE IF NOT EXISTS interview_report (
 );
 CREATE INDEX IF NOT EXISTS idx_interview_report_status_updated ON interview_report (updated_at) WHERE status = 'PROCESSING';
 CREATE INDEX IF NOT EXISTS idx_interview_report_scene_created ON interview_report (scene_id, created_at DESC);
+
+-- ===== Dynamic AI providers, routing, pricing and per-attempt usage =====
+CREATE TABLE IF NOT EXISTS ai_providers (
+    provider_id VARCHAR(64) PRIMARY KEY,
+    display_name VARCHAR(128) NOT NULL,
+    adapter_type VARCHAR(64) NOT NULL,
+    base_url VARCHAR(1000),
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    connect_timeout_ms INTEGER NOT NULL DEFAULT 10000,
+    read_timeout_ms INTEGER NOT NULL DEFAULT 60000,
+    config_version BIGINT NOT NULL DEFAULT 1,
+    secret_ciphertext TEXT,
+    secret_fingerprint VARCHAR(32),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ai_provider_id_check CHECK (provider_id ~ '^[a-z0-9][a-z0-9_-]*$'),
+    CONSTRAINT ai_provider_timeouts_check CHECK (connect_timeout_ms > 0 AND read_timeout_ms > 0),
+    CONSTRAINT ai_provider_secret_check CHECK (
+        (secret_ciphertext IS NULL AND secret_fingerprint IS NULL)
+        OR (secret_ciphertext IS NOT NULL AND secret_fingerprint IS NOT NULL))
+);
+
+CREATE TABLE IF NOT EXISTS ai_models (
+    model_id VARCHAR(128) PRIMARY KEY,
+    provider_id VARCHAR(64) NOT NULL REFERENCES ai_providers(provider_id),
+    display_name VARCHAR(128) NOT NULL,
+    capability VARCHAR(32) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    route_priority INTEGER,
+    billing_unit VARCHAR(32) NOT NULL DEFAULT 'TOKENS',
+    input_price_per_million NUMERIC(20,8) NOT NULL DEFAULT 0,
+    output_price_per_million NUMERIC(20,8) NOT NULL DEFAULT 0,
+    character_price_per_million NUMERIC(20,8) NOT NULL DEFAULT 0,
+    audio_input_price_per_minute NUMERIC(20,8) NOT NULL DEFAULT 0,
+    audio_output_price_per_minute NUMERIC(20,8) NOT NULL DEFAULT 0,
+    request_price_per_call NUMERIC(20,8) NOT NULL DEFAULT 0,
+    price_currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ai_model_capability_check CHECK (capability IN ('REALTIME','LLM','SCORING','TTS','TRANSCRIPTION')),
+    CONSTRAINT ai_model_billing_unit_check CHECK (billing_unit IN ('TOKENS','AUDIO_MINUTES','CHARACTERS','REQUESTS','MIXED')),
+    CONSTRAINT ai_model_route_priority_check CHECK (route_priority IS NULL OR route_priority >= 0),
+    CONSTRAINT ai_model_route_priority_unique UNIQUE (capability, route_priority),
+    CONSTRAINT ai_model_prices_check CHECK (
+        input_price_per_million >= 0 AND output_price_per_million >= 0 AND character_price_per_million >= 0
+        AND audio_input_price_per_minute >= 0 AND audio_output_price_per_minute >= 0
+        AND request_price_per_call >= 0)
+);
+ALTER TABLE ai_models ADD COLUMN IF NOT EXISTS request_price_per_call NUMERIC(20,8) NOT NULL DEFAULT 0;
+ALTER TABLE ai_models DROP CONSTRAINT IF EXISTS ai_model_prices_check;
+ALTER TABLE ai_models ADD CONSTRAINT ai_model_prices_check CHECK (
+    input_price_per_million >= 0 AND output_price_per_million >= 0 AND character_price_per_million >= 0
+    AND audio_input_price_per_minute >= 0 AND audio_output_price_per_minute >= 0
+    AND request_price_per_call >= 0);
+CREATE INDEX IF NOT EXISTS idx_ai_models_provider ON ai_models(provider_id, capability, enabled);
+CREATE INDEX IF NOT EXISTS idx_ai_models_route ON ai_models(capability, route_priority)
+    WHERE route_priority IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS ai_model_invocations (
+    invocation_id UUID PRIMARY KEY,
+    logical_request_id UUID NOT NULL,
+    attempt_no INTEGER NOT NULL,
+    user_id UUID,
+    session_id VARCHAR(64),
+    business_scene VARCHAR(64) NOT NULL DEFAULT 'unspecified',
+    route_key VARCHAR(64) NOT NULL DEFAULT 'default',
+    capability VARCHAR(32) NOT NULL,
+    provider_id VARCHAR(64) NOT NULL,
+    model_id VARCHAR(128) NOT NULL,
+    provider_request_id VARCHAR(256),
+    started_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ NOT NULL,
+    duration_ms BIGINT NOT NULL,
+    first_token_latency_ms BIGINT,
+    input_tokens BIGINT NOT NULL DEFAULT 0,
+    output_tokens BIGINT NOT NULL DEFAULT 0,
+    total_tokens BIGINT NOT NULL DEFAULT 0,
+    input_characters BIGINT NOT NULL DEFAULT 0,
+    output_characters BIGINT NOT NULL DEFAULT 0,
+    audio_input_seconds NUMERIC(16,3) NOT NULL DEFAULT 0,
+    audio_output_seconds NUMERIC(16,3) NOT NULL DEFAULT 0,
+    usage_source VARCHAR(16) NOT NULL DEFAULT 'ESTIMATED',
+    status VARCHAR(16) NOT NULL,
+    error_code VARCHAR(128),
+    retryable BOOLEAN NOT NULL DEFAULT FALSE,
+    fallback_from_model_id VARCHAR(128),
+    estimated_cost NUMERIC(20,8) NOT NULL DEFAULT 0,
+    price_currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
+    pricing_snapshot JSONB NOT NULL DEFAULT '{}'::JSONB,
+    CONSTRAINT ai_invocation_attempt_check CHECK (attempt_no > 0),
+    CONSTRAINT ai_invocation_duration_check CHECK (duration_ms >= 0),
+    CONSTRAINT ai_invocation_status_check CHECK (status IN ('SUCCEEDED','FAILED')),
+    CONSTRAINT ai_invocation_usage_source_check CHECK (usage_source IN ('PROVIDER','ESTIMATED','OFFICIAL','NONE'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_invocation_attempt ON ai_model_invocations(logical_request_id, attempt_no);
+CREATE INDEX IF NOT EXISTS idx_ai_invocation_user_time ON ai_model_invocations(user_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_invocation_model_time ON ai_model_invocations(model_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_invocation_session ON ai_model_invocations(session_id, started_at DESC);
+
+INSERT INTO ai_providers (provider_id, display_name, adapter_type) VALUES
+    ('qwen', '通义千问', 'qwen'), ('deepseek', 'DeepSeek', 'deepseek'),
+    ('qiniu', '七牛云 RTI', 'qiniu'), ('iflytek', '讯飞开放平台', 'iflytek'),
+    ('aliyun', '阿里云语音', 'aliyun'), ('minimax', 'MiniMax', 'minimax'),
+    ('doubao', '豆包语音', 'doubao')
+ON CONFLICT (provider_id) DO NOTHING;
+
+-- Pricing snapshot updated 2026-08-18. DeepSeek uses the conservative peak rate;
+-- Qiniu Realtime Plus uses the referenced underlying Alibaba model rate until official Qiniu pricing is available.
+INSERT INTO ai_models (
+    model_id, provider_id, display_name, capability, route_priority, billing_unit,
+    input_price_per_million, output_price_per_million, character_price_per_million,
+    audio_input_price_per_minute, audio_output_price_per_minute, request_price_per_call) VALUES
+    ('qwen3.5-omni-flash-realtime', 'qwen', 'Qwen Realtime Flash', 'REALTIME', 20, 'MIXED', 3.3, 20, 0, 0.01134, 0.08025, 0),
+    ('qwen3.5-omni-plus-realtime', 'qiniu', 'Qiniu Qwen Realtime Plus', 'REALTIME', 10, 'AUDIO_MINUTES', 0, 0, 0, 0.0336, 0.225, 0),
+    ('qwen3.5-plus', 'qwen', 'Qwen 3.5 Plus', 'LLM', 10, 'TOKENS', 0.8, 4.8, 0, 0, 0, 0),
+    ('deepseek-v4-flash', 'deepseek', 'DeepSeek V4 Flash', 'LLM', 20, 'TOKENS', 3, 9, 0, 0, 0, 0),
+    ('qwen3-asr-flash', 'qwen', 'Qwen ASR Flash', 'TRANSCRIPTION', 10, 'AUDIO_MINUTES', 0, 0, 0, 0.0132, 0, 0),
+    ('volc.bigasr.auc_turbo', 'doubao', 'Doubao BigASR Turbo', 'TRANSCRIPTION', 20, 'AUDIO_MINUTES', 0, 0, 0, 0.075, 0, 0),
+    ('iflytek-suntone', 'iflytek', 'Iflytek Suntone', 'SCORING', 10, 'REQUESTS', 0, 0, 0, 0, 0, 0.005),
+    ('qwen3-tts-flash', 'qwen', 'Qwen TTS Flash', 'TTS', 10, 'CHARACTERS', 0, 0, 80, 0, 0, 0),
+    ('cosyvoice-v3-flash', 'aliyun', 'CosyVoice V3 Flash', 'TTS', 20, 'CHARACTERS', 0, 0, 100, 0, 0, 0),
+    ('speech-2.8-hd', 'minimax', 'MiniMax Speech 2.8 HD', 'TTS', 30, 'CHARACTERS', 0, 0, 350, 0, 0, 0)
+ON CONFLICT (model_id) DO NOTHING;

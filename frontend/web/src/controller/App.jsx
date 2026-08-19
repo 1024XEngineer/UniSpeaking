@@ -176,8 +176,8 @@ async function buildSceneDisplaySummary(scene) {
   return { title, background, aiRole, userRole, learningGoal };
 }
 
-function cachedPronunciationAudio(sceneId, text) {
-  const key = `${sceneId}:${text}`;
+function cachedPronunciationAudio(sceneId, text, voice = "") {
+  const key = `${sceneId}:${voice}:${text}`;
   if (!pronunciationAudioCache.has(key)) {
     if (pronunciationAudioCache.size >= maxPronunciationAudioCacheEntries) {
       pronunciationAudioCache.delete(pronunciationAudioCache.keys().next().value);
@@ -193,14 +193,14 @@ function cachedPronunciationAudio(sceneId, text) {
   return pronunciationAudioCache.get(key);
 }
 
-function prefetchPronunciationAudio(sceneId, items, limit = 2) {
+function prefetchPronunciationAudio(sceneId, items, limit = 2, voice = "") {
   if (!sceneId || !Array.isArray(items) || limit <= 0) return;
   items
     .map((item) => String(item?.englishText || item?.en || "").trim())
     .filter(Boolean)
     .slice(0, limit)
     .forEach((text) => {
-      void cachedPronunciationAudio(sceneId, text).catch(() => undefined);
+      void cachedPronunciationAudio(sceneId, text, voice).catch(() => undefined);
     });
 }
 
@@ -355,7 +355,7 @@ function useTeacherPreviewPlayback() {
   return { failedId, playTeacher, playingId };
 }
 
-function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
+function PronunciationAudioButton({ sceneId, text, voice = "", label = "播放发音" }) {
   const audioRef = useRef(null);
   const objectUrlRef = useRef("");
   const [loading, setLoading] = useState(false);
@@ -376,13 +376,13 @@ function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = "";
     };
-  }, [sceneId, text]);
+  }, [sceneId, text, voice]);
 
   const replay = () => {
     const audio = audioRef.current;
     if (!audio) {
       setLoading(true);
-      cachedPronunciationAudio(sceneId, text)
+      cachedPronunciationAudio(sceneId, text, voice)
         .then((blob) => {
           const objectUrl = URL.createObjectURL(blob);
           const nextAudio = new Audio(objectUrl);
@@ -412,8 +412,8 @@ function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
   );
 }
 
-function ScenePlaybackToggle({ sceneId, text, label = "播放发音" }) {
-  return <PronunciationAudioButton sceneId={sceneId} text={text} label={label} />;
+function ScenePlaybackToggle({ sceneId, text, voice = "", label = "播放发音" }) {
+  return <PronunciationAudioButton sceneId={sceneId} text={text} voice={voice} label={label} />;
 }
 
 function MicrophoneToggle({ label = "麦克风", className, onActivate }) {
@@ -1097,6 +1097,8 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   const clientRef = useRef(null);
   const sessionIdRef = useRef("");
   const clientGenerationRef = useRef(0);
+  const startPromiseRef = useRef(null);
+  const stopPromiseRef = useRef(null);
   const freeChatAnalyticsRef = useRef(null);
   const remoteAudioRef = useRef(null);
   const { transcriptRef, handleTranscriptScroll } = useTranscriptAutoFollow({
@@ -1104,6 +1106,12 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     lines,
     translated,
   });
+  const detachRemoteAudio = () => {
+    const audio = remoteAudioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.srcObject = null;
+  };
   const toggleTranslation = async (index) => {
     const line = lines[index];
     if (!line) return;
@@ -1241,8 +1249,10 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       return;
     }
     if (event.type === "local.ended") {
+      if (stopPromiseRef.current) return;
       freeChatAnalyticsRef.current?.complete();
       const completedSessionId = sessionIdRef.current;
+      detachRemoteAudio();
       setInCall(false);
       setSubtitles(false);
       setPaused(false);
@@ -1250,6 +1260,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       setCallStatus("准备开始");
       clientRef.current = null;
       sessionIdRef.current = "";
+      clientGenerationRef.current += 1;
       onSessionEnded?.(completedSessionId);
       return;
     }
@@ -1290,36 +1301,46 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   };
 
   const startConversation = async () => {
-    freeChatAnalyticsRef.current = analytics.training({ mode: "FREE_CHAT", pageCode: "conversation" });
-    freeChatAnalyticsRef.current.attempt();
-    await onBeforeStart?.();
-    setInCall(true);
-    setPaused(false);
-    setSubtitles(true);
-    setLines([]);
-    setTranslated([]);
-    setCallError("");
-    setCallState("connecting");
-    setCallStatus("正在请求麦克风");
-    const client = getClient();
-    const startGeneration = clientGenerationRef.current;
-    try {
-      const startedSession = await client.start({
-        voice: teacher.voiceId,
-        speechSpeed: speedCodeByLabel[speed] || "NATURAL",
-      });
-      if (clientRef.current !== client || clientGenerationRef.current !== startGeneration) return;
-      if (startedSession?.sessionId) {
-        freeChatAnalyticsRef.current.started();
-        sessionIdRef.current = startedSession.sessionId;
-        onSessionStarted?.(startedSession.sessionId);
+    if (startPromiseRef.current || stopPromiseRef.current) return;
+    let operation;
+    operation = (async () => {
+      freeChatAnalyticsRef.current = analytics.training({ mode: "FREE_CHAT", pageCode: "conversation" });
+      freeChatAnalyticsRef.current.attempt();
+      await onBeforeStart?.();
+      setInCall(true);
+      setPaused(false);
+      setSubtitles(true);
+      setLines([]);
+      setTranslated([]);
+      setCallError("");
+      setCallState("connecting");
+      setCallStatus("正在请求麦克风");
+      const client = getClient();
+      const startGeneration = clientGenerationRef.current;
+      try {
+        const startedSession = await client.start({
+          voice: teacher.voiceId,
+          speechSpeed: speedCodeByLabel[speed] || "NATURAL",
+        });
+        if (clientRef.current !== client || clientGenerationRef.current !== startGeneration) return;
+        if (startedSession?.sessionId) {
+          freeChatAnalyticsRef.current.started();
+          sessionIdRef.current = startedSession.sessionId;
+          onSessionStarted?.(startedSession.sessionId);
+        }
+      } catch (error) {
+        if (clientRef.current !== client) return;
+        freeChatAnalyticsRef.current.fail("REALTIME_ERROR");
+        setCallState("error");
+        setCallError(realtimeFailureMessage(error));
+        setCallStatus("连接失败");
       }
-    } catch (error) {
-      if (clientRef.current !== client) return;
-      freeChatAnalyticsRef.current.fail("REALTIME_ERROR");
-      setCallState("error");
-      setCallError(realtimeFailureMessage(error));
-      setCallStatus("连接失败");
+    })();
+    startPromiseRef.current = operation;
+    try {
+      await operation;
+    } finally {
+      if (startPromiseRef.current === operation) startPromiseRef.current = null;
     }
   };
 
@@ -1339,19 +1360,33 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
   };
 
   const stopConversation = async () => {
+    if (stopPromiseRef.current) return stopPromiseRef.current;
     const client = clientRef.current;
     const completedSessionId = sessionIdRef.current;
-    clientRef.current = null;
-    sessionIdRef.current = "";
-    clientGenerationRef.current += 1;
-    setInCall(false);
-    setSubtitles(false);
-    setPaused(false);
-    setCallState("idle");
-    setCallStatus("准备开始");
-    await client?.stop({ reason: "user_stop" });
-    freeChatAnalyticsRef.current?.complete();
-    onSessionEnded?.(completedSessionId);
+    setCallState("ending");
+    setCallStatus("正在结束对话");
+    setPaused(true);
+    detachRemoteAudio();
+    let operation;
+    operation = (async () => {
+      await client?.stop({ reason: "user_stop" });
+      if (clientRef.current === client) clientRef.current = null;
+      sessionIdRef.current = "";
+      clientGenerationRef.current += 1;
+      setInCall(false);
+      setSubtitles(false);
+      setPaused(false);
+      setCallState("idle");
+      setCallStatus("准备开始");
+      freeChatAnalyticsRef.current?.complete();
+      onSessionEnded?.(completedSessionId);
+    })();
+    stopPromiseRef.current = operation;
+    try {
+      await operation;
+    } finally {
+      if (stopPromiseRef.current === operation) stopPromiseRef.current = null;
+    }
   };
 
   useEffect(() => {
@@ -1361,6 +1396,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     return () => {
       document.removeEventListener("visibilitychange", syncVisibility);
       freeChatAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
+      detachRemoteAudio();
       const client = clientRef.current;
       clientRef.current = null;
       clientGenerationRef.current += 1;
@@ -1399,7 +1435,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
         {subtitles && <CallTranscript lines={lines} translated={translated} onToggleTranslation={toggleTranslation} transcriptRef={transcriptRef} onScroll={handleTranscriptScroll} emptyStatus={callStatus} />}
         {callError && <p className="call-error">{callError}</p>}
       </section>
-      <CallControls paused={paused} onToggleMicrophone={togglePaused} onEnd={stopConversation} disabled={callState === "ended"} subtitles={subtitles} onToggleSubtitles={() => setSubtitles(!subtitles)} />
+      <CallControls paused={paused} onToggleMicrophone={togglePaused} onEnd={stopConversation} disabled={callState === "ending" || callState === "ended"} subtitles={subtitles} onToggleSubtitles={() => setSubtitles(!subtitles)} />
     </main>
   );
 }
@@ -1415,7 +1451,7 @@ function sceneCategoryForLabel(label) {
   return Object.entries(sceneCategories).find(([, value]) => value.label === label)?.[0] || "other";
 }
 
-function Scenes({ onStartTraining, onIelts, onInterview }) {
+function Scenes({ onStartTraining, onIelts, onInterview, teacher }) {
   const [prompt, setPrompt] = useState("");
   const promptRef = useRef(null);
   const previewSceneIdRef = useRef("");
@@ -1429,6 +1465,7 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
     setPrompt(event.currentTarget.value.slice(0, 200));
   };
   const generating = generationSource !== null;
+  const promptLocked = generating || Boolean(preview);
   const generate = async (requestedInput, recommendationId = null) => {
     const fromRecommendation = typeof requestedInput === "string";
     const currentInput = fromRecommendation
@@ -1444,7 +1481,7 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
       previewSceneIdRef.current = scene.sceneId;
       setPreview(scene);
       setPreviewDisplay(null);
-      prefetchPronunciationAudio(scene.sceneId, scene.wordList, 2);
+      prefetchPronunciationAudio(scene.sceneId, scene.wordList, 2, teacher?.voiceId);
       void buildSceneDisplaySummary(scene).then((display) => {
         if (previewSceneIdRef.current === scene.sceneId) setPreviewDisplay(display);
       });
@@ -1479,9 +1516,9 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
             <div><p className="eyebrow">CREATE YOUR OWN</p><h2>创建专属场景</h2><p>用一句话描述你想练习的真实情境，AI 会为你整理角色、目标与表达任务。</p></div>
           </div>
           <div className={cx("scene-input", prompt.trim() && "has-content")}>
-            <textarea ref={promptRef} value={prompt} maxLength={200} onChange={syncPrompt} onInput={syncPrompt} onCompositionEnd={syncPrompt} placeholder="你今天想练习什么？例如：第一次去健身房，咨询设施、开放时间和会员体验" />
+            <textarea ref={promptRef} value={prompt} maxLength={200} readOnly={promptLocked} onChange={syncPrompt} onInput={syncPrompt} onCompositionEnd={syncPrompt} placeholder="你今天想练习什么？例如：第一次去健身房，咨询设施、开放时间和会员体验" />
             <div className="scene-input__footer">
-              <div className="example-chips"><small>快速开始</small>{examples.map((example) => <button key={example} onClick={() => setPrompt(example)}>{example}</button>)}</div>
+              <div className="example-chips"><small>快速开始</small>{examples.map((example) => <button key={example} disabled={promptLocked} onClick={() => setPrompt(example)}>{example}</button>)}</div>
               <div className="scene-input__controls"><span>{prompt.length}/200</span><ExpandingCta className={cx("scene-generate", generationSource === "manual" && "is-generating")} disabled={!prompt.trim() || generating} onClick={() => void generate()}><span className="generation-button-state notranslate" translate="no"><span className={cx("generation-button-state__idle", generationSource === "manual" && "is-hidden")}>生成练习场景</span><span className={cx("generation-button-state__loading", generationSource !== "manual" && "is-hidden")}><NewtonsCradle size={22} className="newtons-cradle--inline" label="正在生成练习场景" /><span>正在生成</span></span></span></ExpandingCta></div>
             </div>
             {generationError && <p className="scene-generation-error" role="alert">{generationError}</p>}
@@ -1671,6 +1708,12 @@ function CustomSceneConversation({
     lines,
     translated,
   });
+  const detachSceneRemoteAudio = () => {
+    const audio = remoteAudioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.srcObject = null;
+  };
 
   const updateLine = ({ id, who, text = "", delta = "", final = false }) => {
     const content = String(text || delta || "");
@@ -1753,6 +1796,7 @@ function CustomSceneConversation({
       setEnding(true);
     } else if (event.type === "local.ended" && event.reason === "state_machine") {
       sceneAnalyticsRef.current?.complete();
+      detachSceneRemoteAudio();
       clientRef.current = null;
       onComplete(
         true,
@@ -1761,6 +1805,7 @@ function CustomSceneConversation({
       );
     } else if (event.type === "local.scenario_completion_error") {
       sceneAnalyticsRef.current?.complete();
+      detachSceneRemoteAudio();
       clientRef.current = null;
       setError(event.message || "场景自动结束失败");
       onComplete(true, null, sessionIdRef.current);
@@ -1781,8 +1826,7 @@ function CustomSceneConversation({
     if (ended) {
       setEnding(true);
       setStatus("模拟对话已结束");
-      remoteAudioRef.current?.pause();
-      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+      detachSceneRemoteAudio();
       return undefined;
     }
     let cancelled = false;
@@ -1819,6 +1863,7 @@ function CustomSceneConversation({
       cancelled = true;
       document.removeEventListener("visibilitychange", syncVisibility);
       sceneAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
+      detachSceneRemoteAudio();
       clientRef.current = null;
       void client.stop({ notifyBackend: false, reason: "component_unmount", emitEnded: false });
     };
@@ -1841,6 +1886,7 @@ function CustomSceneConversation({
     endingRef.current = true;
     setEnding(true);
     setStatus("正在生成本次报告");
+    detachSceneRemoteAudio();
     try {
       const completion = await clientRef.current?.stop({ reason });
       clientRef.current = null;
@@ -2054,6 +2100,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   const [readError, setReadError] = useState("");
   const [flowAdvancing, setFlowAdvancing] = useState(false);
   const [flowError, setFlowError] = useState("");
+  const [exitOpen, setExitOpen] = useState(false);
   const lessonItems = generatedMode
     ? (learningGroup === "words" ? generatedWordItems : generatedPhraseItems)
     : learningItems;
@@ -2064,6 +2111,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   const score = readScores[readIndex] ?? null;
   const readEvaluation = readEvaluations[readIndex] ?? null;
   const completeStep = (id) => setCompletedSteps((current) => current.includes(id) ? current : [...current, id]);
+  const exitConfirmation = exitOpen && <Modal dismissible={false}><p className="eyebrow">EXIT TRAINING</p><h2>确定要退出当前训练吗？</h2><p className="modal-lead">退出后将返回上一页。</p><div className="modal-actions"><Button variant="secondary" onClick={() => setExitOpen(false)}>继续训练</Button><Button onClick={onExit}>确认退出</Button></div></Modal>;
   const goToStep = (id) => {
     const targetIndex = steps.findIndex((item) => item.id === id);
     if (targetIndex > unlockedStepIndex) return;
@@ -2143,14 +2191,14 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   useEffect(() => {
     if (!generatedMode || !sceneId || displayedStep === "speak") return;
     if (displayedStep === "read") {
-      prefetchPronunciationAudio(sceneId, readItems.slice(readIndex), 3);
+      prefetchPronunciationAudio(sceneId, readItems.slice(readIndex), 3, teacher?.voiceId);
       return;
     }
     const upcoming = lessonItems.slice(learnIndex);
     if (learningGroup === "words" && upcoming.length < 3) {
       upcoming.push(...generatedPhraseItems.slice(0, 3 - upcoming.length));
     }
-    prefetchPronunciationAudio(sceneId, upcoming, 3);
+    prefetchPronunciationAudio(sceneId, upcoming, 3, teacher?.voiceId);
   }, [
     displayedStep,
     generatedMode,
@@ -2161,6 +2209,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
     readIndex,
     readItems,
     sceneId,
+    teacher?.voiceId,
   ]);
   const submitRead = () => {
     const nextScore = readIndex === 1 && score === null ? 68 : 86;
@@ -2226,18 +2275,19 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   if (!item && displayedStep !== "speak") {
     return (
       <main className="training-page">
-        <header className="training-header"><div><strong>{sceneTitle || "自定义场景"}</strong><span>场景内容加载失败</span></div><button className="training-exit" aria-label="关闭训练" onClick={onExit}><span><X weight="bold" /></span></button></header>
+        <header className="training-header"><div><strong>{sceneTitle || "自定义场景"}</strong><span>场景内容加载失败</span></div><button className="training-exit" aria-label="关闭训练" onClick={() => setExitOpen(true)}><span><X weight="bold" /></span></button></header>
         <section className="training-empty" role="alert">
           <h1>场景学习内容为空</h1>
           <p>后端没有返回当前阶段需要的单词、词组或句子，请返回场景广场重新生成。</p>
           <ExpandingCta direction="back" onClick={onBack}>返回场景广场</ExpandingCta>
         </section>
+        {exitConfirmation}
       </main>
     );
   }
   return (
     <main className={cx("training-page", standaloneSpeak && "training-page--standalone")}>
-      <header className="training-header"><div><strong>{sceneTitle}</strong><span>从语言到真实表达</span></div><button className="training-exit" aria-label="关闭训练" onClick={onExit}><span><X weight="bold" /></span></button></header>
+      <header className="training-header"><div><strong>{sceneTitle}</strong><span>从语言到真实表达</span></div><button className="training-exit" aria-label="关闭训练" onClick={() => setExitOpen(true)}><span><X weight="bold" /></span></button></header>
       {!standaloneSpeak && <nav className="stepper" aria-label="练习进度">
         <span className="stepper__track" aria-hidden="true"><span style={{ width: `${unlockedStepIndex * 50}%` }} /></span>
         {steps.map((stepItem, index) => {
@@ -2247,14 +2297,15 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
       </nav>}
       {flowError && <p className="call-error" role="alert">{flowError}</p>}
       {!result && <>
-      {displayedStep === "learn" && <section className="training-workspace"><aside className="lesson-list"><div><span>{generatedMode ? (learningGroup === "words" ? "场景单词" : "场景词组") : "本组语言"}</span><small>{learnIndex + 1} / {lessonItems.length}</small></div>{lessonItems.map((learningItem, index) => { const itemId = learningItem.id || `${learningGroup}-${index}-${learningItem.en}`; return <button key={itemId} type="button" disabled className={cx(index === learnIndex && "is-active", learnedItems.includes(itemId) && "is-done")}><small>{learningItem.type}</small><strong>{learningItem.en}</strong><span>{learnedItems.includes(itemId) ? <Check weight="bold" /> : index + 1}</span></button>; })}</aside><article className="learn-stage"><small>{item.type}</small><h1>{item.en}</h1><div className="pronunciation"><span>{item.phonetic || ""}</span>{generatedMode ? <PronunciationAudioButton sceneId={sceneId} text={item.en} label={`播放 ${item.en} 的发音`} /> : <AudioToggle mini label={`${item.en} 的发音`} />}</div><p>{item.zh}</p><div className="stage-footer"><ExpandingCta direction="back" disabled={learnIndex === 0 && (!generatedMode || learningGroup === "words")} onClick={previousLearn}>上一个</ExpandingCta><ExpandingCta onClick={nextLearn}>{learnIndex < lessonItems.length - 1 ? "下一个" : generatedMode && learningGroup === "words" && generatedPhraseItems.length > 0 ? "进入词组" : "进入朗读"}</ExpandingCta></div></article></section>}
-      {step === "read" && generatedMode && <section className="training-workspace"><aside className="lesson-list"><div><span>场景句子</span><small>{readIndex + 1} / {readItems.length}</small></div>{readItems.map((readItem, index) => <button key={readItem.id || readItem.en} type="button" disabled className={cx(index === readIndex && "is-active", readEvaluations[index]?.passed && "is-done")}><small>句子</small><strong>{readItem.en}</strong><span>{readEvaluations[index]?.passed ? <Check weight="bold" /> : index + 1}</span></button>)}</aside><article className="read-stage"><h1 className={cx(readEvaluation && "sentence-score-text")}><ScoredSentence sentence={item.en} words={readEvaluation?.words} /></h1><p>{item.zh}</p><SentenceRecorder sentenceId={item.id} busy={readSubmitting} onSubmit={submitGeneratedRead} onError={setReadError} /><h3>{readSubmitting ? "正在评分" : score === null ? "点击麦克风开始朗读" : readEvaluation?.passed ? "朗读通过" : "再试一次"}</h3>{score === null && !readError && <p>再次点击麦克风结束录音并提交评分。</p>}{readError && <p className="sentence-reading-error" role="alert">{readError}</p>}<div className="read-demo"><span>听标准示范</span><PronunciationAudioButton sceneId={sceneId} text={item.en} label={`播放 ${item.en} 的标准发音`} /></div>{score !== null && <div className="sentence-score-summary"><strong>{score}</strong><span>/100</span></div>}<div className="stage-footer read-stage-footer"><ExpandingCta direction="back" disabled={readIndex === 0 || readSubmitting} onClick={() => setReadIndex(readIndex - 1)}>上一句</ExpandingCta><ExpandingCta disabled={!readEvaluation?.passed || readSubmitting} onClick={nextRead}>{readIndex === readItems.length - 1 ? "进入模拟" : "下一句"}</ExpandingCta></div></article></section>}
+      {displayedStep === "learn" && <section className="training-workspace"><aside className="lesson-list"><div><span>{generatedMode ? (learningGroup === "words" ? "场景单词" : "场景词组") : "本组语言"}</span><small>{learnIndex + 1} / {lessonItems.length}</small></div>{lessonItems.map((learningItem, index) => { const itemId = learningItem.id || `${learningGroup}-${index}-${learningItem.en}`; return <button key={itemId} type="button" disabled className={cx(index === learnIndex && "is-active", learnedItems.includes(itemId) && "is-done")}><small>{learningItem.type}</small><strong>{learningItem.en}</strong><span>{learnedItems.includes(itemId) ? <Check weight="bold" /> : index + 1}</span></button>; })}</aside><article className="learn-stage"><small>{item.type}</small><h1>{item.en}</h1><div className="pronunciation"><span>{item.phonetic || ""}</span>{generatedMode ? <PronunciationAudioButton sceneId={sceneId} text={item.en} voice={teacher?.voiceId} label={`播放 ${item.en} 的发音`} /> : <AudioToggle mini label={`${item.en} 的发音`} />}</div><p>{item.zh}</p><div className="stage-footer"><ExpandingCta direction="back" disabled={learnIndex === 0 && (!generatedMode || learningGroup === "words")} onClick={previousLearn}>上一个</ExpandingCta><ExpandingCta onClick={nextLearn}>{learnIndex < lessonItems.length - 1 ? "下一个" : generatedMode && learningGroup === "words" && generatedPhraseItems.length > 0 ? "进入词组" : "进入朗读"}</ExpandingCta></div></article></section>}
+      {step === "read" && generatedMode && <section className="training-workspace"><aside className="lesson-list"><div><span>场景句子</span><small>{readIndex + 1} / {readItems.length}</small></div>{readItems.map((readItem, index) => <button key={readItem.id || readItem.en} type="button" disabled className={cx(index === readIndex && "is-active", readEvaluations[index]?.passed && "is-done")}><small>句子</small><strong>{readItem.en}</strong><span>{readEvaluations[index]?.passed ? <Check weight="bold" /> : index + 1}</span></button>)}</aside><article className="read-stage"><h1 className={cx(readEvaluation && "sentence-score-text")}><ScoredSentence sentence={item.en} words={readEvaluation?.words} /></h1><p>{item.zh}</p><SentenceRecorder sentenceId={item.id} busy={readSubmitting} onSubmit={submitGeneratedRead} onError={setReadError} /><h3>{readSubmitting ? "正在评分" : score === null ? "点击麦克风开始朗读" : readEvaluation?.passed ? "朗读通过" : "再试一次"}</h3>{score === null && !readError && <p>再次点击麦克风结束录音并提交评分。</p>}{readError && <p className="sentence-reading-error" role="alert">{readError}</p>}<div className="read-demo"><span>听标准示范</span><PronunciationAudioButton sceneId={sceneId} text={item.en} voice={teacher?.voiceId} label={`播放 ${item.en} 的标准发音`} /></div>{score !== null && <div className="sentence-score-summary"><strong>{score}</strong><span>/100</span></div>}<div className="stage-footer read-stage-footer"><ExpandingCta direction="back" disabled={readIndex === 0 || readSubmitting} onClick={() => setReadIndex(readIndex - 1)}>上一句</ExpandingCta><ExpandingCta disabled={!readEvaluation?.passed || readSubmitting} onClick={nextRead}>{readIndex === readItems.length - 1 ? "进入模拟" : "下一句"}</ExpandingCta></div></article></section>}
       {step === "read" && !generatedMode && <section className="training-workspace"><aside className="lesson-list"><div><span>完整表达</span><small>{readIndex + 1} / {learningItems.length}</small></div>{learningItems.map((learningItem, index) => <button key={learningItem.en} className={cx(index === readIndex && "is-active", (readScores[index] ?? 0) >= 80 && "is-done")} onClick={() => setReadIndex(index)}><small>句子</small><strong>{learningItem.en}</strong><span>{(readScores[index] ?? 0) >= 80 ? <Check weight="bold" /> : index + 1}</span></button>)}</aside><article className="read-stage"><h1>{item.en}</h1><p>{item.zh}</p><div className="rhythm"><span>节奏重点</span><strong>{item.en.split(" ").slice(0, 4).join(" · ")}</strong></div><MicrophoneToggle label="朗读麦克风" onActivate={submitRead} /><h3>{score === null ? "轮到你说" : score >= 80 ? "朗读通过" : "再试一次"}</h3>{score === null && <p>尽量完整、连贯地说出整句话。</p>}<button type="button" className="read-replay" onClick={playReadDemo}><SpeakerHigh weight="fill" />{heardReadDemos.includes(readIndex) ? "再听一次标准示范" : "听标准示范"}</button>{score >= 80 && <div className="stage-footer read-stage-footer"><span /><ExpandingCta onClick={nextRead}>{readIndex === learningItems.length - 1 ? "进入模拟" : "下一句"}</ExpandingCta></div>}</article></section>}
       </>}
       {(step === "speak" || result) && generatedMode && <CustomSceneConversation sceneId={sceneId} teacher={teacher} speed={speed} ended={Boolean(result)} onSessionStarted={(startedSessionId) => onStageChange?.("session", startedSessionId)} onComplete={onComplete} />}
       {(step === "speak" || result) && !generatedMode && <CustomSceneConversation sceneId={sceneId} teacher={teacher} speed={speed} ended={Boolean(result)} onSessionStarted={(startedSessionId) => onStageChange?.("session", startedSessionId)} onComplete={onComplete} />}
       {result && <ResultModal completed={result.completed} evaluation={result.evaluation} onBack={onBack} onAssets={onAssets} />}
       {!result && readFeedback && <ReadScoreModal feedback={readFeedback} item={readItems[readFeedback.index]} onClose={() => setReadFeedback(null)} />}
+      {exitConfirmation}
     </main>
   );
 }
@@ -3404,7 +3455,7 @@ export function App() {
   let content;
   if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={completeScenePractice} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
   else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={(sessionId) => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); recordCompletedPractice("free", sessionId); void synchronizeAchievements({ revealNotifications: true }); }} />;
-  else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={selectIelts} onInterview={selectInterview} />;
+  else if (page === "scenes") content = <Scenes teacher={teacher} onStartTraining={startTraining} onLocked={setPaywall} onIelts={selectIelts} onInterview={selectInterview} />;
   else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => selectMainPage("ielts-assets")} onInterview={() => selectMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: false, returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
   else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToInterview={() => selectMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;

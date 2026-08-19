@@ -58,85 +58,72 @@ class JdbcEmailAuthStoreTest {
     }
 
     @Test
-    void usesTheLegacyUserIdentityAndRejectsDuplicateEmailWithoutServerError() {
+    void usesTheUnifiedUserIdentityAndRejectsDuplicateEmailWithoutServerError() {
         var userId = UUID.randomUUID();
         var now = Instant.parse("2026-08-06T08:00:00Z");
 
         assertThat(store.saveUser(userId, "person@example.com", "bcrypt-hash", "Sunny", now, now)).isTrue();
         assertThat(store.findUserByEmail("person@example.com").orElseThrow().id()).isEqualTo(userId);
         assertThat(new JdbcTemplate(database).queryForObject(
-                "select id from \"user\" where username = ?", UUID.class, "person@example.com"))
+                "select id from users where username = ?", UUID.class, "person@example.com"))
                 .isEqualTo(userId);
         assertThat(new JdbcTemplate(database).queryForObject(
-                "select nickname from \"user\" where id = ?", String.class, userId))
+                "select nickname from users where id = ?", String.class, userId))
                 .isEqualTo("Sunny");
         assertThat(store.saveUser(UUID.randomUUID(), "person@example.com", "other-hash", null, now, now)).isFalse();
     }
 
     @Test
-    void findsAnExistingLegacyUserBeforeTheGovernanceProjection() {
+    void ensuresVerificationAndEntitlementForAnExistingUser() {
         var userId = UUID.randomUUID();
         var now = Instant.parse("2026-08-06T08:00:00Z");
         new JdbcTemplate(database).update(
-                "insert into \"user\" (id, username, password_hash, created_at, updated_at) values (?, ?, ?, ?, ?)",
+                "insert into users (id, username, password_hash, created_at, updated_at) values (?, ?, ?, ?, ?)",
                 userId, "legacy@example.com", "bcrypt-hash", now, now);
 
         assertThat(store.findUserByEmail("legacy@example.com").orElseThrow().id()).isEqualTo(userId);
         store.ensureGovernance(store.findUserByEmail("legacy@example.com").orElseThrow(), now);
         assertThat(new JdbcTemplate(database).queryForObject(
-                "select count(*) from app_users where id = ?", Integer.class, userId)).isEqualTo(1);
+                "select email_verified_at from users where id = ?", Instant.class, userId)).isEqualTo(now);
+        assertThat(new JdbcTemplate(database).queryForObject(
+                "select count(*) from user_entitlements where user_id = ?", Integer.class, userId)).isEqualTo(1);
     }
 
     @Test
-    void prefersTheGovernanceIdentityWhenLegacyAndEmailRecordsShareAnAddress() {
-        var legacyId = UUID.randomUUID();
-        var governanceId = UUID.randomUUID();
+    void findsEmailCaseInsensitively() {
+        var userId = UUID.randomUUID();
         var now = Instant.parse("2026-08-06T08:00:00Z");
-        var jdbc = new JdbcTemplate(database);
-        jdbc.update(
-                "insert into \"user\" (id, username, password_hash, created_at, updated_at) values (?, ?, ?, ?, ?)",
-                legacyId, "person@example.com", "legacy-hash", now, now);
-        jdbc.update(
-                "insert into app_users (id, email, password_hash, created_at) values (?, ?, ?, ?)",
-                governanceId, "person@example.com", "governance-hash", now);
+        assertThat(store.saveUser(userId, "person@example.com", "hash", null, now, now)).isTrue();
 
-        assertThat(store.findUserByEmail("person@example.com").orElseThrow().id()).isEqualTo(governanceId);
+        assertThat(store.findUserByEmail("PERSON@EXAMPLE.COM").orElseThrow().id()).isEqualTo(userId);
     }
 
     @Test
-    void resetsBothPasswordIdentitiesAndRevokesSessionsForTheEmail() {
-        var legacyId = UUID.randomUUID();
-        var governanceId = UUID.randomUUID();
+    void resetsPasswordAndRevokesSessionsForTheEmail() {
+        var userId = UUID.randomUUID();
         var now = Instant.parse("2026-08-06T08:00:00Z");
         var jdbc = new JdbcTemplate(database);
         jdbc.update(
-                "insert into \"user\" (id, username, password_hash, auth_version, created_at, updated_at) "
+                "insert into users (id, username, password_hash, auth_version, created_at, updated_at) "
                         + "values (?, ?, ?, 4, ?, ?)",
-                legacyId, "person@example.com", "legacy-hash", now, now);
-        jdbc.update(
-                "insert into app_users (id, email, password_hash, created_at) values (?, ?, ?, ?)",
-                governanceId, "person@example.com", "governance-hash", now);
+                userId, "person@example.com", "old-hash", now, now);
         jdbc.update(
                 "insert into user_sessions (token_digest, user_id, created_at, last_seen_at, expires_at) "
-                        + "values (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
-                "governance-session", governanceId, now, now, now.plusSeconds(3600),
-                "legacy-session", legacyId, now, now, now.plusSeconds(3600));
+                        + "values (?, ?, ?, ?, ?)",
+                "session", userId, now, now, now.plusSeconds(3600));
 
         store.updatePassword("person@example.com", "new-hash", now.plusSeconds(30));
         store.revokeSessionsByEmail("person@example.com", now.plusSeconds(30));
 
         assertThat(jdbc.queryForObject(
-                "select password_hash from app_users where id = ?", String.class, governanceId))
+                "select password_hash from users where id = ?", String.class, userId))
                 .isEqualTo("new-hash");
         assertThat(jdbc.queryForObject(
-                "select password_hash from \"user\" where id = ?", String.class, legacyId))
-                .isEqualTo("new-hash");
-        assertThat(jdbc.queryForObject(
-                "select auth_version from \"user\" where id = ?", Long.class, legacyId))
+                "select auth_version from users where id = ?", Long.class, userId))
                 .isEqualTo(5L);
         assertThat(jdbc.queryForObject(
                 "select count(*) from user_sessions where revoked_at is not null", Integer.class))
-                .isEqualTo(2);
+                .isEqualTo(1);
     }
 
     @Test
@@ -145,11 +132,8 @@ class JdbcEmailAuthStoreTest {
         var now = Instant.parse("2026-08-06T08:00:00Z");
         var jdbc = new JdbcTemplate(database);
         jdbc.update(
-                "insert into \"user\" (id, username, password_hash, created_at, updated_at) values (?, ?, ?, ?, ?)",
+                "insert into users (id, username, password_hash, created_at, updated_at) values (?, ?, ?, ?, ?)",
                 userId, "person@example.com", "old-hash", now, now);
-        jdbc.update(
-                "insert into app_users (id, email, password_hash, created_at) values (?, ?, ?, ?)",
-                userId, "person@example.com", "old-hash", now);
         var transaction = new TransactionTemplate(new DataSourceTransactionManager(database));
 
         assertThatThrownBy(() -> transaction.executeWithoutResult(status -> {
@@ -158,10 +142,7 @@ class JdbcEmailAuthStoreTest {
         })).isInstanceOf(IllegalStateException.class);
 
         assertThat(jdbc.queryForObject(
-                "select password_hash from app_users where id = ?", String.class, userId))
-                .isEqualTo("old-hash");
-        assertThat(jdbc.queryForObject(
-                "select password_hash from \"user\" where id = ?", String.class, userId))
+                "select password_hash from users where id = ?", String.class, userId))
                 .isEqualTo("old-hash");
     }
 }

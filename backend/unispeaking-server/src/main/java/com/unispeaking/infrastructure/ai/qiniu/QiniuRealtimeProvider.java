@@ -8,6 +8,7 @@ import com.unispeaking.domain.vo.session.RealtimeCredential;
 import com.unispeaking.infrastructure.config.QiniuRealtimeProperties;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.RealtimeProvider;
+import com.unispeaking.provider.ProviderCredentialOverride;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -109,7 +110,7 @@ public class QiniuRealtimeProvider extends RealtimeProvider {
 		if (command.offerSdp() == null || command.offerSdp().isBlank()) {
 			throw nonRetryableFailure("INVALID_SDP", "WebRTC offer SDP is required");
 		}
-		if (properties.apiKey().isBlank()) {
+		if (apiKey().isBlank()) {
 			throw retryableFailure(
 					"QINIU_CREDENTIAL_MISSING",
 					"Set QINIU_RTI_API_KEY before starting a Qiniu realtime session");
@@ -227,8 +228,12 @@ public class QiniuRealtimeProvider extends RealtimeProvider {
 		return HttpRequest.newBuilder()
 				.uri(uri)
 				.timeout(properties.readTimeout())
-				.header("Authorization", "Bearer " + properties.apiKey())
+				.header("Authorization", "Bearer " + apiKey())
 				.header("X-Request-ID", requestId);
+	}
+
+	private String apiKey() {
+		return ProviderCredentialOverride.currentOr(properties.apiKey());
 	}
 
 	private HttpResponse<String> send(HttpRequest request, String ioErrorCode) {

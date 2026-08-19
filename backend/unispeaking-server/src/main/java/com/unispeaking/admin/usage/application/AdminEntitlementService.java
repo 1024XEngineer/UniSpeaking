@@ -48,12 +48,7 @@ public final class AdminEntitlementService {
     }
 
     private boolean userExists(UUID userId) {
-        try {
-            return jdbc.queryForObject("select count(*) from \"user\" where id = ?", Integer.class, userId) > 0;
-        } catch (org.springframework.dao.DataAccessException exception) {
-            // Keeps the in-memory/H2 governance tests compatible with pre-V10 schemas.
-            return jdbc.queryForObject("select count(*) from app_users where id = ?", Integer.class, userId) > 0;
-        }
+        return jdbc.queryForObject("select count(*) from users where id = ?", Integer.class, userId) > 0;
     }
 
     private EntitlementView find(UUID userId) {

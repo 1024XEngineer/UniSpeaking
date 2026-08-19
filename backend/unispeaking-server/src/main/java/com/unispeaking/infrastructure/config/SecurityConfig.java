@@ -54,7 +54,12 @@ public class SecurityConfig {
 						.requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/email/**",
 								"/api/auth/mobile/email/**", "/api/auth/logout",
 								"/api/admin/auth/login", "/api/admin/auth/logout", "/actuator/health").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/telemetry/events").permitAll()
 						.requestMatchers(HttpMethod.PATCH, "/api/admin/users/*/entitlement")
+						.hasAnyRole("SUPER_ADMIN", "OPERATIONS")
+						.requestMatchers(HttpMethod.PATCH, "/api/admin/ai/**")
+						.hasAnyRole("SUPER_ADMIN", "OPERATIONS")
+						.requestMatchers(HttpMethod.PUT, "/api/admin/ai/**")
 						.hasAnyRole("SUPER_ADMIN", "OPERATIONS")
 						.requestMatchers("/api/admin/**")
 						.hasAnyRole("SUPER_ADMIN", "OPERATIONS", "AUDITOR")

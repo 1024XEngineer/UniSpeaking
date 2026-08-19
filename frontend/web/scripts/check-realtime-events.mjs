@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   buildResponseCreateEvent,
   buildScenarioResponseRequest,
@@ -11,6 +12,8 @@ import {
   isActiveResponseConflict,
   normalizeProviderEvent,
   normalizeBaseUrl,
+  releaseRealtimeTransport,
+  waitForIceGathering,
   websocketUrl,
 } from "../src/websocket/realtimeClient.js";
 
@@ -279,5 +282,126 @@ assert.equal(turnAudioCapture.start(), true);
 assert.equal(segmentStartCount, 2);
 assert.equal(await turnAudioCapture.take(), expectedAudio);
 assert.equal(segmentStopCount, 2);
+
+const transportCalls = [];
+releaseRealtimeTransport({
+  audioSender: {
+    replaceTrack(track) {
+      transportCalls.push(["sender", track]);
+      return Promise.resolve();
+    },
+  },
+  localStream: {
+    getTracks: () => [{ stop: () => transportCalls.push(["local-track"]) }],
+  },
+  remoteStreams: [{
+    getTracks: () => [{ stop: () => transportCalls.push(["remote-track"]) }],
+  }],
+  channels: [{
+    onopen: () => {},
+    onmessage: () => {},
+    onerror: () => {},
+    onclose: () => {},
+    close: () => transportCalls.push(["channel"]),
+  }],
+  peer: {
+    ontrack: () => {},
+    ondatachannel: () => {},
+    onconnectionstatechange: () => {},
+    close: () => transportCalls.push(["peer"]),
+  },
+});
+assert.deepEqual(transportCalls, [
+  ["sender", null],
+  ["local-track"],
+  ["remote-track"],
+  ["channel"],
+  ["peer"],
+]);
+
+const previousWindow = globalThis.window;
+globalThis.window = {
+  setTimeout: globalThis.setTimeout,
+  clearTimeout: globalThis.clearTimeout,
+};
+try {
+  const partialGathering = await waitForIceGathering({
+    iceGatheringState: "gathering",
+    signalingState: "stable",
+    localDescription: {
+      sdp: "v=0\r\na=candidate:1 1 UDP 1 192.0.2.1 5000 typ host\r\n",
+    },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }, { timeoutMs: 5 });
+  assert.equal(partialGathering.complete, false);
+  assert.equal(partialGathering.timedOut, true);
+  assert.equal(partialGathering.candidates.host, 1);
+
+  await assert.rejects(
+    waitForIceGathering({
+      iceGatheringState: "gathering",
+      signalingState: "stable",
+      localDescription: { sdp: "v=0\r\n" },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }, { timeoutMs: 5 }),
+    (error) => {
+      assert.equal(error.code, "WEBRTC_ICE_GATHERING_NO_CANDIDATE");
+      assert.deepEqual(Object.keys(error.realtimeDiagnostics).sort(), ["candidates", "iceGatheringState"]);
+      return true;
+    },
+  );
+} finally {
+  globalThis.window = previousWindow;
+}
+
+const realtimeSource = await readFile(
+  new URL("../src/websocket/realtimeClient.js", import.meta.url),
+  "utf8",
+);
+const stopSource = realtimeSource.slice(
+  realtimeSource.indexOf("async function performStop"),
+  realtimeSource.indexOf("function stop(options"),
+);
+assert.ok(
+  stopSource.indexOf("releaseCurrentTransport();")
+    < stopSource.indexOf("await waitForPendingOperations"),
+  "realtime transport must be released before business operations drain",
+);
+assert.match(realtimeSource, /let lifecycleState = "idle";/);
+assert.match(realtimeSource, /if \(startPromise\) return startPromise;/);
+assert.doesNotMatch(realtimeSource, /console\.warn\([^\n]*(?:offerSdp|answerSdp|accessToken|credential)/);
+
+const appSource = await readFile(new URL("../src/controller/App.jsx", import.meta.url), "utf8");
+const freeChatStopSource = appSource.slice(
+  appSource.indexOf("const stopConversation = async () =>"),
+  appSource.indexOf("useEffect(() =>", appSource.indexOf("const stopConversation = async () =>")),
+);
+assert.ok(
+  freeChatStopSource.indexOf("await client?.stop") < freeChatStopSource.indexOf("setInCall(false)"),
+  "free chat must remain non-restartable until client.stop completes",
+);
+assert.match(freeChatStopSource, /stopPromiseRef\.current/);
+assert.match(freeChatStopSource, /detachRemoteAudio\(\)/);
+
+assert.match(appSource, /const detachSceneRemoteAudio = \(\) => \{/);
+assert.match(appSource, /sceneAnalyticsRef\.current\?\.abandon\("COMPONENT_UNMOUNT"\);\s+detachSceneRemoteAudio\(\);/);
+
+const ieltsSource = await readFile(
+  new URL("../src/component/ielts/IeltsModule.jsx", import.meta.url),
+  "utf8",
+);
+assert.match(ieltsSource, /const finishingRef = useRef\(false\);/);
+assert.match(ieltsSource, /if \(finishingRef\.current\) return;\s+finishingRef\.current = true;/);
+assert.match(ieltsSource, /ieltsAnalyticsRef\.current\?\.abandon\("COMPONENT_UNMOUNT"\);[\s\S]*?detachIeltsRemoteAudio\(\);[\s\S]*?clientRef\.current = null;/);
+
+const interviewSource = await readFile(
+  new URL("../src/component/interview/InterviewModule.jsx", import.meta.url),
+  "utf8",
+);
+assert.match(interviewSource, /const detachInterviewRemoteAudio = \(\) => \{/);
+assert.match(interviewSource, /interviewAnalyticsRef\.current\?\.abandon\("COMPONENT_UNMOUNT"\);\s+detachInterviewRemoteAudio\(\);/);
+assert.match(interviewSource, /const abandon = async \(\) => \{\s+if \(endingRef\.current\) return;\s+endingRef\.current = true;/);
 
 console.log("Realtime event normalization checks passed.");
