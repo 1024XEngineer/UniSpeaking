@@ -88,6 +88,23 @@ export function defaultIceServers() {
   return DEFAULT_ICE_SERVERS;
 }
 
+export function normalizeIceTransportPolicy(value) {
+  return String(value || "").trim().toLowerCase() === "relay" ? "relay" : "all";
+}
+
+export function realtimeIceTransportPolicy() {
+  return normalizeIceTransportPolicy(import.meta.env?.VITE_REALTIME_ICE_TRANSPORT_POLICY);
+}
+
+export function realtimePeerConnectionConfig() {
+  return {
+    iceServers: defaultIceServers(),
+    // The default remains browser-native ICE selection. `relay` is an explicit
+    // test-only switch used to validate a TURN deployment in a controlled build.
+    iceTransportPolicy: realtimeIceTransportPolicy(),
+  };
+}
+
 export function buildResponseCreateEvent({ id, instructions = "" } = {}) {
   const turnInstructions = String(instructions || "").trim();
   return {
@@ -195,17 +212,86 @@ function candidateType(candidate) {
   return match?.[1]?.toLowerCase() || "unknown";
 }
 
+function candidateProtocol(candidate) {
+  const structuredProtocol = String(candidate?.protocol || "").toLowerCase();
+  if (["udp", "tcp"].includes(structuredProtocol)) return structuredProtocol;
+  const match = String(candidate?.candidate || candidate || "")
+    .match(/^(?:a=)?candidate:\S+\s+\d+\s+(udp|tcp)\s+/i);
+  return match?.[1]?.toLowerCase() || "unknown";
+}
+
+function emptyCandidateSummary() {
+  return {
+    host: 0,
+    srflx: 0,
+    prflx: 0,
+    relay: 0,
+    unknown: 0,
+    protocols: { udp: 0, tcp: 0, unknown: 0 },
+  };
+}
+
+function addCandidateToSummary(summary, candidate) {
+  summary[candidateType(candidate)] += 1;
+  summary.protocols[candidateProtocol(candidate)] += 1;
+}
+
 function candidateSummaryFromSdp(sdp) {
-  const summary = { host: 0, srflx: 0, prflx: 0, relay: 0, unknown: 0 };
+  const summary = emptyCandidateSummary();
   String(sdp || "").split(/\r?\n/).forEach((line) => {
     if (!line.startsWith("a=candidate:")) return;
-    summary[candidateType(line)] += 1;
+    addCandidateToSummary(summary, line);
   });
   return summary;
 }
 
 function candidateTotal(summary) {
-  return Object.values(summary).reduce((total, count) => total + count, 0);
+  return ["host", "srflx", "prflx", "relay", "unknown"]
+    .reduce((total, type) => total + (summary?.[type] || 0), 0);
+}
+
+export async function collectIceConnectionDiagnostics(peer, candidates = emptyCandidateSummary()) {
+  const diagnostics = {
+    candidates,
+    selectedCandidatePair: null,
+    relayProtocols: { udp: 0, tcp: 0, tls: 0, unknown: 0 },
+  };
+  if (typeof peer?.getStats !== "function") return diagnostics;
+  try {
+    const reports = await peer.getStats();
+    const localCandidates = new Map();
+    const remoteCandidates = new Map();
+    reports.forEach((report) => {
+      if (report.type === "remote-candidate") {
+        remoteCandidates.set(report.id, report);
+        return;
+      }
+      if (report.type !== "local-candidate") return;
+      localCandidates.set(report.id, report);
+      const relayProtocol = String(report.relayProtocol || "").toLowerCase();
+      if (report.candidateType === "relay") {
+        diagnostics.relayProtocols[relayProtocol in diagnostics.relayProtocols
+          ? relayProtocol : "unknown"] += 1;
+      }
+    });
+    reports.forEach((report) => {
+      if (report.type !== "candidate-pair") return;
+      if (report.state !== "succeeded" && !report.nominated) return;
+      const local = localCandidates.get(report.localCandidateId);
+      const remote = remoteCandidates.get(report.remoteCandidateId);
+      diagnostics.selectedCandidatePair = {
+        state: report.state || "unknown",
+        nominated: Boolean(report.nominated),
+        localCandidateType: local?.candidateType || "unknown",
+        localProtocol: local?.protocol || "unknown",
+        relayProtocol: local?.relayProtocol || null,
+        remoteCandidateType: remote?.candidateType || "unknown",
+      };
+    });
+  } catch {
+    // Browser stats are optional and must never affect connection handling.
+  }
+  return diagnostics;
 }
 
 function createRealtimeError(code, message, diagnostics = null) {
@@ -249,9 +335,14 @@ export function waitForIceGathering(peer, { timeoutMs = 10_000 } = {}) {
     };
     const currentSummary = () => {
       const fromDescription = candidateSummaryFromSdp(peer?.localDescription?.sdp);
-      const merged = {};
-      Object.keys(candidates).forEach((type) => {
+      const merged = emptyCandidateSummary();
+      ["host", "srflx", "prflx", "relay", "unknown"].forEach((type) => {
         merged[type] = Math.max(candidates[type], fromDescription[type]);
+      });
+      ["udp", "tcp", "unknown"].forEach((protocol) => {
+        merged.protocols[protocol] = Math.max(
+          candidates.protocols[protocol], fromDescription.protocols[protocol],
+        );
       });
       return merged;
     };
@@ -268,7 +359,7 @@ export function waitForIceGathering(peer, { timeoutMs = 10_000 } = {}) {
     const handleCandidate = (event) => {
       if (!supportsEventListeners) previousCandidateHandler?.call(peer, event);
       if (!event?.candidate) return;
-      candidates[candidateType(event.candidate)] += 1;
+      addCandidateToSummary(candidates, event.candidate);
     };
 
     const timer = window.setTimeout(() => {
@@ -609,7 +700,7 @@ export function createRealtimeClient({
     throw createRealtimeError("WEBRTC_START_CANCELLED", "实时会话启动已取消");
   }
 
-  function startFailureDiagnostic(error, stage, startedAt, iceResult) {
+  async function startFailureDiagnostic(error, stage, startedAt, iceResult) {
     const code = error?.code || (isMicFailure(error)
       ? "WEBRTC_MICROPHONE_UNAVAILABLE"
       : {
@@ -620,6 +711,10 @@ export function createRealtimeClient({
         remote_description: "WEBRTC_REMOTE_DESCRIPTION_FAILED",
         data_channel: "WEBRTC_DATA_CHANNEL_FAILED",
       }[stage] || "WEBRTC_START_FAILED");
+    const diagnostics = await collectIceConnectionDiagnostics(
+      peer,
+      iceResult?.candidates || error?.realtimeDiagnostics?.candidates,
+    );
     return {
       code,
       stage,
@@ -630,8 +725,10 @@ export function createRealtimeClient({
       connectionState: peer?.connectionState || "unknown",
       signalingState: peer?.signalingState || "unknown",
       dataChannelState: channel?.readyState || "unknown",
-      candidates: iceResult?.candidates || error?.realtimeDiagnostics?.candidates
-        || { host: 0, srflx: 0, prflx: 0, relay: 0, unknown: 0 },
+      iceTransportPolicy: realtimeIceTransportPolicy(),
+      candidates: diagnostics.candidates || error?.realtimeDiagnostics?.candidates,
+      selectedCandidatePair: diagnostics.selectedCandidatePair,
+      relayProtocols: diagnostics.relayProtocols,
     };
   }
 
@@ -1529,7 +1626,7 @@ export function createRealtimeClient({
     emit({ type: "local.connecting" });
 
     try {
-      peer = new RTCPeerConnection({ iceServers: defaultIceServers() });
+      peer = new RTCPeerConnection(realtimePeerConnectionConfig());
       peer.ontrack = (event) => {
         const stream = event.streams?.[0];
         if (stream) {
@@ -1651,10 +1748,22 @@ export function createRealtimeClient({
           sendSessionUpdate();
         }
       }, 2_000);
-      emit({ type: "local.connected", sessionId, backend });
+      const networkDiagnostics = await collectIceConnectionDiagnostics(peer, iceResult?.candidates);
+      const connectedDiagnostic = {
+        iceTransportPolicy: realtimeIceTransportPolicy(),
+        iceGatheringState: peer?.iceGatheringState || "unknown",
+        iceConnectionState: peer?.iceConnectionState || "unknown",
+        connectionState: peer?.connectionState || "unknown",
+        dataChannelState: channel?.readyState || "unknown",
+        ...networkDiagnostics,
+      };
+      if (connectedDiagnostic.iceTransportPolicy === "relay") {
+        console.info("realtime.turn-test.connected", connectedDiagnostic);
+      }
+      emit({ type: "local.connected", sessionId, backend, diagnostic: connectedDiagnostic });
       return { sessionId, backend };
     } catch (error) {
-      const diagnostic = startFailureDiagnostic(error, stage, startedAt, iceResult);
+      const diagnostic = await startFailureDiagnostic(error, stage, startedAt, iceResult);
       releaseCurrentTransport();
       await stop({ notifyBackend: false, reason: "start_failed", emitEnded: false });
       if (diagnostic.code === "WEBRTC_START_CANCELLED") throw error;

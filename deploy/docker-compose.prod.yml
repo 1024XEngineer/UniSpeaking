@@ -49,6 +49,7 @@ services:
         VITE_UMAMI_SCRIPT_URL: ${VITE_UMAMI_SCRIPT_URL:-https://cloud.umami.is/script.js}
         VITE_UMAMI_WEBSITE_ID: ${VITE_UMAMI_WEBSITE_ID:-}
         VITE_UMAMI_DOMAINS: ${VITE_UMAMI_DOMAINS:-}
+        VITE_REALTIME_ICE_TRANSPORT_POLICY: ${VITE_REALTIME_ICE_TRANSPORT_POLICY:-all}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     expose:
       - "80"
