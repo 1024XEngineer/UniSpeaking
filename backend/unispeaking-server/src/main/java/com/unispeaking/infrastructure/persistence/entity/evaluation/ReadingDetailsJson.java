@@ -162,9 +162,12 @@ public record ReadingDetailsJson(
 			actualPhoneme = requireText(actualPhoneme, "actualPhoneme");
 			pronunciationScore =
 					requireScore(pronunciationScore, "pronunciationScore");
-			if (startPosition < 0 || endPosition <= startPosition) {
+			boolean unmatched = startPosition == -1 && endPosition == -1;
+			if (!unmatched
+					&& (startPosition < 0
+							|| endPosition <= startPosition)) {
 				throw new IllegalArgumentException(
-						"phoneme positions must define a positive duration");
+						"phoneme positions must define a positive duration or be unmatched");
 			}
 		}
 	}

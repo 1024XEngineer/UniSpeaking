@@ -177,6 +177,45 @@ function StageProgressRail({
   );
 }
 
+function ReadRecordButton({
+  passed,
+  recording,
+  onPress,
+}: {
+  passed: boolean;
+  recording: boolean;
+  onPress: () => void;
+}) {
+  const showSuccess = passed && !recording;
+  const successProgress = useSharedValue(showSuccess ? 1 : 0);
+
+  useEffect(() => {
+    successProgress.value = withTiming(showSuccess ? 1 : 0, {
+      duration: 280,
+      easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
+    });
+  }, [showSuccess, successProgress]);
+
+  const successStyle = useAnimatedStyle(() => ({
+    opacity: successProgress.value,
+    transform: [{ scale: 0.78 + successProgress.value * 0.22 }],
+  }));
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={recording ? '结束朗读' : passed ? '重新朗读' : '开始朗读'}
+      onPress={onPress}
+      style={[styles.readRecordButton, recording && styles.readRecordButtonActive]}
+    >
+      <AppIcon name={recording ? 'microphone' : 'microphone-off'} size={28} color={recording ? '#B94D44' : colors.subtle} />
+      <Reanimated.View pointerEvents="none" style={[styles.readRecordSuccess, successStyle]}>
+        <AppIcon name="check" size={28} color={colors.white} />
+      </Reanimated.View>
+    </Pressable>
+  );
+}
+
 type SceneMetric = { label: string; value: number };
 
 const defaultSceneMetrics: readonly SceneMetric[] = [
@@ -338,6 +377,7 @@ export function SceneCallStage({
 
 export function Training({ id, scene, analytics, trainingController: injectedTrainingController, wavRecorder: injectedWavRecorder, ttsPlayer: injectedTtsPlayer, initialStage = 'learn', onBack, onFinish, onViewDetails }: { id?: string; scene?: GeneratedScene; analytics?: AnalyticsTrackerFactory; trainingController?: SceneTrainingController; wavRecorder?: Pick<WavRecorder, 'start' | 'stop' | 'cancel'>; ttsPlayer?: Pick<TtsPlayer, 'play' | 'stop'>; initialStage?: TrainingStage; onBack: () => void; onFinish: () => void; onViewDetails?: (id: string) => void }) {
   const { setImmersiveLearning } = useLearningStage();
+  const { signOut } = useAppModel();
   const sceneId = scene?.sceneId ?? id ?? recommendations[0].id;
   const scenario = scene
     ? { id: scene.sceneId, title: scene.title }
@@ -364,7 +404,7 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   const readRecordingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [trainingController] = useState<SceneTrainingController | null>(() =>
     scene
-      ? injectedTrainingController ?? new SceneTrainingController(createDefaultSceneService())
+      ? injectedTrainingController ?? new SceneTrainingController(createDefaultSceneService(signOut))
       : null,
   );
   const [wavRecorder] = useState<Pick<WavRecorder, 'start' | 'stop' | 'cancel'> | null>(
@@ -500,6 +540,21 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
       setLearnIndex(wordItems.length - 1);
     }
   };
+  const previousRead = () => {
+    ttsPlayer?.stop();
+    demoActive.current = false;
+    setDemoPlaying(false);
+    setRecording(false);
+    if (scene && trainingController) {
+      if (displayedReadIndex > 0) {
+        trainingController.previous();
+      } else {
+        void trainingController.selectStage('learn').catch(() => undefined);
+      }
+      return;
+    }
+    setStage('learn');
+  };
   const clearReadRecordingTimer = () => {
     if (!readRecordingTimer.current) return;
     clearTimeout(readRecordingTimer.current);
@@ -583,7 +638,10 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
         onSelect={(nextStage) => {
           setRecording(false);
           setDemoPlaying(false);
-          if (scene) return;
+          if (scene && trainingController) {
+            void trainingController.selectStage(nextStage).catch(() => undefined);
+            return;
+          }
           setStage(nextStage);
         }}
       />
@@ -682,9 +740,7 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
                   {displayedReadPassed ? readItem.en : readItem.en}
                 </Text>
                 <Text style={styles.readTranslation}>{readItem.zh}</Text>
-                <Pressable accessibilityRole="button" accessibilityLabel={recording ? '结束朗读' : '开始朗读'} onPress={() => void toggleReadRecording()} style={[styles.readRecordButton, recording && styles.readRecordButtonActive]}>
-                  <AppIcon name={recording ? 'microphone' : 'microphone-off'} size={28} color={recording ? '#B94D44' : colors.subtle} />
-                </Pressable>
+                <ReadRecordButton passed={displayedReadPassed} recording={recording} onPress={() => void toggleReadRecording()} />
                 <Text style={styles.readStatus}>{recording ? '正在听你朗读' : displayedReadPassed ? '朗读通过' : '点击麦克风开始朗读'}</Text>
                 <Text style={styles.readInstruction}>{recording ? '再次点击麦克风结束录音并提交评分，最长录制 30 秒。' : displayedReadPassed ? '本句已达到通过标准，可以进入下一步。' : '再次点击麦克风结束录音并提交评分，最长录制 30 秒。'}</Text>
                 {audioError ? <Text style={styles.generationError}>{audioError}</Text> : null}
@@ -696,7 +752,7 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
             </ScrollView>
           </View>
           <View style={styles.stageFooterRow}>
-            <Pressable accessibilityRole="button" onPress={() => setStage('learn')} style={styles.roundNavButton}>
+            <Pressable accessibilityRole="button" accessibilityLabel={displayedReadIndex > 0 ? '上一句' : '返回学习阶段'} onPress={previousRead} style={styles.roundNavButton}>
               <AppIcon name="arrow-left" size={20} />
             </Pressable>
             <Pressable
@@ -805,12 +861,13 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   );
 }
 
-function createDefaultSceneService() {
+function createDefaultSceneService(onUnauthorized?: () => void | Promise<void>) {
   const tokenStore = new SecureTokenStore();
   return new SceneService(
     new ApiClient({
       baseUrl: getRuntimeConfig().backendUrl,
       tokenStore,
+      onUnauthorized,
     }),
   );
 }
@@ -902,8 +959,9 @@ export function ScenesHome({
   promptExample?: ScenePromptExample;
   sceneService?: Pick<SceneService, 'generate'>;
 }) {
+  const { signOut } = useAppModel();
   const [sceneService] = useState(
-    () => injectedSceneService ?? createDefaultSceneService(),
+    () => injectedSceneService ?? createDefaultSceneService(signOut),
   );
   const [prompt, setPrompt] = useState('');
   const [preview, setPreview] = useState<GeneratedScene | null>(null);
@@ -1434,7 +1492,7 @@ const styles = StyleSheet.create({
   readCardContent: { paddingHorizontal: 22, paddingVertical: 24 },
   readCardInner: { width: '100%', position: 'relative', alignItems: 'center' },
   readCardInnerCentered: { justifyContent: 'center' },
-  scoreBadge: { position: 'absolute', top: 16, right: 17, flexDirection: 'row', alignItems: 'baseline' },
+  scoreBadge: { position: 'absolute', top: 0, right: -6, flexDirection: 'row', alignItems: 'baseline' },
   scoreBadgeValue: { color: colors.ink, fontSize: 24, fontWeight: '600' },
   scoreBadgeMax: { color: colors.subtle, fontSize: 9, fontWeight: '500' },
   readSentence: { width: '100%', maxWidth: 350, flexShrink: 1, color: colors.ink, fontSize: 29, lineHeight: 37, fontWeight: '600', textAlign: 'center', letterSpacing: -1 },
@@ -1442,6 +1500,7 @@ const styles = StyleSheet.create({
   scoreCorrect: { color: '#278B5B' },
   scoreIncorrect: { color: '#D65349' },
   readRecordButton: { width: 62, height: 62, marginTop: 28, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 31, backgroundColor: colors.white },
+  readRecordSuccess: { position: 'absolute', width: 62, height: 62, alignItems: 'center', justifyContent: 'center', borderRadius: 31, backgroundColor: '#278B5B' },
   readRecordButtonActive: { borderColor: '#E2AAA5', backgroundColor: '#FFF7F6', shadowColor: '#C75950', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 3 },
   readStatus: { marginTop: 15, color: colors.ink, fontSize: 15, fontWeight: '600' },
   readInstruction: { width: '100%', maxWidth: 350, marginTop: 7, flexShrink: 1, color: colors.muted, fontSize: 11, lineHeight: 17, fontWeight: '300', textAlign: 'center' },

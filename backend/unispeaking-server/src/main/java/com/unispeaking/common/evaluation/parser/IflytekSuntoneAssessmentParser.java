@@ -151,11 +151,11 @@ public final class IflytekSuntoneAssessmentParser {
 					: phoneme;
 			JsonNode span =
 					requiredObject(rawPhoneme, "span");
-			int start = requiredNonNegativeInteger(
-					span,
-					"start");
-			int end = requiredNonNegativeInteger(span, "end");
-			if (end <= start) {
+			int start = requiredInteger(span, "start");
+			int end = requiredInteger(span, "end");
+			boolean unmatched = start == -1 && end == -1;
+			if (!unmatched
+					&& (start < 0 || end < 0 || end <= start)) {
 				throw invalid();
 			}
 			phonemes.add(new PronunciationPhonemeResult(
@@ -301,16 +301,6 @@ public final class IflytekSuntoneAssessmentParser {
 			throw invalid();
 		}
 		return value.intValue();
-	}
-
-	private int requiredNonNegativeInteger(
-			JsonNode parent,
-			String field) {
-		int value = requiredInteger(parent, field);
-		if (value < 0) {
-			throw invalid();
-		}
-		return value;
 	}
 
 	private EvaluationException invalid() {

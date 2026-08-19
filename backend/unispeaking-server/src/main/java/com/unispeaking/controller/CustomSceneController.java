@@ -87,7 +87,12 @@ public class CustomSceneController {
 	@PostMapping("/flows/advance")
 	public ApiResponse<SceneFlowResponse> advanceStage(
 			@RequestBody AdvanceSceneStageRequest request) {
-		sceneFlowService.next(request.sceneId());
+		if (request.stage() == null) {
+			sceneFlowService.next(request.sceneId());
+		}
+		else {
+			sceneFlowService.next(request.sceneId(), request.stage());
+		}
 		return ApiResponse.success(sceneFlowService.response(request.sceneId()));
 	}
 
@@ -107,7 +112,7 @@ public class CustomSceneController {
 	public ApiResponse<List<LearningContentItem>> getByCurrentStage(
 			@PathVariable String sceneId,
 			@RequestParam(required = false) SceneFlowStage stage) {
-		return ApiResponse.success(sceneFlowService.content(sceneId));
+		return ApiResponse.success(sceneFlowService.content(sceneId, stage));
 	}
 
 	@PostMapping("/{sceneId}/sessions")

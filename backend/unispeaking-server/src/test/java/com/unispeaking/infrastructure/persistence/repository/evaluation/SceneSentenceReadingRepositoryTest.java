@@ -16,6 +16,7 @@ import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SceneSentenceReadingRepository;
 import com.unispeaking.common.persistence.codec.evaluation.EvaluationJsonbCodec;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.SentenceEvaluationEntity;
+import com.unispeaking.infrastructure.persistence.entity.evaluation.ReadingDetailsJson;
 import com.unispeaking.infrastructure.persistence.mapper.evaluation.SentenceEvaluationMapper;
 import com.unispeaking.infrastructure.persistence.mapper.scene.SceneSentenceMapper;
 import com.unispeaking.infrastructure.persistence.entity.scene.SceneSentenceEntity;
@@ -83,9 +84,17 @@ class SceneSentenceReadingRepositoryTest {
 		assertEquals("sentence_abc", first.getSentenceId());
 		assertEquals("custom_scene1", first.getSceneId());
 		assertEquals(new BigDecimal("82"), first.getOverallScore());
+		ReadingDetailsJson decoded =
+				codec.decodeReadingDetails(first.getScoreDetail());
 		assertEquals(
 				assessment.overallScore(),
-				codec.decodeReadingDetails(first.getScoreDetail()).overallScore());
+				decoded.overallScore());
+		assertEquals(
+				-1,
+				decoded.words().getFirst().phonemes().get(1).startPosition());
+		assertEquals(
+				-1,
+				decoded.words().getFirst().phonemes().get(1).endPosition());
 	}
 
 	@Test
@@ -170,6 +179,14 @@ class SceneSentenceReadingRepositoryTest {
 						new BigDecimal("83"),
 						0,
 						18);
+		PronunciationPhonemeResult unmatchedPhoneme =
+				new PronunciationPhonemeResult(
+						1,
+						"eɪ",
+						"eɪ",
+						BigDecimal.ZERO,
+						-1,
+						-1);
 		PronunciationWordResult word = new PronunciationWordResult(
 				0,
 				"headache",
@@ -177,7 +194,7 @@ class SceneSentenceReadingRepositoryTest {
 				new BigDecimal("82"),
 				new BigDecimal("83"),
 				false,
-				List.of(phoneme));
+				List.of(phoneme, unmatchedPhoneme));
 		return new PronunciationAssessmentResult(
 				new BigDecimal("82"),
 				new BigDecimal("80"),
