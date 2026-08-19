@@ -148,6 +148,7 @@ unispeaking:
     persistence: ${AUTH_PERSISTENCE:postgres}
     secure-cookie: ${AUTH_COOKIE_SECURE:false}
     session-max-age-seconds: ${AUTH_SESSION_MAX_AGE_SECONDS:28800}
+    mobile-session-idle-seconds: ${AUTH_MOBILE_SESSION_IDLE_SECONDS:2592000}
     captcha:
       provider: ${AUTH_CAPTCHA_PROVIDER:aliyun}
       development-token: ${AUTH_CAPTCHA_DEVELOPMENT_TOKEN:local-human-verified}

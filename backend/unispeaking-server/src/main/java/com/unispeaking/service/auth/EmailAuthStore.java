@@ -31,6 +31,8 @@ public interface EmailAuthStore {
 
     Optional<SessionRecord> findSession(String tokenDigest);
 
+    boolean touchSession(String tokenDigest, Instant lastSeenAt, Instant expiresAt);
+
     void revokeSession(String tokenDigest);
 
     record ChallengeRecord(UUID id, String email, byte[] codeDigest, Instant expiresAt, Instant consumedAt) {

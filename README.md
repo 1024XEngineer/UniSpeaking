@@ -180,6 +180,7 @@ DATABASE_PASSWORD=your-local-password
 JWT_SECRET=replace-with-at-least-32-random-bytes-in-base64
 JWT_ISSUER=unispeaking
 JWT_ACCESS_TOKEN_TTL=2h
+AUTH_MOBILE_SESSION_IDLE_SECONDS=2592000
 ```
 
 可通过以下命令生成 JWT Secret：

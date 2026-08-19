@@ -4,6 +4,7 @@ import com.unispeaking.common.response.ApiResponse;
 import com.unispeaking.domain.dto.auth.EmailAuthChallenge;
 import com.unispeaking.domain.dto.auth.AuthResponse;
 import com.unispeaking.domain.dto.auth.LoginRequest;
+import com.unispeaking.domain.dto.auth.UserAccountResponse;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.auth.EmailAuthService;
 import jakarta.validation.Valid;
@@ -12,7 +13,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.time.Instant;
 import java.util.UUID;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -39,6 +42,17 @@ public final class MobileEmailAuthController {
             @NotBlank String password) {
     }
 
+    public record MobileSessionRequest(@NotBlank String refreshToken) {
+    }
+
+    public record MobileAuthResponse(
+            String tokenType,
+            String accessToken,
+            Instant expiresAt,
+            UserAccountResponse user,
+            String refreshToken) {
+    }
+
     public record ChallengeResponse(UUID challengeId, int expiresInSeconds, int resendAfterSeconds) {
     }
 
@@ -58,16 +72,39 @@ public final class MobileEmailAuthController {
     }
 
     @PostMapping("/register")
-    public ApiResponse<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
+    public ApiResponse<MobileAuthResponse> register(@Valid @RequestBody RegisterRequest request) {
         emailAuthService.register(
                 request.email(), request.password(), request.challengeId(), request.code(), request.nickname());
-        return ApiResponse.success(authService.login(
-                new LoginRequest(request.email(), request.password())));
+        var access = authService.login(new LoginRequest(request.email(), request.password()));
+        var mobileSession = emailAuthService.loginMobile(request.email(), request.password());
+        return ApiResponse.success(response(access, mobileSession.rawToken()));
     }
 
     @PostMapping("/login")
-    public ApiResponse<AuthResponse> login(@Valid @RequestBody MobileLoginRequest request) {
-        return ApiResponse.success(authService.login(
-                new LoginRequest(request.email(), request.password())));
+    public ApiResponse<MobileAuthResponse> login(@Valid @RequestBody MobileLoginRequest request) {
+        var access = authService.login(new LoginRequest(request.email(), request.password()));
+        var mobileSession = emailAuthService.loginMobile(request.email(), request.password());
+        return ApiResponse.success(response(access, mobileSession.rawToken()));
+    }
+
+    @PostMapping("/refresh")
+    public ApiResponse<AuthResponse> refresh(@Valid @RequestBody MobileSessionRequest request) {
+        var user = emailAuthService.refreshMobileSession(request.refreshToken());
+        return ApiResponse.success(authService.issueAccessToken(user.id().toString()));
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@Valid @RequestBody MobileSessionRequest request) {
+        emailAuthService.logout(request.refreshToken());
+        return ResponseEntity.noContent().build();
+    }
+
+    private MobileAuthResponse response(AuthResponse access, String refreshToken) {
+        return new MobileAuthResponse(
+                access.tokenType(),
+                access.accessToken(),
+                access.expiresAt(),
+                access.user(),
+                refreshToken);
     }
 }

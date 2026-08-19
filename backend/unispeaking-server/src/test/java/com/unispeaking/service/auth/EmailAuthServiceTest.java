@@ -19,18 +19,26 @@ import org.springframework.security.crypto.argon2.Argon2PasswordEncoder;
 class EmailAuthServiceTest {
 
     private CapturingEmailSender emailSender;
+    private InMemoryEmailAuthStore store;
     private EmailAuthService service;
 
     @BeforeEach
     void setUp() {
         emailSender = new CapturingEmailSender();
-        service = new EmailAuthService(
+        store = new InMemoryEmailAuthStore();
+        service = serviceAt(Instant.parse("2026-08-06T08:00:00Z"));
+    }
+
+    private EmailAuthService serviceAt(Instant instant) {
+        return new EmailAuthService(
                 emailSender,
                 token -> "verified-human".equals(token),
                 Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8(),
-                Clock.fixed(Instant.parse("2026-08-06T08:00:00Z"), ZoneOffset.UTC),
+                Clock.fixed(instant, ZoneOffset.UTC),
                 Duration.ofMinutes(10),
-                new InMemoryEmailAuthStore());
+                Duration.ofHours(8),
+                Duration.ofDays(30),
+                store);
     }
 
     @Test
@@ -106,6 +114,37 @@ class EmailAuthServiceTest {
                 emailSender.lastCode()))
                 .isInstanceOf(EmailAuthException.class)
                 .hasMessage("CHALLENGE_INVALID");
+    }
+
+    @Test
+    void mobileSessionRemainsValidWhileItIsRefreshedWithinTheIdleWindow() {
+        var challenge = service.issueChallenge("person@example.com", "verified-human");
+        service.register("person@example.com", "correct-password", challenge.challengeId(), emailSender.lastCode());
+        var login = service.loginMobile("person@example.com", "correct-password");
+
+        var day29 = serviceAt(Instant.parse("2026-09-04T08:00:00Z"));
+        assertThat(day29.refreshMobileSession(login.rawToken()).email()).isEqualTo("person@example.com");
+
+        var day58 = serviceAt(Instant.parse("2026-10-03T08:00:00Z"));
+        assertThat(day58.currentUser(login.rawToken()).email()).isEqualTo("person@example.com");
+    }
+
+    @Test
+    void mobileSessionCannotRefreshAfterItsIdleWindowOrRevocation() {
+        var challenge = service.issueChallenge("person@example.com", "verified-human");
+        service.register("person@example.com", "correct-password", challenge.challengeId(), emailSender.lastCode());
+        var expired = service.loginMobile("person@example.com", "correct-password");
+
+        assertThatThrownBy(() -> serviceAt(Instant.parse("2026-09-06T08:00:00Z"))
+                .refreshMobileSession(expired.rawToken()))
+                .isInstanceOf(EmailAuthException.class)
+                .hasMessage("UNAUTHENTICATED");
+
+        var revoked = service.loginMobile("person@example.com", "correct-password");
+        service.logout(revoked.rawToken());
+        assertThatThrownBy(() -> service.refreshMobileSession(revoked.rawToken()))
+                .isInstanceOf(EmailAuthException.class)
+                .hasMessage("UNAUTHENTICATED");
     }
 
     private static final class CapturingEmailSender implements VerificationEmailSender {

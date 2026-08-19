@@ -45,6 +45,12 @@ class JdbcEmailAuthStoreTest {
 
         store.saveSession("token-digest", userId, now, now, now.plusSeconds(3600));
         assertThat(store.findSession("token-digest").orElseThrow().userId()).isEqualTo(userId);
+
+        var refreshedAt = now.plusSeconds(1800);
+        assertThat(store.touchSession("token-digest", refreshedAt, refreshedAt.plusSeconds(3600))).isTrue();
+        assertThat(store.findSession("token-digest").orElseThrow().expiresAt())
+                .isEqualTo(refreshedAt.plusSeconds(3600));
+        assertThat(store.touchSession("missing-token", refreshedAt, refreshedAt.plusSeconds(3600))).isFalse();
     }
 
     @Test

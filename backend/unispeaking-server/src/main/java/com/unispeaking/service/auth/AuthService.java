@@ -17,6 +17,11 @@ public interface AuthService {
 	/** Returns the currently authenticated account. */
 	UserAccountResponse currentUser();
 
+	/** Issues a short-lived access token after another trusted auth flow validates the user. */
+	default AuthResponse issueAccessToken(String userId) {
+		throw new UnsupportedOperationException("Access token renewal is not supported");
+	}
+
 	/** Changes the current user's password when supported. */
 	default ChangePasswordResponse changePassword(ChangePasswordRequest request) {
 		throw new UnsupportedOperationException("Password change is not supported");

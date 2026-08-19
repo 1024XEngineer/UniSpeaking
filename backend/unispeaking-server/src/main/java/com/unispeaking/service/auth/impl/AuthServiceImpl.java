@@ -15,6 +15,7 @@ import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.infrastructure.persistence.repository.user.UserAccountRepository;
 import com.unispeaking.infrastructure.persistence.repository.user.UserProfileRepository;
 import com.unispeaking.service.auth.AuthService;
+import com.unispeaking.service.auth.EmailAuthService;
 import com.unispeaking.service.auth.JwtTokenService;
 import java.time.Instant;
 import java.util.Locale;
@@ -34,16 +35,19 @@ public class AuthServiceImpl implements AuthService {
 	private final UserProfileRepository userProfileRepository;
 	private final PasswordEncoder passwordEncoder;
 	private final JwtTokenService jwtTokenService;
+	private final EmailAuthService emailAuthService;
 
 	public AuthServiceImpl(
 			UserAccountRepository userAccountRepository,
 			UserProfileRepository userProfileRepository,
 			PasswordEncoder passwordEncoder,
-			JwtTokenService jwtTokenService) {
+			JwtTokenService jwtTokenService,
+			EmailAuthService emailAuthService) {
 		this.userAccountRepository = userAccountRepository;
 		this.userProfileRepository = userProfileRepository;
 		this.passwordEncoder = passwordEncoder;
 		this.jwtTokenService = jwtTokenService;
+		this.emailAuthService = emailAuthService;
 	}
 
 	@Override
@@ -101,6 +105,23 @@ public class AuthServiceImpl implements AuthService {
 	}
 
 	@Override
+	public AuthResponse issueAccessToken(String userId) {
+		UUID id;
+		try {
+			id = UUID.fromString(userId);
+		}
+		catch (IllegalArgumentException exception) {
+			throw new BusinessException("AUTHENTICATION_REQUIRED", "登录状态已失效，请重新登录");
+		}
+		UserAccount user = userAccountRepository.findById(id)
+				.orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "用户不存在"));
+		if (user.status() != UserStatus.ACTIVE) {
+			throw new BusinessException("USER_NOT_ACTIVE", "账号当前不可登录");
+		}
+		return createAuthResponse(user);
+	}
+
+	@Override
 	@Transactional
 	public ChangePasswordResponse changePassword(ChangePasswordRequest request) {
 		UserAccount user = requireAuthenticatedUser();
@@ -115,6 +136,7 @@ public class AuthServiceImpl implements AuthService {
 				user.id(), user.authVersion(), encoded)) {
 			throw new BusinessException("PASSWORD_UPDATE_CONFLICT", "账号已发生变化，请重新登录后再试");
 		}
+		emailAuthService.revokeSessionsByEmail(user.username());
 		return ChangePasswordResponse.required();
 	}
 

@@ -35,4 +35,14 @@ public class EmailAuthConfiguration {
         }
         return Duration.ofSeconds(maxAgeSeconds);
     }
+
+    @Bean(name = "mobileAuthSessionIdleTtl")
+    Duration mobileAuthSessionIdleTtl(
+            @Value("${AUTH_MOBILE_SESSION_IDLE_SECONDS:2592000}") long idleSeconds) {
+        if (idleSeconds < 3600 || idleSeconds > 31536000) {
+            throw new IllegalArgumentException(
+                    "AUTH_MOBILE_SESSION_IDLE_SECONDS must be between 3600 and 31536000");
+        }
+        return Duration.ofSeconds(idleSeconds);
+    }
 }

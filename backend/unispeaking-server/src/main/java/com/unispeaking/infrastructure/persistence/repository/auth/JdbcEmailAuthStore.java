@@ -179,6 +179,14 @@ public final class JdbcEmailAuthStore implements EmailAuthStore {
     }
 
     @Override
+    public boolean touchSession(String tokenDigest, Instant lastSeenAt, Instant expiresAt) {
+        return jdbc.update(
+                "update user_sessions set last_seen_at = ?, expires_at = ? "
+                        + "where token_digest = ? and revoked_at is null and expires_at > ?",
+                Timestamp.from(lastSeenAt), Timestamp.from(expiresAt), tokenDigest, Timestamp.from(lastSeenAt)) == 1;
+    }
+
+    @Override
     public void revokeSession(String tokenDigest) {
         jdbc.update("update user_sessions set revoked_at = current_timestamp where token_digest = ? and revoked_at is null", tokenDigest);
     }

@@ -34,6 +34,7 @@ public class EmailAuthService {
     private final Clock clock;
     private final Duration challengeTtl;
     private final Duration sessionTtl;
+    private final Duration mobileSessionIdleTtl;
     private final EmailAuthStore store;
 
     @Autowired
@@ -44,6 +45,7 @@ public class EmailAuthService {
             Clock clock,
             @Qualifier("userAuthChallengeTtl") Duration challengeTtl,
             @Qualifier("userAuthSessionTtl") Duration sessionTtl,
+            @Qualifier("mobileAuthSessionIdleTtl") Duration mobileSessionIdleTtl,
             EmailAuthStore store) {
         this.emailSender = emailSender;
         this.humanVerificationGateway = humanVerificationGateway;
@@ -51,6 +53,7 @@ public class EmailAuthService {
         this.clock = clock;
         this.challengeTtl = challengeTtl;
         this.sessionTtl = sessionTtl;
+        this.mobileSessionIdleTtl = mobileSessionIdleTtl;
         this.store = store;
     }
 
@@ -62,7 +65,7 @@ public class EmailAuthService {
             Duration challengeTtl,
             EmailAuthStore store) {
         this(emailSender, humanVerificationGateway, passwordEncoder, clock, challengeTtl,
-                Duration.ofHours(8), store);
+                Duration.ofHours(8), Duration.ofDays(30), store);
     }
 
     public EmailAuthChallenge issueChallenge(String rawEmail, String humanVerificationToken) {
@@ -118,6 +121,14 @@ public class EmailAuthService {
     }
 
     public EmailLoginResult login(String rawEmail, String password) {
+        return login(rawEmail, password, sessionTtl);
+    }
+
+    public EmailLoginResult loginMobile(String rawEmail, String password) {
+        return login(rawEmail, password, mobileSessionIdleTtl);
+    }
+
+    private EmailLoginResult login(String rawEmail, String password, Duration ttl) {
         var user = store.findUserByEmail(normalizeEmail(rawEmail)).orElse(null);
         if (user == null || !passwordEncoder.matches(password, user.passwordHash())) {
             throw new EmailAuthException("INVALID_CREDENTIALS");
@@ -125,7 +136,7 @@ public class EmailAuthService {
         var token = randomToken();
         var now = clock.instant();
         store.ensureGovernance(user, now);
-        store.saveSession(digestString(token), user.id(), now, now, now.plus(sessionTtl));
+        store.saveSession(digestString(token), user.id(), now, now, now.plus(ttl));
         return new EmailLoginResult(token, new EmailAuthUser(user.id(), user.email()));
     }
 
@@ -159,10 +170,37 @@ public class EmailAuthService {
     }
 
     public EmailAuthUser currentUser(String rawToken) {
+        var session = findActiveSession(rawToken);
+        return findSessionUser(session);
+    }
+
+    @Transactional
+    public EmailAuthUser refreshMobileSession(String rawToken) {
+        var session = findActiveSession(rawToken);
+        var user = findSessionUser(session);
+        var now = clock.instant();
+        if (!store.touchSession(session.tokenDigest(), now, now.plus(mobileSessionIdleTtl))) {
+            throw new EmailAuthException("UNAUTHENTICATED");
+        }
+        return user;
+    }
+
+    public void revokeSessionsByEmail(String rawEmail) {
+        store.revokeSessionsByEmail(normalizeEmail(rawEmail), clock.instant());
+    }
+
+    private EmailAuthStore.SessionRecord findActiveSession(String rawToken) {
+        if (!StringUtils.hasText(rawToken)) {
+            throw new EmailAuthException("UNAUTHENTICATED");
+        }
         var session = store.findSession(digestString(rawToken)).orElse(null);
         if (session == null || !session.activeAt(clock.instant())) {
             throw new EmailAuthException("UNAUTHENTICATED");
         }
+        return session;
+    }
+
+    private EmailAuthUser findSessionUser(EmailAuthStore.SessionRecord session) {
         var user = store.findUserById(session.userId()).orElse(null);
         if (user == null) {
             throw new EmailAuthException("UNAUTHENTICATED");

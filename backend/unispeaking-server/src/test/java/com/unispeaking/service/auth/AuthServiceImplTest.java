@@ -43,6 +43,8 @@ class AuthServiceImplTest {
 	private PasswordEncoder passwordEncoder;
 	@Mock
 	private JwtTokenService jwtTokenService;
+	@Mock
+	private EmailAuthService emailAuthService;
 
 	@AfterEach
 	void clearSecurityContext() {
@@ -129,6 +131,37 @@ class AuthServiceImplTest {
 		assertEquals(admin.id().toString(), service.requireAdminUserId());
 	}
 
+	@Test
+	void issuesAccessTokenForAUserValidatedByThePersistentSession() {
+		AuthServiceImpl service = service();
+		UserAccount user = user();
+		when(userAccountRepository.findById(user.id())).thenReturn(Optional.of(user));
+		when(jwtTokenService.issue(user))
+				.thenReturn(new IssuedJwt("renewed-token", Instant.parse("2026-07-29T00:00:00Z")));
+
+		var response = service.issueAccessToken(user.id().toString());
+
+		assertEquals("renewed-token", response.accessToken());
+	}
+
+	@Test
+	void passwordChangeRevokesPersistentSessions() {
+		AuthServiceImpl service = service();
+		UserAccount user = user();
+		when(userAccountRepository.findById(user.id())).thenReturn(Optional.of(user));
+		when(passwordEncoder.matches("current-password", user.passwordHash())).thenReturn(true);
+		when(passwordEncoder.matches("new-password", user.passwordHash())).thenReturn(false);
+		when(passwordEncoder.encode("new-password")).thenReturn("new-hash");
+		when(userAccountRepository.updatePasswordAndAuthVersion(user.id(), user.authVersion(), "new-hash"))
+				.thenReturn(true);
+		setAuthentication(user);
+
+		service.changePassword(new com.unispeaking.domain.dto.auth.ChangePasswordRequest(
+				"current-password", "new-password"));
+
+		verify(emailAuthService).revokeSessionsByEmail(user.username());
+	}
+
 	private void setAuthentication(UserAccount user) {
 		Jwt jwt = new Jwt(
 				"token",
@@ -145,7 +178,8 @@ class AuthServiceImplTest {
 				userAccountRepository,
 				userProfileRepository,
 				passwordEncoder,
-				jwtTokenService);
+				jwtTokenService,
+				emailAuthService);
 	}
 
 	private UserAccount user() {

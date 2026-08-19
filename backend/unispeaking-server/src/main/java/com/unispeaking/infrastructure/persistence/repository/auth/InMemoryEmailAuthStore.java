@@ -89,6 +89,17 @@ public final class InMemoryEmailAuthStore implements EmailAuthStore {
     }
 
     @Override
+    public synchronized boolean touchSession(String tokenDigest, Instant lastSeenAt, Instant expiresAt) {
+        var session = sessions.get(tokenDigest);
+        if (session == null || !session.activeAt(lastSeenAt)) {
+            return false;
+        }
+        sessions.put(tokenDigest, new SessionRecord(
+                session.tokenDigest(), session.userId(), session.createdAt(), lastSeenAt, expiresAt, null));
+        return true;
+    }
+
+    @Override
     public synchronized void revokeSession(String tokenDigest) {
         var session = sessions.get(tokenDigest);
         if (session != null) {
