@@ -176,8 +176,8 @@ async function buildSceneDisplaySummary(scene) {
   return { title, background, aiRole, userRole, learningGoal };
 }
 
-function cachedPronunciationAudio(sceneId, text) {
-  const key = `${sceneId}:${text}`;
+function cachedPronunciationAudio(sceneId, text, voice = "") {
+  const key = `${sceneId}:${voice}:${text}`;
   if (!pronunciationAudioCache.has(key)) {
     if (pronunciationAudioCache.size >= maxPronunciationAudioCacheEntries) {
       pronunciationAudioCache.delete(pronunciationAudioCache.keys().next().value);
@@ -193,14 +193,14 @@ function cachedPronunciationAudio(sceneId, text) {
   return pronunciationAudioCache.get(key);
 }
 
-function prefetchPronunciationAudio(sceneId, items, limit = 2) {
+function prefetchPronunciationAudio(sceneId, items, limit = 2, voice = "") {
   if (!sceneId || !Array.isArray(items) || limit <= 0) return;
   items
     .map((item) => String(item?.englishText || item?.en || "").trim())
     .filter(Boolean)
     .slice(0, limit)
     .forEach((text) => {
-      void cachedPronunciationAudio(sceneId, text).catch(() => undefined);
+      void cachedPronunciationAudio(sceneId, text, voice).catch(() => undefined);
     });
 }
 
@@ -355,7 +355,7 @@ function useTeacherPreviewPlayback() {
   return { failedId, playTeacher, playingId };
 }
 
-function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
+function PronunciationAudioButton({ sceneId, text, voice = "", label = "播放发音" }) {
   const audioRef = useRef(null);
   const objectUrlRef = useRef("");
   const [loading, setLoading] = useState(false);
@@ -376,13 +376,13 @@ function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = "";
     };
-  }, [sceneId, text]);
+  }, [sceneId, text, voice]);
 
   const replay = () => {
     const audio = audioRef.current;
     if (!audio) {
       setLoading(true);
-      cachedPronunciationAudio(sceneId, text)
+      cachedPronunciationAudio(sceneId, text, voice)
         .then((blob) => {
           const objectUrl = URL.createObjectURL(blob);
           const nextAudio = new Audio(objectUrl);
@@ -412,8 +412,8 @@ function PronunciationAudioButton({ sceneId, text, label = "播放发音" }) {
   );
 }
 
-function ScenePlaybackToggle({ sceneId, text, label = "播放发音" }) {
-  return <PronunciationAudioButton sceneId={sceneId} text={text} label={label} />;
+function ScenePlaybackToggle({ sceneId, text, voice = "", label = "播放发音" }) {
+  return <PronunciationAudioButton sceneId={sceneId} text={text} voice={voice} label={label} />;
 }
 
 function MicrophoneToggle({ label = "麦克风", className, onActivate }) {
@@ -1451,7 +1451,7 @@ function sceneCategoryForLabel(label) {
   return Object.entries(sceneCategories).find(([, value]) => value.label === label)?.[0] || "other";
 }
 
-function Scenes({ onStartTraining, onIelts, onInterview }) {
+function Scenes({ onStartTraining, onIelts, onInterview, teacher }) {
   const [prompt, setPrompt] = useState("");
   const promptRef = useRef(null);
   const previewSceneIdRef = useRef("");
@@ -1465,6 +1465,7 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
     setPrompt(event.currentTarget.value.slice(0, 200));
   };
   const generating = generationSource !== null;
+  const promptLocked = generating || Boolean(preview);
   const generate = async (requestedInput, recommendationId = null) => {
     const fromRecommendation = typeof requestedInput === "string";
     const currentInput = fromRecommendation
@@ -1480,7 +1481,7 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
       previewSceneIdRef.current = scene.sceneId;
       setPreview(scene);
       setPreviewDisplay(null);
-      prefetchPronunciationAudio(scene.sceneId, scene.wordList, 2);
+      prefetchPronunciationAudio(scene.sceneId, scene.wordList, 2, teacher?.voiceId);
       void buildSceneDisplaySummary(scene).then((display) => {
         if (previewSceneIdRef.current === scene.sceneId) setPreviewDisplay(display);
       });
@@ -1515,9 +1516,9 @@ function Scenes({ onStartTraining, onIelts, onInterview }) {
             <div><p className="eyebrow">CREATE YOUR OWN</p><h2>创建专属场景</h2><p>用一句话描述你想练习的真实情境，AI 会为你整理角色、目标与表达任务。</p></div>
           </div>
           <div className={cx("scene-input", prompt.trim() && "has-content")}>
-            <textarea ref={promptRef} value={prompt} maxLength={200} onChange={syncPrompt} onInput={syncPrompt} onCompositionEnd={syncPrompt} placeholder="你今天想练习什么？例如：第一次去健身房，咨询设施、开放时间和会员体验" />
+            <textarea ref={promptRef} value={prompt} maxLength={200} readOnly={promptLocked} onChange={syncPrompt} onInput={syncPrompt} onCompositionEnd={syncPrompt} placeholder="你今天想练习什么？例如：第一次去健身房，咨询设施、开放时间和会员体验" />
             <div className="scene-input__footer">
-              <div className="example-chips"><small>快速开始</small>{examples.map((example) => <button key={example} onClick={() => setPrompt(example)}>{example}</button>)}</div>
+              <div className="example-chips"><small>快速开始</small>{examples.map((example) => <button key={example} disabled={promptLocked} onClick={() => setPrompt(example)}>{example}</button>)}</div>
               <div className="scene-input__controls"><span>{prompt.length}/200</span><ExpandingCta className={cx("scene-generate", generationSource === "manual" && "is-generating")} disabled={!prompt.trim() || generating} onClick={() => void generate()}><span className="generation-button-state notranslate" translate="no"><span className={cx("generation-button-state__idle", generationSource === "manual" && "is-hidden")}>生成练习场景</span><span className={cx("generation-button-state__loading", generationSource !== "manual" && "is-hidden")}><NewtonsCradle size={22} className="newtons-cradle--inline" label="正在生成练习场景" /><span>正在生成</span></span></span></ExpandingCta></div>
             </div>
             {generationError && <p className="scene-generation-error" role="alert">{generationError}</p>}
@@ -2190,14 +2191,14 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   useEffect(() => {
     if (!generatedMode || !sceneId || displayedStep === "speak") return;
     if (displayedStep === "read") {
-      prefetchPronunciationAudio(sceneId, readItems.slice(readIndex), 3);
+      prefetchPronunciationAudio(sceneId, readItems.slice(readIndex), 3, teacher?.voiceId);
       return;
     }
     const upcoming = lessonItems.slice(learnIndex);
     if (learningGroup === "words" && upcoming.length < 3) {
       upcoming.push(...generatedPhraseItems.slice(0, 3 - upcoming.length));
     }
-    prefetchPronunciationAudio(sceneId, upcoming, 3);
+    prefetchPronunciationAudio(sceneId, upcoming, 3, teacher?.voiceId);
   }, [
     displayedStep,
     generatedMode,
@@ -2208,6 +2209,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
     readIndex,
     readItems,
     sceneId,
+    teacher?.voiceId,
   ]);
   const submitRead = () => {
     const nextScore = readIndex === 1 && score === null ? 68 : 86;
@@ -2295,8 +2297,8 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
       </nav>}
       {flowError && <p className="call-error" role="alert">{flowError}</p>}
       {!result && <>
-      {displayedStep === "learn" && <section className="training-workspace"><aside className="lesson-list"><div><span>{generatedMode ? (learningGroup === "words" ? "场景单词" : "场景词组") : "本组语言"}</span><small>{learnIndex + 1} / {lessonItems.length}</small></div>{lessonItems.map((learningItem, index) => { const itemId = learningItem.id || `${learningGroup}-${index}-${learningItem.en}`; return <button key={itemId} type="button" disabled className={cx(index === learnIndex && "is-active", learnedItems.includes(itemId) && "is-done")}><small>{learningItem.type}</small><strong>{learningItem.en}</strong><span>{learnedItems.includes(itemId) ? <Check weight="bold" /> : index + 1}</span></button>; })}</aside><article className="learn-stage"><small>{item.type}</small><h1>{item.en}</h1><div className="pronunciation"><span>{item.phonetic || ""}</span>{generatedMode ? <PronunciationAudioButton sceneId={sceneId} text={item.en} label={`播放 ${item.en} 的发音`} /> : <AudioToggle mini label={`${item.en} 的发音`} />}</div><p>{item.zh}</p><div className="stage-footer"><ExpandingCta direction="back" disabled={learnIndex === 0 && (!generatedMode || learningGroup === "words")} onClick={previousLearn}>上一个</ExpandingCta><ExpandingCta onClick={nextLearn}>{learnIndex < lessonItems.length - 1 ? "下一个" : generatedMode && learningGroup === "words" && generatedPhraseItems.length > 0 ? "进入词组" : "进入朗读"}</ExpandingCta></div></article></section>}
-      {step === "read" && generatedMode && <section className="training-workspace"><aside className="lesson-list"><div><span>场景句子</span><small>{readIndex + 1} / {readItems.length}</small></div>{readItems.map((readItem, index) => <button key={readItem.id || readItem.en} type="button" disabled className={cx(index === readIndex && "is-active", readEvaluations[index]?.passed && "is-done")}><small>句子</small><strong>{readItem.en}</strong><span>{readEvaluations[index]?.passed ? <Check weight="bold" /> : index + 1}</span></button>)}</aside><article className="read-stage"><h1 className={cx(readEvaluation && "sentence-score-text")}><ScoredSentence sentence={item.en} words={readEvaluation?.words} /></h1><p>{item.zh}</p><SentenceRecorder sentenceId={item.id} busy={readSubmitting} onSubmit={submitGeneratedRead} onError={setReadError} /><h3>{readSubmitting ? "正在评分" : score === null ? "点击麦克风开始朗读" : readEvaluation?.passed ? "朗读通过" : "再试一次"}</h3>{score === null && !readError && <p>再次点击麦克风结束录音并提交评分。</p>}{readError && <p className="sentence-reading-error" role="alert">{readError}</p>}<div className="read-demo"><span>听标准示范</span><PronunciationAudioButton sceneId={sceneId} text={item.en} label={`播放 ${item.en} 的标准发音`} /></div>{score !== null && <div className="sentence-score-summary"><strong>{score}</strong><span>/100</span></div>}<div className="stage-footer read-stage-footer"><ExpandingCta direction="back" disabled={readIndex === 0 || readSubmitting} onClick={() => setReadIndex(readIndex - 1)}>上一句</ExpandingCta><ExpandingCta disabled={!readEvaluation?.passed || readSubmitting} onClick={nextRead}>{readIndex === readItems.length - 1 ? "进入模拟" : "下一句"}</ExpandingCta></div></article></section>}
+      {displayedStep === "learn" && <section className="training-workspace"><aside className="lesson-list"><div><span>{generatedMode ? (learningGroup === "words" ? "场景单词" : "场景词组") : "本组语言"}</span><small>{learnIndex + 1} / {lessonItems.length}</small></div>{lessonItems.map((learningItem, index) => { const itemId = learningItem.id || `${learningGroup}-${index}-${learningItem.en}`; return <button key={itemId} type="button" disabled className={cx(index === learnIndex && "is-active", learnedItems.includes(itemId) && "is-done")}><small>{learningItem.type}</small><strong>{learningItem.en}</strong><span>{learnedItems.includes(itemId) ? <Check weight="bold" /> : index + 1}</span></button>; })}</aside><article className="learn-stage"><small>{item.type}</small><h1>{item.en}</h1><div className="pronunciation"><span>{item.phonetic || ""}</span>{generatedMode ? <PronunciationAudioButton sceneId={sceneId} text={item.en} voice={teacher?.voiceId} label={`播放 ${item.en} 的发音`} /> : <AudioToggle mini label={`${item.en} 的发音`} />}</div><p>{item.zh}</p><div className="stage-footer"><ExpandingCta direction="back" disabled={learnIndex === 0 && (!generatedMode || learningGroup === "words")} onClick={previousLearn}>上一个</ExpandingCta><ExpandingCta onClick={nextLearn}>{learnIndex < lessonItems.length - 1 ? "下一个" : generatedMode && learningGroup === "words" && generatedPhraseItems.length > 0 ? "进入词组" : "进入朗读"}</ExpandingCta></div></article></section>}
+      {step === "read" && generatedMode && <section className="training-workspace"><aside className="lesson-list"><div><span>场景句子</span><small>{readIndex + 1} / {readItems.length}</small></div>{readItems.map((readItem, index) => <button key={readItem.id || readItem.en} type="button" disabled className={cx(index === readIndex && "is-active", readEvaluations[index]?.passed && "is-done")}><small>句子</small><strong>{readItem.en}</strong><span>{readEvaluations[index]?.passed ? <Check weight="bold" /> : index + 1}</span></button>)}</aside><article className="read-stage"><h1 className={cx(readEvaluation && "sentence-score-text")}><ScoredSentence sentence={item.en} words={readEvaluation?.words} /></h1><p>{item.zh}</p><SentenceRecorder sentenceId={item.id} busy={readSubmitting} onSubmit={submitGeneratedRead} onError={setReadError} /><h3>{readSubmitting ? "正在评分" : score === null ? "点击麦克风开始朗读" : readEvaluation?.passed ? "朗读通过" : "再试一次"}</h3>{score === null && !readError && <p>再次点击麦克风结束录音并提交评分。</p>}{readError && <p className="sentence-reading-error" role="alert">{readError}</p>}<div className="read-demo"><span>听标准示范</span><PronunciationAudioButton sceneId={sceneId} text={item.en} voice={teacher?.voiceId} label={`播放 ${item.en} 的标准发音`} /></div>{score !== null && <div className="sentence-score-summary"><strong>{score}</strong><span>/100</span></div>}<div className="stage-footer read-stage-footer"><ExpandingCta direction="back" disabled={readIndex === 0 || readSubmitting} onClick={() => setReadIndex(readIndex - 1)}>上一句</ExpandingCta><ExpandingCta disabled={!readEvaluation?.passed || readSubmitting} onClick={nextRead}>{readIndex === readItems.length - 1 ? "进入模拟" : "下一句"}</ExpandingCta></div></article></section>}
       {step === "read" && !generatedMode && <section className="training-workspace"><aside className="lesson-list"><div><span>完整表达</span><small>{readIndex + 1} / {learningItems.length}</small></div>{learningItems.map((learningItem, index) => <button key={learningItem.en} className={cx(index === readIndex && "is-active", (readScores[index] ?? 0) >= 80 && "is-done")} onClick={() => setReadIndex(index)}><small>句子</small><strong>{learningItem.en}</strong><span>{(readScores[index] ?? 0) >= 80 ? <Check weight="bold" /> : index + 1}</span></button>)}</aside><article className="read-stage"><h1>{item.en}</h1><p>{item.zh}</p><div className="rhythm"><span>节奏重点</span><strong>{item.en.split(" ").slice(0, 4).join(" · ")}</strong></div><MicrophoneToggle label="朗读麦克风" onActivate={submitRead} /><h3>{score === null ? "轮到你说" : score >= 80 ? "朗读通过" : "再试一次"}</h3>{score === null && <p>尽量完整、连贯地说出整句话。</p>}<button type="button" className="read-replay" onClick={playReadDemo}><SpeakerHigh weight="fill" />{heardReadDemos.includes(readIndex) ? "再听一次标准示范" : "听标准示范"}</button>{score >= 80 && <div className="stage-footer read-stage-footer"><span /><ExpandingCta onClick={nextRead}>{readIndex === learningItems.length - 1 ? "进入模拟" : "下一句"}</ExpandingCta></div>}</article></section>}
       </>}
       {(step === "speak" || result) && generatedMode && <CustomSceneConversation sceneId={sceneId} teacher={teacher} speed={speed} ended={Boolean(result)} onSessionStarted={(startedSessionId) => onStageChange?.("session", startedSessionId)} onComplete={onComplete} />}
@@ -3453,7 +3455,7 @@ export function App() {
   let content;
   if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={completeScenePractice} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
   else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={(sessionId) => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); recordCompletedPractice("free", sessionId); void synchronizeAchievements({ revealNotifications: true }); }} />;
-  else if (page === "scenes") content = <Scenes onStartTraining={startTraining} onLocked={setPaywall} onIelts={selectIelts} onInterview={selectInterview} />;
+  else if (page === "scenes") content = <Scenes teacher={teacher} onStartTraining={startTraining} onLocked={setPaywall} onIelts={selectIelts} onInterview={selectInterview} />;
   else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => selectMainPage("ielts-assets")} onInterview={() => selectMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: false, returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
   else if (page === "ielts-assets") content = <IeltsAssets route={ieltsRoute} onNavigate={navigateIelts} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToInterview={() => selectMainPage("interview-assets")} onTraining={() => navigateIelts(paths.ielts.root)} />;
