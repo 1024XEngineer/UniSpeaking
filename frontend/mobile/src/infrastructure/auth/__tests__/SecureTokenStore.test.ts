@@ -1,4 +1,8 @@
-import { SecureTokenStore } from '../SecureTokenStore';
+import {
+  createPlatformTokenStorage,
+  SecureTokenStore,
+  WebTokenStorage,
+} from '../SecureTokenStore';
 
 function createStorage(initialValue: string | null = null) {
   let value = initialValue;
@@ -38,5 +42,26 @@ describe('SecureTokenStore', () => {
     expect(storage.deleteItemAsync).toHaveBeenCalledWith(
       'unispeaking.accessToken',
     );
+  });
+
+  it('uses browser storage for the web platform', async () => {
+    const values = new Map<string, string>();
+    const browserStorage = {
+      getItem: jest.fn((key: string) => values.get(key) ?? null),
+      setItem: jest.fn((key: string, value: string) => values.set(key, value)),
+      removeItem: jest.fn((key: string) => values.delete(key)),
+    };
+    const storage = new WebTokenStorage(() => browserStorage);
+    const tokenStore = new SecureTokenStore(storage);
+
+    await tokenStore.set('web-token');
+    await expect(tokenStore.get()).resolves.toBe('web-token');
+    await tokenStore.clear();
+    await expect(tokenStore.get()).resolves.toBeNull();
+  });
+
+  it('selects web storage only for the web platform', () => {
+    expect(createPlatformTokenStorage('web')).toBeInstanceOf(WebTokenStorage);
+    expect(createPlatformTokenStorage('ios')).not.toBeInstanceOf(WebTokenStorage);
   });
 });

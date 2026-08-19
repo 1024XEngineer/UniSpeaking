@@ -3094,8 +3094,8 @@ export function App() {
         return;
       }
       try {
-        const [currentUser, preference, profile] = await Promise.all([
-          getCurrentUser(),
+        const currentUser = await getCurrentUser();
+        const [preference, profile] = await Promise.all([
           getUserPreference(),
           getProfileOverview(),
         ]);
