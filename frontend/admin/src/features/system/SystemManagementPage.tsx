@@ -6,8 +6,8 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import {
-  getAiConfiguration, getCredentialStatus, replaceCredential, replaceRoute,
-  updateModel, updateProvider, type AiCapability, type ModelView, type ProviderView,
+	getAiConfiguration, getCredentialStatus, replaceCredential, replaceRoute,
+	updateModel, updateProvider, type AiCapability, type AiConfiguration, type ModelView, type ProviderView,
 } from './systemApi'
 
 const capabilityLabels: Record<AiCapability, string> = { REALTIME: '实时对话', LLM: '文本模型', SCORING: '发音评分', TTS: '语音合成', TRANSCRIPTION: '语音识别' }
@@ -63,16 +63,37 @@ function BlockHeader({ title, count, suffix, action }: { title: string; count?: 
 
 
 function ProviderTable({ providers, onChanged }: { providers: ProviderView[]; onChanged: () => Promise<unknown> }) {
-  const [credentialProvider, setCredentialProvider] = useState<ProviderView | null>(null)
-  const mutation = useMutation({ mutationFn: ({ provider, enabled }: { provider: ProviderView; enabled: boolean }) => updateProvider(provider.providerId, { enabled }), onSuccess: onChanged })
+	const queryClient = useQueryClient()
+	const [credentialProvider, setCredentialProvider] = useState<ProviderView | null>(null)
+	const mutation = useMutation({
+		mutationFn: ({ provider, enabled }: { provider: ProviderView; enabled: boolean }) => updateProvider(provider.providerId, { enabled }),
+		onMutate: async ({ provider, enabled }) => {
+			await queryClient.cancelQueries({ queryKey: ['ai', 'configuration'] })
+			const previous = queryClient.getQueryData<AiConfiguration>(['ai', 'configuration'])
+			queryClient.setQueryData<AiConfiguration>(['ai', 'configuration'], (current) => current ? {
+				...current,
+				providers: current.providers.map((item) => item.providerId === provider.providerId ? { ...item, enabled } : item),
+			} : current)
+			return { previous }
+		},
+		onError: (_error, _variables, context) => {
+			if (context?.previous) queryClient.setQueryData(['ai', 'configuration'], context.previous)
+		},
+		onSuccess: (updated) => queryClient.setQueryData<AiConfiguration>(['ai', 'configuration'], (current) => current ? {
+			...current,
+			providers: current.providers.map((item) => item.providerId === updated.providerId ? updated : item),
+		} : current),
+		onSettled: onChanged,
+	})
   return <>
     <div className="compact-table-scroll"><table className="compact-table provider-table"><thead><tr><th>供应商</th><th>渠道 ID</th><th>版本</th><th>状态</th><th>操作</th></tr></thead><tbody>{providers.map((provider) => <tr key={provider.providerId}>
       <td><span className="provider-identity"><span className={`provider-logo provider-logo--${provider.providerId}`}><Bot size={14} /></span><strong>{provider.displayName}</strong></span></td>
       <td><code>{provider.adapterType}</code></td>
       <td>v{provider.configVersion}</td>
-      <td><label className="compact-toggle"><input aria-label={`${provider.displayName}供应商状态`} type="checkbox" checked={provider.enabled} disabled={mutation.isPending} onChange={(event) => mutation.mutate({ provider, enabled: event.target.checked })} /><span><i />{provider.enabled ? '已启用' : '已停用'}</span></label></td>
+		<td><label className="compact-toggle"><input aria-label={`${provider.displayName}供应商状态`} type="checkbox" checked={provider.enabled} disabled={mutation.isPending} onChange={(event) => mutation.mutate({ provider, enabled: event.target.checked })} /><span><i />{provider.enabled ? '已启用' : '已停用'}</span></label></td>
       <td><button className="table-action" type="button" aria-label="管理密钥" onClick={() => setCredentialProvider(provider)}><KeyRound size={13} />密钥</button></td>
-    </tr>)}</tbody></table></div>
+	</tr>)}</tbody></table></div>
+	{mutation.isError && <p className="form-error" role="alert">{mutation.error.message}</p>}
     {credentialProvider && <CredentialDialog provider={credentialProvider} onClose={() => setCredentialProvider(null)} />}
   </>
 }
@@ -116,8 +137,28 @@ function CredentialDialog({ provider, onClose }: { provider: ProviderView; onClo
 }
 
 function ModelTable({ models, onChanged }: { models: ModelView[]; onChanged: () => Promise<unknown> }) {
-  const [editing, setEditing] = useState<ModelView | null>(null)
-  const mutation = useMutation({ mutationFn: ({ model, enabled }: { model: ModelView; enabled: boolean }) => updateModel(model.modelId, { enabled }), onSuccess: onChanged })
+	const queryClient = useQueryClient()
+	const [editing, setEditing] = useState<ModelView | null>(null)
+	const mutation = useMutation({
+		mutationFn: ({ model, enabled }: { model: ModelView; enabled: boolean }) => updateModel(model.modelId, { enabled }),
+		onMutate: async ({ model, enabled }) => {
+			await queryClient.cancelQueries({ queryKey: ['ai', 'configuration'] })
+			const previous = queryClient.getQueryData<AiConfiguration>(['ai', 'configuration'])
+			queryClient.setQueryData<AiConfiguration>(['ai', 'configuration'], (current) => current ? {
+				...current,
+				models: current.models.map((item) => item.modelId === model.modelId ? { ...item, enabled } : item),
+			} : current)
+			return { previous }
+		},
+		onError: (_error, _variables, context) => {
+			if (context?.previous) queryClient.setQueryData(['ai', 'configuration'], context.previous)
+		},
+		onSuccess: (updated) => queryClient.setQueryData<AiConfiguration>(['ai', 'configuration'], (current) => current ? {
+			...current,
+			models: current.models.map((item) => item.modelId === updated.modelId ? updated : item),
+		} : current),
+		onSettled: onChanged,
+	})
   return <>
     <div className="compact-table-scroll compact-table-scroll--models"><table className="compact-table model-table"><thead><tr><th>模型</th><th>类型</th><th>计费单位</th><th>价格</th><th>状态</th><th>操作</th></tr></thead><tbody>{models.map((model) => <tr key={model.modelId}>
       <td><strong>{model.displayName}</strong><small>{model.modelId}</small></td>
@@ -126,7 +167,8 @@ function ModelTable({ models, onChanged }: { models: ModelView[]; onChanged: () 
       <td><PriceSummary model={model} /></td>
       <td><label className="compact-toggle"><input aria-label={`${model.displayName}模型状态`} type="checkbox" checked={model.enabled} disabled={mutation.isPending} onChange={(event) => mutation.mutate({ model, enabled: event.target.checked })} /><span><i />{model.enabled ? '已启用' : '已停用'}</span></label></td>
       <td><button className="table-action" type="button" onClick={() => setEditing(model)}>编辑价格</button></td>
-    </tr>)}</tbody></table></div>
+	</tr>)}</tbody></table></div>
+	{mutation.isError && <p className="form-error" role="alert">{mutation.error.message}</p>}
     {editing && <ModelDialog model={editing} onClose={() => setEditing(null)} onChanged={onChanged} />}
   </>
 }

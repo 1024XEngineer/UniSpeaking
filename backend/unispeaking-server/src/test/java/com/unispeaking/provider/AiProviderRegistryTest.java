@@ -1,6 +1,7 @@
 package com.unispeaking.provider;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,6 +32,36 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
 class AiProviderRegistryTest {
+
+	@Test
+	void disablesAllQiniuAiModelsAtRegistrationBoundary() {
+		AiProviderRegistry registry = new AiProviderRegistry(
+				List.of(new StubQiniuRealtimeProvider(), new StubRealtimeProvider()),
+				llmProviders(),
+				List.of(new StubScoringProvider()),
+				ttsProviders(),
+				List.of(new StubTranscriptionProvider()),
+				Map.of(
+						AiCapability.REALTIME, List.of(
+								AiProviderRegistry.QINIU_REALTIME_PLUS,
+								AiProviderRegistry.QWEN_REALTIME_FLASH),
+						AiCapability.LLM, List.of(
+								AiProviderRegistry.QINIU_MAAS_QWEN_PLUS,
+								AiProviderRegistry.QWEN_LLM_PLUS,
+								AiProviderRegistry.DEEPSEEK_CHAT)),
+				false);
+
+		assertEquals(
+				List.of(AiProviderRegistry.QWEN_REALTIME_FLASH),
+				registry.route(AiCapability.REALTIME));
+		assertEquals(
+				List.of(
+						AiProviderRegistry.QWEN_LLM_PLUS,
+						AiProviderRegistry.DEEPSEEK_CHAT),
+				registry.route(AiCapability.LLM));
+		assertFalse(registry.deployedModels().stream()
+				.anyMatch(model -> model.providerId().startsWith("qiniu")));
+	}
 
 	@Test
 	void exposesOnlyTheDocumentedProviderOperations() {
