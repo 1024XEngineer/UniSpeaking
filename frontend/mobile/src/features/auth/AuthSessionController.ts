@@ -162,7 +162,11 @@ export class AuthSessionController {
   }
 
   async unauthorized() {
-    await this.dependencies.tokenStore.clear();
+    if (this.dependencies.tokenStore.clearTokens) {
+      await this.dependencies.tokenStore.clearTokens();
+    } else {
+      await this.dependencies.tokenStore.clear();
+    }
     this.setAnonymous();
   }
 
