@@ -181,6 +181,12 @@ function assistantResponseInvitesReply(text: string) {
   return /[?\uFF1F]$/.test(terminalText);
 }
 
+function isBenignResponseCancellationError(message: string) {
+  return /(?:cancel(?:lation)?[^.]*no active response|no active response|response[^.]*not active|already (?:been )?cancel)/i.test(
+    message,
+  );
+}
+
 function buildSessionUpdate(
   eventId: string,
   response: RealtimeSessionStartResponse,
@@ -617,6 +623,19 @@ export class RealtimeSessionController {
         return;
       case 'user.speech.started':
         if (this.options.mode === 'scene' && !this.inputEnabled) return;
+        if (
+          this.options.mode === 'scene' &&
+          this.machine.state === 'assistant_speaking' &&
+          this.responseInFlight
+        ) {
+          // Do not rely solely on provider-side interrupt_response. Native
+          // WebRTC can surface speech_started before the automatic cancellation
+          // has stopped remote output, so explicitly cancel the active reply.
+          this.dependencies.transport.sendProviderEvent({
+            event_id: this.createEventId(),
+            type: 'response.cancel',
+          });
+        }
         if (this.options.mode === 'scene') {
           this.clearSceneContinuationTimer();
           this.sceneUserTurnPending = true;
@@ -705,6 +724,18 @@ export class RealtimeSessionController {
         }
         return;
       case 'provider.error':
+        if (
+          this.options.mode === 'scene' &&
+          this.machine.state === 'user_speaking' &&
+          isBenignResponseCancellationError(event.message)
+        ) {
+          // Provider-side auto-interrupt may win the race with our explicit
+          // cancellation. Treat an already-cancelled response as success.
+          this.responseInFlight = false;
+          this.currentResponseRequest = null;
+          this.publish();
+          return;
+        }
         if (/conversation already has an active response/i.test(event.message)) {
           if (!this.pendingResponseRequest && this.currentResponseRequest) {
             this.pendingResponseRequest = this.currentResponseRequest;
