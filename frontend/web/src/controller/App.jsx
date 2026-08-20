@@ -2967,6 +2967,12 @@ function FeedbackInvitation({ onDismiss, onAccept }) {
 }
 
 export function App() {
+  useEffect(() => {
+    // Migrate away from the previous persistent Web access-token storage. The
+    // current page session is intentionally not restored after the browser
+    // process ends, even if an older build left a token in localStorage.
+    window.localStorage?.removeItem?.("unispeaking.accessToken");
+  }, []);
   const initialRoute = useMemo(() => resolveRoute(window.location), []);
   const {
     synchronizeAchievements,
