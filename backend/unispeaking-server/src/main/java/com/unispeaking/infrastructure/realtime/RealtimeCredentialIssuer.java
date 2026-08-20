@@ -109,8 +109,8 @@ public class RealtimeCredentialIssuer {
 	private String parentApiKey() {
 		String configured = credentialStore == null
 				? qwenProperties.getApiKey()
-				: credentialStore.credentialOrFallback("qwen", qwenProperties.getApiKey());
-		return ProviderCredentialOverride.currentOr(configured);
+				: credentialStore.credentialOrFallback("qwen", "apiKey", qwenProperties.getApiKey());
+		return ProviderCredentialOverride.currentOr("apiKey", configured);
 	}
 
 	private JsonNode parsePayload(String body) {

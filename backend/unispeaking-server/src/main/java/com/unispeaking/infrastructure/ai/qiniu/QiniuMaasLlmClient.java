@@ -2,12 +2,14 @@ package com.unispeaking.infrastructure.ai.qiniu;
 
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.infrastructure.config.QiniuMaasProperties;
+import com.unispeaking.provider.ProviderCredentialOverride;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -52,10 +54,11 @@ public final class QiniuMaasLlmClient {
 
 	public String execute(String model, String promptValue) {
 		String prompt = trim(promptValue);
+		String apiKey = ProviderCredentialOverride.currentOr("apiKey", properties.apiKey());
 		if (prompt.isBlank()) {
 			throw new ProviderFailure("INVALID_LLM_PROMPT", "LLM task prompt is required", false);
 		}
-		if (properties.apiKey().isBlank()) {
+		if (apiKey.isBlank()) {
 			throw new ProviderFailure(
 					"QINIU_MAAS_CREDENTIAL_MISSING",
 					"Set QINIU_MAAS_API_KEY before calling Qiniu MaaS LLM",
@@ -78,7 +81,7 @@ public final class QiniuMaasLlmClient {
 			HttpRequest request = HttpRequest.newBuilder()
 					.uri(endpoint)
 					.timeout(properties.readTimeout())
-					.header("Authorization", "Bearer " + properties.apiKey())
+					.header("Authorization", "Bearer " + apiKey)
 					.header("Content-Type", "application/json")
 					.POST(HttpRequest.BodyPublishers.ofString(
 							objectMapper.writeValueAsString(body),
@@ -139,6 +142,14 @@ public final class QiniuMaasLlmClient {
 			throw failure(
 					"QINIU_MAAS_LLM_RESPONSE_INVALID",
 					"Qiniu MaaS LLM response is not valid JSON",
+					true,
+					model,
+					startedAt);
+		}
+		catch (HttpTimeoutException exception) {
+			throw failure(
+					"QINIU_MAAS_LLM_TIMEOUT",
+					"Qiniu MaaS LLM request timed out",
 					true,
 					model,
 					startedAt);

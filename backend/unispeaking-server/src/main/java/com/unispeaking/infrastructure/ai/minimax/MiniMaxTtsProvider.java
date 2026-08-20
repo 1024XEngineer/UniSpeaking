@@ -112,7 +112,7 @@ public class MiniMaxTtsProvider extends TtsProvider {
 
 	@Override
 	public byte[] generateSpeechAudio(String text, String token) {
-		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		String credential = ProviderCredentialOverride.currentOr("apiKey", apiKey);
 		if (credential.isBlank()) {
 			throw retryableFailure(
 					"MINIMAX_TTS_CREDENTIAL_MISSING",

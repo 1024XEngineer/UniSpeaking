@@ -103,7 +103,7 @@ public class QwenLlmProvider extends LlmProvider {
 			String prompt,
 			String token,
 			LlmResponseFormat responseFormat) {
-		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		String credential = ProviderCredentialOverride.currentOr("apiKey", apiKey);
 		if (credential.isBlank()) {
 			throw retryableFailure(
 					"QWEN_LLM_CREDENTIAL_MISSING",
@@ -114,7 +114,7 @@ public class QwenLlmProvider extends LlmProvider {
 
 	@Override
 	public AiProviderResponse<String> executeLlmTaskMeasured(String prompt, String token) {
-		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		String credential = ProviderCredentialOverride.currentOr("apiKey", apiKey);
 		if (credential.isBlank()) {
 			throw retryableFailure(
 					"QWEN_LLM_CREDENTIAL_MISSING",

@@ -152,7 +152,7 @@ public class QwenTtsProvider extends TtsProvider {
 
 	@Override
 	public byte[] generateSpeechAudio(String text, String token, String requestedVoice) {
-		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		String credential = ProviderCredentialOverride.currentOr("apiKey", apiKey);
 		if (credential.isBlank()) {
 			throw retryableFailure(
 					"QWEN_TTS_CREDENTIAL_MISSING",
@@ -165,9 +165,17 @@ public class QwenTtsProvider extends TtsProvider {
 
 	@Override
 	public AiProviderResponse<byte[]> generateSpeechAudioMeasured(String text, String token) {
+		return generateSpeechAudioMeasured(text, token, voice);
+	}
+
+	@Override
+	public AiProviderResponse<byte[]> generateSpeechAudioMeasured(
+			String text,
+			String token,
+			String requestedVoice) {
 		requestIdCapture.remove();
 		try {
-			byte[] audio = generateSpeechAudio(text, token);
+			byte[] audio = generateSpeechAudio(text, token, requestedVoice);
 			String requestId = requestIdCapture.get();
 			ProviderUsage usage = requestId == null
 					? new ProviderUsage(0, 0, 0, 0, 0, 0, "NONE")
@@ -327,17 +335,17 @@ public class QwenTtsProvider extends TtsProvider {
 	}
 
 	private String officialRequestId(HttpResponse<byte[]> response) throws JacksonException {
-		String header = response.headers().firstValue("x-request-id")
-				.or(() -> response.headers().firstValue("x-dashscope-request-id"))
-				.orElse("")
-				.trim();
-		if (!header.isBlank()) return header;
 		String bodyRequestId = objectMapper.readTree(
 				new String(response.body(), StandardCharsets.UTF_8))
 				.path("request_id")
 				.asString("")
 				.trim();
-		return bodyRequestId.isBlank() ? null : bodyRequestId;
+		if (!bodyRequestId.isBlank()) return bodyRequestId;
+		String header = response.headers().firstValue("x-request-id")
+				.or(() -> response.headers().firstValue("x-dashscope-request-id"))
+				.orElse("")
+				.trim();
+		return header.isBlank() ? null : header;
 	}
 
 	private String resolveVoice(String requestedVoice) {

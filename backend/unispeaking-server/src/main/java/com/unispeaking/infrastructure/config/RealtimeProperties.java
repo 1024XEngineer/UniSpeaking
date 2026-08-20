@@ -67,9 +67,14 @@ public record RealtimeProperties(
 	}
 
 	public String getWebRtcSdpExchangeUrl(String realtimeModel) {
-		String resolvedWorkspaceId = getWorkspaceId();
+		return getWebRtcSdpExchangeUrl(realtimeModel, getWorkspaceId());
+	}
+
+	public String getWebRtcSdpExchangeUrl(String realtimeModel, String workspaceId) {
+		String resolvedWorkspaceId = trim(workspaceId);
 		String resolvedModel = trim(realtimeModel);
-		if (resolvedWorkspaceId.isBlank() || resolvedModel.isBlank()) {
+		if (resolvedWorkspaceId.isBlank() || resolvedModel.isBlank()
+				|| !resolvedWorkspaceId.matches("[A-Za-z0-9-]{1,128}")) {
 			return "";
 		}
 		return "https://" + resolvedWorkspaceId + "." + getRegion()

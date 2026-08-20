@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 export interface TokenStore {
   get(): Promise<string | null>;
@@ -14,12 +15,45 @@ export interface SecureStoragePort {
   deleteItemAsync(key: string): Promise<void>;
 }
 
+interface WebStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+export class WebTokenStorage implements SecureStoragePort {
+  constructor(
+    private readonly storageProvider: () => WebStorage | undefined = () =>
+      typeof globalThis.localStorage === 'undefined'
+        ? undefined
+        : globalThis.localStorage,
+  ) {}
+
+  async getItemAsync(key: string) {
+    return this.storageProvider()?.getItem(key) ?? null;
+  }
+
+  async setItemAsync(key: string, value: string) {
+    this.storageProvider()?.setItem(key, value);
+  }
+
+  async deleteItemAsync(key: string) {
+    this.storageProvider()?.removeItem(key);
+  }
+}
+
+export function createPlatformTokenStorage(
+  platform: string = Platform.OS,
+): SecureStoragePort {
+  return platform === 'web' ? new WebTokenStorage() : SecureStore;
+}
+
 export const accessTokenStorageKey = 'unispeaking.accessToken';
 export const refreshTokenStorageKey = 'unispeaking.refreshToken';
 
 export class SecureTokenStore implements TokenStore {
   constructor(
-    private readonly storage: SecureStoragePort = SecureStore,
+    private readonly storage: SecureStoragePort = createPlatformTokenStorage(),
     private readonly storageKey: string = accessTokenStorageKey,
     private readonly refreshStorageKey: string = refreshTokenStorageKey,
   ) {}
