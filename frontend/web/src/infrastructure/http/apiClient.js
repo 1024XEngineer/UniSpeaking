@@ -66,7 +66,9 @@ async function request(path, options = {}) {
     });
     return result;
   } catch (error) {
-    const expectedFailure = expectedStatuses.includes(response.status);
+    // Authentication expiry is an expected client state for every protected
+    // endpoint, even when the response races with navigation to /login.
+    const expectedFailure = response.status === 401 || expectedStatuses.includes(response.status);
     recordTelemetry("api.request", {
       severity: expectedFailure ? "INFO" : "ERROR",
       message: error instanceof Error ? error.message : "API request failed",
@@ -137,6 +139,11 @@ export async function getCurrentUser() {
   const user = await request("/api/auth/me", { expectedStatuses: [401] });
   setTelemetryUser(user?.id || null);
   return user;
+}
+
+export function getRealtimeIceConfiguration(forceRelay = false) {
+  const query = forceRelay ? "?forceRelay=true" : "";
+  return request(`/api/realtime/ice-configuration${query}`);
 }
 
 export function getProfileOverview(month) {

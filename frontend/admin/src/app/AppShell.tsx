@@ -11,6 +11,7 @@ const navigation = [
   { label: '总览', to: '/', icon: 'overview', end: true },
   { label: '用户与权益', to: '/users', icon: 'users' },
   { label: '用量与计费', to: '/billing', icon: 'usage' },
+  { label: 'BUG 与优化', to: '/quality', icon: 'alerts' },
   { label: '系统管理', to: '/system', icon: 'settings' },
 ] as const
 

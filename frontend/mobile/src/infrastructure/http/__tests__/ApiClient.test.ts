@@ -1,5 +1,10 @@
 import { ApiClient, ApiError, type ApiRequestOptions } from '../ApiClient';
 import type { TokenStore } from '../../auth/SecureTokenStore';
+import { mobileTelemetry } from '../../telemetry/MobileTelemetry';
+
+jest.mock('../../telemetry/MobileTelemetry', () => ({
+  mobileTelemetry: { recordApiRequest: jest.fn(async () => undefined) },
+}));
 
 function createTokenStore(token: string | null): TokenStore & {
   clear: jest.Mock<Promise<void>, []>;
@@ -102,6 +107,13 @@ describe('ApiClient', () => {
     await expect(client.request('/api/user-preferences')).rejects.toThrow('登录已过期');
     expect(tokenStore.clear).toHaveBeenCalledTimes(1);
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(mobileTelemetry.recordApiRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: '/api/user-preferences',
+        outcome: 'unauthenticated',
+        status: 401,
+      }),
+    );
   });
 
   it('aborts a request after its configured timeout', async () => {

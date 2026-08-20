@@ -999,6 +999,9 @@ public class EvaluationProcessor {
 		if (command == null || command.turnNo() < 1) {
 			throw new EvaluationException(EvaluationErrorCode.INVALID_REQUEST);
 		}
+		if (command.transcript().isBlank()) {
+			throw new EvaluationException(EvaluationErrorCode.TRANSCRIPT_REQUIRED);
+		}
 		AbstractSceneSession runtimeSession =
 				findCustomRuntimeSession(command.sessionId());
 		if (runtimeSession == null) {
@@ -1604,8 +1607,7 @@ public class EvaluationProcessor {
 
 	private boolean isRecoverableTurnFailure(EvaluationException exception) {
 		return switch (exception.errorCode()) {
-			case TRANSCRIPT_REQUIRED,
-					AUDIO_REQUIRED,
+			case AUDIO_REQUIRED,
 					AUDIO_UNSUPPORTED,
 					AUDIO_INVALID,
 					PROVIDER_NOT_CONFIGURED,
