@@ -139,7 +139,7 @@ describe('AuthSessionController', () => {
 
     await controller.bootstrap();
 
-    expect(dependencies.tokenStore.clear).not.toHaveBeenCalled();
+    expect(dependencies.tokenStore.clearTokens).not.toHaveBeenCalled();
     expect(controller.getSnapshot()).toEqual(
       expect.objectContaining({ status: 'anonymous', error: 'Network request failed' }),
     );
@@ -180,7 +180,7 @@ describe('AuthSessionController', () => {
 
     await controller.unauthorized();
 
-    expect(dependencies.tokenStore.clear).toHaveBeenCalledTimes(1);
+    expect(dependencies.tokenStore.clearTokens).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot().status).toBe('anonymous');
   });
 });
