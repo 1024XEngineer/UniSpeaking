@@ -10,11 +10,35 @@ import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.config.AiProviderCredentialStore;
 import com.unispeaking.provider.config.JdbcAiConfigurationStore;
 import java.util.List;
+import java.util.UUID;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 class AiProviderAdminServiceTest {
+
+	@Test
+	void updatesProviderAndModelEnabledStatesImmediately() {
+		JdbcTemplate jdbc = database();
+		JdbcAiConfigurationStore store = new JdbcAiConfigurationStore(jdbc);
+		var service = new AiProviderAdminService(
+				jdbc, store, mock(AiProviderRegistry.class),
+				mock(AiProviderCredentialStore.class));
+
+		var provider = service.updateProvider(
+				"vendor", new AiProviderAdminService.UpdateProviderRequest(null, false));
+		var model = service.updateModel(
+				"primary", new AiProviderAdminService.UpdateModelRequest(
+						null, false, null, null, null, null, null, null, null));
+
+		assertThat(provider.enabled()).isFalse();
+		assertThat(provider.configVersion()).isEqualTo(2);
+		assertThat(model.enabled()).isFalse();
+		assertThat(service.configuration().providers().getFirst().enabled()).isFalse();
+		assertThat(service.configuration().models().stream()
+				.filter(value -> value.modelId().equals("primary"))
+				.findFirst().orElseThrow().enabled()).isFalse();
+	}
 
 	@Test
 	void replacesDefaultRouteUsingModelPriorities() {
@@ -46,7 +70,8 @@ class AiProviderAdminServiceTest {
 
 	private static JdbcTemplate database() {
 		JdbcDataSource dataSource = new JdbcDataSource();
-		dataSource.setURL("jdbc:h2:mem:ai-provider-admin;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
+		dataSource.setURL("jdbc:h2:mem:ai-provider-admin-" + UUID.randomUUID()
+				+ ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
 		JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 		jdbc.execute("""
 				create table ai_providers (

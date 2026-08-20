@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -39,6 +40,13 @@ public final class AiProviderAdminController {
 
 	@PatchMapping("/models/{modelId}")
 	ModelView updateModel(@PathVariable String modelId, @RequestBody UpdateModelRequest request) {
+		return service.updateModel(modelId, request);
+	}
+
+	@PatchMapping("/models")
+	ModelView updateModelByQuery(
+			@RequestParam String modelId,
+			@RequestBody UpdateModelRequest request) {
 		return service.updateModel(modelId, request);
 	}
 

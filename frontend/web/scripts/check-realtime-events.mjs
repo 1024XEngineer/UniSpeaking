@@ -7,15 +7,37 @@ import {
   buildRealtimeStartPayload,
   createTurnAudioCaptureController,
   buildProviderSessionBindingFrame,
+  assistantResponseInvitesReply,
   extractProviderSessionId,
   extractCompletedAssistantMessage,
   isActiveResponseConflict,
+  isRealtimeChannelOpen,
   normalizeProviderEvent,
   normalizeBaseUrl,
+  normalizeIceTransportPolicy,
+  realtimeIceTransportPolicy,
+  realtimePeerConnectionConfig,
+  realtimeTurnEnabled,
+  resolveRealtimePeerConnectionConfig,
+  collectIceConnectionDiagnostics,
   releaseRealtimeTransport,
   waitForIceGathering,
   websocketUrl,
 } from "../src/websocket/realtimeClient.js";
+
+assert.equal(
+  assistantResponseInvitesReply("Understood. Just the steak and vegetables?"),
+  true,
+);
+assert.equal(
+  assistantResponseInvitesReply('Would you like anything else?"'),
+  true,
+);
+assert.equal(assistantResponseInvitesReply("Have a safe trip!"), false);
+
+assert.equal(isRealtimeChannelOpen({ readyState: "open" }), true);
+assert.equal(isRealtimeChannelOpen({ readyState: "closing" }), false);
+assert.equal(isRealtimeChannelOpen(null), false);
 
 assert.deepEqual(
   buildProviderSessionBindingFrame("local-session-1", {
@@ -115,6 +137,68 @@ assert.equal(
   websocketUrl("/backend", "signed-token", "https://app.example.com"),
   "wss://app.example.com/backend/ws/session-messages?access_token=signed-token",
 );
+assert.equal(realtimeIceTransportPolicy(), "all");
+assert.equal(realtimeTurnEnabled(), false);
+assert.equal(normalizeIceTransportPolicy("relay"), "relay");
+assert.equal(normalizeIceTransportPolicy("invalid"), "all");
+assert.equal(realtimePeerConnectionConfig().iceTransportPolicy, "all");
+
+let turnConfigurationRequests = 0;
+const unchangedPeerConfiguration = await resolveRealtimePeerConnectionConfig({
+  turnEnabled: false,
+  loadConfiguration: async () => {
+    turnConfigurationRequests += 1;
+    throw new Error("must not load");
+  },
+});
+assert.equal(turnConfigurationRequests, 0);
+assert.equal(unchangedPeerConfiguration.iceTransportPolicy, "all");
+
+const grayPeerConfiguration = await resolveRealtimePeerConnectionConfig({
+  turnEnabled: true,
+  loadConfiguration: async (forceRelay) => {
+    assert.equal(forceRelay, false);
+    return {
+      turnEnabled: true,
+      iceServers: [{
+        urls: ["turn:turn.example.cn:443?transport=udp"],
+        username: "temporary-user",
+        credential: "temporary-credential",
+      }],
+    };
+  },
+});
+assert.equal(grayPeerConfiguration.iceTransportPolicy, "all");
+assert.equal(grayPeerConfiguration.iceServers.at(-1).username, "temporary-user");
+
+const relayPeerConfiguration = await resolveRealtimePeerConnectionConfig({
+  turnEnabled: true,
+  forceRelay: true,
+  loadConfiguration: async () => ({
+    turnEnabled: true,
+    iceServers: [{
+      urls: "turn:turn.example.cn:443?transport=udp",
+      username: "temporary-user",
+      credential: "temporary-credential",
+    }],
+  }),
+});
+assert.equal(relayPeerConfiguration.iceTransportPolicy, "relay");
+assert.equal(relayPeerConfiguration.iceServers.length, 1);
+
+await assert.rejects(
+  resolveRealtimePeerConnectionConfig({
+    forceRelay: true,
+    loadConfiguration: async () => ({ turnEnabled: false, iceServers: [] }),
+  }),
+  (error) => error.code === "WEBRTC_TURN_NOT_CONFIGURED",
+);
+
+const fallbackPeerConfiguration = await resolveRealtimePeerConnectionConfig({
+  turnEnabled: true,
+  loadConfiguration: async () => { throw new Error("TURN endpoint unavailable"); },
+});
+assert.equal(fallbackPeerConfiguration.iceTransportPolicy, "all");
 
 assert.deepEqual(
   extractCompletedAssistantMessage({
@@ -337,6 +421,7 @@ try {
   assert.equal(partialGathering.complete, false);
   assert.equal(partialGathering.timedOut, true);
   assert.equal(partialGathering.candidates.host, 1);
+  assert.equal(partialGathering.candidates.protocols.udp, 1);
 
   await assert.rejects(
     waitForIceGathering({
@@ -356,6 +441,48 @@ try {
   globalThis.window = previousWindow;
 }
 
+const statsDiagnostics = await collectIceConnectionDiagnostics({
+  async getStats() {
+    return new Map([
+      ["local-1", {
+        id: "local-1",
+        type: "local-candidate",
+        candidateType: "relay",
+        protocol: "udp",
+        relayProtocol: "udp",
+      }],
+      ["remote-1", {
+        id: "remote-1",
+        type: "remote-candidate",
+        candidateType: "host",
+      }],
+      ["pair-1", {
+        type: "candidate-pair",
+        state: "succeeded",
+        nominated: true,
+        localCandidateId: "local-1",
+        remoteCandidateId: "remote-1",
+      }],
+    ]);
+  },
+}, {
+  host: 0,
+  srflx: 0,
+  prflx: 0,
+  relay: 1,
+  unknown: 0,
+  protocols: { udp: 1, tcp: 0, unknown: 0 },
+});
+assert.deepEqual(statsDiagnostics.selectedCandidatePair, {
+  state: "succeeded",
+  nominated: true,
+  localCandidateType: "relay",
+  localProtocol: "udp",
+  relayProtocol: "udp",
+  remoteCandidateType: "host",
+});
+assert.equal(statsDiagnostics.relayProtocols.udp, 1);
+
 const realtimeSource = await readFile(
   new URL("../src/websocket/realtimeClient.js", import.meta.url),
   "utf8",
@@ -371,6 +498,65 @@ assert.ok(
 );
 assert.match(realtimeSource, /let lifecycleState = "idle";/);
 assert.match(realtimeSource, /if \(startPromise\) return startPromise;/);
+assert.match(
+  realtimeSource,
+  /const manualTurnResponses = Boolean\(ieltsSceneId \|\| interviewSceneId\);/,
+  "custom scenes must use provider-managed VAD responses",
+);
+assert.match(
+  realtimeSource,
+  /automaticTurnResponses: !manualTurnResponses/,
+  "custom scene VAD must create responses without waiting for state advancement",
+);
+assert.match(
+  realtimeSource,
+  /vadThreshold: interviewSceneId \? 0\.8 : customSceneId \? 0\.4 : 0\.5/,
+  "custom scene VAD must retain short contextual answers",
+);
+assert.match(
+  realtimeSource,
+  /prefixPaddingMs: interviewSceneId \|\| customSceneId \? 1_000 : 500/,
+  "custom scene VAD must preserve the leading audio of short turns",
+);
+assert.match(
+  realtimeSource,
+  /inputReady = !customSceneId && \(!manualTurnResponses \|\| interviewSceneId\);/,
+  "custom scene scoring capture must stay closed before the opening response",
+);
+assert.match(
+  realtimeSource,
+  /if \(!customSceneId \|\| !responsePending\) turnAudioCapture\?\.start\(\);/,
+  "custom scene barge-in must not record mixed assistant audio for scoring",
+);
+const customSceneTurnSource = realtimeSource.slice(
+  realtimeSource.indexOf("if (customSceneId && persisted)"),
+  realtimeSource.indexOf("if (interviewSceneId && persisted)"),
+);
+assert.doesNotMatch(
+  customSceneTurnSource,
+  /await\s+turnAudioCapture\?\.take/,
+  "custom scene state advancement must not wait for WAV capture",
+);
+assert.doesNotMatch(
+  customSceneTurnSource,
+  /await\s+stateOperation/,
+  "custom scene provider responses must not wait for the state machine",
+);
+assert.match(
+  customSceneTurnSource,
+  /applyScenarioState\(scenarioState, \{ requestResponse: false \}\)/,
+  "custom scene state observations must not create normal turn responses",
+);
+assert.match(
+  customSceneTurnSource,
+  /if \(turnNo !== learnerTurnNo \|\| customSceneTurnPending\) return;/,
+  "scene completion must wait until state analysis reaches the latest user turn",
+);
+assert.doesNotMatch(
+  customSceneTurnSource,
+  /requestTurnResponse/,
+  "custom scene completion must not append a second provider closing response",
+);
 assert.doesNotMatch(realtimeSource, /console\.warn\([^\n]*(?:offerSdp|answerSdp|accessToken|credential)/);
 
 const appSource = await readFile(new URL("../src/controller/App.jsx", import.meta.url), "utf8");
