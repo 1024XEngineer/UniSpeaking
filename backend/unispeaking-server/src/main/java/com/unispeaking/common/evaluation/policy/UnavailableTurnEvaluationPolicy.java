@@ -35,13 +35,12 @@ public final class UnavailableTurnEvaluationPolicy {
 
 	public static boolean isUnavailable(CustomScores scores) {
 		return scores != null
-				&& isZero(scores.overallScore())
-				&& isZero(scores.rhythmScore())
-				&& isZero(scores.toneScore())
-				&& isZero(scores.integrityScore())
-				&& isZero(scores.pronunciationScore())
-				&& isZero(scores.fluencyScore())
-				&& FEEDBACK_SUMMARY.equals(scores.feedbackSummary());
+				&& isMissingOrZero(scores.overallScore())
+				&& isMissingOrZero(scores.rhythmScore())
+				&& isMissingOrZero(scores.toneScore())
+				&& isMissingOrZero(scores.integrityScore())
+				&& isMissingOrZero(scores.pronunciationScore())
+				&& isMissingOrZero(scores.fluencyScore());
 	}
 
 	public record CustomScores(
@@ -54,7 +53,7 @@ public final class UnavailableTurnEvaluationPolicy {
 			String feedbackSummary) {
 	}
 
-	private static boolean isZero(BigDecimal score) {
-		return score != null && score.compareTo(BigDecimal.ZERO) == 0;
+	private static boolean isMissingOrZero(BigDecimal score) {
+		return score == null || score.compareTo(BigDecimal.ZERO) == 0;
 	}
 }

@@ -7,6 +7,7 @@ import {
   buildRealtimeStartPayload,
   createTurnAudioCaptureController,
   buildProviderSessionBindingFrame,
+  assistantResponseInvitesReply,
   extractProviderSessionId,
   extractCompletedAssistantMessage,
   isActiveResponseConflict,
@@ -16,6 +17,16 @@ import {
   waitForIceGathering,
   websocketUrl,
 } from "../src/websocket/realtimeClient.js";
+
+assert.equal(
+  assistantResponseInvitesReply("Understood. Just the steak and vegetables?"),
+  true,
+);
+assert.equal(
+  assistantResponseInvitesReply('Would you like anything else?"'),
+  true,
+);
+assert.equal(assistantResponseInvitesReply("Have a safe trip!"), false);
 
 assert.deepEqual(
   buildProviderSessionBindingFrame("local-session-1", {
@@ -371,6 +382,65 @@ assert.ok(
 );
 assert.match(realtimeSource, /let lifecycleState = "idle";/);
 assert.match(realtimeSource, /if \(startPromise\) return startPromise;/);
+assert.match(
+  realtimeSource,
+  /const manualTurnResponses = Boolean\(ieltsSceneId \|\| interviewSceneId\);/,
+  "custom scenes must use provider-managed VAD responses",
+);
+assert.match(
+  realtimeSource,
+  /automaticTurnResponses: !manualTurnResponses/,
+  "custom scene VAD must create responses without waiting for state advancement",
+);
+assert.match(
+  realtimeSource,
+  /vadThreshold: interviewSceneId \? 0\.8 : customSceneId \? 0\.4 : 0\.5/,
+  "custom scene VAD must retain short contextual answers",
+);
+assert.match(
+  realtimeSource,
+  /prefixPaddingMs: interviewSceneId \|\| customSceneId \? 1_000 : 500/,
+  "custom scene VAD must preserve the leading audio of short turns",
+);
+assert.match(
+  realtimeSource,
+  /inputReady = !customSceneId && \(!manualTurnResponses \|\| interviewSceneId\);/,
+  "custom scene scoring capture must stay closed before the opening response",
+);
+assert.match(
+  realtimeSource,
+  /if \(!customSceneId \|\| !responsePending\) turnAudioCapture\?\.start\(\);/,
+  "custom scene barge-in must not record mixed assistant audio for scoring",
+);
+const customSceneTurnSource = realtimeSource.slice(
+  realtimeSource.indexOf("if (customSceneId && persisted)"),
+  realtimeSource.indexOf("if (interviewSceneId && persisted)"),
+);
+assert.doesNotMatch(
+  customSceneTurnSource,
+  /await\s+turnAudioCapture\?\.take/,
+  "custom scene state advancement must not wait for WAV capture",
+);
+assert.doesNotMatch(
+  customSceneTurnSource,
+  /await\s+stateOperation/,
+  "custom scene provider responses must not wait for the state machine",
+);
+assert.match(
+  customSceneTurnSource,
+  /applyScenarioState\(scenarioState, \{ requestResponse: false \}\)/,
+  "custom scene state observations must not create normal turn responses",
+);
+assert.match(
+  customSceneTurnSource,
+  /if \(turnNo !== learnerTurnNo \|\| customSceneTurnPending\) return;/,
+  "scene completion must wait until state analysis reaches the latest user turn",
+);
+assert.doesNotMatch(
+  customSceneTurnSource,
+  /requestTurnResponse/,
+  "custom scene completion must not append a second provider closing response",
+);
 assert.doesNotMatch(realtimeSource, /console\.warn\([^\n]*(?:offerSdp|answerSdp|accessToken|credential)/);
 
 const appSource = await readFile(new URL("../src/controller/App.jsx", import.meta.url), "utf8");

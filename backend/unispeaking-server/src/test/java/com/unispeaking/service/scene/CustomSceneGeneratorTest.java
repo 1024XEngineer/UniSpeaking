@@ -81,6 +81,10 @@ class CustomSceneGeneratorTest {
 				"either acceptance or refusal resolves"));
 		assertTrue(prompt.getValue().contains(
 				"must not request teaching feedback"));
+		assertTrue(prompt.getValue().contains(
+				"reusable lexical chunk or collocation of 2 to 6 English"));
+		assertTrue(prompt.getValue().contains(
+				"not a complete clause or sentence"));
 	}
 
 	@Test
@@ -138,7 +142,89 @@ class CustomSceneGeneratorTest {
 		verify(registry, times(2)).executeLlmTask(anyString(), isNull());
 	}
 
+	@Test
+	void retriesWhenPhraseListContainsCompleteSentences() {
+		AiProviderRegistry registry = mock(AiProviderRegistry.class);
+		when(registry.executeLlmTask(anyString(), isNull()))
+				.thenReturn(
+						validResponse(5, List.of(
+								"There is a hole in it",
+								"I would like to return this",
+								"Can I get my money back?",
+								"It was bought yesterday",
+								"Do you have the receipt?")),
+						validResponse(5));
+		var service = new CustomSceneGenerator(registry, objectMapper);
+
+		var scene = service.generate(
+				"custom_phrase_retry",
+				"user-1",
+				"退货退款",
+				null,
+				new UserProfile("user-1", "B", "Katerina", "zh-CN", ""));
+
+		assertEquals("check in", scene.phraseList().getFirst().englishText());
+		verify(registry, times(2)).executeLlmTask(anyString(), isNull());
+	}
+
+	@Test
+	void acceptsReusableLexicalChunksAsPhrases() {
+		AiProviderRegistry registry = mock(AiProviderRegistry.class);
+		when(registry.executeLlmTask(anyString(), isNull()))
+				.thenReturn(validResponse(5, List.of(
+						"money back",
+						"return this item",
+						"proof of purchase",
+						"ask for a refund",
+						"damaged product")));
+		var service = new CustomSceneGenerator(registry, objectMapper);
+
+		var scene = service.generate(
+				"custom_phrase_chunks",
+				"user-1",
+				"退货退款",
+				null,
+				new UserProfile("user-1", "B", "Katerina", "zh-CN", ""));
+
+		assertEquals("return this item", scene.phraseList().get(1).englishText());
+		verify(registry).executeLlmTask(anyString(), isNull());
+	}
+
+	@Test
+	void retriesWhenPhraseStartsWithNominalSubjectClause() {
+		AiProviderRegistry registry = mock(AiProviderRegistry.class);
+		when(registry.executeLlmTask(anyString(), isNull()))
+				.thenReturn(
+						validResponse(5, List.of(
+								"The item is defective",
+								"return this item",
+								"proof of purchase",
+								"ask for a refund",
+								"damaged product")),
+						validResponse(5));
+		var service = new CustomSceneGenerator(registry, objectMapper);
+
+		var scene = service.generate(
+				"custom_nominal_clause_retry",
+				"user-1",
+				"退货退款",
+				null,
+				new UserProfile("user-1", "B", "Katerina", "zh-CN", ""));
+
+		assertEquals("check in", scene.phraseList().getFirst().englishText());
+		verify(registry, times(2)).executeLlmTask(anyString(), isNull());
+	}
+
 	private String validResponse(int wordCount) {
+		return validResponse(wordCount, List.of(
+				"check in",
+				"single room",
+				"book a room",
+				"show my passport",
+				"confirm the reservation"));
+	}
+
+	private String validResponse(int wordCount, List<String> phrases) {
 		Map<String, Object> root = new LinkedHashMap<>();
 		root.put("title", "酒店办理入住");
 		root.put("label", "住宿");
@@ -174,12 +260,11 @@ class CustomSceneGeneratorTest {
 					"translation", "释义" + index));
 		}
 		root.put("words", words);
-		root.put("phrases", List.of(
-				item("phrase", "check in", "办理入住"),
-				item("phrase", "single room", "单人间"),
-				item("phrase", "book a room", "预订房间"),
-				item("phrase", "show my passport", "出示护照"),
-				item("phrase", "confirm the reservation", "确认预订")));
+		List<Map<String, String>> phraseItems = new ArrayList<>();
+		for (int index = 0; index < phrases.size(); index++) {
+			phraseItems.add(item("phrase", phrases.get(index), "短语" + index));
+		}
+		root.put("phrases", phraseItems);
 		root.put("sentences", List.of(
 				Map.of(
 						"sentence",
