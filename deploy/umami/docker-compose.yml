@@ -1,0 +1,66 @@
+name: unispeaking-umami
+
+services:
+  postgres:
+    image: docker.m.daocloud.io/library/postgres:15-alpine
+    environment:
+      POSTGRES_DB: umami
+      POSTGRES_USER: umami
+      POSTGRES_PASSWORD: ${UMAMI_DB_PASSWORD:?UMAMI_DB_PASSWORD is required}
+    volumes:
+      - umami_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umami -d umami"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      internal:
+        aliases:
+          - unispeaking-umami-postgres
+    restart: unless-stopped
+
+  umami:
+    image: unispeaking-umami:3.3.0-basepath-analytics
+    build:
+      context: ./src
+      args:
+        BASE_PATH: /analytics
+    environment:
+      DATABASE_URL: postgresql://umami:${UMAMI_DB_PASSWORD:?UMAMI_DB_PASSWORD is required}@unispeaking-umami-postgres:5432/umami
+      DATABASE_TYPE: postgresql
+      APP_SECRET: ${UMAMI_APP_SECRET:?UMAMI_APP_SECRET is required}
+      BASE_PATH: /analytics
+      DISABLE_TELEMETRY: "1"
+    expose:
+      - "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/analytics/api/heartbeat').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    networks:
+      internal: {}
+      proxy:
+        aliases:
+          - unispeaking-umami
+    restart: unless-stopped
+
+volumes:
+  umami_postgres_data: {}
+
+networks:
+  internal:
+    internal: true
+  proxy:
+    name: deploy_default
+    external: true
