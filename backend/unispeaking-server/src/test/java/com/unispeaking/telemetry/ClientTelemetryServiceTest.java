@@ -26,7 +26,7 @@ class ClientTelemetryServiceTest {
 				"https://unispeaking.qnsdk.com/conversation?token=secret#call", "web@abc",
 				null, null,
 				Map.of("rtt_ms", 123.5, "turn_used", true, "user_id", "forged-user",
-						"nested", Map.of("secret", "value")));
+						"nested", Map.of("secret", "value")), "evt-stable-1");
 
 		int accepted = service.accept(new ClientTelemetryBatchRequest(List.of(event)), "real-user");
 
@@ -36,6 +36,7 @@ class ClientTelemetryServiceTest {
 		assertEquals("/conversation", fields.get("route"));
 		assertEquals(123.5, fields.get("rtt_ms"));
 		assertEquals(true, fields.get("turn_used"));
+		assertEquals("evt-stable-1", fields.get("event_id"));
 		assertFalse(fields.containsKey("nested"));
 	}
 

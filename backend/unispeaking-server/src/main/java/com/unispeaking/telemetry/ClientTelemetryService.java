@@ -7,12 +7,17 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.List;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
 public class ClientTelemetryService {
+	private static final Logger LOGGER = LoggerFactory.getLogger(ClientTelemetryService.class);
 
 	private static final Set<String> RESERVED_ATTRIBUTE_KEYS = Set.of(
 			"telemetry", "service_name", "event_type", "platform", "level", "user_id",
@@ -20,23 +25,35 @@ public class ClientTelemetryService {
 	private static final int MAX_ATTRIBUTE_STRING_LENGTH = 500;
 	private static final Duration MAX_CLOCK_SKEW = Duration.ofDays(1);
 
-	private final ClientTelemetrySink sink;
+	private final List<ClientTelemetrySink> sinks;
 	private final Clock clock;
 
 	@Autowired
-	public ClientTelemetryService(ClientTelemetrySink sink) {
-		this(sink, Clock.systemUTC());
+	public ClientTelemetryService(List<ClientTelemetrySink> sinks) {
+		this(sinks, Clock.systemUTC());
 	}
 
 	ClientTelemetryService(ClientTelemetrySink sink, Clock clock) {
-		this.sink = sink;
+		this(List.of(sink), clock);
+	}
+
+	ClientTelemetryService(List<ClientTelemetrySink> sinks, Clock clock) {
+		this.sinks = List.copyOf(sinks);
 		this.clock = clock;
 	}
 
 	public int accept(ClientTelemetryBatchRequest batch, String authenticatedUserId) {
 		String userId = trimToNull(authenticatedUserId, 80);
 		for (ClientTelemetryEventRequest event : batch.events()) {
-			sink.write(new ClientTelemetryRecord(toFields(event, userId)));
+			var record = new ClientTelemetryRecord(toFields(event, userId));
+			for (ClientTelemetrySink sink : sinks) {
+				try {
+					sink.write(record);
+				}
+				catch (RuntimeException exception) {
+					LOGGER.warn("client telemetry sink failed: {}", sink.getClass().getSimpleName(), exception);
+				}
+			}
 		}
 		return batch.events().size();
 	}
@@ -44,6 +61,9 @@ public class ClientTelemetryService {
 	private Map<String, Object> toFields(ClientTelemetryEventRequest event, String userId) {
 		Map<String, Object> fields = new LinkedHashMap<>();
 		fields.put("telemetry", true);
+		fields.put("event_id", trimToNull(event.eventId(), 80) == null
+				? UUID.randomUUID().toString()
+				: trimToNull(event.eventId(), 80));
 		fields.put("service_name", "client-telemetry");
 		fields.put("event_type", event.eventType());
 		fields.put("platform", event.platform().toLowerCase());
