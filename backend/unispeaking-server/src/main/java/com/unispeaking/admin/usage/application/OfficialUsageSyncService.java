@@ -29,7 +29,6 @@ public final class OfficialUsageSyncService {
     private final AliyunInferenceLogParser parser;
     private final Clock clock;
     private final String expectedWorkspaceId;
-    private final String expectedModel;
     private final int lookbackSeconds;
 
     @Autowired
@@ -59,7 +58,6 @@ public final class OfficialUsageSyncService {
         this.parser = parser;
         this.clock = clock;
         this.expectedWorkspaceId = expectedWorkspaceId;
-        this.expectedModel = expectedModel;
         this.lookbackSeconds = lookbackSeconds;
     }
 
@@ -69,6 +67,7 @@ public final class OfficialUsageSyncService {
         Instant to = now.plusSeconds(1);
         List<String> rawLogs = logSource.loadLogs(from, to);
         Set<String> localTaskUuids = localTaskUuids();
+        Set<String> localRequestIds = usageDataSource.localProviderRequestIds();
         var unique = new LinkedHashMap<String, OfficialUsageRecord>();
         int rejectedSchema = 0;
         int rejectedContext = 0;
@@ -87,7 +86,11 @@ public final class OfficialUsageSyncService {
                 rejectedContext++;
                 continue;
             }
-            if (!localTaskUuids.contains(record.taskUuid())) {
+            boolean realtime = "ws".equals(record.protocol()) || "webrtc".equals(record.protocol());
+            boolean locallyBound = realtime
+                    ? localTaskUuids.contains(record.taskUuid())
+                    : localRequestIds.contains(record.requestId());
+            if (!locallyBound) {
                 unbound++;
                 continue;
             }
@@ -118,9 +121,10 @@ public final class OfficialUsageSyncService {
     private boolean matchesExpectedContext(OfficialUsageRecord record) {
         boolean workspaceMatches = expectedWorkspaceId == null || expectedWorkspaceId.isBlank()
                 || expectedWorkspaceId.equals(record.workspaceId());
-        boolean modelMatches = expectedModel == null || expectedModel.isBlank()
-                || expectedModel.equals(record.model());
-        return workspaceMatches && modelMatches && ("ws".equals(record.protocol()) || "webrtc".equals(record.protocol()));
+        boolean supportedProtocol = "ws".equals(record.protocol())
+                || "webrtc".equals(record.protocol())
+                || "http".equals(record.protocol());
+        return workspaceMatches && "200".equals(record.statusCode()) && supportedProtocol;
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)

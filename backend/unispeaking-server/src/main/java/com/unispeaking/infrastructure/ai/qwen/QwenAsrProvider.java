@@ -98,7 +98,7 @@ public class QwenAsrProvider extends TranscriptionProvider {
 				requireAudio(audio, "Qwen ASR"),
 				"wav");
 		requireAudio(input);
-		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		String credential = ProviderCredentialOverride.currentOr("apiKey", apiKey);
 		if (credential.isBlank()) {
 			throw retryableFailure(
 					"QWEN_ASR_CREDENTIAL_MISSING",

@@ -29,17 +29,36 @@ services:
       - path: ./env/.env
         required: false
     environment:
+      # Set JAVA_TOOL_OPTIONS to a valid agent path only after the host JAR has
+      # been verified. The empty default keeps the service bootable otherwise.
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS-}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
       OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-unispeaking-backend}
+      OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-otlp}
+      OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-otlp}
+      OTEL_LOGS_EXPORTER: ${OTEL_LOGS_EXPORTER:-none}
+      MANAGEMENT_PROMETHEUS_ENABLED: ${MANAGEMENT_PROMETHEUS_ENABLED:-true}
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: ${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:-health,prometheus}
     expose:
       - "8080"
+    volumes:
+      - ${OTEL_JAVA_AGENT_HOST_PATH:-/opt/monitoring/opentelemetry-javaagent.jar}:/opt/otel/opentelemetry-javaagent.jar:ro
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - default
       - monitoring
+    labels:
+      logging: "promtail"
+      service: "unispeaking-backend"
+      monitoring: "prometheus"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     restart: unless-stopped
 
   frontend:
@@ -52,10 +71,10 @@ services:
         VITE_ALIYUN_CAPTCHA_SCENE_ID: ${ALIYUN_CAPTCHA_SCENE_ID:-}
         VITE_ALIYUN_CAPTCHA_PREFIX: ${ALIYUN_CAPTCHA_PREFIX:-}
         VITE_ALIYUN_CAPTCHA_REGION: ${ALIYUN_CAPTCHA_REGION:-cn}
-        VITE_UMAMI_ENABLED: ${VITE_UMAMI_ENABLED:-false}
-        VITE_UMAMI_SCRIPT_URL: ${VITE_UMAMI_SCRIPT_URL:-https://cloud.umami.is/script.js}
-        VITE_UMAMI_WEBSITE_ID: ${VITE_UMAMI_WEBSITE_ID:-}
-        VITE_UMAMI_DOMAINS: ${VITE_UMAMI_DOMAINS:-}
+        VITE_UMAMI_ENABLED: ${VITE_UMAMI_ENABLED:-true}
+        VITE_UMAMI_SCRIPT_URL: ${VITE_UMAMI_SCRIPT_URL:-https://unispeaking.qnsdk.com/analytics/script.js}
+        VITE_UMAMI_WEBSITE_ID: ${VITE_UMAMI_WEBSITE_ID:-395f9c94-9165-49c7-9db1-f2d646a15268}
+        VITE_UMAMI_DOMAINS: ${VITE_UMAMI_DOMAINS:-unispeaking.qnsdk.com}
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
         VITE_APP_RELEASE: ${VITE_APP_RELEASE:-web@production}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}

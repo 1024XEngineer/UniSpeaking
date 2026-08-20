@@ -31,7 +31,7 @@ public record QiniuMaasProperties(
 		primaryModel = defaultIfBlank(primaryModel, DEFAULT_PRIMARY_MODEL);
 		fallbackModel = defaultIfBlank(fallbackModel, DEFAULT_FALLBACK_MODEL);
 		connectTimeout = positiveOrDefault(connectTimeout, Duration.ofSeconds(10));
-		readTimeout = positiveOrDefault(readTimeout, Duration.ofSeconds(90));
+		readTimeout = positiveOrDefault(readTimeout, Duration.ofSeconds(30));
 		maxResponseBytes = maxResponseBytes > 0 ? maxResponseBytes : 2 * 1024 * 1024;
 		maxOutputTokens = maxOutputTokens > 0 ? maxOutputTokens : 4096;
 	}

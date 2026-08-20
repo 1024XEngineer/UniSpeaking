@@ -486,6 +486,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   const [messages, setMessages] = useState([]);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
+  const [realtimeState, setRealtimeState] = useState("connecting");
   const [ending, setEnding] = useState(false);
   const [exitOpen, setExitOpen] = useState(false);
   const [partTwoPhase, setPartTwoPhase] = useState(isPartTwo ? "INTRODUCTION" : null);
@@ -707,6 +708,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
         if (cancelled) return;
         if (event.type === "local.connecting") setStatus("正在连接考官…");
         else if (event.type === "local.connected") {
+          setRealtimeState("connected");
           setStatus(isPartTwo ? "考官正在说明 Part 2 准备要求" : "考试进行中");
           if (isPartTwo) client.setMuted(true);
         }
@@ -800,9 +802,11 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
         } else if (event.type === "local.backend_warning") {
           setError("会话记录保存失败，请稍后重试");
         } else if (event.type === "local.mic_error") {
+          setRealtimeState("error");
           setError(event.message || "无法访问麦克风");
           setStatus("麦克风不可用，请检查权限");
         } else if (event.type === "error" || event.type === "local.error") {
+          setRealtimeState("error");
           setError(event.message || event.error?.message || "实时会话发生错误");
           setStatus("连接异常");
         }
@@ -823,6 +827,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
       .catch((startError) => {
         if (!cancelled) {
           ieltsAnalyticsRef.current.fail("REALTIME_ERROR");
+          setRealtimeState("error");
           setError(startError?.message || "无法开始 IELTS 实时会话");
         }
       });
@@ -849,10 +854,10 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   }, [generated?.ieltsId, generated?.voiceId, examiner.id]);
 
   useEffect(() => {
-    if (ending) return undefined;
+    if (ending || realtimeState === "error") return undefined;
     const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000);
     return () => window.clearInterval(timer);
-  }, [ending]);
+  }, [ending, realtimeState]);
 
   const finish = async () => {
     if (finishingRef.current) return;
@@ -951,7 +956,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
             <span className={cx("voice-wave", subtitles && "voice-wave--compact", "is-fallback")} aria-hidden="true">
               {[.28, .52, .78, 1, .72, .48, .3].map((level, index) => <i key={index} className="voice-wave__bar" style={{ "--rest-level": level }} />)}
             </span>
-            <time className="call-presence__time">{isPartTwo ? formatTime(partTwoRemaining) : isPartThree && partThreeRemaining != null ? formatTime(partThreeRemaining) : formatTime(elapsed)}</time>
+            <time className="call-presence__time">{realtimeState === "error" ? "连接失败" : isPartTwo ? formatTime(partTwoRemaining) : isPartThree && partThreeRemaining != null ? formatTime(partThreeRemaining) : formatTime(elapsed)}</time>
             {!subtitles && <span>{status}</span>}
           </div>
         </div>

@@ -446,20 +446,23 @@ const formatCallDuration = (totalSeconds) => {
 function CallTimer({ state = "active", paused = false, stopped = false, className }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const startedAt = useRef(Date.now());
+  const terminal = stopped || state === "ended" || state === "error";
 
   useEffect(() => {
     const updateElapsed = () => {
       setElapsedSeconds(Math.floor((Date.now() - startedAt.current) / 1000));
     };
     updateElapsed();
-    if (stopped || state === "ended") return undefined;
+    if (terminal) return undefined;
     const interval = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(interval);
-  }, [state, stopped]);
+  }, [terminal]);
 
   const duration = formatCallDuration(elapsedSeconds);
   const label = state === "connecting"
     ? "连接中"
+    : state === "error"
+      ? "连接失败"
     : state === "ended"
       ? "已结束"
       : paused
@@ -1939,7 +1942,7 @@ function CustomSceneConversation({
           <div className="portrait portrait--small"><img src={teacher.image} alt={teacher.name} /></div>
           <div className="listening-state listening-state--compact">
             <VoiceWaveform active={!ended && !paused && !ending && !error} compact />
-            <CallTimer paused={paused} state={ended || error ? "ended" : "active"} stopped={ending} />
+            <CallTimer paused={paused} state={ended ? "ended" : error ? "error" : "active"} stopped={ending} />
             <span>{status}</span>
           </div>
         </div>
@@ -2405,6 +2408,13 @@ function AssetModulePlaceholder({ module, onBack }) {
   );
 }
 
+function formatAssetDate(value) {
+  if (!value) return "待练习";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "待练习";
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
 function Assets({ sceneId, onPractice, onIelts, onInterview, onOpenRecord, onCloseRecord, initialView = "home", initialRecordTitle }) {
   const [records, setRecords] = useState([]);
   const [selectedId, setSelectedId] = useState(sceneId || "");
@@ -2415,11 +2425,18 @@ function Assets({ sceneId, onPractice, onIelts, onInterview, onOpenRecord, onClo
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [reservedModule, setReservedModule] = useState(null);
-  const visibleRecords = records;
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const filteredRecords = useMemo(() => (
+    selectedCategory === "all"
+      ? records
+      : records.filter((record) => record.label === sceneCategories[selectedCategory]?.label)
+  ), [records, selectedCategory]);
+  const visibleRecords = filteredRecords;
   const selected = visibleRecords.find((record) => record.sceneId === selectedId)
     || visibleRecords.find((record) => record.title === initialRecordTitle)
     || visibleRecords[0]
     || null;
+  const selectedDate = selected?.latestPracticedAt || selected?.createdAt || null;
 
   useEffect(() => {
     let cancelled = false;
@@ -2444,11 +2461,18 @@ function Assets({ sceneId, onPractice, onIelts, onInterview, onOpenRecord, onClo
   }, [sceneId]);
 
   useEffect(() => {
+    if (!visibleRecords.some((record) => record.sceneId === selectedId)) {
+      setSelectedId(visibleRecords[0]?.sceneId || "");
+    }
+  }, [selectedId, visibleRecords]);
+
+  useEffect(() => {
     const targetSceneId = sceneId || selected?.sceneId;
     if (!targetSceneId) {
       setDetail(null);
       return undefined;
     }
+    setDetail(null);
     let cancelled = false;
     getLearningAsset(targetSceneId)
       .then((asset) => {
@@ -2501,19 +2525,31 @@ function Assets({ sceneId, onPractice, onIelts, onInterview, onOpenRecord, onClo
     <main className="page assets-page">
       <PageHeader title="学习资产" subtitle="把场景练习中真正用过的表达，留在这里继续复习。" action={<AssetModuleMenu onIelts={onIelts} onInterview={onInterview} />} />
       {assetError && <p className="call-error" role="alert">{assetError}</p>}
+      <nav className="asset-category-filters" aria-label="学习资产标签筛选">
+        <button type="button" className={cx("asset-category-filter", selectedCategory === "all" && "is-active", "asset-category-filter--all")} onClick={() => setSelectedCategory("all")} aria-pressed={selectedCategory === "all"}>全部</button>
+        {Object.entries(sceneCategories).map(([key, category]) => {
+          const active = selectedCategory === key;
+          return <button key={key} type="button" className={cx("asset-category-filter", active && "is-active")} onClick={() => setSelectedCategory(key)} aria-pressed={active} style={active ? { backgroundColor: category.backgroundColor, borderColor: category.backgroundColor, color: category.textColor } : undefined}>{category.label}</button>;
+        })}
+      </nav>
       <section className="asset-layout">
         <aside className="asset-list asset-list--history" aria-label="场景训练历史">
           <div className="asset-list__heading"><strong>训练记录</strong><span>{visibleRecords.length} 条</span></div>
-          {visibleRecords.map((record) => <button key={record.sceneId} className={selected?.sceneId === record.sceneId ? "is-active" : ""} onClick={() => setSelectedId(record.sceneId)}><small>{record.latestPracticedAt ? new Date(record.latestPracticedAt).toLocaleDateString("zh-CN") : "尚未练习"} · {record.label || "其他"}</small><strong>{record.title}</strong><em>{record.wordCount + record.phraseCount + record.sentenceCount} 个语言资产 · {record.practiceCount ? `已练习 ${record.practiceCount} 次` : "待练习"}{record.latestScore !== null && record.latestScore !== undefined && ` · ${Math.round(Number(record.latestScore))}`}</em></button>)}
-          {!visibleRecords.length && <div className="asset-list__empty">{loading ? "正在加载学习资产" : "暂无场景学习资产"}</div>}
+          {visibleRecords.map((record) => <button key={record.sceneId} className={selected?.sceneId === record.sceneId ? "is-active" : ""} onClick={() => setSelectedId(record.sceneId)}>
+            <span className="asset-record-topline"><strong>{record.title}</strong><span className="asset-record-category" style={(() => { const palette = sceneCategories[sceneCategoryForLabel(record.label)]; return { backgroundColor: palette.backgroundColor, color: palette.textColor }; })()}>{record.label || "其他"}</span></span>
+            <span className="asset-record-bottomline"><small>{formatAssetDate(record.latestPracticedAt || record.createdAt)}</small><em>{record.latestSessionId ? "已完成" : "待练习"}</em></span>
+            {record.latestSessionId && record.latestScore !== null && record.latestScore !== undefined && <span className="asset-record-score">{Math.round(Number(record.latestScore))} 分</span>}
+            <CaretRight className="asset-record-arrow" aria-hidden="true" />
+          </button>)}
+          {!visibleRecords.length && <div className="asset-list__empty">{loading ? "正在加载学习资产" : selectedCategory !== "all" ? "没有匹配的学习资产" : "暂无场景学习资产"}</div>}
         </aside>
         <article className="asset-detail">
           {selected && <header>
-            <div><p className="eyebrow">{selected.label || "其他"}</p><h2>{selected.title}</h2><p>{selected.latestPracticedAt ? `${new Date(selected.latestPracticedAt).toLocaleDateString("zh-CN")} · 已完成 ${selected.practiceCount} 次模拟` : "尚未完成模拟对话"}</p></div>
+            <div><p className="eyebrow">{selected.label || "其他"}</p><h2>{selected.title}</h2><p>{formatAssetDate(selectedDate)} · {selected.latestSessionId ? "已完成" : "待练习"}</p></div>
             <div className="asset-detail__actions"><AnimatedDeleteButton onClick={() => { setDeleteError(""); setDeleteOpen(true); }} /><ExpandingCta className="teacher-cta asset-open-button" onClick={() => onOpenRecord(selected.sceneId)}>打开当前学习资产</ExpandingCta></div>
           </header>}
           <div className="asset-items" aria-label="已保存的单词、短语和句子">
-            {items.map((item) => <div key={`${item.type}-${item.contentId}`}><span className="tag">{item.type}</span><p><strong>{item.englishText}</strong><small>{item.chineseText}</small></p><ScenePlaybackToggle sceneId={selected.sceneId} text={item.englishText} label={`播放 ${item.englishText} 的发音`} /></div>)}
+            {selected && items.map((item) => <div key={`${item.type}-${item.contentId}`}><span className="tag">{item.type}</span><p><strong>{item.englishText}</strong><small>{item.chineseText}</small></p><ScenePlaybackToggle sceneId={selected.sceneId} text={item.englishText} label={`播放 ${item.englishText} 的发音`} /></div>)}
             {selected && !items.length && <div className="asset-list__empty">正在读取该场景的语言资产</div>}
           </div>
         </article>
@@ -3061,8 +3097,8 @@ export function App() {
         return;
       }
       try {
-        const [currentUser, preference, profile] = await Promise.all([
-          getCurrentUser(),
+        const currentUser = await getCurrentUser();
+        const [preference, profile] = await Promise.all([
           getUserPreference(),
           getProfileOverview(),
         ]);

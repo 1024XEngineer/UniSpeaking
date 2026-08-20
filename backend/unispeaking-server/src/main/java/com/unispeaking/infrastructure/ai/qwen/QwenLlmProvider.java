@@ -103,7 +103,7 @@ public class QwenLlmProvider extends LlmProvider {
 			String prompt,
 			String token,
 			LlmResponseFormat responseFormat) {
-		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		String credential = ProviderCredentialOverride.currentOr("apiKey", apiKey);
 		if (credential.isBlank()) {
 			throw retryableFailure(
 					"QWEN_LLM_CREDENTIAL_MISSING",
@@ -114,7 +114,7 @@ public class QwenLlmProvider extends LlmProvider {
 
 	@Override
 	public AiProviderResponse<String> executeLlmTaskMeasured(String prompt, String token) {
-		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		String credential = ProviderCredentialOverride.currentOr("apiKey", apiKey);
 		if (credential.isBlank()) {
 			throw retryableFailure(
 					"QWEN_LLM_CREDENTIAL_MISSING",
@@ -179,7 +179,17 @@ public class QwenLlmProvider extends LlmProvider {
 			ProviderUsage measuredUsage = inputTokens > 0 || outputTokens > 0
 					? new ProviderUsage(inputTokens, outputTokens, prompt.length(), content.length(), 0, 0, "PROVIDER")
 					: ProviderUsage.estimatedText(prompt, content);
-			return new AiProviderResponse<>(content, root.path("id").asString(null), measuredUsage);
+			String providerRequestId = response.headers().firstValue("x-request-id")
+					.or(() -> response.headers().firstValue("x-dashscope-request-id"))
+					.map(String::trim)
+					.filter(value -> !value.isBlank())
+					.orElseGet(() -> {
+						String requestId = root.path("request_id").asString(null);
+						return requestId == null || requestId.isBlank()
+								? root.path("id").asString(null)
+								: requestId;
+					});
+			return new AiProviderResponse<>(content, providerRequestId, measuredUsage);
 		}
 		catch (BusinessException exception) {
 			throw exception;

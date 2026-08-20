@@ -21,6 +21,7 @@ import com.unispeaking.provider.usage.AiInvocationAttempt;
 import com.unispeaking.provider.usage.AiInvocationLedger;
 import com.unispeaking.service.auth.AuthService;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -333,6 +334,57 @@ class AiProviderRegistryTest {
 		assertTrue(attempts.stream().allMatch(attempt -> userId.equals(attempt.context().userId())));
 	}
 
+	@Test
+	void recordsRealtimeProviderRequestIdInInvocationLedger() {
+		AiProviderRegistry registry = registry(new StubRealtimeProvider());
+		List<AiInvocationAttempt> attempts = new ArrayList<>();
+		registry.configureDynamicRuntime(null, attempts::add, null, null);
+
+		registry.recordRealtimeSession(
+				"11111111-1111-4111-8111-111111111111",
+				"session-1",
+				AiProviderRegistry.QWEN_REALTIME_FLASH,
+				"official-request-01",
+				Instant.parse("2026-08-18T08:00:00Z"),
+				Instant.parse("2026-08-18T08:01:00Z"));
+
+		assertEquals(1, attempts.size());
+		assertEquals("official-request-01", attempts.getFirst().providerRequestId());
+		assertEquals("11111111-1111-4111-8111-111111111111", attempts.getFirst().context().userId());
+	}
+
+	@Test
+	void recordsMeteredTtsFailureBeforeFallingBack() {
+		AiProviderRegistry registry = new AiProviderRegistry(
+				List.of(new StubRealtimeProvider()),
+				llmProviders(),
+				List.of(new StubScoringProvider()),
+				List.of(new MeteredFailingQwenTtsProvider(), new SuccessfulAliyunTtsProvider()),
+				List.of(new StubTranscriptionProvider()),
+				Map.of(AiCapability.TTS, List.of(
+						AiProviderRegistry.QWEN_TTS,
+						AiProviderRegistry.ALIYUN_TTS)));
+		List<AiInvocationAttempt> attempts = new ArrayList<>();
+		registry.configureDynamicRuntime(null, attempts::add, null, null);
+		AiInvocationContext context = new AiInvocationContext(
+				UUID.randomUUID(),
+				"11111111-1111-4111-8111-111111111111",
+				"session-tts",
+				"tts",
+				"default");
+
+		registry.generateSpeechAudioRouted(context, "Hello", null);
+
+		assertEquals(2, attempts.size());
+		AiInvocationAttempt failed = attempts.getFirst();
+		assertEquals("FAILED", failed.status());
+		assertEquals("QWEN_TTS_AUDIO_DOWNLOAD_FAILED", failed.errorCode());
+		assertEquals("qwen-billed-request", failed.providerRequestId());
+		assertEquals(5, failed.usage().inputCharacters());
+		assertTrue(failed.retryable());
+		assertEquals("SUCCEEDED", attempts.get(1).status());
+	}
+
 	private static AiRuntimeConfiguration runtime(
 			Map<String, AiProviderConfiguration> providers,
 			Map<String, AiModelConfiguration> models) {
@@ -359,8 +411,10 @@ class AiProviderRegistryTest {
 	private static AiProviderCredentialStore credentials() {
 		return new AiProviderCredentialStore() {
 			@Override public String credentialOrFallback(String providerId, String fallback) { return fallback; }
-			@Override public CredentialStatus status(String providerId) { return new CredentialStatus(false, null, false); }
-			@Override public CredentialStatus replace(String providerId, String plaintext) { throw new UnsupportedOperationException(); }
+			@Override public String credentialOrFallback(String providerId, String field, String fallback) { return fallback; }
+			@Override public Map<String, String> credentialsOrFallback(String providerId, Map<String, String> fallback) { return fallback; }
+			@Override public CredentialStatus status(String providerId) { return new CredentialStatus(false, null, false, List.of()); }
+			@Override public CredentialStatus replace(String providerId, Map<String, String> values) { throw new UnsupportedOperationException(); }
 		};
 	}
 
@@ -557,6 +611,36 @@ class AiProviderRegistryTest {
 			super("minimax", Set.of(AiProviderRegistry.MINIMAX_TTS));
 		}
 
+	}
+
+	private static final class MeteredFailingQwenTtsProvider extends TtsProvider {
+		private MeteredFailingQwenTtsProvider() {
+			super("qwen", Set.of(AiProviderRegistry.QWEN_TTS));
+		}
+
+		@Override
+		public AiProviderResponse<byte[]> generateSpeechAudioMeasured(String text, String token) {
+			throw new MeteredProviderException(
+					"QWEN_TTS_AUDIO_DOWNLOAD_FAILED",
+					"download failed",
+					true,
+					"qwen-billed-request",
+					ProviderUsage.ttsInput(text));
+		}
+	}
+
+	private static final class SuccessfulAliyunTtsProvider extends TtsProvider {
+		private SuccessfulAliyunTtsProvider() {
+			super("aliyun", Set.of(AiProviderRegistry.ALIYUN_TTS));
+		}
+
+		@Override
+		public AiProviderResponse<byte[]> generateSpeechAudioMeasured(String text, String token) {
+			return new AiProviderResponse<>(
+					new byte[] {1},
+					"aliyun-success-request",
+					ProviderUsage.tts(text, new byte[] {1}));
+		}
 	}
 
 	private static final class StubTranscriptionProvider extends TranscriptionProvider {

@@ -13,4 +13,12 @@ public abstract class TtsProvider extends AbstractAiProvider {
 	public final AiCapability capability() {
 		return AiCapability.TTS;
 	}
+
+	@Override
+	public AiProviderResponse<byte[]> generateSpeechAudioMeasured(
+			String text,
+			String token,
+			String voice) {
+		return generateSpeechAudioMeasured(text, token);
+	}
 }

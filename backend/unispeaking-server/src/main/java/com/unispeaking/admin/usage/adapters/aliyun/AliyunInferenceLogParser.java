@@ -7,6 +7,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 @Component
@@ -21,29 +22,27 @@ public final class AliyunInferenceLogParser {
     public OfficialUsageRecord parse(String json) {
         try {
             JsonNode root = mapper.readTree(json);
-            JsonNode usage = objectNode(root.path("usage"), "usage");
-            JsonNode inputDetails = usage.path("input_tokens_details");
-            JsonNode outputDetails = usage.path("output_tokens_details");
-            var officialUsage = new ModelUsage(
-                    1,
-                    requiredLong(usage, "total_tokens"),
-                    requiredLong(usage, "input_tokens"),
-                    requiredLong(usage, "output_tokens"),
-                    requiredLong(inputDetails, "text_tokens"),
-                    requiredLong(inputDetails, "audio_tokens"),
-                    requiredLong(outputDetails, "text_tokens"),
-                    requiredLong(outputDetails, "audio_tokens"));
+            String statusCode = requiredText(root, "status_code");
+            JsonNode usage = "200".equals(statusCode)
+                    ? objectNode(root.path("usage"), "usage")
+                    : mapper.createObjectNode();
+            long characters = optionalLong(usage, "characters");
+            var officialUsage = characters > 0
+                    ? new ModelUsage(1, 0, 0, 0, 0, 0, 0, 0)
+                    : tokenUsage(usage, statusCode);
             var record = new OfficialUsageRecord(
                     requiredText(root, "request_id"),
-                    requiredText(root, "task_uuid"),
+                    optionalText(root, "task_uuid"),
                     requiredLong(root, "start_unix_timestamp"),
                     requiredLong(root, "duration"),
-                    requiredText(root, "status_code"),
+                    statusCode,
                     requiredText(root, "model"),
                     requiredText(root, "workspace_id"),
                     requiredText(root, "apikey_id"),
-                    requiredText(objectNode(root.path("extras"), "extras"), "protocol"),
-                    officialUsage);
+                    requiredText(objectNode(root.path("extras"), "extras"), "protocol")
+                            .toLowerCase(Locale.ROOT),
+                    officialUsage,
+                    characters);
             validate(record);
             return record;
         } catch (OfficialUsageSchemaException exception) {
@@ -53,17 +52,44 @@ public final class AliyunInferenceLogParser {
         }
     }
 
+    private static ModelUsage tokenUsage(JsonNode usage, String statusCode) {
+        if (!"200".equals(statusCode)) {
+            return new ModelUsage(0, 0, 0, 0, 0, 0, 0, 0);
+        }
+        JsonNode inputDetails = usage.path("input_tokens_details");
+        JsonNode outputDetails = usage.path("output_tokens_details");
+        return new ModelUsage(
+                1,
+                requiredLong(usage, "total_tokens"),
+                requiredLong(usage, "input_tokens"),
+                requiredLong(usage, "output_tokens"),
+                optionalLong(inputDetails, "text_tokens"),
+                optionalLong(inputDetails, "audio_tokens"),
+                optionalLong(outputDetails, "text_tokens"),
+                optionalLong(outputDetails, "audio_tokens"));
+    }
+
     private static void validate(OfficialUsageRecord record) {
         requireStableId("request_id", record.requestId());
-        requireStableId("task_uuid", record.taskUuid());
+        if (record.taskUuid() != null) {
+            requireStableId("task_uuid", record.taskUuid());
+        }
         if (record.startedAtEpochMs() < 0) {
             throw new OfficialUsageSchemaException("start_unix_timestamp 不能为负数");
         }
         if (record.durationMs() < 0) {
             throw new OfficialUsageSchemaException("duration 不能为负数");
         }
-        if (!"ws".equals(record.protocol()) && !"webrtc".equals(record.protocol())) {
-            throw new OfficialUsageSchemaException("protocol 必须为 ws 或 webrtc");
+        if (!"ws".equals(record.protocol()) && !"webrtc".equals(record.protocol())
+                && !"http".equals(record.protocol())) {
+            throw new OfficialUsageSchemaException("protocol 必须为 ws、webrtc 或 http");
+        }
+        if (("ws".equals(record.protocol()) || "webrtc".equals(record.protocol()))
+                && record.taskUuid() == null) {
+            throw new OfficialUsageSchemaException("task_uuid 缺失");
+        }
+        if (!"200".equals(record.statusCode())) {
+            return;
         }
         var usage = record.usage();
         if (usage.inputTokens() != usage.inputTextTokens() + usage.inputAudioTokens()) {
@@ -92,6 +118,12 @@ public final class AliyunInferenceLogParser {
         return value;
     }
 
+    private static String optionalText(JsonNode parent, String field) {
+        JsonNode node = parent.path(field);
+        String value = node.asText();
+        return value == null || value.isBlank() ? null : value;
+    }
+
     private static long requiredLong(JsonNode parent, String field) {
         JsonNode node = parent.path(field);
         String value = node.asText();
@@ -107,6 +139,14 @@ public final class AliyunInferenceLogParser {
         } catch (NumberFormatException exception) {
             throw new OfficialUsageSchemaException(field + " 不是有效整数", exception);
         }
+    }
+
+    private static long optionalLong(JsonNode parent, String field) {
+        JsonNode node = parent.path(field);
+        if (node.isMissingNode() || node.isNull() || node.asText().isBlank()) {
+            return 0;
+        }
+        return requiredLong(parent, field);
     }
 
     private JsonNode objectNode(JsonNode node, String field) {

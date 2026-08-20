@@ -7,7 +7,7 @@ import { AssetsScreen, SceneAssetDetail, SceneAssetDetailLoader } from '../Asset
 const summaryRecord: SceneLearningRecord = {
   id: 'scene/airport',
   title: '机场行李托运',
-  date: '2026-08-05',
+  date: '2026年8月5日',
   status: '已完成',
   score: 88.6,
   practiceCount: 2,
@@ -77,6 +77,41 @@ describe('AssetsScreen backend binding', () => {
       expect(screen.getByText('资产服务暂时不可用')).toBeTruthy(),
     );
     expect(screen.getByText('重新加载')).toBeTruthy();
+  });
+
+  it('filters records by category before paginating and can return to all records', async () => {
+    const foodRecord = { ...summaryRecord, id: 'scene/food', title: '咖啡店点单', category: 'food' as const };
+    const transitRecord = { ...summaryRecord, id: 'scene/transit', title: '机场行李托运', category: 'transit' as const };
+    const service = {
+      listRecords: jest.fn(async () => [foodRecord, transitRecord]),
+      getRecord: jest.fn(async () => detailRecord),
+      deleteRecord: jest.fn(async () => undefined),
+    };
+    const screen = await render(
+      <AssetsScreen assetService={service} onOpenRecord={jest.fn()} onOpenIelts={jest.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByText('咖啡店点单')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('按餐饮筛选'));
+    expect(screen.getByText('咖啡店点单')).toBeTruthy();
+    expect(screen.queryByText('机场行李托运')).toBeNull();
+    await fireEvent.press(screen.getByText('全部'));
+    expect(screen.getByText('机场行李托运')).toBeTruthy();
+  });
+
+  it('shows an empty state when a category has no records', async () => {
+    const service = {
+      listRecords: jest.fn(async () => [summaryRecord]),
+      getRecord: jest.fn(async () => detailRecord),
+      deleteRecord: jest.fn(async () => undefined),
+    };
+    const screen = await render(
+      <AssetsScreen assetService={service} onOpenRecord={jest.fn()} onOpenIelts={jest.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByText('机场行李托运')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('按餐饮筛选'));
+    expect(screen.getByText('没有匹配的学习资产')).toBeTruthy();
   });
 });
 

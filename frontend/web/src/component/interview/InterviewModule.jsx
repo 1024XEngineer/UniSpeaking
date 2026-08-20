@@ -167,15 +167,16 @@ function InterviewWaveform({ active = false, compact = false }) {
 
 function InterviewTimer({ state = "active", paused = false }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const startedAt = useRef(Date.now());
   useEffect(() => {
-    const startedAt = Date.now();
-    const updateElapsed = () => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    const updateElapsed = () => setElapsedSeconds(Math.floor((Date.now() - startedAt.current) / 1000));
     updateElapsed();
+    if (state === "ended" || state === "error") return undefined;
     const interval = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [state]);
   const duration = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`;
-  const label = state === "ended" ? "已结束" : paused ? `已暂停 · ${duration}` : duration;
+  const label = state === "error" ? "连接失败" : state === "ended" ? "已结束" : paused ? `已暂停 · ${duration}` : duration;
   return <time className="call-presence__time">{label}</time>;
 }
 
@@ -762,7 +763,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
           <div className="portrait portrait--small interview-call-portrait"><img src={teacher?.image} alt={teacher?.name} /></div>
           <div className="listening-state listening-state--compact">
             <InterviewWaveform active={!ending && !paused && !error} compact />
-            <InterviewTimer paused={paused} state={ending || error ? "ended" : "active"} />
+            <InterviewTimer paused={paused} state={ending ? "ended" : error ? "error" : "active"} />
             {(!ending || closing) && <span>{status}</span>}
           </div>
         </div>
