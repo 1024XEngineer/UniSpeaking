@@ -13,6 +13,12 @@ import {
   isRealtimeChannelOpen,
   normalizeProviderEvent,
   normalizeBaseUrl,
+  normalizeIceTransportPolicy,
+  realtimeIceTransportPolicy,
+  realtimePeerConnectionConfig,
+  realtimeTurnEnabled,
+  resolveRealtimePeerConnectionConfig,
+  collectIceConnectionDiagnostics,
   releaseRealtimeTransport,
   waitForIceGathering,
   websocketUrl,
@@ -120,6 +126,68 @@ assert.equal(
   websocketUrl("/backend", "signed-token", "https://app.example.com"),
   "wss://app.example.com/backend/ws/session-messages?access_token=signed-token",
 );
+assert.equal(realtimeIceTransportPolicy(), "all");
+assert.equal(realtimeTurnEnabled(), false);
+assert.equal(normalizeIceTransportPolicy("relay"), "relay");
+assert.equal(normalizeIceTransportPolicy("invalid"), "all");
+assert.equal(realtimePeerConnectionConfig().iceTransportPolicy, "all");
+
+let turnConfigurationRequests = 0;
+const unchangedPeerConfiguration = await resolveRealtimePeerConnectionConfig({
+  turnEnabled: false,
+  loadConfiguration: async () => {
+    turnConfigurationRequests += 1;
+    throw new Error("must not load");
+  },
+});
+assert.equal(turnConfigurationRequests, 0);
+assert.equal(unchangedPeerConfiguration.iceTransportPolicy, "all");
+
+const grayPeerConfiguration = await resolveRealtimePeerConnectionConfig({
+  turnEnabled: true,
+  loadConfiguration: async (forceRelay) => {
+    assert.equal(forceRelay, false);
+    return {
+      turnEnabled: true,
+      iceServers: [{
+        urls: ["turn:turn.example.cn:443?transport=udp"],
+        username: "temporary-user",
+        credential: "temporary-credential",
+      }],
+    };
+  },
+});
+assert.equal(grayPeerConfiguration.iceTransportPolicy, "all");
+assert.equal(grayPeerConfiguration.iceServers.at(-1).username, "temporary-user");
+
+const relayPeerConfiguration = await resolveRealtimePeerConnectionConfig({
+  turnEnabled: true,
+  forceRelay: true,
+  loadConfiguration: async () => ({
+    turnEnabled: true,
+    iceServers: [{
+      urls: "turn:turn.example.cn:443?transport=udp",
+      username: "temporary-user",
+      credential: "temporary-credential",
+    }],
+  }),
+});
+assert.equal(relayPeerConfiguration.iceTransportPolicy, "relay");
+assert.equal(relayPeerConfiguration.iceServers.length, 1);
+
+await assert.rejects(
+  resolveRealtimePeerConnectionConfig({
+    forceRelay: true,
+    loadConfiguration: async () => ({ turnEnabled: false, iceServers: [] }),
+  }),
+  (error) => error.code === "WEBRTC_TURN_NOT_CONFIGURED",
+);
+
+const fallbackPeerConfiguration = await resolveRealtimePeerConnectionConfig({
+  turnEnabled: true,
+  loadConfiguration: async () => { throw new Error("TURN endpoint unavailable"); },
+});
+assert.equal(fallbackPeerConfiguration.iceTransportPolicy, "all");
 
 assert.deepEqual(
   extractCompletedAssistantMessage({
@@ -342,6 +410,7 @@ try {
   assert.equal(partialGathering.complete, false);
   assert.equal(partialGathering.timedOut, true);
   assert.equal(partialGathering.candidates.host, 1);
+  assert.equal(partialGathering.candidates.protocols.udp, 1);
 
   await assert.rejects(
     waitForIceGathering({
@@ -360,6 +429,48 @@ try {
 } finally {
   globalThis.window = previousWindow;
 }
+
+const statsDiagnostics = await collectIceConnectionDiagnostics({
+  async getStats() {
+    return new Map([
+      ["local-1", {
+        id: "local-1",
+        type: "local-candidate",
+        candidateType: "relay",
+        protocol: "udp",
+        relayProtocol: "udp",
+      }],
+      ["remote-1", {
+        id: "remote-1",
+        type: "remote-candidate",
+        candidateType: "host",
+      }],
+      ["pair-1", {
+        type: "candidate-pair",
+        state: "succeeded",
+        nominated: true,
+        localCandidateId: "local-1",
+        remoteCandidateId: "remote-1",
+      }],
+    ]);
+  },
+}, {
+  host: 0,
+  srflx: 0,
+  prflx: 0,
+  relay: 1,
+  unknown: 0,
+  protocols: { udp: 1, tcp: 0, unknown: 0 },
+});
+assert.deepEqual(statsDiagnostics.selectedCandidatePair, {
+  state: "succeeded",
+  nominated: true,
+  localCandidateType: "relay",
+  localProtocol: "udp",
+  relayProtocol: "udp",
+  remoteCandidateType: "host",
+});
+assert.equal(statsDiagnostics.relayProtocols.udp, 1);
 
 const realtimeSource = await readFile(
   new URL("../src/websocket/realtimeClient.js", import.meta.url),

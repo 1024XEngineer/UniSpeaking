@@ -141,6 +141,11 @@ export async function getCurrentUser() {
   return user;
 }
 
+export function getRealtimeIceConfiguration(forceRelay = false) {
+  const query = forceRelay ? "?forceRelay=true" : "";
+  return request(`/api/realtime/ice-configuration${query}`);
+}
+
 export function getProfileOverview(month) {
   const query = month ? `?month=${encodeURIComponent(month)}` : "";
   return request(`/api/profile/overview${query}`);
