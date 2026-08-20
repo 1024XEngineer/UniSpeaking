@@ -105,7 +105,11 @@ export class AuthSessionController {
       this.setAuthenticated(user, preference);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        await this.dependencies.tokenStore.clear();
+        if (this.dependencies.tokenStore.clearTokens) {
+          await this.dependencies.tokenStore.clearTokens();
+        } else {
+          await this.dependencies.tokenStore.clear();
+        }
       }
       this.setAnonymous(authErrorMessage(error));
     }
