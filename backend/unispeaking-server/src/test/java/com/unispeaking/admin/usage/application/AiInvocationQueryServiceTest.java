@@ -21,6 +21,7 @@ class AiInvocationQueryServiceTest {
 		assertThat(response.summary().requests()).isEqualTo(1);
 		assertThat(response.summary().attempts()).isEqualTo(2);
 		assertThat(response.summary().fallbackAttempts()).isEqualTo(1);
+		assertThat(response.summary().ttsCharacters()).isZero();
 		assertThat(response.summary().estimatedCost()).isEqualByComparingTo("0.03000000");
 		assertThat(response.records()).hasSize(2);
 		assertThat(response.records().getFirst().userEmail()).isEqualTo("learner@example.com");
@@ -46,6 +47,43 @@ class AiInvocationQueryServiceTest {
 	}
 
 	@Test
+	void reportsTtsUsageInCharactersWithoutCountingLlmCharacterEstimates() {
+		JdbcTemplate jdbc = database();
+		jdbc.update("""
+				insert into ai_model_invocations values
+				('20000000-0000-0000-0000-000000000003', '30000000-0000-0000-0000-000000000003', 1,
+				 '10000000-0000-0000-0000-000000000001', null, 'tts', 'default', 'TTS',
+				 'qwen', 'qwen3-tts-flash', 'tts-body-request-id', '2026-08-18T10:00:00Z',
+				 '2026-08-18T10:00:00.300Z', 300, null, 0, 0, 0, 51, 0, 0, 0,
+				 'OFFICIAL', 'SUCCEEDED', null, false, null, 0.00408000, 'CNY')
+				""");
+		var service = new AiInvocationQueryService(jdbc);
+
+		var response = service.query(new AiInvocationQueryService.Query(
+				OffsetDateTime.parse("2026-08-18T00:00:00Z"),
+				OffsetDateTime.parse("2026-08-19T00:00:00Z"), null, null, null, 100));
+
+		assertThat(response.summary().ttsCharacters()).isEqualTo(51);
+		assertThat(response.byModel())
+				.filteredOn(model -> model.capability().equals("TTS"))
+				.singleElement()
+				.satisfies(model -> {
+					assertThat(model.totalTokens()).isZero();
+					assertThat(model.inputCharacters()).isEqualTo(51);
+					assertThat(model.outputCharacters()).isZero();
+				});
+		assertThat(response.byUser()).singleElement().satisfies(user ->
+				assertThat(user.models())
+						.filteredOn(model -> model.capability().equals("TTS"))
+						.singleElement()
+						.satisfies(model -> {
+							assertThat(model.totalTokens()).isZero();
+							assertThat(model.inputCharacters()).isEqualTo(51);
+							assertThat(model.outputCharacters()).isZero();
+						}));
+	}
+
+	@Test
 	void pagesInvocationRecordsWithoutChangingTheCompleteSummary() {
 		JdbcTemplate jdbc = database();
 		var service = new AiInvocationQueryService(jdbc);
@@ -60,6 +98,38 @@ class AiInvocationQueryServiceTest {
 				.extracting(AiInvocationQueryService.InvocationRecord::modelId)
 				.isEqualTo("qwen3.5-plus");
 		assertThat(response.recordPage()).isEqualTo(new AiInvocationQueryService.RecordPage(2, 1, 2, 2));
+	}
+
+	@Test
+	void pagesOnlyMatchedRealtimeRecordsAndReportsFullRangeRequestIdCoverage() {
+		JdbcTemplate jdbc = database();
+		jdbc.update("""
+				insert into ai_model_invocations values
+				('20000000-0000-0000-0000-000000000003', '30000000-0000-0000-0000-000000000003', 1,
+				 '10000000-0000-0000-0000-000000000001', null, 'pronunciation_scoring', 'default', 'SCORING',
+				 'iflytek', 'iflytek-suntone', null, '2026-08-18T10:00:00Z', '2026-08-18T10:00:00.100Z',
+				 100, null, 0, 0, 0, 10, 0, 1, 0, 'ESTIMATED', 'SUCCEEDED', null, false, null, 0.00500000, 'CNY'),
+					('20000000-0000-0000-0000-000000000004', '30000000-0000-0000-0000-000000000004', 1,
+					 '10000000-0000-0000-0000-000000000001', 'session-2', 'realtime_session', 'default', 'REALTIME',
+					 'qwen', 'qwen-realtime', 'handshake-only', '2026-08-18T11:00:00Z', '2026-08-18T11:01:00Z',
+					 60000, null, 0, 0, 0, 0, 0, 0, 0, 'ESTIMATED', 'SUCCEEDED', null, false, null, 0, 'CNY'),
+					('20000000-0000-0000-0000-000000000005', '30000000-0000-0000-0000-000000000005', 1,
+					 '10000000-0000-0000-0000-000000000001', null, 'tts', 'default', 'TTS',
+					 'qwen', 'qwen3-tts-flash', null, '2026-08-18T12:00:00Z', '2026-08-18T12:00:00.010Z',
+					 10, null, 0, 0, 0, 0, 0, 0, 0, 'NONE', 'SUCCEEDED', null, false, null, 0, 'CNY')
+					""");
+		var service = new AiInvocationQueryService(jdbc);
+
+		var response = service.query(new AiInvocationQueryService.Query(
+				OffsetDateTime.parse("2026-08-18T00:00:00Z"),
+				OffsetDateTime.parse("2026-08-19T00:00:00Z"), null, null, null, 100));
+
+		assertThat(response.summary().attempts()).isEqualTo(5);
+		assertThat(response.recordPage().totalRecords()).isEqualTo(4);
+		assertThat(response.records()).extracting(AiInvocationQueryService.InvocationRecord::modelId)
+				.containsExactly("qwen3-tts-flash", "iflytek-suntone", "deepseek-v4-flash", "qwen3.5-plus");
+		assertThat(response.requestIdCoverage())
+				.isEqualTo(new AiInvocationQueryService.RequestIdCoverage(2, 2));
 	}
 
 	private static JdbcTemplate database() {

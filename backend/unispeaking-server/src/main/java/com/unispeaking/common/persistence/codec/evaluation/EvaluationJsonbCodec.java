@@ -210,16 +210,26 @@ public final class EvaluationJsonbCodec {
 			requireText(phoneme.get("expected_phoneme"));
 			requireText(phoneme.get("actual_phoneme"));
 			requireScore(phoneme.get("pronunciation_score"));
-			requirePositiveSpan(
+			requireValidSpan(
 					phoneme.get("start_position"),
 					phoneme.get("end_position"));
 		}
 	}
 
-	private void requirePositiveSpan(JsonNode start, JsonNode end) {
-		requireIndex(start);
-		requireIndex(end);
-		if (end.intValue() <= start.intValue()) {
+	private void requireValidSpan(JsonNode start, JsonNode end) {
+		if (start == null
+				|| end == null
+				|| !start.isIntegralNumber()
+				|| !end.isIntegralNumber()
+				|| !start.canConvertToInt()
+				|| !end.canConvertToInt()) {
+			throw persistenceFailure();
+		}
+		int startPosition = start.intValue();
+		int endPosition = end.intValue();
+		boolean unmatched = startPosition == -1 && endPosition == -1;
+		if (!unmatched
+				&& (startPosition < 0 || endPosition <= startPosition)) {
 			throw persistenceFailure();
 		}
 	}

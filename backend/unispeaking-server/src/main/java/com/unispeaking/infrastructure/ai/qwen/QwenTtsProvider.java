@@ -1,9 +1,11 @@
 package com.unispeaking.infrastructure.ai.qwen;
 
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.provider.AiProviderResponse;
 import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.TtsProvider;
 import com.unispeaking.provider.ProviderCredentialOverride;
+import com.unispeaking.provider.ProviderUsage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -63,6 +65,7 @@ public class QwenTtsProvider extends TtsProvider {
 	private final Map<String, CachedAudio> audioCache = new ConcurrentHashMap<>();
 	private final Map<String, CompletableFuture<byte[]>> inFlightAudio =
 			new ConcurrentHashMap<>();
+	private final ThreadLocal<String> requestIdCapture = new ThreadLocal<>();
 
 	@Autowired
 	public QwenTtsProvider(
@@ -149,7 +152,7 @@ public class QwenTtsProvider extends TtsProvider {
 
 	@Override
 	public byte[] generateSpeechAudio(String text, String token, String requestedVoice) {
-		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		String credential = ProviderCredentialOverride.currentOr("apiKey", apiKey);
 		if (credential.isBlank()) {
 			throw retryableFailure(
 					"QWEN_TTS_CREDENTIAL_MISSING",
@@ -158,6 +161,37 @@ public class QwenTtsProvider extends TtsProvider {
 		String normalizedText = trim(text);
 		String qwenVoice = resolveVoice(requestedVoice);
 		return cachedSynthesize(normalizedText, credential, qwenVoice);
+	}
+
+	@Override
+	public AiProviderResponse<byte[]> generateSpeechAudioMeasured(String text, String token) {
+		return generateSpeechAudioMeasured(text, token, voice);
+	}
+
+	@Override
+	public AiProviderResponse<byte[]> generateSpeechAudioMeasured(
+			String text,
+			String token,
+			String requestedVoice) {
+		requestIdCapture.remove();
+		try {
+			byte[] audio = generateSpeechAudio(text, token, requestedVoice);
+			String requestId = requestIdCapture.get();
+			ProviderUsage usage = requestId == null
+					? new ProviderUsage(0, 0, 0, 0, 0, 0, "NONE")
+					: ProviderUsage.tts(text, audio);
+			return new AiProviderResponse<>(audio, requestId, usage);
+		}
+		catch (BusinessException exception) {
+			String requestId = requestIdCapture.get();
+			if (requestId != null && !requestId.isBlank()) {
+				throw meteredFailure(exception, requestId, ProviderUsage.ttsInput(text));
+			}
+			throw exception;
+		}
+		finally {
+			requestIdCapture.remove();
+		}
 	}
 
 	private byte[] cachedSynthesize(String text, String credential, String qwenVoice) {
@@ -254,6 +288,7 @@ public class QwenTtsProvider extends TtsProvider {
 						"QWEN_TTS_REQUEST_FAILED",
 						synthesisResponse.statusCode());
 			}
+			requestIdCapture.set(officialRequestId(synthesisResponse));
 			URI audioUri = audioUri(synthesisResponse.body());
 			HttpResponse<byte[]> audioResponse = httpClient.send(
 					HttpRequest.newBuilder()
@@ -297,6 +332,20 @@ public class QwenTtsProvider extends TtsProvider {
 					"QWEN_TTS_INTERRUPTED",
 					"Qwen TTS call was interrupted");
 		}
+	}
+
+	private String officialRequestId(HttpResponse<byte[]> response) throws JacksonException {
+		String bodyRequestId = objectMapper.readTree(
+				new String(response.body(), StandardCharsets.UTF_8))
+				.path("request_id")
+				.asString("")
+				.trim();
+		if (!bodyRequestId.isBlank()) return bodyRequestId;
+		String header = response.headers().firstValue("x-request-id")
+				.or(() -> response.headers().firstValue("x-dashscope-request-id"))
+				.orElse("")
+				.trim();
+		return header.isBlank() ? null : header;
 	}
 
 	private String resolveVoice(String requestedVoice) {

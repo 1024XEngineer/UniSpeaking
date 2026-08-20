@@ -12,6 +12,8 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -67,6 +69,16 @@ public final class JdbcUsageDataSource implements UsageDataSource {
         }
     }
 
+    @Override
+    public Set<String> localProviderRequestIds() {
+        return jdbc.queryForList(
+                        "select distinct provider_request_id from ai_model_invocations "
+                                + "where provider_request_id is not null and provider_request_id <> ''",
+                        String.class)
+                .stream()
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
     private List<UsageSession> loadSessions(String userId, String planCode, double quota, LocalDate quotaDate) {
         return jdbc.query(
                     "select session_id, status, started_at, ended_at, provider_session_id from practice_session where user_id = ? "
@@ -84,7 +96,9 @@ public final class JdbcUsageDataSource implements UsageDataSource {
                                 Math.max(0, quota - seconds), null, null, null,
                                 taskUuid, official == null ? null : official.requestId(),
                                 ZERO_USAGE, official == null ? ZERO_USAGE : official.usage(),
-                                official == null ? null : official.durationMs(), "0", "UNAVAILABLE",
+                                official == null ? null : official.durationMs(),
+                                official == null ? "0" : official.estimatedCostCny(),
+                                official == null ? "UNAVAILABLE" : "ESTIMATED_FROM_OFFICIAL_USAGE",
                                 official == null ? "PENDING" : "MATCHED",
                                 official == null
                                         ? List.of("official SLS usage has not been imported for this provider session")
@@ -96,14 +110,15 @@ public final class JdbcUsageDataSource implements UsageDataSource {
     private OfficialSummary loadOfficialSummary(String taskUuid) {
         if (taskUuid == null || taskUuid.isBlank()) return null;
         return jdbc.queryForObject(
-                    "select count(*) response_count, coalesce(sum(total_tokens), 0) total_tokens, "
-                            + "coalesce(sum(input_tokens), 0) input_tokens, coalesce(sum(output_tokens), 0) output_tokens, "
-                            + "coalesce(sum(input_text_tokens), 0) input_text_tokens, "
-                            + "coalesce(sum(input_audio_tokens), 0) input_audio_tokens, "
-                            + "coalesce(sum(output_text_tokens), 0) output_text_tokens, "
-                            + "coalesce(sum(output_audio_tokens), 0) output_audio_tokens, "
-                            + "coalesce(sum(duration_ms), 0) duration_ms, max(request_id) request_id "
-                            + "from official_usage_records where task_uuid = ?",
+                    "select count(*) response_count, coalesce(sum(o.total_tokens), 0) total_tokens, "
+                            + "coalesce(sum(o.input_tokens), 0) input_tokens, coalesce(sum(o.output_tokens), 0) output_tokens, "
+                            + "coalesce(sum(o.input_text_tokens), 0) input_text_tokens, "
+                            + "coalesce(sum(o.input_audio_tokens), 0) input_audio_tokens, "
+                            + "coalesce(sum(o.output_text_tokens), 0) output_text_tokens, "
+                            + "coalesce(sum(o.output_audio_tokens), 0) output_audio_tokens, "
+                            + "coalesce(sum(o.duration_ms), 0) duration_ms, max(o.request_id) request_id "
+                            + "from official_usage_records o "
+                            + "where o.task_uuid = ?",
                     (rs, row) -> {
                         long responseCount = rs.getLong("response_count");
                         if (responseCount == 0) return null;
@@ -118,9 +133,23 @@ public final class JdbcUsageDataSource implements UsageDataSource {
                                         rs.getLong("output_text_tokens"),
                                         rs.getLong("output_audio_tokens")),
                                 rs.getLong("duration_ms"),
-                                rs.getString("request_id"));
+                                rs.getString("request_id"),
+                                officialLedgerCost(taskUuid));
                     },
                     taskUuid);
+    }
+
+    private String officialLedgerCost(String taskUuid) {
+        java.math.BigDecimal cost = jdbc.queryForObject(
+                "select coalesce(sum(i.estimated_cost), 0) from ai_model_invocations i "
+                        + "join practice_session p on p.session_id = i.session_id "
+                        + "where p.provider_session_id = ? and i.business_scene = 'realtime_session' "
+                        + "and i.status = 'SUCCEEDED' and i.usage_source = 'OFFICIAL'",
+                java.math.BigDecimal.class,
+                taskUuid);
+        return (cost == null ? java.math.BigDecimal.ZERO : cost)
+                .setScale(8, java.math.RoundingMode.HALF_UP)
+                .toPlainString();
     }
 
     private static Map<String, Integer> reconciliationCounts(List<UsageSession> sessions) {
@@ -129,5 +158,5 @@ public final class JdbcUsageDataSource implements UsageDataSource {
         return counts;
     }
 
-    private record OfficialSummary(ModelUsage usage, long durationMs, String requestId) {}
+    private record OfficialSummary(ModelUsage usage, long durationMs, String requestId, String estimatedCostCny) {}
 }

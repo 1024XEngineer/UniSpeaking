@@ -115,7 +115,7 @@ public class DoubaoAsrProvider extends TranscriptionProvider {
 				requireAudio(audio, "Doubao ASR"),
 				"wav");
 		requireAudio(input);
-		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		String credential = ProviderCredentialOverride.currentOr("apiKey", apiKey);
 		requireCredentials(credential);
 		return transcribe(input, credential);
 	}

@@ -114,6 +114,18 @@ public abstract class AbstractAiProvider implements AiProvider {
 		return new ClassifiedProviderException(code, message, false);
 	}
 
+	protected static final BusinessException meteredFailure(
+			BusinessException failure,
+			String providerRequestId,
+			ProviderUsage usage) {
+		return new MeteredProviderException(
+				failure.code(),
+				failure.getMessage(),
+				retryable(failure),
+				providerRequestId,
+				usage);
+	}
+
 	public abstract AiCapability capability();
 
 	protected static byte[] requireAudio(byte[] audio, String operationName) {
@@ -126,6 +138,9 @@ public abstract class AbstractAiProvider implements AiProvider {
 	}
 
 	static Boolean retryable(BusinessException exception) {
+		if (exception instanceof MeteredProviderException metered) {
+			return metered.retryable();
+		}
 		if (exception instanceof ClassifiedProviderException classified) {
 			return classified.retryable();
 		}

@@ -24,8 +24,10 @@ public final class OfficialUsageSyncScheduler {
     void sync() {
         try {
             var result = service.syncNow();
-            log.info("阿里云官方用量同步完成: scanned={}, accepted={}, matched={}",
-                    result.scanned(), result.accepted(), result.matched());
+            log.info("阿里云官方用量同步完成: scanned={}, accepted={}, imported={}, matched={}, unmatched={}, "
+                            + "duplicate={}, unbound={}, rejectedContext={}, rejectedSchema={}",
+                    result.scanned(), result.accepted(), result.imported(), result.matched(), result.unmatched(),
+                    result.duplicate(), result.unbound(), result.rejectedContext(), result.rejectedSchema());
         } catch (RuntimeException exception) {
             log.warn("阿里云官方用量同步失败: {}", exception.getMessage());
         }

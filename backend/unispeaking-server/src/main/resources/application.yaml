@@ -37,6 +37,26 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+# Prometheus scrapes this endpoint over the private monitoring Docker network.
+# Keep the public reverse proxy unaware of actuator routes.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:health,prometheus}
+  endpoint:
+    health:
+      show-details: ${MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS:never}
+      probes:
+        enabled: ${MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED:true}
+  metrics:
+    tags:
+      application: ${OTEL_SERVICE_NAME:unispeaking-backend}
+  prometheus:
+    metrics:
+      export:
+        enabled: ${MANAGEMENT_PROMETHEUS_ENABLED:true}
+
 web:
   allowed-origin-patterns: "${WEB_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*,https://unispeaking.cn,https://www.unispeaking.cn}"
 
@@ -140,7 +160,7 @@ ai:
     primary-model: ${QINIU_MAAS_PRIMARY_MODEL:qwen/qwen3.5-plus}
     fallback-model: ${QINIU_MAAS_FALLBACK_MODEL:deepseek/deepseek-v4-flash}
     connect-timeout: ${QINIU_MAAS_CONNECT_TIMEOUT:10s}
-    read-timeout: ${QINIU_MAAS_READ_TIMEOUT:90s}
+    read-timeout: ${QINIU_MAAS_READ_TIMEOUT:30s}
     max-response-bytes: ${QINIU_MAAS_MAX_RESPONSE_BYTES:2097152}
     max-output-tokens: ${QINIU_MAAS_MAX_OUTPUT_TOKENS:4096}
 
@@ -188,7 +208,7 @@ unispeaking:
       region: ${ALIYUN_SLS_REGION:cn-beijing}
       project: ${ALIYUN_SLS_PROJECT:}
       audit-logstore: ${ALIYUN_SLS_AUDIT_LOGSTORE:bailian-model-audit-log}
-      inference-logstore: ${ALIYUN_SLS_INFERENCE_LOGSTORE:bailian-model-inference-log}
+      inference-logstore: ${ALIYUN_SLS_USAGE_LOGSTORE:${ALIYUN_SLS_INFERENCE_LOGSTORE:bailian-model-audit-log}}
       access-key-id: ${ALIYUN_SLS_ACCESS_KEY_ID:${ALIBABA_CLOUD_ACCESS_KEY_ID:}}
       access-key-secret: ${ALIYUN_SLS_ACCESS_KEY_SECRET:${ALIBABA_CLOUD_ACCESS_KEY_SECRET:}}
       workspace-id: ${ALIYUN_MODEL_WORKSPACE_ID:${BAILIAN_WORKSPACE_ID:}}

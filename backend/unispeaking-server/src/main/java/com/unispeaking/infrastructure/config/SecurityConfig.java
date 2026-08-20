@@ -53,7 +53,8 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.GET, "/api/help-center", "/api/help-center/**").permitAll()
 						.requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/email/**",
 								"/api/auth/mobile/email/**", "/api/auth/logout",
-								"/api/admin/auth/login", "/api/admin/auth/logout", "/actuator/health").permitAll()
+								"/api/admin/auth/login", "/api/admin/auth/logout",
+								"/actuator/health", "/actuator/prometheus").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/telemetry/events").permitAll()
 						.requestMatchers(HttpMethod.PATCH, "/api/admin/users/*/entitlement")
 						.hasAnyRole("SUPER_ADMIN", "OPERATIONS")

@@ -86,6 +86,12 @@ class JdbcUsageDataSourceTest {
                 + "input_text_tokens bigint not null, input_audio_tokens bigint not null, "
                 + "output_text_tokens bigint not null, output_audio_tokens bigint not null, "
                 + "imported_at timestamp with time zone not null)");
+        jdbc.execute("create table ai_models (model_id varchar(128) primary key, "
+                + "input_price_per_million decimal(20,8) not null, "
+                + "output_price_per_million decimal(20,8) not null)");
+        jdbc.execute("create table ai_model_invocations (invocation_id varchar(64) primary key, "
+                + "session_id varchar(64), business_scene varchar(64), status varchar(16), "
+                + "usage_source varchar(16), estimated_cost decimal(20,8) not null)");
         UUID userId = UUID.fromString("33333333-3333-4333-8333-333333333333");
         jdbc.update("insert into users (id, username, password_hash, created_at, updated_at) "
                         + "values (?, ?, 'hash', current_timestamp, current_timestamp)",
@@ -108,6 +114,9 @@ class JdbcUsageDataSourceTest {
                         + "input_audio_tokens, output_text_tokens, output_audio_tokens, imported_at) values "
                         + "('request-today', 'sess-provider-today', 1, 90000, '200', 'qwen-realtime', 'workspace', "
                         + "'apikey', 'webrtc', 1, 120, 80, 40, 20, 60, 10, 30, current_timestamp)");
+        jdbc.update("insert into ai_models values ('qwen-realtime', 3.3, 20)");
+        jdbc.update("insert into ai_model_invocations values "
+                + "('invocation-today', 'session-today', 'realtime_session', 'SUCCEEDED', 'OFFICIAL', 0.00012345)");
 
         var user = new JdbcUsageDataSource(jdbc).loadSnapshot().users().getFirst();
 
@@ -116,6 +125,8 @@ class JdbcUsageDataSourceTest {
         assertThat(user.sessions().getFirst().taskUuid()).isEqualTo("sess-provider-today");
         assertThat(user.sessions().getFirst().providerRequestId()).isEqualTo("request-today");
         assertThat(user.sessions().getFirst().officialUsage().totalTokens()).isEqualTo(120);
+        assertThat(user.sessions().getFirst().estimatedCostCny()).isEqualTo("0.00012345");
+        assertThat(user.sessions().getFirst().pricingStatus()).isEqualTo("ESTIMATED_FROM_OFFICIAL_USAGE");
         assertThat(user.sessions().getFirst().reconciliationStatus()).isEqualTo("MATCHED");
         assertThat(user.sessionCount()).isEqualTo(1);
         assertThat(user.usedSeconds()).isEqualTo(90);

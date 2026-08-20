@@ -16,19 +16,20 @@ async function unwrap(response) {
 }
 
 async function request(path, options = {}) {
+  const { expectedStatuses = [], ...fetchOptions } = options;
   const token = getAccessToken();
-  const formDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const formDataBody = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
   const startedAt = performance.now();
   const apiPath = path.split("?", 1)[0];
   let response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
-      ...options,
+      ...fetchOptions,
       credentials: "include",
       headers: {
-        ...(options.body && !formDataBody ? { "Content-Type": "application/json" } : {}),
+        ...(fetchOptions.body && !formDataBody ? { "Content-Type": "application/json" } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...options.headers,
+        ...fetchOptions.headers,
       },
     });
   } catch (error) {
@@ -37,7 +38,7 @@ async function request(path, options = {}) {
       message: error instanceof Error ? error.message : "Network request failed",
       attributes: {
         api_path: apiPath,
-        api_method: options.method || "GET",
+        api_method: fetchOptions.method || "GET",
         outcome: "network_error",
         duration_ms: performance.now() - startedAt,
       },
@@ -57,7 +58,7 @@ async function request(path, options = {}) {
     recordTelemetry("api.request", {
       attributes: {
         api_path: apiPath,
-        api_method: options.method || "GET",
+        api_method: fetchOptions.method || "GET",
         http_status: response.status,
         outcome: "success",
         duration_ms: performance.now() - startedAt,
@@ -65,14 +66,15 @@ async function request(path, options = {}) {
     });
     return result;
   } catch (error) {
+    const expectedFailure = expectedStatuses.includes(response.status);
     recordTelemetry("api.request", {
-      severity: "ERROR",
+      severity: expectedFailure ? "INFO" : "ERROR",
       message: error instanceof Error ? error.message : "API request failed",
       attributes: {
         api_path: apiPath,
-        api_method: options.method || "GET",
+        api_method: fetchOptions.method || "GET",
         http_status: response.status,
-        outcome: "error",
+        outcome: expectedFailure ? "unauthenticated" : "error",
         duration_ms: performance.now() - startedAt,
       },
     });
@@ -132,7 +134,7 @@ export async function login({ username, password }) {
 }
 
 export async function getCurrentUser() {
-  const user = await request("/api/auth/me");
+  const user = await request("/api/auth/me", { expectedStatuses: [401] });
   setTelemetryUser(user?.id || null);
   return user;
 }

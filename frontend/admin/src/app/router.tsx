@@ -1,9 +1,8 @@
-import { createBrowserRouter } from 'react-router-dom'
+import { Navigate, createBrowserRouter } from 'react-router-dom'
 import { AuthenticatedShell, LoginRoute } from './RouteComponents'
 import { RequireAuth } from '../features/auth/RequireAuth'
 import { OverviewPage } from '../features/overview/OverviewPage'
-import { MonitoringPage } from '../features/governance/MonitoringPage'
-import { ReconciliationPage } from '../features/governance/ReconciliationPage'
+import { BillingPage } from '../features/billing/BillingPage'
 import { UsersPage } from '../features/governance/UsersPage'
 import { SystemManagementPage } from '../features/system/SystemManagementPage'
 
@@ -16,8 +15,9 @@ export const router = createBrowserRouter([
       children: [
         { index: true, element: <OverviewPage /> },
         { path: 'users', element: <UsersPage /> },
-        { path: 'monitoring', element: <MonitoringPage /> },
-        { path: 'reconciliation', element: <ReconciliationPage /> },
+        { path: 'billing', element: <BillingPage /> },
+        { path: 'monitoring', element: <Navigate to="/billing" replace /> },
+        { path: 'reconciliation', element: <Navigate to="/billing" replace /> },
         { path: 'system', element: <SystemManagementPage /> },
       ],
     }],

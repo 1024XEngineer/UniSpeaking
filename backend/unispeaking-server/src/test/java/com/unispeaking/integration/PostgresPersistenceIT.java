@@ -201,7 +201,7 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(List.of("1"), migrationVersions);
+		assertEquals(List.of("1", "2", "3", "4"), migrationVersions);
 		assertEquals(
 				List.of("users"),
 				jdbcTemplate.queryForList(
@@ -213,9 +213,9 @@ class PostgresPersistenceIT {
 						ORDER BY table_name
 						""",
 						String.class));
-		assertEquals(7, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_providers", Integer.class));
-		assertEquals(10, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_models", Integer.class));
-		assertEquals(10, jdbcTemplate.queryForObject(
+		assertEquals(8, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_providers", Integer.class));
+		assertEquals(12, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_models", Integer.class));
+		assertEquals(11, jdbcTemplate.queryForObject(
 				"SELECT COUNT(*) FROM ai_models WHERE route_priority IS NOT NULL", Integer.class));
 		assertEquals(3, jdbcTemplate.queryForObject(
 				"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'ai_%'",
@@ -776,7 +776,7 @@ class PostgresPersistenceIT {
 				"SELECT COUNT(*) FROM legacy_ci.user_sessions WHERE token_digest = 'legacy-session'",
 				Integer.class));
 		assertEquals(
-				List.of("0", "1"),
+				List.of("0", "1", "2", "3", "4"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version

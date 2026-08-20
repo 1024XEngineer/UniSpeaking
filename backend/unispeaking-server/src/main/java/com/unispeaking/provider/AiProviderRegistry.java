@@ -284,6 +284,7 @@ public class AiProviderRegistry {
 			String userId,
 			String sessionId,
 			String modelId,
+			String providerRequestId,
 			Instant startedAt,
 			Instant endedAt) {
 		if (invocationLedger == null || sessionId == null || sessionId.isBlank()
@@ -295,7 +296,7 @@ public class AiProviderRegistry {
 		invocationLedger.record(new AiInvocationAttempt(
 				stableId, context, 1, AiCapability.REALTIME,
 				modelConfigurationForLedger(AbstractAiProvider.normalizeModelId(modelId), AiCapability.REALTIME),
-				null, startedAt, endedAt, Math.max(0, java.time.Duration.between(startedAt, endedAt).toMillis()),
+				providerRequestId, startedAt, endedAt, Math.max(0, java.time.Duration.between(startedAt, endedAt).toMillis()),
 				new ProviderUsage(0, 0, 0, 0, seconds, 0, "ESTIMATED"),
 				"SUCCEEDED", null, false, null));
 	}
@@ -653,11 +654,11 @@ public class AiProviderRegistry {
 					index + 1,
 					models.size());
 			try {
-				String dynamicCredential = credentialStore == null
-						? null
-						: credentialStore.credentialOrFallback(model.providerId(), null);
+				Map<String, String> dynamicCredentials = credentialStore == null
+						? Map.of()
+						: credentialStore.credentialsOrFallback(model.providerId(), Map.of());
 				AiProviderResponse<T> measured = ProviderCredentialOverride.call(
-						dynamicCredential, () -> operation.apply(modelId));
+						dynamicCredentials, () -> operation.apply(modelId));
 				Instant completedAt = Instant.now();
 				recordAttempt(context, index + 1, capability, model, measured.providerRequestId(),
 						startedAt, completedAt, elapsedMillis(startedNanos), measured.usage(),
@@ -672,9 +673,15 @@ public class AiProviderRegistry {
 			}
 			catch (BusinessException exception) {
 				boolean retryable = shouldFailOver(exception);
+				String providerRequestId = null;
+				ProviderUsage usage = null;
+				if (exception instanceof MeteredProviderException metered) {
+					providerRequestId = metered.providerRequestId();
+					usage = metered.usage();
+				}
 				Instant completedAt = Instant.now();
-				recordAttempt(context, index + 1, capability, model, null,
-						startedAt, completedAt, elapsedMillis(startedNanos), null,
+				recordAttempt(context, index + 1, capability, model, providerRequestId,
+						startedAt, completedAt, elapsedMillis(startedNanos), usage,
 						"FAILED", exception.code(), retryable,
 						index == 0 ? null : models.get(index - 1));
 				if (!retryable) {

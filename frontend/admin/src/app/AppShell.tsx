@@ -10,8 +10,7 @@ interface AppShellProps {
 const navigation = [
   { label: '总览', to: '/', icon: 'overview', end: true },
   { label: '用户与权益', to: '/users', icon: 'users' },
-  { label: 'Realtime 监测', to: '/monitoring', icon: 'pulse' },
-  { label: '用量对账', to: '/reconciliation', icon: 'usage' },
+  { label: '用量与计费', to: '/billing', icon: 'usage' },
   { label: '系统管理', to: '/system', icon: 'settings' },
 ] as const
 
@@ -76,7 +75,7 @@ export function AppShell({ administrator, logout }: AppShellProps) {
           <span className="status-dot status-dot--ok" aria-hidden="true" />
           <div>
             <strong>管理服务正常</strong>
-            <span>数据源状态见系统管理</span>
+            <span>数据源状态见用量与计费</span>
           </div>
         </div>
 

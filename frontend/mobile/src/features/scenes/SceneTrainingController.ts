@@ -51,6 +51,11 @@ type Listener = (snapshot: SceneTrainingSnapshot) => void;
 export class SceneTrainingController {
   private snapshot = initialSnapshot;
   private readonly listeners = new Set<Listener>();
+  private readonly readingResultsByContentId = new Map<string, SentenceEvaluation>();
+  private readonly learningItemsByGroup: Record<'words' | 'phrases', LearningContentItem[]> = {
+    words: [],
+    phrases: [],
+  };
 
   constructor(private readonly service: SceneTrainingServicePort) {}
 
@@ -67,6 +72,9 @@ export class SceneTrainingController {
   }
 
   async start(scene: GeneratedScene, initialStage: 'learn' | 'read' | 'speak' = 'learn') {
+    this.readingResultsByContentId.clear();
+    this.learningItemsByGroup.words = [];
+    this.learningItemsByGroup.phrases = [];
     this.update({
       ...initialSnapshot,
       status: 'loading',
@@ -99,6 +107,7 @@ export class SceneTrainingController {
         return;
       }
       const items = await this.requireContent(scene.sceneId, 'WORD_LEARNING');
+      this.learningItemsByGroup.words = items;
       this.update({
         ...this.snapshot,
         status: 'ready',
@@ -119,11 +128,12 @@ export class SceneTrainingController {
     if (this.snapshot.stage === 'speak') return false;
     if (this.snapshot.index < this.snapshot.items.length - 1) {
       const index = this.snapshot.index + 1;
+      const currentItem = this.snapshot.items[index];
       this.update({
         ...this.snapshot,
         index,
-        currentItem: this.snapshot.items[index],
-        readingResult: null,
+        currentItem,
+        readingResult: this.snapshot.stage === 'read' ? this.readingResultFor(currentItem) : null,
       });
       return true;
     }
@@ -165,14 +175,72 @@ export class SceneTrainingController {
     }
   }
 
+  async selectStage(stage: 'learn' | 'read' | 'speak') {
+    if (this.snapshot.status === 'loading' || this.snapshot.status === 'scoring') {
+      return false;
+    }
+    const restartingLearn = stage === 'learn'
+      && this.snapshot.stage === 'learn'
+      && (this.snapshot.learningGroup === 'phrases' || this.snapshot.index > 0);
+    if (stage === this.snapshot.stage && !restartingLearn) return true;
+    if (stage === 'speak') {
+      if (this.snapshot.unlockedStage < 2) return false;
+      this.update({
+        ...this.snapshot,
+        status: 'ready',
+        stage: 'speak',
+        readingResult: null,
+      });
+      return true;
+    }
+    const scene = this.requireScene();
+    const contentStage = stage === 'learn' ? 'WORD_LEARNING' : 'SENTENCE_LEARNING';
+    this.update({ ...this.snapshot, status: 'loading', error: null });
+    try {
+      const items = await this.requireContent(scene.sceneId, contentStage);
+      if (stage === 'learn') this.learningItemsByGroup.words = items;
+      this.update({
+        ...this.snapshot,
+        status: 'ready',
+        stage,
+        learningGroup: stage === 'learn' ? 'words' : this.snapshot.learningGroup,
+        items,
+        currentItem: items[0],
+        index: 0,
+        readingResult: stage === 'read' ? this.readingResultFor(items[0]) : null,
+      });
+      return true;
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    }
+  }
+
   previous() {
-    if (this.snapshot.index <= 0) return false;
+    if (this.snapshot.index <= 0) {
+      if (this.snapshot.stage !== 'learn' || this.snapshot.learningGroup !== 'phrases') {
+        return false;
+      }
+      const items = this.learningItemsByGroup.words;
+      if (!items.length) return false;
+      const index = items.length - 1;
+      this.update({
+        ...this.snapshot,
+        learningGroup: 'words',
+        items,
+        currentItem: items[index],
+        index,
+        readingResult: null,
+      });
+      return true;
+    }
     const index = this.snapshot.index - 1;
+    const currentItem = this.snapshot.items[index];
     this.update({
       ...this.snapshot,
       index,
-      currentItem: this.snapshot.items[index],
-      readingResult: null,
+      currentItem,
+      readingResult: this.snapshot.stage === 'read' ? this.readingResultFor(currentItem) : null,
     });
     return true;
   }
@@ -190,6 +258,7 @@ export class SceneTrainingController {
         sentence.contentId,
         wavUri,
       );
+      this.readingResultsByContentId.set(sentence.contentId, readingResult);
       this.update({ ...this.snapshot, status: 'ready', readingResult });
       return readingResult;
     } catch (error) {
@@ -210,6 +279,9 @@ export class SceneTrainingController {
         throw new Error(`后端未进入预期训练阶段：${nextStage}`);
       }
       const items = await this.requireContent(sceneId, nextStage);
+      if (nextStage === 'PHRASE_LEARNING') {
+        this.learningItemsByGroup.phrases = items;
+      }
       this.update({
         ...this.snapshot,
         status: 'ready',
@@ -219,8 +291,10 @@ export class SceneTrainingController {
         items,
         currentItem: items[0],
         index: 0,
-        unlockedStage: nextStage === 'SENTENCE_LEARNING' ? 1 : 0,
-        readingResult: null,
+        unlockedStage: nextStage === 'SENTENCE_LEARNING'
+          ? Math.max(this.snapshot.unlockedStage, 1) as 1 | 2
+          : this.snapshot.unlockedStage,
+        readingResult: nextStage === 'SENTENCE_LEARNING' ? this.readingResultFor(items[0]) : null,
       });
     } catch (error) {
       this.fail(error);
@@ -237,6 +311,10 @@ export class SceneTrainingController {
   private requireScene() {
     if (!this.snapshot.scene) throw new Error('场景训练尚未开始');
     return this.snapshot.scene;
+  }
+
+  private readingResultFor(item: LearningContentItem | undefined) {
+    return item ? this.readingResultsByContentId.get(item.contentId) ?? null : null;
   }
 
   private fail(error: unknown) {
