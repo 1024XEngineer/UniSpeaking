@@ -2998,6 +2998,7 @@ export function App() {
   const [feedbackInvitationOpen, setFeedbackInvitationOpen] = useState(false);
   const preferenceWriteChainRef = useRef(Promise.resolve());
   const preferenceWriteVersionRef = useRef(0);
+  const profileOverviewRequestVersionRef = useRef(0);
 
   const applyRoute = (route) => {
     setFlow(route.flow);
@@ -3047,6 +3048,19 @@ export function App() {
     }
   };
 
+  const refreshProfileOverview = async (month) => {
+    const requestVersion = ++profileOverviewRequestVersionRef.current;
+    try {
+      const profile = await getProfileOverview(month);
+      if (requestVersion === profileOverviewRequestVersionRef.current) {
+        setProfileOverview(profile);
+      }
+      return profile;
+    } catch {
+      return null;
+    }
+  };
+
   useEffect(() => {
     if (initialRoute.canonicalPath && window.location.pathname !== initialRoute.canonicalPath) {
       window.history.replaceState({}, "", initialRoute.canonicalPath);
@@ -3082,6 +3096,11 @@ export function App() {
   useEffect(() => {
     analytics.setDistinctId(user?.id || null);
   }, [user?.id]);
+
+  useEffect(() => {
+    if (page !== "profile" || !user?.id) return;
+    void refreshProfileOverview();
+  }, [page, user?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3304,11 +3323,8 @@ export function App() {
     }
   };
   const loadProfileMonth = async (month) => {
-    try {
-      setProfileOverview(await getProfileOverview(month));
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "学习日历加载失败");
-    }
+    const profile = await refreshProfileOverview(month);
+    if (!profile) window.alert("学习日历加载失败");
   };
   const updateAvatar = async (file) => {
     if (!["image/jpeg", "image/png"].includes(file.type) || file.size > 2 * 1024 * 1024) {
@@ -3404,9 +3420,7 @@ export function App() {
       },
       result: { completed, evaluation },
     });
-    if (evaluation) {
-      void getProfileOverview().then(setProfileOverview).catch(() => undefined);
-    }
+    void refreshProfileOverview();
     void synchronizeAchievements({ revealNotifications: true });
   };
   const recordCompletedPractice = (practiceType, sessionId) => {
@@ -3490,7 +3504,7 @@ export function App() {
   }
   let content;
   if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={completeScenePractice} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
-  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={(sessionId) => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); recordCompletedPractice("free", sessionId); void synchronizeAchievements({ revealNotifications: true }); }} />;
+  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={(sessionId) => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); recordCompletedPractice("free", sessionId); void refreshProfileOverview(); void synchronizeAchievements({ revealNotifications: true }); }} />;
   else if (page === "scenes") content = <Scenes teacher={teacher} onStartTraining={startTraining} onLocked={setPaywall} onIelts={selectIelts} onInterview={selectInterview} />;
   else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => selectMainPage("ielts-assets")} onInterview={() => selectMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: false, returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
