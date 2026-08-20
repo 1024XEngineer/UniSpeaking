@@ -16,6 +16,7 @@ import com.unispeaking.infrastructure.persistence.repository.user.UserAccountRep
 import com.unispeaking.infrastructure.persistence.repository.user.UserProfileRepository;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.auth.JwtTokenService;
+import com.unispeaking.service.auth.RefreshTokenService;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.UUID;
@@ -26,6 +27,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @Service
 public class AuthServiceImpl implements AuthService {
@@ -34,16 +36,28 @@ public class AuthServiceImpl implements AuthService {
 	private final UserProfileRepository userProfileRepository;
 	private final PasswordEncoder passwordEncoder;
 	private final JwtTokenService jwtTokenService;
+	private final RefreshTokenService refreshTokenService;
+
+	@Autowired
+	public AuthServiceImpl(
+			UserAccountRepository userAccountRepository,
+			UserProfileRepository userProfileRepository,
+			PasswordEncoder passwordEncoder,
+			JwtTokenService jwtTokenService,
+			RefreshTokenService refreshTokenService) {
+		this.userAccountRepository = userAccountRepository;
+		this.userProfileRepository = userProfileRepository;
+		this.passwordEncoder = passwordEncoder;
+		this.jwtTokenService = jwtTokenService;
+		this.refreshTokenService = refreshTokenService;
+	}
 
 	public AuthServiceImpl(
 			UserAccountRepository userAccountRepository,
 			UserProfileRepository userProfileRepository,
 			PasswordEncoder passwordEncoder,
 			JwtTokenService jwtTokenService) {
-		this.userAccountRepository = userAccountRepository;
-		this.userProfileRepository = userProfileRepository;
-		this.passwordEncoder = passwordEncoder;
-		this.jwtTokenService = jwtTokenService;
+		this(userAccountRepository, userProfileRepository, passwordEncoder, jwtTokenService, null);
 	}
 
 	@Override
@@ -114,6 +128,9 @@ public class AuthServiceImpl implements AuthService {
 		if (!userAccountRepository.updatePasswordAndAuthVersion(
 				user.id(), user.authVersion(), encoded)) {
 			throw new BusinessException("PASSWORD_UPDATE_CONFLICT", "账号已发生变化，请重新登录后再试");
+		}
+		if (refreshTokenService != null) {
+			refreshTokenService.revokeAll(user.id());
 		}
 		return ChangePasswordResponse.required();
 	}

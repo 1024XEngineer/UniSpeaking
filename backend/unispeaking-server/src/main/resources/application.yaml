@@ -110,7 +110,10 @@ auth:
   jwt:
     issuer: ${JWT_ISSUER:unispeaking}
     secret: ${JWT_SECRET:}
-    access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:2h}
+    access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:30m}
+    refresh-idle-ttl: ${JWT_REFRESH_IDLE_TTL:7d}
+    refresh-absolute-ttl: ${JWT_REFRESH_ABSOLUTE_TTL:90d}
+    refresh-cleanup-cron: ${JWT_REFRESH_CLEANUP_CRON:0 20 3 * * *}
 
 realtime:
   flow:
