@@ -342,6 +342,10 @@ export function releaseRealtimeTransport({
   }
 }
 
+export function isRealtimeChannelOpen(dataChannel) {
+  return dataChannel?.readyState === "open";
+}
+
 function waitForChannel(channel, peer) {
   if (channel.readyState === "open") return Promise.resolve();
   return new Promise((resolve, reject) => {
@@ -1013,6 +1017,7 @@ export function createRealtimeClient({
   }
 
   function requestTurnResponse({ closing = false, instructions = "" } = {}) {
+    if (!isRealtimeChannelOpen(channel)) return false;
     if (responsePending) return false;
     responsePending = true;
     if (closing) {
