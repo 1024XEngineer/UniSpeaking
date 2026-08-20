@@ -114,7 +114,9 @@ public class AiProviderRegistry {
 			@Value("${AI_PROVIDER_ROUTE_TTS:}")
 			String ttsRoute,
 			@Value("${AI_PROVIDER_ROUTE_TRANSCRIPTION:}")
-			String transcriptionRoute) {
+			String transcriptionRoute,
+			@Value("${AI_QINIU_MODELS_ENABLED:false}")
+			boolean qiniuModelsEnabled) {
 		this(
 				realtimeProviders,
 				llmProviders,
@@ -126,7 +128,8 @@ public class AiProviderRegistry {
 						AiCapability.LLM, parseRoute(llmRoute),
 						AiCapability.SCORING, parseRoute(scoringRoute),
 						AiCapability.TTS, parseRoute(ttsRoute),
-						AiCapability.TRANSCRIPTION, parseRoute(transcriptionRoute)));
+						AiCapability.TRANSCRIPTION, parseRoute(transcriptionRoute)),
+				qiniuModelsEnabled);
 	}
 
 	public AiProviderRegistry(
@@ -151,6 +154,30 @@ public class AiProviderRegistry {
 			List<TtsProvider> ttsProviders,
 			List<TranscriptionProvider> transcriptionProviders,
 			Map<AiCapability, List<String>> configuredRoutes) {
+		this(
+				realtimeProviders,
+				llmProviders,
+				scoringProviders,
+				ttsProviders,
+				transcriptionProviders,
+				configuredRoutes,
+				true);
+	}
+
+	AiProviderRegistry(
+			List<RealtimeProvider> realtimeProviders,
+			List<LlmProvider> llmProviders,
+			List<ScoringProvider> scoringProviders,
+			List<TtsProvider> ttsProviders,
+			List<TranscriptionProvider> transcriptionProviders,
+			Map<AiCapability, List<String>> configuredRoutes,
+			boolean qiniuModelsEnabled) {
+		if (!qiniuModelsEnabled) {
+			realtimeProviders = withoutProvider(realtimeProviders, "qiniu");
+			llmProviders = withoutProvider(llmProviders, "qiniu-maas");
+			configuredRoutes = withoutQiniuModels(configuredRoutes);
+			LOGGER.info("Qiniu AI models are disabled; RTI and MaaS adapters will not be registered");
+		}
 		this.realtimeProviders = registerProviders(realtimeProviders, AiCapability.REALTIME);
 		this.llmProviders = registerProviders(llmProviders, AiCapability.LLM);
 		this.scoringProviders = registerProviders(scoringProviders, AiCapability.SCORING);
@@ -161,6 +188,29 @@ public class AiProviderRegistry {
 		this.modelRoutes = buildModelRoutes(configuredRoutes);
 		this.modelDefinitions = buildModelDefinitions();
 		this.models = List.copyOf(modelDefinitions.values());
+	}
+
+	private static <T extends AbstractAiProvider> List<T> withoutProvider(
+			List<T> providers,
+			String providerId) {
+		return providers.stream()
+				.filter(provider -> !provider.providerId().equalsIgnoreCase(providerId))
+				.toList();
+	}
+
+	private static Map<AiCapability, List<String>> withoutQiniuModels(
+			Map<AiCapability, List<String>> configuredRoutes) {
+		if (configuredRoutes == null || configuredRoutes.isEmpty()) return Map.of();
+		Map<AiCapability, List<String>> filtered = new EnumMap<>(AiCapability.class);
+		configuredRoutes.forEach((capability, route) -> filtered.put(
+				capability,
+				route.stream()
+						.map(AbstractAiProvider::normalizeModelId)
+						.filter(modelId -> !modelId.equals(QINIU_REALTIME_PLUS))
+						.filter(modelId -> !modelId.equals(QINIU_MAAS_QWEN_PLUS))
+						.filter(modelId -> !modelId.equals(QINIU_MAAS_DEEPSEEK_FLASH))
+						.toList()));
+		return Map.copyOf(filtered);
 	}
 
 	public List<AiModelDefinition> models() {

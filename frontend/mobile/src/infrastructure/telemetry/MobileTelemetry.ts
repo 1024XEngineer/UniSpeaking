@@ -216,6 +216,7 @@ export const mobileTelemetry = {
   record(event: MobileTelemetryEvent) {
     if (process.env.NODE_ENV === 'test' || !/^[a-z][a-z0-9_.-]{1,63}$/.test(event.eventType)) return;
     queue.push({
+      eventId: randomId('evt'),
       eventType: event.eventType,
       platform: 'MOBILE',
       severity: event.severity || 'INFO',
@@ -275,7 +276,7 @@ export const mobileTelemetry = {
     path: string;
     method: string;
     durationMs: number;
-    outcome: 'success' | 'error' | 'network_error' | 'timeout';
+    outcome: 'success' | 'error' | 'network_error' | 'timeout' | 'unauthenticated';
     status?: number;
     message?: string;
   }) {
@@ -291,7 +292,7 @@ export const mobileTelemetry = {
     }
     this.record({
       eventType: 'api.request',
-      severity: input.outcome === 'success' ? 'INFO' : 'ERROR',
+      severity: input.outcome === 'success' || input.outcome === 'unauthenticated' ? 'INFO' : 'ERROR',
       message: input.message,
       route: input.path,
       attributes: {

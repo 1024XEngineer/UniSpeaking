@@ -39,7 +39,7 @@ function renderPage(ui: ReactNode) {
 }
 
 describe('SystemManagementPage', () => {
-  it('shows real provider configuration and model pricing without duplicating the usage ledger', async () => {
+	it('shows real provider configuration and model pricing without duplicating the usage ledger', async () => {
     vi.mocked(getAiConfiguration).mockResolvedValue(configuration)
     vi.mocked(updateProvider).mockResolvedValue({ ...configuration.providers[0], enabled: false })
     const user = userEvent.setup()
@@ -54,8 +54,28 @@ describe('SystemManagementPage', () => {
     expect(screen.queryByText('数据源状态')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('checkbox', { name: '通义千问供应商状态' }))
-    expect(updateProvider).toHaveBeenCalledWith('qwen', { enabled: false })
-  })
+		expect(updateProvider).toHaveBeenCalledWith('qwen', { enabled: false })
+	})
+
+	it('keeps the provider switch and label synchronized while disabling it', async () => {
+		const disabledProvider = { ...configuration.providers[0], enabled: false, configVersion: 2 }
+		vi.mocked(getAiConfiguration)
+			.mockResolvedValueOnce(configuration)
+			.mockResolvedValue(configurationFor(disabledProvider))
+		let finishUpdate: ((provider: ProviderView) => void) | undefined
+		vi.mocked(updateProvider).mockReturnValue(new Promise((resolve) => { finishUpdate = resolve }))
+		const user = userEvent.setup()
+
+		renderPage(<SystemManagementPage />)
+		const toggle = await screen.findByRole('checkbox', { name: '通义千问供应商状态' })
+		await user.click(toggle)
+
+		expect(toggle).not.toBeChecked()
+		expect(screen.getByText('已停用')).toBeInTheDocument()
+		finishUpdate?.(disabledProvider)
+		expect(await screen.findByText('通义千问已停用，运行时路由已刷新。')).toBeInTheDocument()
+		await waitFor(() => expect(toggle).not.toBeChecked())
+	})
 
   it('persists reordered failover routes', async () => {
     vi.mocked(getAiConfiguration).mockResolvedValue(configuration)

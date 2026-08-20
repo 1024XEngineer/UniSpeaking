@@ -9,6 +9,18 @@ import org.junit.jupiter.api.Test;
 class AiProviderAdminControllerTest {
 
 	@Test
+	void forwardsModelIdsContainingSlashesThroughQueryEndpoint() {
+		AiProviderAdminService service = mock(AiProviderAdminService.class);
+		var controller = new AiProviderAdminController(service);
+		var request = new AiProviderAdminService.UpdateModelRequest(
+				null, false, null, null, null, null, null, null, null);
+
+		controller.updateModelByQuery("qwen/qwen3.5-plus", request);
+
+		verify(service).updateModel("qwen/qwen3.5-plus", request);
+	}
+
+	@Test
 	void forwardsStructuredCredentialValues() {
 		AiProviderAdminService service = mock(AiProviderAdminService.class);
 		var controller = new AiProviderAdminController(service);
