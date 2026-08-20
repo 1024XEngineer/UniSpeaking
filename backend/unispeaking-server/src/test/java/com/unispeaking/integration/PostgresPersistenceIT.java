@@ -213,9 +213,9 @@ class PostgresPersistenceIT {
 						ORDER BY table_name
 						""",
 						String.class));
-		assertEquals(7, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_providers", Integer.class));
-		assertEquals(10, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_models", Integer.class));
-		assertEquals(10, jdbcTemplate.queryForObject(
+		assertEquals(8, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_providers", Integer.class));
+		assertEquals(12, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_models", Integer.class));
+		assertEquals(11, jdbcTemplate.queryForObject(
 				"SELECT COUNT(*) FROM ai_models WHERE route_priority IS NOT NULL", Integer.class));
 		assertEquals(3, jdbcTemplate.queryForObject(
 				"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'ai_%'",
