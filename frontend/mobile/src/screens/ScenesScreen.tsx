@@ -28,6 +28,7 @@ import { SceneService, type GeneratedScene } from '@/features/scenes/SceneServic
 import { SceneTrainingController, type SceneTrainingSnapshot } from '@/features/scenes/SceneTrainingController';
 import { WavRecorder } from '@/features/audio/WavRecorder';
 import { createTurnAudioCapture } from '@/features/audio/TurnAudioCapture';
+import { createNativeWebRtcTurnAudioCapture } from '@/features/audio/WebRtcTurnAudioCapture';
 import { SceneSpeechClient, TtsPlayer } from '@/features/audio/TtsPlayer';
 import {
   useFreeChatSession,
@@ -288,7 +289,12 @@ function createDefaultSceneController(
       sessionApi: new RealtimeSessionApi(apiClient),
       sessionSocket: new SessionMessageSocket({ baseUrl: backendUrl, tokenStore }),
       sceneDialogue: new SceneDialogueApi(apiClient, sceneId),
-      turnAudioCapture: createTurnAudioCapture(new WavRecorder()),
+      // Android scoring must copy the PCM frames already captured by WebRTC.
+      // Opening AudioStudio here creates a second AudioRecord and degrades VAD,
+      // barge-in, and the scoring WAV on physical devices such as OnePlus.
+      turnAudioCapture:
+        createNativeWebRtcTurnAudioCapture() ??
+        createTurnAudioCapture(new WavRecorder()),
     },
     {
       mode: 'scene',
@@ -640,13 +646,18 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
         unlockedStage={displayedUnlockedStage}
         onCollapsedChange={setProgressCollapsed}
         onSelect={(nextStage) => {
-          setRecording(false);
-          setDemoPlaying(false);
-          if (scene && trainingController) {
-            void trainingController.selectStage(nextStage).catch(() => undefined);
-            return;
-          }
-          setStage(nextStage);
+          void (async () => {
+            clearReadRecordingTimer();
+            setRecording(false);
+            setDemoPlaying(false);
+            ttsPlayer?.stop();
+            await wavRecorder?.cancel().catch(() => undefined);
+            if (scene && trainingController) {
+              await trainingController.selectStage(nextStage).catch(() => undefined);
+              return;
+            }
+            setStage(nextStage);
+          })();
         }}
       />
 
@@ -763,10 +774,22 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
               accessibilityRole="button"
               disabled={!displayedReadPassed || trainingTransitioning}
               onPress={() => {
-                if (scene && trainingController) void trainingController.next().catch(() => undefined);
-                else { setUnlockedStage(2); setStage('speak'); }
-                setRecording(false);
-                setDemoPlaying(false);
+                void (async () => {
+                  clearReadRecordingTimer();
+                  setRecording(false);
+                  setDemoPlaying(false);
+                  ttsPlayer?.stop();
+                  // Await the native recorder shutdown before WebRTC mounts.
+                  // Otherwise Android can leave the realtime microphone in a
+                  // preparing state or route it through the wrong capture path.
+                  await wavRecorder?.cancel().catch(() => undefined);
+                  if (scene && trainingController) {
+                    await trainingController.next().catch(() => undefined);
+                  } else {
+                    setUnlockedStage(2);
+                    setStage('speak');
+                  }
+                })();
               }}
               style={[styles.primaryPillButton, (!displayedReadPassed || trainingTransitioning) && styles.primaryPillDisabled]}
             >
