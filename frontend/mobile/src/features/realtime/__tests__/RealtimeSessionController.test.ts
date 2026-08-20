@@ -1310,6 +1310,14 @@ describe('RealtimeSessionController', () => {
       JSON.stringify({ type: 'input_audio_buffer.speech_started' }),
     );
     expect(controller.getSnapshot().state).toBe('user_speaking');
+    expect(dependencies.transport.sendProviderEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'response.cancel' }),
+    );
+    await controller.handleProviderMessage(JSON.stringify({
+      type: 'error',
+      error: { message: 'Cancellation failed: no active response found' },
+    }));
+    expect(controller.getSnapshot().state).toBe('user_speaking');
     await controller.handleProviderMessage(
       JSON.stringify({ type: 'response.done', response: { status: 'cancelled' } }),
     );
