@@ -68,12 +68,13 @@ function ProviderTable({ providers, onChanged }: { providers: ProviderView[]; on
 	const mutation = useMutation({
 		mutationFn: ({ provider, enabled }: { provider: ProviderView; enabled: boolean }) => updateProvider(provider.providerId, { enabled }),
 		onMutate: async ({ provider, enabled }) => {
-			await queryClient.cancelQueries({ queryKey: ['ai', 'configuration'] })
+			const cancellation = queryClient.cancelQueries({ queryKey: ['ai', 'configuration'] })
 			const previous = queryClient.getQueryData<AiConfiguration>(['ai', 'configuration'])
 			queryClient.setQueryData<AiConfiguration>(['ai', 'configuration'], (current) => current ? {
 				...current,
 				providers: current.providers.map((item) => item.providerId === provider.providerId ? { ...item, enabled } : item),
 			} : current)
+			await cancellation
 			return { previous }
 		},
 		onError: (_error, _variables, context) => {
@@ -85,14 +86,19 @@ function ProviderTable({ providers, onChanged }: { providers: ProviderView[]; on
 		} : current),
 		onSettled: onChanged,
 	})
+	const displayedEnabled = (provider: ProviderView) => mutation.isPending
+		&& mutation.variables?.provider.providerId === provider.providerId
+		? mutation.variables.enabled
+		: provider.enabled
   return <>
     <div className="compact-table-scroll"><table className="compact-table provider-table"><thead><tr><th>供应商</th><th>渠道 ID</th><th>版本</th><th>状态</th><th>操作</th></tr></thead><tbody>{providers.map((provider) => <tr key={provider.providerId}>
       <td><span className="provider-identity"><span className={`provider-logo provider-logo--${provider.providerId}`}><Bot size={14} /></span><strong>{provider.displayName}</strong></span></td>
       <td><code>{provider.adapterType}</code></td>
       <td>v{provider.configVersion}</td>
-		<td><label className="compact-toggle"><input aria-label={`${provider.displayName}供应商状态`} type="checkbox" checked={provider.enabled} disabled={mutation.isPending} onChange={(event) => mutation.mutate({ provider, enabled: event.target.checked })} /><span><i />{provider.enabled ? '已启用' : '已停用'}</span></label></td>
+		<td><label className="compact-toggle"><input aria-label={`${provider.displayName}供应商状态`} type="checkbox" checked={displayedEnabled(provider)} disabled={mutation.isPending} onChange={(event) => mutation.mutate({ provider, enabled: event.target.checked })} /><span><i />{displayedEnabled(provider) ? '已启用' : '已停用'}</span></label></td>
       <td><button className="table-action" type="button" aria-label="管理密钥" onClick={() => setCredentialProvider(provider)}><KeyRound size={13} />密钥</button></td>
 	</tr>)}</tbody></table></div>
+	{mutation.isSuccess && <p className="form-success" role="status">{mutation.data.displayName}{mutation.data.enabled ? '已启用' : '已停用'}，运行时路由已刷新。</p>}
 	{mutation.isError && <p className="form-error" role="alert">{mutation.error.message}</p>}
     {credentialProvider && <CredentialDialog provider={credentialProvider} onClose={() => setCredentialProvider(null)} />}
   </>
@@ -142,12 +148,13 @@ function ModelTable({ models, onChanged }: { models: ModelView[]; onChanged: () 
 	const mutation = useMutation({
 		mutationFn: ({ model, enabled }: { model: ModelView; enabled: boolean }) => updateModel(model.modelId, { enabled }),
 		onMutate: async ({ model, enabled }) => {
-			await queryClient.cancelQueries({ queryKey: ['ai', 'configuration'] })
+			const cancellation = queryClient.cancelQueries({ queryKey: ['ai', 'configuration'] })
 			const previous = queryClient.getQueryData<AiConfiguration>(['ai', 'configuration'])
 			queryClient.setQueryData<AiConfiguration>(['ai', 'configuration'], (current) => current ? {
 				...current,
 				models: current.models.map((item) => item.modelId === model.modelId ? { ...item, enabled } : item),
 			} : current)
+			await cancellation
 			return { previous }
 		},
 		onError: (_error, _variables, context) => {
@@ -159,15 +166,20 @@ function ModelTable({ models, onChanged }: { models: ModelView[]; onChanged: () 
 		} : current),
 		onSettled: onChanged,
 	})
+	const displayedEnabled = (model: ModelView) => mutation.isPending
+		&& mutation.variables?.model.modelId === model.modelId
+		? mutation.variables.enabled
+		: model.enabled
   return <>
     <div className="compact-table-scroll compact-table-scroll--models"><table className="compact-table model-table"><thead><tr><th>模型</th><th>类型</th><th>计费单位</th><th>价格</th><th>状态</th><th>操作</th></tr></thead><tbody>{models.map((model) => <tr key={model.modelId}>
       <td><strong>{model.displayName}</strong><small>{model.modelId}</small></td>
       <td><span className="model-type">{capabilityLabels[model.capability]}</span></td>
       <td>{billingLabels[model.billingUnit]}</td>
       <td><PriceSummary model={model} /></td>
-      <td><label className="compact-toggle"><input aria-label={`${model.displayName}模型状态`} type="checkbox" checked={model.enabled} disabled={mutation.isPending} onChange={(event) => mutation.mutate({ model, enabled: event.target.checked })} /><span><i />{model.enabled ? '已启用' : '已停用'}</span></label></td>
+	  <td><label className="compact-toggle"><input aria-label={`${model.displayName}模型状态`} type="checkbox" checked={displayedEnabled(model)} disabled={mutation.isPending} onChange={(event) => mutation.mutate({ model, enabled: event.target.checked })} /><span><i />{displayedEnabled(model) ? '已启用' : '已停用'}</span></label></td>
       <td><button className="table-action" type="button" onClick={() => setEditing(model)}>编辑价格</button></td>
 	</tr>)}</tbody></table></div>
+	{mutation.isSuccess && <p className="form-success" role="status">{mutation.data.displayName}{mutation.data.enabled ? '已启用' : '已停用'}，运行时路由已刷新。</p>}
 	{mutation.isError && <p className="form-error" role="alert">{mutation.error.message}</p>}
     {editing && <ModelDialog model={editing} onClose={() => setEditing(null)} onChanged={onChanged} />}
   </>
