@@ -411,8 +411,10 @@ class AiProviderRegistryTest {
 	private static AiProviderCredentialStore credentials() {
 		return new AiProviderCredentialStore() {
 			@Override public String credentialOrFallback(String providerId, String fallback) { return fallback; }
-			@Override public CredentialStatus status(String providerId) { return new CredentialStatus(false, null, false); }
-			@Override public CredentialStatus replace(String providerId, String plaintext) { throw new UnsupportedOperationException(); }
+			@Override public String credentialOrFallback(String providerId, String field, String fallback) { return fallback; }
+			@Override public Map<String, String> credentialsOrFallback(String providerId, Map<String, String> fallback) { return fallback; }
+			@Override public CredentialStatus status(String providerId) { return new CredentialStatus(false, null, false, List.of()); }
+			@Override public CredentialStatus replace(String providerId, Map<String, String> values) { throw new UnsupportedOperationException(); }
 		};
 	}
 

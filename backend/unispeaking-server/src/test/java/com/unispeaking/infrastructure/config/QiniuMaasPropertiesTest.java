@@ -35,11 +35,27 @@ class QiniuMaasPropertiesTest {
 				"same-model",
 				"same-model",
 				Duration.ofSeconds(10),
-				Duration.ofSeconds(90),
+				Duration.ofSeconds(30),
 				2_097_152,
 				4096);
 
 		assertThrows(IllegalStateException.class, properties::validate);
+	}
+
+	@Test
+	void defaultsMissingTimeoutsToBoundedValues() {
+		QiniuMaasProperties properties = new QiniuMaasProperties(
+				"https://api.qnaigc.com/v1",
+				"key",
+				"deepseek/deepseek-v4-flash",
+				"qwen/qwen3.5-plus",
+				null,
+				null,
+				2_097_152,
+				4096);
+
+		assertEquals(Duration.ofSeconds(10), properties.connectTimeout());
+		assertEquals(Duration.ofSeconds(30), properties.readTimeout());
 	}
 
 	private QiniuMaasProperties properties(String baseUrl) {
@@ -49,7 +65,7 @@ class QiniuMaasPropertiesTest {
 				"deepseek/deepseek-v4-flash",
 				"qwen/qwen3.5-plus",
 				Duration.ofSeconds(10),
-				Duration.ofSeconds(90),
+				Duration.ofSeconds(30),
 				2_097_152,
 				4096);
 	}

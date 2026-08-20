@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -12,8 +15,12 @@ import com.sun.net.httpserver.HttpServer;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.infrastructure.config.QiniuMaasProperties;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
@@ -91,6 +98,28 @@ class QiniuMaasLlmProviderTest {
 				() -> provider.executeLlmTask("hello", null));
 
 		assertEquals("QINIU_MAAS_CREDENTIAL_MISSING", exception.code());
+	}
+
+	@Test
+	void mapsRequestTimeoutsToADedicatedRetryableFailure() throws Exception {
+		HttpClient httpClient = mock(HttpClient.class);
+		doThrow(new HttpTimeoutException("timed out"))
+				.when(httpClient)
+				.send(
+						any(HttpRequest.class),
+						org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any());
+		QiniuMaasProperties properties = properties(
+				"secret-key",
+				"qwen/qwen3.5-plus");
+		QiniuMaasLlmProvider provider = new QiniuMaasLlmProvider(
+				new QiniuMaasLlmClient(httpClient, new ObjectMapper(), properties),
+				properties.primaryModel());
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> provider.executeLlmTask("hello", null));
+
+		assertEquals("QINIU_MAAS_LLM_TIMEOUT", exception.code());
 	}
 
 	@Test
@@ -197,7 +226,7 @@ class QiniuMaasLlmProviderTest {
 						? "deepseek/deepseek-v4-flash"
 						: "qwen/qwen3.5-plus",
 				Duration.ofSeconds(10),
-				Duration.ofSeconds(90),
+				Duration.ofSeconds(30),
 				2_097_152,
 				4096);
 	}

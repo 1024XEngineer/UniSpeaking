@@ -146,9 +146,19 @@ function BillingMetrics({ usage, activeSessions, requestCoverage, recordsWithReq
   recordCount: number
 }) {
   const summary = usage?.summary
+  const totalTokens = summary?.totalTokens ?? 0
+  const ttsCharacters = summary?.ttsCharacters ?? 0
   const cards: Array<{ label: string; value: string; detail: string; icon: LucideIcon; tone: string }> = [
     { label: '调用请求', value: (summary?.requests ?? 0).toLocaleString(), detail: `${(summary?.attempts ?? 0).toLocaleString()} 次模型尝试`, icon: Activity, tone: 'blue' },
-    { label: 'Token 用量', value: formatTokens(summary?.totalTokens ?? 0), detail: `输入 ${formatCount(summary?.inputTokens ?? 0)} · 输出 ${formatCount(summary?.outputTokens ?? 0)}`, icon: Coins, tone: 'violet' },
+    {
+      label: '模型用量',
+      value: totalTokens > 0 ? formatTokens(totalTokens) : formatCharacters(ttsCharacters),
+      detail: ttsCharacters > 0
+        ? `TTS ${formatCharacters(ttsCharacters)}`
+        : `输入 ${formatCount(summary?.inputTokens ?? 0)} · 输出 ${formatCount(summary?.outputTokens ?? 0)}`,
+      icon: Coins,
+      tone: 'violet',
+    },
     { label: '账本金额', value: formatMoney(summary?.estimatedCost ?? 0), detail: '价格快照计算，官方匹配后定账', icon: CircleDollarSign, tone: 'green' },
     { label: 'Request ID 覆盖', value: `${requestCoverage.toFixed(1)}%`, detail: `${recordsWithRequestId} / ${recordCount} 条已获取`, icon: Link2, tone: 'orange' },
     { label: '活跃连接', value: activeSessions.toLocaleString(), detail: 'Realtime 每 5 秒刷新', icon: Radio, tone: 'cyan' },
@@ -173,15 +183,26 @@ function UserBillingTable({ users }: { users: InvocationUsage['byUser'] }) {
   if (users.length === 0) return <PanelMessage title="暂无用户账单" detail="用户产生模型调用后，将按 User ID 自动聚合。" />
   return <div className="table-scroll"><table className="billing-table billing-user-table">
     <thead><tr><th>用户</th><th>请求 / 会话</th><th>模型</th><th>用量</th><th>调用结果</th><th>账本金额</th><th>最近调用</th></tr></thead>
-    <tbody>{users.map((user, index) => <tr key={user.userId ?? `system-${index}`}>
+    <tbody>{users.map((user, index) => {
+      const ttsCharacters = user.models
+        .filter((model) => model.capability === 'TTS')
+        .reduce((total, model) => total + model.inputCharacters + model.outputCharacters, 0)
+      const primaryUsage = user.totalTokens > 0
+        ? formatTokens(user.totalTokens)
+        : formatCharacters(ttsCharacters)
+      const secondaryUsage = ttsCharacters > 0
+        ? `TTS ${formatCharacters(ttsCharacters)}`
+        : formatSecondaryUsage(0, Number(user.audioInputSeconds) + Number(user.audioOutputSeconds))
+      return <tr key={user.userId ?? `system-${index}`}>
       <td><strong>{user.email || '系统任务'}</strong><code title={user.userId ?? ''}>{user.userId || '无用户 ID'}</code></td>
       <td className="numeric"><strong>{user.requests.toLocaleString()} / {user.sessions.toLocaleString()}</strong><small>{user.attempts.toLocaleString()} 次尝试</small></td>
       <td><div className="billing-model-list">{user.models.map((model) => <span key={`${model.providerId}-${model.modelId}-${model.capability}`}>{model.modelId}</span>)}</div></td>
-      <td className="numeric"><strong>{formatTokens(user.totalTokens)}</strong><small>{formatSecondaryUsage(user.inputCharacters + user.outputCharacters, Number(user.audioInputSeconds) + Number(user.audioOutputSeconds))}</small></td>
+      <td className="numeric"><strong>{primaryUsage}</strong><small>{secondaryUsage}</small></td>
       <td className="numeric"><strong>{user.successes.toLocaleString()} 成功</strong><small>{user.failures.toLocaleString()} 失败 · {user.fallbackAttempts.toLocaleString()} 降级</small></td>
       <td className="numeric billing-money"><strong>{formatMoney(user.estimatedCost, 6)}</strong><small>价格快照</small></td>
       <td><strong>{new Date(user.lastInvokedAt).toLocaleString('zh-CN')}</strong><small>{user.models.length} 个模型</small></td>
-    </tr>)}</tbody>
+      </tr>
+    })}</tbody>
   </table></div>
 }
 
@@ -220,7 +241,7 @@ function RequestLedgerTable({ records, sessionById, pagination, onPageChange }: 
         : isLocallyBilled(record)
           ? '1 次请求'
         : officialCharacters > 0
-          ? `${officialCharacters.toLocaleString('zh-CN')} 字符`
+          ? formatCharacters(officialCharacters)
           : officialTokens > 0
             ? formatTokens(officialTokens)
             : '—'
@@ -335,6 +356,10 @@ function formatCount(value: number) {
 
 function formatTokens(value: number) {
   return value > 0 ? `${value.toLocaleString('zh-CN')} Token` : '—'
+}
+
+function formatCharacters(value: number) {
+  return value > 0 ? `${value.toLocaleString('zh-CN')} Character` : '—'
 }
 
 function formatMoney(value: number, digits = 4) {

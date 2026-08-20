@@ -489,7 +489,8 @@ class QwenRealtimeProviderTest {
 						200,
 						utf8("""
 						{"request_id":"req-1","output":{"finish_reason":"stop","audio":{"url":"%s"}}}
-						""".formatted(audioUrl))),
+						""".formatted(audioUrl)),
+						Map.of("x-request-id", List.of("different-header-request-id"))),
 				new QueuedResponse(200, audio));
 		AliyunTtsProvider provider = new AliyunTtsProvider(
 				httpClient,
@@ -503,7 +504,10 @@ class QwenRealtimeProviderTest {
 				Duration.ofSeconds(20),
 				1_048_576);
 
-		var measured = provider.generateSpeechAudioMeasured("Practice makes progress.", null);
+		var measured = provider.generateSpeechAudioMeasured(
+				"Practice makes progress.",
+				null,
+				"configured-voice-only");
 		byte[] response = measured.response();
 
 		assertArrayEquals(new byte[] {1, 2, 3, 4}, response);
@@ -530,7 +534,8 @@ class QwenRealtimeProviderTest {
 						200,
 						utf8("""
 						{"request_id":"qwen-tts-request-1","output":{"finish_reason":"stop","audio":{"url":"%s"}}}
-						""".formatted(audioUrl))),
+						""".formatted(audioUrl)),
+						Map.of("x-request-id", List.of("different-header-request-id"))),
 				new QueuedResponse(200, wav));
 		QwenTtsProvider provider = new QwenTtsProvider(
 				httpClient,
@@ -547,7 +552,8 @@ class QwenRealtimeProviderTest {
 
 		var measured = provider.generateSpeechAudioMeasured(
 				"Practice makes progress.",
-				"must-not-be-used");
+				"must-not-be-used",
+				"Aiden");
 		byte[] response = measured.response();
 		byte[] cachedResponse = provider.generateSpeechAudio(
 				"Practice makes progress.",
