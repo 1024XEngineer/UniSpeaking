@@ -55,7 +55,7 @@ public class AuthController {
 			HttpServletResponse servletResponse) {
 		requireVerifiedEmail(request.username(), servletRequest);
 		AuthResponse auth = authService.register(request);
-		addLearningRefreshCookie(servletResponse, auth.user().id());
+		addLearningRefreshCookie(servletResponse, auth);
 		return ApiResponse.success(auth);
 	}
 
@@ -66,15 +66,15 @@ public class AuthController {
 			HttpServletResponse servletResponse) {
 		requireVerifiedEmail(request.username(), servletRequest);
 		AuthResponse auth = authService.login(request);
-		addLearningRefreshCookie(servletResponse, auth.user().id());
+		addLearningRefreshCookie(servletResponse, auth);
 		return ApiResponse.success(auth);
 	}
 
-	private void addLearningRefreshCookie(HttpServletResponse response, java.util.UUID userId) {
-		if (refreshTokenService == null) {
+	private void addLearningRefreshCookie(HttpServletResponse response, AuthResponse auth) {
+		if (refreshTokenService == null || auth == null || auth.user() == null) {
 			return;
 		}
-		var issued = refreshTokenService.issue(userId);
+		var issued = refreshTokenService.issue(auth.user().id());
 		response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie.from(AuthTokenController.COOKIE_NAME, issued.token())
 				.httpOnly(true)
 				.secure(secureCookie)

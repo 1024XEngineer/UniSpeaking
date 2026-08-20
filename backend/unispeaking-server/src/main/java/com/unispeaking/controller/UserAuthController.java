@@ -143,7 +143,7 @@ public final class UserAuthController {
         }
         AuthResponse auth = learningAuthService.login(new com.unispeaking.domain.dto.auth.LoginRequest(
                         request.email(), request.password()));
-        addLearningRefreshCookie(response, auth.user().id());
+        addLearningRefreshCookie(response, auth);
         return ApiResponse.success(auth);
     }
 
@@ -158,13 +158,13 @@ public final class UserAuthController {
         AuthResponse auth = learningAuthService.login(
                 new com.unispeaking.domain.dto.auth.LoginRequest(
                         request.email(), request.password()));
-        addLearningRefreshCookie(response, auth.user().id());
+        addLearningRefreshCookie(response, auth);
         return ApiResponse.success(auth);
     }
 
-    private void addLearningRefreshCookie(HttpServletResponse response, UUID userId) {
-        if (refreshTokenService == null) return;
-        var issued = refreshTokenService.issue(userId);
+    private void addLearningRefreshCookie(HttpServletResponse response, AuthResponse auth) {
+        if (refreshTokenService == null || auth == null || auth.user() == null) return;
+        var issued = refreshTokenService.issue(auth.user().id());
         response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie.from(AuthTokenController.COOKIE_NAME, issued.token())
                 .httpOnly(true).secure(secureCookie).sameSite("Lax")
                 .path("/api/auth/web/token").build().toString());
