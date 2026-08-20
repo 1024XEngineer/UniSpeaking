@@ -159,6 +159,27 @@ const speechSpeedInstructions = {
 } as const;
 
 const SCENE_AUDIO_DRAIN_MS = 1_200;
+const SCENE_FILLER_CONTINUATION_MS = 1_200;
+const SCENE_TRAILING_FILLER =
+  /(?:^|[\s,;:])(?:uh+|um+|erm+|em+|hmm+|ah+|well|you know|let me (?:think|see))[\s.!?,;:~-]*$/i;
+
+function hasTrailingSceneFiller(text: string) {
+  return SCENE_TRAILING_FILLER.test(text.trim());
+}
+
+function mergeSceneTranscript(left: string, right: string) {
+  const prefix = left.trim().replace(/[.!?]+$/, '');
+  const suffix = right.trim();
+  return [prefix, suffix].filter(Boolean).join(' ');
+}
+
+function assistantResponseInvitesReply(text: string) {
+  const terminalText = text
+    .trim()
+    .replace(/["'\u2019\u201D)\]]+$/, '')
+    .trimEnd();
+  return /[?\uFF1F]$/.test(terminalText);
+}
 
 function buildSessionUpdate(
   eventId: string,
@@ -179,7 +200,10 @@ function buildSessionUpdate(
         .join('\n\n'),
       input_audio_format: 'pcm',
       output_audio_format: 'pcm',
-      input_audio_transcription: { model: 'qwen3-asr-flash-realtime' },
+      input_audio_transcription: {
+        model: 'qwen3-asr-flash-realtime',
+        ...(options.mode === 'scene' ? { language: 'en' } : {}),
+      },
       smooth_output: false,
       turn_detection: {
         type:
@@ -189,10 +213,13 @@ function buildSessionUpdate(
             : options.model.startsWith('qwen3.5-omni-')
               ? 'semantic_vad'
               : 'server_vad',
-        threshold: 0.5,
-        prefix_padding_ms: 500,
+        threshold: options.mode === 'scene' ? 0.4 : 0.5,
+        prefix_padding_ms: options.mode === 'scene' ? 1_000 : 500,
         silence_duration_ms: options.mode === 'ielts' ? 3_000 : 600,
-        create_response: options.mode === 'free_chat',
+        // Scene dialogue uses an explicit opening response, then lets Realtime
+        // VAD own subsequent responses. State advancement and WAV scoring stay
+        // off this response path.
+        create_response: options.mode !== 'ielts',
         interrupt_response:
           options.mode === 'ielts' ? options.ieltsPart !== 'PART_2' : true,
       },
@@ -218,6 +245,11 @@ type PendingResponseRequest = Readonly<{
   sessionUpdate?: Record<string, unknown>;
   responseCreate: Record<string, unknown>;
 }>;
+
+type CompletedUserTranscriptEvent = Extract<
+  RealtimeDomainEvent,
+  { type: 'user.transcript.completed' }
+>;
 
 export class RealtimeSessionController {
   private readonly machine = new RealtimeStateMachine();
@@ -245,7 +277,12 @@ export class RealtimeSessionController {
   private sceneState: ScenarioDialogueState | null = null;
   private completion: DialogueCompletion | null = null;
   private sceneCompletionPending = false;
+  private sceneTurnResponseCompleted = false;
+  private sceneStatePipeline: Promise<ScenarioDialogueState | null> = Promise.resolve(null);
   private sceneAudioDrainTimer: ReturnType<typeof setTimeout> | null = null;
+  private sceneContinuationTimer: ReturnType<typeof setTimeout> | null = null;
+  private scenePendingTranscript: CompletedUserTranscriptEvent | null = null;
+  private sceneUserTurnPending = false;
   private ieltsActivePart: IeltsPart | null = null;
   private ieltsDialogueState: IeltsDialogueState | null = null;
   private ieltsPart2State: IeltsPart2State | null = null;
@@ -256,6 +293,9 @@ export class RealtimeSessionController {
   private ieltsTimedOutTurn: { turnNo: number } | null = null;
   private ieltsStateRestored = false;
   private turnAudioWarning = false;
+  private turnAudioCaptureStarted = false;
+  private turnAudioCaptureStartPromise: Promise<void> | null = null;
+  private sceneTurnWithoutCapture = false;
 
   constructor(
     private readonly dependencies: RealtimeSessionDependencies,
@@ -577,15 +617,28 @@ export class RealtimeSessionController {
         return;
       case 'user.speech.started':
         if (this.options.mode === 'scene' && !this.inputEnabled) return;
+        if (this.options.mode === 'scene') {
+          this.clearSceneContinuationTimer();
+          this.sceneUserTurnPending = true;
+        }
         if (
           this.machine.state === 'ready' ||
           this.machine.state === 'assistant_speaking'
         ) {
+          const sceneTurnWithoutCapture =
+            this.options.mode === 'scene' &&
+            (this.machine.state === 'assistant_speaking' || !this.turnAudioCaptureStarted);
+          if (sceneTurnWithoutCapture) {
+            this.sceneTurnWithoutCapture = true;
+            await this.releaseTurnAudioCapture();
+          }
           this.captureTranscript(0, this.assistantTranscript);
-          this.userTranscript = '';
+          this.userTranscript = this.scenePendingTranscript
+            ? `${this.scenePendingTranscript.text.trim().replace(/[.!?]+$/, '')} `
+            : '';
           this.assistantTranscript = '';
           this.transition({ type: 'USER_SPEECH_STARTED' });
-          this.beginTurnAudioCapture();
+          if (!sceneTurnWithoutCapture) void this.beginTurnAudioCapture();
         }
         return;
       case 'user.speech.stopped':
@@ -602,39 +655,13 @@ export class RealtimeSessionController {
         return;
       case 'user.transcript.preview':
         if (this.options.mode === 'scene' && !this.inputEnabled) return;
-        this.userTranscript = event.text;
+        this.userTranscript = this.scenePendingTranscript
+          ? mergeSceneTranscript(this.scenePendingTranscript.text, event.text)
+          : event.text;
         this.publish();
         return;
       case 'user.transcript.completed':
-        if (this.options.mode === 'scene') {
-          if (!this.inputEnabled || this.sceneCompletionPending) {
-            this.dependencies.turnAudioCapture?.stop();
-            return;
-          }
-          this.inputEnabled = false;
-          this.applyAudioEnabled();
-          this.dependencies.turnAudioCapture?.stop();
-        }
-        this.userTranscript = event.text;
-        this.captureTranscript(1, event.text, event.itemId);
-        this.publish();
-        if (
-          event.itemId &&
-          this.coordinatedUserMessageIds.has(event.itemId)
-        ) {
-          return;
-        }
-        if (event.itemId) this.coordinatedUserMessageIds.add(event.itemId);
-        try {
-          await this.persistTranscript(1, event.text, event.itemId);
-        } catch (error) {
-          if (this.options.mode !== 'ielts') throw error;
-        }
-        if (this.options.mode === 'scene') {
-          await this.coordinateSceneTurn(event.text);
-        } else if (this.options.mode === 'ielts') {
-          await this.coordinateIeltsTurn(event.text);
-        }
+        await this.handleCompletedUserTranscript(event);
         return;
       case 'assistant.response.started':
         this.clearSceneAudioDrain();
@@ -645,6 +672,11 @@ export class RealtimeSessionController {
         ) {
           this.assistantTranscript = '';
           this.transition({ type: 'ASSISTANT_SPEECH_STARTED' });
+        }
+        if (this.options.mode === 'scene' && !this.sceneCompletionPending) {
+          this.inputEnabled = true;
+          this.applyAudioEnabled();
+          this.publish();
         }
         return;
       case 'assistant.transcript.delta':
@@ -665,6 +697,8 @@ export class RealtimeSessionController {
         }
         if (this.flushPendingResponse()) return;
         if (this.options.mode === 'scene') {
+          this.sceneTurnResponseCompleted = true;
+          if (this.deferSceneCompletionForAssistantQuestion()) return;
           this.scheduleSceneAfterAudioDrain();
         } else if (this.options.mode === 'ielts') {
           this.handleIeltsAssistantResponseCompleted();
@@ -677,7 +711,9 @@ export class RealtimeSessionController {
           }
           this.currentResponseRequest = null;
           this.responseInFlight = true;
-          this.inputEnabled = this.options.mode === 'free_chat';
+          this.inputEnabled =
+            this.options.mode === 'free_chat' ||
+            (this.options.mode === 'scene' && !this.sceneCompletionPending);
           this.applyAudioEnabled();
           this.publish();
           return;
@@ -743,6 +779,8 @@ export class RealtimeSessionController {
 
   private async performEnd() {
     this.clearSceneAudioDrain();
+    this.clearSceneContinuationTimer();
+    this.scenePendingTranscript = null;
     if (this.machine.state === 'ended') return null;
     if (this.machine.state === 'idle') {
       this.dependencies.transport.close();
@@ -789,7 +827,9 @@ export class RealtimeSessionController {
 
   private applyAudioEnabled() {
     const activeState =
-      this.machine.state === 'ready' || this.machine.state === 'user_speaking';
+      this.machine.state === 'ready' ||
+      this.machine.state === 'user_speaking' ||
+      (this.options.mode === 'scene' && this.machine.state === 'assistant_speaking');
     this.dependencies.transport.setAudioEnabled(
       activeState && this.inputEnabled && !this.muted,
     );
@@ -851,16 +891,27 @@ export class RealtimeSessionController {
     this.sendIeltsControlInstruction(instruction);
   }
 
-  private beginTurnAudioCapture() {
+  private beginTurnAudioCapture(): Promise<void> {
     if (
       !this.dependencies.turnAudioCapture ||
       (this.options.mode !== 'ielts' && this.options.mode !== 'scene')
     ) {
-      return;
+      return Promise.resolve();
     }
-    void this.dependencies.turnAudioCapture.start().catch(() => {
-      this.turnAudioWarning = true;
-    });
+    if (this.turnAudioCaptureStartPromise) {
+      return this.turnAudioCaptureStartPromise;
+    }
+    if (this.turnAudioCaptureStarted) return Promise.resolve();
+    const startPromise = this.dependencies.turnAudioCapture.start()
+      .then(() => {
+        this.turnAudioCaptureStarted = true;
+      })
+      .catch(() => {
+        this.turnAudioCaptureStarted = false;
+        this.turnAudioWarning = true;
+      });
+    this.turnAudioCaptureStartPromise = startPromise;
+    return startPromise;
   }
 
   private async takeTurnAudioUri() {
@@ -870,14 +921,23 @@ export class RealtimeSessionController {
       return await capture.take();
     } catch {
       return null;
+    } finally {
+      this.turnAudioCaptureStarted = false;
+      this.turnAudioCaptureStartPromise = null;
     }
   }
 
   private async releaseTurnAudioCapture() {
-    const release = this.dependencies.turnAudioCapture?.release;
+    const capture = this.dependencies.turnAudioCapture;
+    if (this.turnAudioCaptureStartPromise) {
+      await this.turnAudioCaptureStartPromise;
+    }
+    const release = capture?.release.bind(capture);
     if (typeof release === 'function') {
       await release().catch(() => undefined);
     }
+    this.turnAudioCaptureStarted = false;
+    this.turnAudioCaptureStartPromise = null;
   }
 
   private async evaluateIeltsTurn(
@@ -990,48 +1050,132 @@ export class RealtimeSessionController {
     }
   }
 
-  private async coordinateSceneTurn(transcript: string) {
+  private async handleCompletedUserTranscript(
+    event: CompletedUserTranscriptEvent,
+    allowFillerDeferral = true,
+  ) {
+    let completed = event;
+    if (this.options.mode === 'scene') {
+      if (!this.inputEnabled || this.sceneCompletionPending) {
+        this.dependencies.turnAudioCapture?.stop();
+        return;
+      }
+      const pending = this.scenePendingTranscript;
+      const repeatedPendingItem = Boolean(
+        pending?.itemId && event.itemId && pending.itemId === event.itemId,
+      );
+      completed = {
+        ...event,
+        text: pending && !repeatedPendingItem
+          ? mergeSceneTranscript(pending.text, event.text)
+          : event.text,
+        itemId: event.itemId ?? pending?.itemId,
+      };
+      if (allowFillerDeferral && hasTrailingSceneFiller(completed.text)) {
+        this.scenePendingTranscript = completed;
+        this.userTranscript = completed.text;
+        this.dependencies.turnAudioCapture?.stop();
+        this.sceneTurnWithoutCapture = true;
+        await this.releaseTurnAudioCapture();
+        this.scheduleSceneContinuation();
+        this.publish();
+        return;
+      }
+      this.clearSceneContinuationTimer();
+      this.scenePendingTranscript = null;
+      this.dependencies.turnAudioCapture?.stop();
+    }
+    this.userTranscript = completed.text;
+    if (this.options.mode === 'scene') {
+      this.sceneTurnResponseCompleted = false;
+    }
+    this.captureTranscript(1, completed.text, completed.itemId);
+    this.publish();
+    if (
+      completed.itemId &&
+      this.coordinatedUserMessageIds.has(completed.itemId)
+    ) {
+      return;
+    }
+    if (completed.itemId) {
+      this.coordinatedUserMessageIds.add(completed.itemId);
+    }
+    try {
+      await this.persistTranscript(1, completed.text, completed.itemId);
+    } catch (error) {
+      if (this.options.mode !== 'ielts') throw error;
+    }
+    if (this.options.mode === 'scene') {
+      this.sceneUserTurnPending = false;
+      this.coordinateSceneTurn(completed.text);
+    } else if (this.options.mode === 'ielts') {
+      await this.coordinateIeltsTurn(completed.text);
+    }
+  }
+
+  private coordinateSceneTurn(transcript: string) {
     const sessionId = this.backendSession?.sessionId;
     const sceneDialogue = this.dependencies.sceneDialogue;
     if (!sessionId || !sceneDialogue) {
       throw new Error('场景对话服务尚未配置');
     }
-    this.inputEnabled = false;
-    this.applyAudioEnabled();
     const turnNo = ++this.learnerTurnNo;
-    const wavUri = await this.takeTurnAudioUri();
-    const evaluation = sceneDialogue
-      .evaluateTurn(sessionId, turnNo, transcript, wavUri)
+    const wavUri = this.sceneTurnWithoutCapture
+      ? this.releaseTurnAudioCapture().then(() => null)
+      : this.takeTurnAudioUri();
+    this.sceneTurnWithoutCapture = false;
+    const evaluation = wavUri
+      .then((uri) => sceneDialogue.evaluateTurn(
+        sessionId,
+        turnNo,
+        transcript,
+        uri,
+      ))
       .catch(() => null);
     this.pendingTurnEvaluations.add(evaluation);
     void evaluation.finally(() => {
       this.pendingTurnEvaluations.delete(evaluation);
     });
-    const state = await sceneDialogue.advanceState(
-      sessionId,
-      turnNo,
-      transcript,
+    const stateOperation = this.sceneStatePipeline.then(() =>
+      sceneDialogue.advanceState(sessionId, turnNo, transcript),
     );
-    this.sceneState = state;
-    this.sceneCompletionPending = state.completed;
-    this.publish();
+    this.sceneStatePipeline = stateOperation.catch(() => null);
+    void stateOperation
+      .then((state) => {
+        if (turnNo !== this.learnerTurnNo || this.sceneUserTurnPending) return;
+        this.sceneState = state;
+        this.sceneCompletionPending = Boolean(state.completed);
+        this.publish();
 
-    let sessionUpdate: Record<string, unknown> | undefined;
-    if (state.controlInstruction?.trim() && this.backendSession) {
-      const update = buildSessionUpdate(
-        this.createEventId(),
-        this.backendSession,
-        this.options,
-      );
-      update.session.instructions = [
-        update.session.instructions,
-        state.controlInstruction.trim(),
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-      sessionUpdate = update;
-    }
-    this.requestAssistantResponse(undefined, sessionUpdate);
+        const turnInstruction = state.controlInstruction?.trim() ?? '';
+        if (turnInstruction && this.backendSession) {
+          const update = buildSessionUpdate(
+            this.createEventId(),
+            this.backendSession,
+            this.options,
+          );
+          update.session.instructions = [
+            update.session.instructions,
+            turnInstruction,
+          ]
+            .filter(Boolean)
+            .join('\n\n');
+          this.dependencies.transport.sendProviderEvent(update);
+        }
+
+        if (state.completed) {
+          if (this.deferSceneCompletionForAssistantQuestion()) return;
+          this.inputEnabled = false;
+          this.applyAudioEnabled();
+          if (this.sceneTurnResponseCompleted && !this.responseInFlight) {
+            this.scheduleSceneAfterAudioDrain();
+          }
+        }
+      })
+      .catch(() => {
+        // Observation failures must not interrupt the realtime dialogue.
+        this.publish();
+      });
   }
 
   private requestAssistantResponse(
@@ -1083,10 +1227,33 @@ export class RealtimeSessionController {
     this.sceneAudioDrainTimer = null;
   }
 
+  private clearSceneContinuationTimer() {
+    if (!this.sceneContinuationTimer) return;
+    clearTimeout(this.sceneContinuationTimer);
+    this.sceneContinuationTimer = null;
+  }
+
+  private scheduleSceneContinuation() {
+    this.clearSceneContinuationTimer();
+    this.sceneContinuationTimer = setTimeout(() => {
+      this.sceneContinuationTimer = null;
+      const pending = this.scenePendingTranscript;
+      this.scenePendingTranscript = null;
+      if (!pending || this.sceneCompletionPending) return;
+      void this.handleCompletedUserTranscript(pending, false);
+    }, SCENE_FILLER_CONTINUATION_MS);
+  }
+
   private scheduleSceneAfterAudioDrain() {
     this.clearSceneAudioDrain();
-    this.inputEnabled = false;
+    if (this.sceneCompletionPending) {
+      this.inputEnabled = false;
+    } else {
+      this.inputEnabled = true;
+    }
     this.applyAudioEnabled();
+    this.publish();
+    if (this.sceneTurnWithoutCapture && !this.sceneCompletionPending) return;
     this.sceneAudioDrainTimer = setTimeout(() => {
       this.sceneAudioDrainTimer = null;
       if (this.sceneCompletionPending) {
@@ -1094,10 +1261,38 @@ export class RealtimeSessionController {
         return;
       }
       if (this.machine.state !== 'ready' || this.responseInFlight) return;
-      this.inputEnabled = true;
-      this.applyAudioEnabled();
-      this.publish();
+      void this.enableSceneInputAfterRecordingStarts();
     }, SCENE_AUDIO_DRAIN_MS);
+  }
+
+  private deferSceneCompletionForAssistantQuestion() {
+    if (
+      !this.sceneCompletionPending ||
+      !this.sceneTurnResponseCompleted ||
+      this.responseInFlight ||
+      !assistantResponseInvitesReply(this.assistantTranscript)
+    ) {
+      return false;
+    }
+    this.sceneCompletionPending = false;
+    this.clearSceneAudioDrain();
+    this.scheduleSceneAfterAudioDrain();
+    return true;
+  }
+
+  private async enableSceneInputAfterRecordingStarts() {
+    await this.beginTurnAudioCapture();
+    if (
+      this.sceneCompletionPending ||
+      this.machine.state !== 'ready' ||
+      this.responseInFlight
+    ) {
+      await this.releaseTurnAudioCapture();
+      return;
+    }
+    this.inputEnabled = true;
+    this.applyAudioEnabled();
+    this.publish();
   }
 
   private transition(event: Parameters<RealtimeStateMachine['dispatch']>[0]) {
@@ -1112,6 +1307,7 @@ export class RealtimeSessionController {
 
   private resetSessionValues() {
     this.clearSceneAudioDrain();
+    this.clearSceneContinuationTimer();
     this.backendSession = null;
     this.userTranscript = '';
     this.assistantTranscript = '';
@@ -1131,6 +1327,10 @@ export class RealtimeSessionController {
     this.sceneState = null;
     this.completion = null;
     this.sceneCompletionPending = false;
+    this.sceneTurnResponseCompleted = false;
+    this.sceneStatePipeline = Promise.resolve(null);
+    this.scenePendingTranscript = null;
+    this.sceneUserTurnPending = false;
     this.ieltsActivePart =
       this.options.mode === 'ielts' ? this.options.ieltsPart ?? null : null;
     this.ieltsDialogueState = null;
@@ -1142,5 +1342,8 @@ export class RealtimeSessionController {
     this.ieltsTimedOutTurn = null;
     this.ieltsStateRestored = false;
     this.turnAudioWarning = false;
+    this.turnAudioCaptureStarted = false;
+    this.turnAudioCaptureStartPromise = null;
+    this.sceneTurnWithoutCapture = false;
   }
 }

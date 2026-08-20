@@ -230,13 +230,16 @@ export function sceneMetricsForReport(
   report?: DialogueReport,
 ): readonly SceneMetric[] {
   if (!report) return defaultSceneMetrics;
-  return [
+  const metrics = [
     { label: '准确', value: report.accuracyScore },
     { label: '流利', value: report.fluencyScore },
     { label: '语法', value: report.grammarScore },
     { label: '词汇', value: report.vocabularyScore },
     { label: '自然', value: report.naturalnessScore },
   ];
+  return metrics.some((metric) => Number.isFinite(metric.value) && metric.value > 0)
+    ? metrics
+    : [];
 }
 
 function SceneRadar({ metrics }: { metrics: readonly SceneMetric[] }) {
@@ -471,6 +474,7 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   const readingResult = trainingSnapshot?.readingResult;
   const trainingTransitioning = trainingSnapshot?.status === 'loading';
   const completionMetrics = sceneMetricsForReport(dialogueCompletion?.evaluation);
+  const completionScoreAvailable = completionMetrics.length > 0;
   const confirmExit = () => {
     Alert.alert(
       '退出当前训练？',
@@ -827,24 +831,39 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
             <View style={styles.completionHeaderCopy}>
               <Text style={styles.completionEyebrow}>SIMULATION COMPLETE</Text>
               <Text style={styles.completionTitle}>模拟完成</Text>
-              <Text style={styles.completionLead}>本次场景对话已结束，下面是你的五维表现。</Text>
+              <Text style={styles.completionLead}>
+                {completionScoreAvailable
+                  ? '本次场景对话已结束，下面是你的五维表现。'
+                  : dialogueCompletion?.evaluation?.summary ?? '本次有效英文语音不足，暂时无法生成五维评分。'}
+              </Text>
             </View>
             <View style={styles.completionScoreRow}>
-              <Text style={styles.completionScore}>{Math.round(dialogueCompletion?.evaluation?.finalScore ?? 86)}</Text>
-              <Text style={styles.completionScoreMax}>/100</Text>
+              <Text style={completionScoreAvailable ? styles.completionScore : styles.completionScoreUnavailable}>
+                {completionScoreAvailable
+                  ? Math.round(dialogueCompletion?.evaluation?.finalScore ?? 86)
+                  : '暂无评分'}
+              </Text>
+              {completionScoreAvailable ? <Text style={styles.completionScoreMax}>/100</Text> : null}
             </View>
           </View>
-          <View style={styles.completionOverview}>
-            <SceneRadar metrics={completionMetrics} />
-            <View style={styles.completionMetrics}>
-              {completionMetrics.map((metric) => (
-                <View key={metric.label} style={styles.completionMetricRow}>
-                  <Text style={styles.completionMetricLabel}>{metric.label}</Text>
-                  <Text style={styles.completionMetricValue}>{Math.round(metric.value)}</Text>
-                </View>
-              ))}
+          {completionScoreAvailable ? (
+            <View style={styles.completionOverview}>
+              <SceneRadar metrics={completionMetrics} />
+              <View style={styles.completionMetrics}>
+                {completionMetrics.map((metric) => (
+                  <View key={metric.label} style={styles.completionMetricRow}>
+                    <Text style={styles.completionMetricLabel}>{metric.label}</Text>
+                    <Text style={styles.completionMetricValue}>{Math.round(metric.value)}</Text>
+                  </View>
+                ))}
+              </View>
             </View>
-          </View>
+          ) : (
+            <View style={styles.completionUnavailable}>
+              <Text style={styles.completionUnavailableTitle}>有效语音不足</Text>
+              <Text style={styles.completionUnavailableCopy}>请使用完整英文句子完成至少一轮回答后再试。</Text>
+            </View>
+          )}
           <View style={styles.completionActions}>
             <Pressable accessibilityRole="button" onPress={finishTraining} style={[styles.completionActionButton, styles.completionBackButton]}>
               <Text style={styles.completionBackText}>返回场景广场</Text>
@@ -1534,8 +1553,12 @@ const styles = StyleSheet.create({
   completionLead: { marginTop: 8, color: colors.muted, fontSize: 12, lineHeight: 18, fontWeight: '300' },
   completionScoreRow: { flexDirection: 'row', alignItems: 'flex-end' },
   completionScore: { color: colors.ink, fontSize: 52, lineHeight: 52, fontWeight: '600', letterSpacing: -3 },
+  completionScoreUnavailable: { maxWidth: 100, color: colors.muted, fontSize: 17, lineHeight: 24, fontWeight: '600', textAlign: 'right' },
   completionScoreMax: { marginBottom: 5, marginLeft: 3, color: colors.subtle, fontSize: 12, fontWeight: '500' },
   completionOverview: { paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  completionUnavailable: { minHeight: 208, paddingVertical: 36, alignItems: 'center', justifyContent: 'center' },
+  completionUnavailableTitle: { color: colors.ink, fontSize: 20, lineHeight: 28, fontWeight: '600' },
+  completionUnavailableCopy: { maxWidth: 280, marginTop: 10, color: colors.muted, fontSize: 13, lineHeight: 21, fontWeight: '300', textAlign: 'center' },
   completionMetrics: { flex: 1, borderTopWidth: 1, borderTopColor: colors.line },
   completionMetricRow: { minHeight: 35, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: colors.line },
   completionMetricLabel: { color: colors.muted, fontSize: 12, fontWeight: '300' },

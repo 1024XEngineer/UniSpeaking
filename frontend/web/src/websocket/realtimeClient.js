@@ -573,6 +573,14 @@ export function extractCompletedAssistantMessage(event) {
   };
 }
 
+export function assistantResponseInvitesReply(text) {
+  const terminalText = String(text || "")
+    .trim()
+    .replace(/["'\u2019\u201D)\]]+$/, "")
+    .trimEnd();
+  return /[?\uFF1F]$/.test(terminalText);
+}
+
 export function isActiveResponseConflict(event) {
   if (event?.type !== "error") return false;
   const message = event.error?.message || event.message || "";
@@ -674,7 +682,9 @@ export function createRealtimeClient({
   const customSceneId = sceneType === "custom" ? sceneId : null;
   const ieltsSceneId = sceneType === "ielts" ? sceneId : null;
   const interviewSceneId = sceneType === "interview" ? sceneId : null;
-  const manualTurnResponses = Boolean(customSceneId || ieltsSceneId || interviewSceneId);
+  // Custom scenes keep the native Realtime VAD/response path. IELTS and
+  // interviews still require deterministic application-owned prompts.
+  const manualTurnResponses = Boolean(ieltsSceneId || interviewSceneId);
   let peer = null;
   let rtcTelemetry = null;
   let channel = null;
@@ -722,6 +732,9 @@ export function createRealtimeClient({
   let activeInputItemId = null;
   let ieltsTimedOutTurn = null;
   let closingInstructions = "";
+  let customSceneTurnPending = false;
+  let customSceneTurnResponseCompleted = false;
+  let customSceneAssistantTranscript = "";
   let pendingInterviewReportStatus = null;
   let providerSessionId = null;
   let providerSessionBound = false;
@@ -792,7 +805,7 @@ export function createRealtimeClient({
     // answer recorder for that interviewer-only interval; speech_started will
     // start it when the candidate actually interrupts.
     if (enabled && (customSceneId || ieltsSceneId || interviewSceneId)
-      && (!interviewSceneId || !responsePending)) {
+      && (!(customSceneId || interviewSceneId) || !responsePending)) {
       turnAudioCapture?.start();
     }
   }
@@ -1158,6 +1171,35 @@ export function createRealtimeClient({
     Promise.resolve(drain).catch(() => {}).then(finish);
   }
 
+  function scheduleCustomSceneCompletionIfResponseFinished() {
+    if (!customSceneId
+      || !scenarioCompletionPending
+      || responsePending
+      || !customSceneTurnResponseCompleted) return false;
+    if (scenarioCompletionTimer) {
+      window.clearTimeout(scenarioCompletionTimer);
+      scenarioCompletionTimer = null;
+    }
+    scheduleScenarioCompletionAfterAudioDrain();
+    return true;
+  }
+
+  function deferCustomSceneCompletionForAssistantQuestion() {
+    if (!customSceneId
+      || !scenarioCompletionPending
+      || responsePending
+      || !customSceneTurnResponseCompleted
+      || !assistantResponseInvitesReply(customSceneAssistantTranscript)) return false;
+    scenarioCompletionPending = false;
+    if (scenarioCompletionTimer) {
+      window.clearTimeout(scenarioCompletionTimer);
+      scenarioCompletionTimer = null;
+    }
+    inputReady = true;
+    setTrackEnabled();
+    return true;
+  }
+
   function requestTurnResponse({ closing = false, instructions = "" } = {}) {
     if (!isRealtimeChannelOpen(channel)) return false;
     if (responsePending) return false;
@@ -1232,7 +1274,7 @@ export function createRealtimeClient({
     return state;
   }
 
-  function applyScenarioState(state) {
+  function applyScenarioState(state, { requestResponse = true } = {}) {
     if (!state) return;
     emit({ type: "local.scenario_state", state });
     const instruction = String(state.controlInstruction || "").trim();
@@ -1247,11 +1289,12 @@ export function createRealtimeClient({
     }
     if (state.completed) {
       scenarioCompletionPending = true;
+      closingInstructions = String(state.controlInstruction || "").trim();
       inputReady = false;
       setTrackEnabled();
       turnAudioCapture?.stop();
     }
-    requestTurnResponse(buildScenarioResponseRequest(state));
+    if (requestResponse) requestTurnResponse(buildScenarioResponseRequest(state));
   }
 
   async function postStart({ offerSdp, voice }) {
@@ -1337,10 +1380,10 @@ export function createRealtimeClient({
         window.clearTimeout(sessionUpdateRetryTimer);
         sessionUpdateRetryTimer = null;
       }
-      // The interview uses provider-managed VAD, but the backend state machine
-      // is the only producer of interviewer responses. VAD only detects the
-      // candidate turn and never creates a response by itself.
-      inputReady = !manualTurnResponses || interviewSceneId;
+      // Keep custom-scene scoring capture closed until the opening response
+      // starts. response.created opens the track for native VAD barge-in, while
+      // the turn recorder itself waits for speech_started.
+      inputReady = !customSceneId && (!manualTurnResponses || interviewSceneId);
       setTrackEnabled();
       requestInitialResponse();
       return;
@@ -1357,6 +1400,10 @@ export function createRealtimeClient({
         ieltsTimedOutTurn = null;
       }
       activeInputItemId = startedItemId;
+      if (customSceneId) {
+        customSceneTurnPending = true;
+        customSceneTurnResponseCompleted = false;
+      }
       if (interviewSceneId && responsePending && !scenarioCompletionPending) {
         // Keep deliberate barge-in: VAD detects the candidate speech and the
         // active interviewer response is cancelled. Since interview VAD does
@@ -1368,7 +1415,7 @@ export function createRealtimeClient({
         }
         emit({ type: "local.interview_interrupted" });
       }
-      turnAudioCapture?.start();
+      if (!customSceneId || !responsePending) turnAudioCapture?.start();
       return;
     }
 
@@ -1381,7 +1428,9 @@ export function createRealtimeClient({
       clearIeltsInputRecovery();
       initialResponseStarted = true;
       responsePending = true;
-      inputReady = !manualTurnResponses || interviewSceneId;
+      if (customSceneId) customSceneAssistantTranscript = "";
+      inputReady = (!manualTurnResponses || interviewSceneId)
+        && !scenarioCompletionPending;
       if (initialResponseFallbackTimer) {
         window.clearTimeout(initialResponseFallbackTimer);
         initialResponseFallbackTimer = null;
@@ -1398,6 +1447,7 @@ export function createRealtimeClient({
       }
       const transcript = String(event.transcript || event.text || "").trim();
       if (!transcript) return;
+      if (customSceneId) customSceneTurnResponseCompleted = false;
       const completedInputItemId = event.item_id || event.item?.id || null;
       const timedOutTurn = ieltsActivePart === "PART_3"
         && ieltsTimedOutTurn
@@ -1506,8 +1556,11 @@ export function createRealtimeClient({
         });
       }
       if (customSceneId && persisted) {
+        customSceneTurnPending = false;
         const turnNo = ++learnerTurnNo;
-        const wavAudio = await turnAudioCapture?.take();
+        const wavAudioOperation = Promise.resolve()
+          .then(() => turnAudioCapture?.take())
+          .catch(() => null);
         const stateOperation = statePipeline.then(() => advanceCustomDialogueState(
           customSceneId,
           sessionId,
@@ -1515,13 +1568,14 @@ export function createRealtimeClient({
           transcript,
         ));
         statePipeline = stateOperation.catch(() => null);
-        const evaluationOperation = evaluateCustomDialogueTurn(
-          customSceneId,
-          sessionId,
-          turnNo,
-          transcript,
-          wavAudio,
-        );
+        const evaluationOperation = wavAudioOperation.then((wavAudio) =>
+          evaluateCustomDialogueTurn(
+            customSceneId,
+            sessionId,
+            turnNo,
+            transcript,
+            wavAudio,
+          ));
         pendingOperations.add(stateOperation);
         pendingOperations.add(evaluationOperation);
         void evaluationOperation.then((turnResult) => {
@@ -1540,19 +1594,23 @@ export function createRealtimeClient({
         }).finally(() => {
           pendingOperations.delete(evaluationOperation);
         });
-        try {
-          const scenarioState = await stateOperation;
-          applyScenarioState(scenarioState);
-        } catch (error) {
+        void stateOperation.then((scenarioState) => {
+          if (turnNo !== learnerTurnNo || customSceneTurnPending) return;
+          applyScenarioState(scenarioState, { requestResponse: false });
+          if (scenarioState?.completed) {
+            if (deferCustomSceneCompletionForAssistantQuestion()) return;
+            armScenarioCompletionTimeout();
+            scheduleCustomSceneCompletionIfResponseFinished();
+          }
+        }).catch((error) => {
           emit({
             type: "local.scenario_state_error",
             turnNo,
             message: error instanceof Error ? error.message : "场景状态推进失败",
           });
-          requestTurnResponse();
-        } finally {
+        }).finally(() => {
           pendingOperations.delete(stateOperation);
-        }
+        });
       }
       if (interviewSceneId && persisted) {
         const turnNo = ++learnerTurnNo;
@@ -1616,6 +1674,10 @@ export function createRealtimeClient({
 
     const completedAssistantMessage = extractCompletedAssistantMessage(event);
     if (completedAssistantMessage) {
+      const assistantText = String(completedAssistantMessage.text || "").trim();
+      if (customSceneId && assistantText) {
+        customSceneAssistantTranscript = assistantText;
+      }
       scheduleIeltsInputRecovery();
       if (scenarioCompletionPending && interviewSceneId) {
         // 收尾期间会话已被后端终态化：跳过 WS 落库（否则 Session not found），仅展示收尾语
@@ -1638,13 +1700,18 @@ export function createRealtimeClient({
     }
     if (event.type === "response.done") {
       responsePending = false;
+      if (customSceneId) customSceneTurnResponseCompleted = true;
       if (ieltsActivePart === "PART_2" && ieltsDialogueCompleted) {
         inputReady = false;
         setTrackEnabled();
         emit({ type: "local.ielts_part2_completion_ready" });
       }
       if (scenarioCompletionPending) {
-        if (closingResponseRequested) {
+        if (customSceneId) {
+          if (!deferCustomSceneCompletionForAssistantQuestion()) {
+            scheduleCustomSceneCompletionIfResponseFinished();
+          }
+        } else if (closingResponseRequested) {
           if (scenarioCompletionTimer) {
             window.clearTimeout(scenarioCompletionTimer);
             scenarioCompletionTimer = null;
@@ -1774,18 +1841,14 @@ export function createRealtimeClient({
         includeVoice: backend.voiceId !== "Cherry",
         model: DEFAULT_MODEL,
         speechSpeed,
-        // Interview and IELTS both keep the provider VAD open through a
-        // natural three-second thinking pause. Interview response.create is
-        // still orchestrated after the backend state transition, but turn
-        // detection and interruption are automatic at the provider.
-        // Scenario/interview state machines own the next prompt. Provider VAD
-        // remains automatic, but it must not create a competing response.
+        // Custom scenes use the provider's native VAD response and barge-in
+        // path. IELTS and interview prompts remain application-controlled.
         automaticTurnResponses: !manualTurnResponses,
         silenceDurationMs: silenceDurationMs ?? (interviewSceneId || ieltsSceneId ? 3_000 : 600),
         turnDetectionType: turnDetectionType ?? (isDeterministicIeltsPart() ? "server_vad" : null),
         interruptResponse: interruptResponse ?? (interviewSceneId || ieltsActivePart !== "PART_2"),
-        vadThreshold: interviewSceneId ? 0.8 : 0.5,
-        prefixPaddingMs: interviewSceneId ? 1_000 : 500,
+        vadThreshold: interviewSceneId ? 0.8 : customSceneId ? 0.4 : 0.5,
+        prefixPaddingMs: interviewSceneId || customSceneId ? 1_000 : 500,
       });
       baseSessionInstructions = sessionConfig.instructions;
 
@@ -2112,6 +2175,9 @@ export function createRealtimeClient({
       responsePending = false;
       closingResponseRequested = false;
       closingInstructions = "";
+      customSceneTurnPending = false;
+      customSceneTurnResponseCompleted = false;
+      customSceneAssistantTranscript = "";
       pendingInterviewReportStatus = null;
       statePipeline = Promise.resolve();
       ieltsActivePart = null;

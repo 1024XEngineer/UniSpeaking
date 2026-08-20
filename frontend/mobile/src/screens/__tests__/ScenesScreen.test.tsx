@@ -122,6 +122,22 @@ describe('scene completion report mapping', () => {
       { label: '自然', value: 55 },
     ]);
   });
+
+  it('does not present an all-zero unavailable report as a scored result', () => {
+    expect(
+      sceneMetricsForReport({
+        accuracyScore: 0,
+        fluencyScore: 0,
+        grammarScore: 0,
+        vocabularyScore: 0,
+        naturalnessScore: 0,
+        finalScore: 0,
+        summary: '本次对话已保存，但有效英文语音不足，暂时无法生成完整五维评分。',
+        strengths: [],
+        improvements: ['请使用完整英文句子完成至少一轮回答后再试。'],
+      }),
+    ).toEqual([]);
+  });
 });
 
 describe('ScenesHome backend generation binding', () => {
