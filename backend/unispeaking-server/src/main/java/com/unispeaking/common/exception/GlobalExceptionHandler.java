@@ -1,9 +1,12 @@
 package com.unispeaking.common.exception;
 
+import com.unispeaking.admin.quality.QualityIssueTelemetrySink;
 import com.unispeaking.common.response.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.ErrorResponseException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -12,6 +15,16 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+	private final QualityIssueTelemetrySink qualityIssueSink;
+
+	public GlobalExceptionHandler() {
+		this(null);
+	}
+
+	@Autowired
+	public GlobalExceptionHandler(QualityIssueTelemetrySink qualityIssueSink) {
+		this.qualityIssueSink = qualityIssueSink;
+	}
 
 	@ExceptionHandler(BusinessException.class)
 	public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException exception) {
@@ -68,8 +81,45 @@ public class GlobalExceptionHandler {
 					HttpStatus.BAD_REQUEST;
 			default -> HttpStatus.BAD_REQUEST;
 		};
+		if (status.is5xxServerError()) {
+			report(exception, null, null, status.value(), exception.code());
+		}
 		return ResponseEntity.status(status)
 				.body(ApiResponse.failure(exception.code(), exception.getMessage()));
+	}
+
+	@ExceptionHandler(Exception.class)
+	public ResponseEntity<ApiResponse<Void>> handleUnexpectedException(
+			Exception exception,
+			HttpServletRequest request) {
+		report(exception, request.getRequestURI(), request.getMethod(), 500, "INTERNAL_SERVER_ERROR");
+		return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+				.body(ApiResponse.failure("INTERNAL_SERVER_ERROR", "服务器内部错误"));
+	}
+
+	@ExceptionHandler(ErrorResponseException.class)
+	public ResponseEntity<ApiResponse<Void>> handleFrameworkStatusException(
+			ErrorResponseException exception,
+			HttpServletRequest request) {
+		int status = exception.getStatusCode().value();
+		String code = "HTTP_" + status;
+		if (status >= 500) {
+			report(exception, request.getRequestURI(), request.getMethod(), status, code);
+		}
+		String detail = exception.getBody().getDetail();
+		return ResponseEntity.status(exception.getStatusCode())
+				.body(ApiResponse.failure(code,
+						detail == null || detail.isBlank() ? "请求处理失败" : detail));
+	}
+
+	private void report(Throwable error, String route, String method, int status, String errorCode) {
+		if (qualityIssueSink == null) return;
+		try {
+			qualityIssueSink.captureBackend(error, route, method, status, errorCode);
+		}
+		catch (RuntimeException ignored) {
+			// Quality reporting must not replace the original API response.
+		}
 	}
 
 	@ExceptionHandler(EmailAuthException.class)

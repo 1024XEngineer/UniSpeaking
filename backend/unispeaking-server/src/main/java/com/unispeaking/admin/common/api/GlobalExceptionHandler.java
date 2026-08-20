@@ -4,6 +4,7 @@ import com.unispeaking.admin.auth.application.InvalidCredentialsException;
 import com.unispeaking.admin.usage.application.UsageSourceUnavailableException;
 import com.unispeaking.admin.usage.application.UsageUserNotFoundException;
 import com.unispeaking.admin.usage.application.AdminEntitlementService.InvalidEntitlementException;
+import com.unispeaking.admin.quality.QualityIssueAdminService.QualityIssueNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -42,6 +43,13 @@ public final class GlobalExceptionHandler {
             InvalidEntitlementException exception,
             HttpServletRequest request) {
         return error(HttpStatus.BAD_REQUEST, "INVALID_ENTITLEMENT", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(QualityIssueNotFoundException.class)
+    ResponseEntity<ApiError> qualityIssueNotFound(
+            QualityIssueNotFoundException exception,
+            HttpServletRequest request) {
+        return error(HttpStatus.NOT_FOUND, "QUALITY_ISSUE_NOT_FOUND", exception.getMessage(), request);
     }
 
     private static ResponseEntity<ApiError> error(

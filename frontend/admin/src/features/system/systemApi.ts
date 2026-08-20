@@ -124,9 +124,9 @@ export const updateProvider = (providerId: string, body: Partial<ProviderView>) 
   })
 
 export const updateModel = (modelId: string, body: Partial<ModelView>) =>
-  requestJson<ModelView>(`/api/admin/ai/models/${encodeURIComponent(modelId)}`, {
-    method: 'PATCH', body: JSON.stringify(body),
-  })
+	requestJson<ModelView>(`/api/admin/ai/models?modelId=${encodeURIComponent(modelId)}`, {
+		method: 'PATCH', body: JSON.stringify(body),
+	})
 
 export const replaceRoute = (capability: AiCapability, modelIds: string[]) =>
   requestJson<RouteView>(`/api/admin/ai/routes/${capability}`, {

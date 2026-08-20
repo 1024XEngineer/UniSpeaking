@@ -162,7 +162,7 @@ export class ApiClient {
 		path,
 		method,
 		durationMs: Date.now() - startedAt,
-		outcome: 'error',
+		outcome: response.status === 401 ? 'unauthenticated' : 'error',
 		status: response.status,
 		message: envelope?.message ?? envelope?.code ?? `请求失败（${response.status}）`,
 	  });

@@ -10,12 +10,17 @@ import {
   extractProviderSessionId,
   extractCompletedAssistantMessage,
   isActiveResponseConflict,
+  isRealtimeChannelOpen,
   normalizeProviderEvent,
   normalizeBaseUrl,
   releaseRealtimeTransport,
   waitForIceGathering,
   websocketUrl,
 } from "../src/websocket/realtimeClient.js";
+
+assert.equal(isRealtimeChannelOpen({ readyState: "open" }), true);
+assert.equal(isRealtimeChannelOpen({ readyState: "closing" }), false);
+assert.equal(isRealtimeChannelOpen(null), false);
 
 assert.deepEqual(
   buildProviderSessionBindingFrame("local-session-1", {

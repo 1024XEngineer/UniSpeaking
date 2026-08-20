@@ -5,6 +5,11 @@ import {
   type ApiRequestOptions,
 } from '../ApiClient';
 import type { TokenStore } from '../../auth/SecureTokenStore';
+import { mobileTelemetry } from '../../telemetry/MobileTelemetry';
+
+jest.mock('../../telemetry/MobileTelemetry', () => ({
+  mobileTelemetry: { recordApiRequest: jest.fn(async () => undefined) },
+}));
 
 function createTokenStore(
   token: string | null,
@@ -175,6 +180,13 @@ describe('ApiClient', () => {
 
     expect(tokenStore.clear).toHaveBeenCalledTimes(1);
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(mobileTelemetry.recordApiRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: '/api/user-preferences',
+        outcome: 'unauthenticated',
+        status: 401,
+      }),
+    );
   });
 
   it('preserves the persistent session when refresh fails because of the network', async () => {

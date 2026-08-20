@@ -69,6 +69,7 @@ function cleanAttributes(attributes = {}) {
 
 function eventPayload(eventType, options = {}) {
   return {
+    eventId: randomId("evt"),
     eventType,
     platform: "WEB",
     severity: options.severity || "INFO",
