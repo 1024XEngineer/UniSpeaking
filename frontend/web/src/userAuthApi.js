@@ -1,4 +1,4 @@
-import { clearAuthSession, saveAuthSession } from "./infrastructure/http/apiClient.js";
+import { clearAuthSession, revokeWebSession, saveAuthSession } from "./infrastructure/http/apiClient.js";
 
 const API_BASE = (import.meta.env?.VITE_BACKEND_URL || "").replace(/\/$/, "");
 
@@ -100,7 +100,7 @@ export async function loginWithPassword(email, password, humanVerificationToken)
 
 export async function logoutUser() {
   try {
-    await request("/api/auth/logout", { method: "POST" });
+    await revokeWebSession();
   } finally {
     clearAuthSession();
   }

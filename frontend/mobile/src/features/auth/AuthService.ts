@@ -11,6 +11,8 @@ export type UserAccount = {
 export type AuthResponse = {
   tokenType: string;
   accessToken: string;
+  refreshToken?: string | null;
+  refreshTokenExpiresAt?: string | null;
   expiresAt: string;
   user: UserAccount;
 };
@@ -86,6 +88,22 @@ export class AuthService {
         code: input.code,
       }),
     }) as Promise<AuthResponse>;
+  }
+
+  refresh(refreshToken: string) {
+    return this.client.request('/api/auth/mobile/token/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+      headers: { 'X-Skip-Authorization': 'true' },
+    }) as Promise<AuthResponse>;
+  }
+
+  revoke(refreshToken: string) {
+    return this.client.request('/api/auth/mobile/token/revoke', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+      headers: { 'X-Skip-Authorization': 'true' },
+    }) as Promise<void>;
   }
 
   currentUser() {

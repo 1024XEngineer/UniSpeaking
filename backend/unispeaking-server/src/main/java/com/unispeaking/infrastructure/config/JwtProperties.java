@@ -8,7 +8,9 @@ public class JwtProperties {
 
 	private String issuer = "unispeaking";
 	private String secret = "";
-	private Duration accessTokenTtl = Duration.ofHours(2);
+	private Duration accessTokenTtl = Duration.ofMinutes(30);
+	private Duration refreshIdleTtl = Duration.ofDays(7);
+	private Duration refreshAbsoluteTtl = Duration.ofDays(90);
 
 	public String getIssuer() {
 		return issuer;
@@ -32,5 +34,21 @@ public class JwtProperties {
 
 	public void setAccessTokenTtl(Duration accessTokenTtl) {
 		this.accessTokenTtl = accessTokenTtl;
+	}
+
+	public Duration getRefreshIdleTtl() {
+		return refreshIdleTtl;
+	}
+
+	public void setRefreshIdleTtl(Duration refreshIdleTtl) {
+		this.refreshIdleTtl = refreshIdleTtl;
+	}
+
+	public Duration getRefreshAbsoluteTtl() {
+		return refreshAbsoluteTtl;
+	}
+
+	public void setRefreshAbsoluteTtl(Duration refreshAbsoluteTtl) {
+		this.refreshAbsoluteTtl = refreshAbsoluteTtl;
 	}
 }

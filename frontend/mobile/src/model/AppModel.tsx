@@ -18,6 +18,7 @@ import {
   type SceneLearningRecord,
 } from '@/data/learningAssets';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
+import { authTokenCoordinator } from '@/infrastructure/auth/AuthTokenCoordinator';
 import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
 import { ApiClient } from '@/infrastructure/http/ApiClient';
 import { levels, teachers, type Teacher } from '@/theme/tokens';
@@ -96,9 +97,15 @@ function createDefaultAuthController(): AppModelAuthController {
     tokenStore,
     onUnauthorized: () => controller.unauthorized(),
   });
+  const authService = new AuthService(apiClient);
+  authTokenCoordinator.configure({
+    refresh: (refreshToken) => authService.refresh(refreshToken),
+    onRefreshFailure: () => authTokenCoordinator.clear(),
+  });
   controller = new AuthSessionController({
     tokenStore,
-    authService: new AuthService(apiClient),
+    tokenCoordinator: authTokenCoordinator,
+    authService,
   });
   return controller;
 }

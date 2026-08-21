@@ -1,4 +1,5 @@
-import type { TokenStore } from '../auth/SecureTokenStore';
+import { AuthTokenCoordinator, authTokenCoordinator } from '../auth/AuthTokenCoordinator';
+import { SecureTokenStore, type TokenStore } from '../auth/SecureTokenStore';
 import { mobileTelemetry } from '../telemetry/MobileTelemetry';
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -15,6 +16,7 @@ export type ApiClientOptions = {
   tokenStore: TokenStore;
   fetchImpl?: FetchLike;
   onUnauthorized?: () => void | Promise<void>;
+  tokenCoordinator?: AuthTokenCoordinator;
 };
 
 export type ApiRequestOptions = RequestInit & {
@@ -55,24 +57,50 @@ export class ApiClient {
   private readonly tokenStore: TokenStore;
   private readonly fetchImpl: FetchLike;
   private readonly onUnauthorized?: () => void | Promise<void>;
+  private readonly tokenCoordinator: AuthTokenCoordinator;
 
   constructor(options: ApiClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.tokenStore = options.tokenStore;
+    this.tokenCoordinator = options.tokenCoordinator ?? (
+      options.tokenStore instanceof SecureTokenStore
+        ? authTokenCoordinator
+        : new AuthTokenCoordinator(options.tokenStore)
+    );
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.onUnauthorized = options.onUnauthorized;
   }
 
   async request<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
     const { timeoutMs = 15_000, ...requestOptions } = options;
-    const token = await this.tokenStore.get();
-    const isFormData =
-      typeof FormData !== 'undefined' && requestOptions.body instanceof FormData;
-    const headers = {
-      ...(requestOptions.body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...toHeaderRecord(requestOptions.headers),
+    const skipAuthorization = toHeaderRecord(requestOptions.headers)['X-Skip-Authorization'] === 'true';
+    const requestOnce = async (token: string | null) => {
+      const isFormData = typeof FormData !== 'undefined' && requestOptions.body instanceof FormData;
+      const suppliedHeaders = toHeaderRecord(requestOptions.headers);
+      delete suppliedHeaders['X-Skip-Authorization'];
+      const headers = {
+        ...(requestOptions.body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
+        ...(!skipAuthorization && token ? { Authorization: `Bearer ${token}` } : {}),
+        ...suppliedHeaders,
+      };
+      return this.fetchWithTimeout(path, requestOptions, headers, timeoutMs);
     };
+
+    let token = skipAuthorization ? null : await this.tokenCoordinator.getAccessToken();
+    let response = await requestOnce(token);
+
+    if (response.status === 401 && !skipAuthorization && !path.startsWith('/api/auth/')) {
+      const refreshedToken = await this.tokenCoordinator.refreshAccessToken();
+      if (refreshedToken) {
+        token = refreshedToken;
+        response = await requestOnce(token);
+      }
+    }
+
+    return this.parseResponse<T>(path, requestOptions, response);
+  }
+
+  private async fetchWithTimeout(path: string, requestOptions: RequestInit, headers: Record<string, string>, timeoutMs: number) {
 
     const controller = new AbortController();
     const externalSignal = requestOptions.signal;
@@ -122,13 +150,19 @@ export class ApiClient {
       externalSignal?.removeEventListener('abort', abortFromExternalSignal);
     }
 
+    return response;
+  }
+
+  private async parseResponse<T>(path: string, requestOptions: RequestInit, response: Response): Promise<T> {
+    const startedAt = Date.now();
+    const method = requestOptions.method || 'GET';
     const contentType = response.headers.get('content-type') ?? '';
     const body: unknown = contentType.includes('application/json')
       ? await response.json()
       : await response.text();
 
     if (response.status === 401 && !path.startsWith('/api/auth/')) {
-      await this.tokenStore.clear();
+      await this.tokenCoordinator.clear();
       await this.onUnauthorized?.();
     }
 
