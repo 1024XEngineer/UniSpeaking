@@ -5,6 +5,7 @@ import com.unispeaking.telemetry.ClientTelemetrySink;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -71,7 +72,7 @@ public class QualityIssueTelemetrySink implements ClientTelemetrySink {
 				RETURNING issue_id
 				""", UUID.class,
 				fingerprint, platform, severity, title(eventType, apiPath, httpStatus, message), message,
-				errorCode, apiPath, httpStatus, release, occurredAt, occurredAt);
+				errorCode, apiPath, httpStatus, release, timestamp(occurredAt), timestamp(occurredAt));
 
 		int inserted = insertEvent(issueId, fields, platform, eventType, occurredAt);
 		if (inserted == 1) {
@@ -148,7 +149,11 @@ public class QualityIssueTelemetrySink implements ClientTelemetrySink {
 				text(fields, "api_method"), integer(fields, "http_status"), text(fields, "outcome"),
 				text(fields, "error_code"), text(fields, "error_name"), text(fields, "device_model"),
 				text(fields, "os_name"), text(fields, "os_version"), text(fields, "network_type"),
-				number(fields, "duration_ms"), attributesJson(fields), occurredAt);
+				number(fields, "duration_ms"), attributesJson(fields), timestamp(occurredAt));
+	}
+
+	private Timestamp timestamp(Instant value) {
+		return Timestamp.from(value == null ? Instant.now() : value);
 	}
 
 	private boolean isActionable(Map<String, Object> fields) {
