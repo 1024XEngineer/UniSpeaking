@@ -37,6 +37,7 @@ function createDependencies(
   tokenStore: AuthSessionDependencies['tokenStore'] & {
     set: jest.Mock;
     clear: jest.Mock;
+    clearTokens: jest.Mock;
   };
   authService: AuthSessionDependencies['authService'] & {
     login: jest.Mock;
@@ -52,6 +53,7 @@ function createDependencies(
       get: jest.fn(async () => token),
       set: jest.fn(async () => undefined),
       clear: jest.fn(async () => undefined),
+      clearTokens: jest.fn(async () => undefined),
     },
     authService: {
       login: jest.fn(async () => authResponse),
@@ -124,7 +126,7 @@ describe('AuthSessionController', () => {
 
     await controller.bootstrap();
 
-    expect(dependencies.tokenStore.clear).toHaveBeenCalledTimes(1);
+    expect(dependencies.tokenStore.clearTokens).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot()).toEqual(
       expect.objectContaining({ status: 'anonymous', error: '登录已过期' }),
     );
@@ -137,7 +139,7 @@ describe('AuthSessionController', () => {
 
     await controller.bootstrap();
 
-    expect(dependencies.tokenStore.clear).not.toHaveBeenCalled();
+    expect(dependencies.tokenStore.clearTokens).not.toHaveBeenCalled();
     expect(controller.getSnapshot()).toEqual(
       expect.objectContaining({ status: 'anonymous', error: 'Network request failed' }),
     );
@@ -178,7 +180,7 @@ describe('AuthSessionController', () => {
 
     await controller.unauthorized();
 
-    expect(dependencies.tokenStore.clear).toHaveBeenCalledTimes(1);
+    expect(dependencies.tokenStore.clearTokens).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot().status).toBe('anonymous');
   });
 });

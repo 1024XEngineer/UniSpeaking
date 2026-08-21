@@ -5,6 +5,10 @@ export interface TokenStore {
   get(): Promise<string | null>;
   set(token: string): Promise<void>;
   clear(): Promise<void>;
+  getAccessToken?(): Promise<string | null>;
+  setTokens?(tokens: { accessToken: string; refreshToken?: string | null }): Promise<void>;
+  getRefreshToken?(): Promise<string | null>;
+  clearTokens?(): Promise<void>;
 }
 
 export interface SecureStoragePort {
@@ -47,11 +51,13 @@ export function createPlatformTokenStorage(
 }
 
 export const accessTokenStorageKey = 'unispeaking.accessToken';
+export const refreshTokenStorageKey = 'unispeaking.refreshToken';
 
 export class SecureTokenStore implements TokenStore {
   constructor(
     private readonly storage: SecureStoragePort = createPlatformTokenStorage(),
     private readonly storageKey: string = accessTokenStorageKey,
+    private readonly refreshStorageKey: string = refreshTokenStorageKey,
   ) {}
 
   get() {
@@ -64,5 +70,25 @@ export class SecureTokenStore implements TokenStore {
 
   clear() {
     return this.storage.deleteItemAsync(this.storageKey);
+  }
+
+  getAccessToken() { return this.storage.getItemAsync(this.storageKey); }
+
+  async setTokens(tokens: { accessToken: string; refreshToken?: string | null }) {
+    await this.storage.setItemAsync(this.storageKey, tokens.accessToken);
+    if (tokens.refreshToken) {
+      await this.storage.setItemAsync(this.refreshStorageKey, tokens.refreshToken);
+    } else {
+      await this.storage.deleteItemAsync(this.refreshStorageKey);
+    }
+  }
+
+  getRefreshToken() { return this.storage.getItemAsync(this.refreshStorageKey); }
+
+  async clearTokens() {
+    await Promise.all([
+      this.storage.deleteItemAsync(this.storageKey),
+      this.storage.deleteItemAsync(this.refreshStorageKey),
+    ]);
   }
 }

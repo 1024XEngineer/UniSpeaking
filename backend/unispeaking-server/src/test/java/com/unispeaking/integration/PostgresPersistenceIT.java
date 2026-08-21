@@ -204,7 +204,7 @@ class PostgresPersistenceIT {
 				""",
 				String.class);
 
-		assertEquals(List.of("1", "2", "3", "4", "5", "6"), migrationVersions);
+		assertEquals(List.of("1", "2", "3", "4", "5", "6", "7"), migrationVersions);
 		assertEquals(
 				List.of("quality_issue_events", "quality_issue_history", "quality_issues"),
 				jdbcTemplate.queryForList(
@@ -796,7 +796,7 @@ class PostgresPersistenceIT {
 				"SELECT COUNT(*) FROM legacy_ci.user_sessions WHERE token_digest = 'legacy-session'",
 				Integer.class));
 		assertEquals(
-				List.of("0", "1", "2", "3", "4", "5", "6"),
+				List.of("0", "1", "2", "3", "4", "5", "6", "7"),
 				jdbcTemplate.queryForList(
 						"""
 						SELECT version

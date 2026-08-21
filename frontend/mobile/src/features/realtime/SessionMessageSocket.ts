@@ -1,4 +1,5 @@
-import type { TokenStore } from '@/infrastructure/auth/SecureTokenStore';
+import { SecureTokenStore, type TokenStore } from '@/infrastructure/auth/SecureTokenStore';
+import { authTokenCoordinator, type AuthTokenCoordinator } from '@/infrastructure/auth/AuthTokenCoordinator';
 
 import type { SessionMessage } from './RealtimeSessionController';
 
@@ -30,6 +31,7 @@ type PendingAck = {
 export type SessionMessageSocketOptions = {
   baseUrl: string;
   tokenStore: Pick<TokenStore, 'get'>;
+  tokenCoordinator?: AuthTokenCoordinator;
   webSocketFactory?: (url: string) => SessionWebSocketLike;
   connectTimeoutMs?: number;
   ackTimeoutMs?: number;
@@ -77,13 +79,17 @@ export class SessionMessageSocket {
       return this.connectPromise;
     }
 
-    const token = await this.options.tokenStore.get();
-    if (!token) throw new Error('请先登录后再建立会话 WebSocket');
+    const coordinator = this.options.tokenCoordinator
+      ?? (this.options.tokenStore instanceof SecureTokenStore ? authTokenCoordinator : null);
+    const fallbackToken = coordinator
+      ? await coordinator.getAccessToken()
+      : await this.options.tokenStore.get();
+    if (!fallbackToken) throw new Error('请先登录后再建立会话 WebSocket');
 
     this.close();
     this.sessionId = normalizedSessionId;
     const socket = this.webSocketFactory(
-      sessionWebSocketUrl(this.options.baseUrl, token),
+      sessionWebSocketUrl(this.options.baseUrl, fallbackToken),
     );
     this.socket = socket;
     socket.onmessage = (event) => this.handleAck(event.data);

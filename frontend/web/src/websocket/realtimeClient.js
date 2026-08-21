@@ -1,4 +1,4 @@
-import { getAccessToken } from "../infrastructure/http/apiClient.js";
+import { getAccessToken, requestAuthenticated } from "../infrastructure/http/apiClient.js";
 import {
   advanceCustomDialogueState,
   advanceIeltsDialogueState,
@@ -228,20 +228,6 @@ export function buildRealtimeStartPayload(offerSdp, { ielts = false, voice = DEF
     ...(ielts ? { voiceId: selectedVoice } : { voice: selectedVoice }),
     translationEnabled: true,
   };
-}
-
-async function unwrapResponse(response) {
-  const contentType = response.headers.get("content-type") || "";
-  const body = contentType.includes("application/json") ? await response.json() : await response.text();
-  if (!response.ok) {
-    const message = body?.message || body?.error || body?.code || `后端请求失败（${response.status}）`;
-    throw new Error(message);
-  }
-  if (body && typeof body === "object" && "success" in body) {
-    if (!body.success) throw new Error(body.message || body.code || "后端请求失败");
-    return body.data ?? null;
-  }
-  return body;
 }
 
 function normalizeSdp(sdp) {
@@ -1298,7 +1284,6 @@ export function createRealtimeClient({
   }
 
   async function postStart({ offerSdp, voice }) {
-    const accessToken = getAccessToken();
     const path = customSceneId
       ? `/api/custom-scenes/${encodeURIComponent(customSceneId)}/sessions`
       : ieltsSceneId
@@ -1306,18 +1291,13 @@ export function createRealtimeClient({
         : interviewSceneId
           ? `/api/interview-scenes/${encodeURIComponent(interviewSceneId)}/sessions`
       : "/api/scene-sessions";
-    const response = await fetch(`${base}${path}`, {
+    return requestAuthenticated(path, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      },
       body: JSON.stringify(buildRealtimeStartPayload(offerSdp, {
         ielts: Boolean(ieltsSceneId),
         voice,
       })),
     });
-    return unwrapResponse(response);
   }
 
   async function handleProviderEvent(raw) {

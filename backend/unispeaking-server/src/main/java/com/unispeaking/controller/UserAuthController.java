@@ -6,6 +6,7 @@ import com.unispeaking.domain.dto.auth.AuthResponse;
 import com.unispeaking.domain.dto.auth.EmailAuthUser;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.auth.EmailAuthService;
+import com.unispeaking.service.auth.RefreshTokenService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -16,6 +17,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -67,24 +69,27 @@ public final class UserAuthController {
     private final AuthService learningAuthService;
     private final boolean secureCookie;
     private final long sessionMaxAgeSeconds;
+    private final RefreshTokenService refreshTokenService;
 
     @Autowired
     public UserAuthController(
             EmailAuthService authService,
             AuthService learningAuthService,
             @Value("${AUTH_COOKIE_SECURE:false}") boolean secureCookie,
-            @Value("${AUTH_SESSION_MAX_AGE_SECONDS:28800}") long sessionMaxAgeSeconds) {
+            @Value("${AUTH_SESSION_MAX_AGE_SECONDS:28800}") long sessionMaxAgeSeconds,
+            RefreshTokenService refreshTokenService) {
         this.authService = authService;
         this.learningAuthService = learningAuthService;
         this.secureCookie = secureCookie;
         this.sessionMaxAgeSeconds = sessionMaxAgeSeconds;
+        this.refreshTokenService = refreshTokenService;
     }
 
     public UserAuthController(
             EmailAuthService authService,
             @Value("${AUTH_COOKIE_SECURE:false}") boolean secureCookie,
             @Value("${AUTH_SESSION_MAX_AGE_SECONDS:28800}") long sessionMaxAgeSeconds) {
-        this(authService, null, secureCookie, sessionMaxAgeSeconds);
+        this(authService, null, secureCookie, sessionMaxAgeSeconds, null);
     }
 
     @PostMapping("/email/challenges")
@@ -130,26 +135,39 @@ public final class UserAuthController {
 
     /** Web login response for local HTTP and other clients that cannot persist Secure cookies. */
     @PostMapping("/email/password/login/token")
-    public ApiResponse<AuthResponse> loginToken(@Valid @RequestBody LoginRequest request) {
+    public ApiResponse<AuthResponse> loginToken(@Valid @RequestBody LoginRequest request,
+            HttpServletResponse response) {
         authService.login(request.email(), request.password(), request.humanVerificationToken());
         if (learningAuthService == null) {
             throw new IllegalStateException("Learning auth service is not configured");
         }
-        return ApiResponse.success(
-                learningAuthService.login(new com.unispeaking.domain.dto.auth.LoginRequest(
-                        request.email(), request.password())));
+        AuthResponse auth = learningAuthService.login(new com.unispeaking.domain.dto.auth.LoginRequest(
+                        request.email(), request.password()));
+        addLearningRefreshCookie(response, auth);
+        return ApiResponse.success(auth);
     }
 
     @PostMapping("/email/register/token")
-    public ApiResponse<AuthResponse> registerToken(@Valid @RequestBody RegisterRequest request) {
+    public ApiResponse<AuthResponse> registerToken(@Valid @RequestBody RegisterRequest request,
+            HttpServletResponse response) {
         if (learningAuthService == null) {
             throw new IllegalStateException("Learning auth service is not configured");
         }
         authService.register(
                 request.email(), request.password(), request.challengeId(), request.code(), request.nickname());
-        return ApiResponse.success(learningAuthService.login(
+        AuthResponse auth = learningAuthService.login(
                 new com.unispeaking.domain.dto.auth.LoginRequest(
-                        request.email(), request.password())));
+                        request.email(), request.password()));
+        addLearningRefreshCookie(response, auth);
+        return ApiResponse.success(auth);
+    }
+
+    private void addLearningRefreshCookie(HttpServletResponse response, AuthResponse auth) {
+        if (refreshTokenService == null || auth == null || auth.user() == null) return;
+        var issued = refreshTokenService.issue(auth.user().id());
+        response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie.from(AuthTokenController.COOKIE_NAME, issued.token())
+                .httpOnly(true).secure(secureCookie).sameSite("Lax")
+                .path("/api/auth/web/token").build().toString());
     }
 
     @GetMapping("/email/me")

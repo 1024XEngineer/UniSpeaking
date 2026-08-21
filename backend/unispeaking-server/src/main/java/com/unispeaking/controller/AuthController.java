@@ -10,7 +10,13 @@ import com.unispeaking.domain.dto.auth.RegisterRequest;
 import com.unispeaking.domain.dto.auth.UserAccountResponse;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.auth.EmailAuthService;
+import com.unispeaking.service.auth.RefreshTokenService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
+import org.springframework.beans.factory.annotation.Autowired;
 import jakarta.validation.Valid;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,26 +32,56 @@ public class AuthController {
 
 	private final AuthService authService;
 	private final EmailAuthService emailAuthService;
+	private final RefreshTokenService refreshTokenService;
+	private final boolean secureCookie;
 
-	public AuthController(AuthService authService, EmailAuthService emailAuthService) {
+	@Autowired
+	public AuthController(AuthService authService, EmailAuthService emailAuthService, RefreshTokenService refreshTokenService,
+			@Value("${AUTH_COOKIE_SECURE:false}") boolean secureCookie) {
 		this.authService = authService;
 		this.emailAuthService = emailAuthService;
+		this.refreshTokenService = refreshTokenService;
+		this.secureCookie = secureCookie;
+	}
+
+	public AuthController(AuthService authService, EmailAuthService emailAuthService) {
+		this(authService, emailAuthService, null, false);
 	}
 
 	@PostMapping("/register")
 	public ApiResponse<AuthResponse> register(
 			@Valid @RequestBody RegisterRequest request,
-			HttpServletRequest servletRequest) {
+			HttpServletRequest servletRequest,
+			HttpServletResponse servletResponse) {
 		requireVerifiedEmail(request.username(), servletRequest);
-		return ApiResponse.success(authService.register(request));
+		AuthResponse auth = authService.register(request);
+		addLearningRefreshCookie(servletResponse, auth);
+		return ApiResponse.success(auth);
 	}
 
 	@PostMapping("/login")
 	public ApiResponse<AuthResponse> login(
 			@Valid @RequestBody LoginRequest request,
-			HttpServletRequest servletRequest) {
+			HttpServletRequest servletRequest,
+			HttpServletResponse servletResponse) {
 		requireVerifiedEmail(request.username(), servletRequest);
-		return ApiResponse.success(authService.login(request));
+		AuthResponse auth = authService.login(request);
+		addLearningRefreshCookie(servletResponse, auth);
+		return ApiResponse.success(auth);
+	}
+
+	private void addLearningRefreshCookie(HttpServletResponse response, AuthResponse auth) {
+		if (refreshTokenService == null || auth == null || auth.user() == null) {
+			return;
+		}
+		var issued = refreshTokenService.issue(auth.user().id());
+		response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie.from(AuthTokenController.COOKIE_NAME, issued.token())
+				.httpOnly(true)
+				.secure(secureCookie)
+				.sameSite("Lax")
+				.path("/api/auth/web/token")
+				.build()
+				.toString());
 	}
 
 	private void requireVerifiedEmail(String username, HttpServletRequest request) {

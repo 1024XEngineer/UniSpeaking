@@ -35,6 +35,7 @@ public class EmailAuthService {
     private final Duration challengeTtl;
     private final Duration sessionTtl;
     private final EmailAuthStore store;
+    private final RefreshTokenService refreshTokenService;
 
     @Autowired
     public EmailAuthService(
@@ -44,7 +45,8 @@ public class EmailAuthService {
             Clock clock,
             @Qualifier("userAuthChallengeTtl") Duration challengeTtl,
             @Qualifier("userAuthSessionTtl") Duration sessionTtl,
-            EmailAuthStore store) {
+            EmailAuthStore store,
+            RefreshTokenService refreshTokenService) {
         this.emailSender = emailSender;
         this.humanVerificationGateway = humanVerificationGateway;
         this.passwordEncoder = passwordEncoder;
@@ -52,6 +54,7 @@ public class EmailAuthService {
         this.challengeTtl = challengeTtl;
         this.sessionTtl = sessionTtl;
         this.store = store;
+        this.refreshTokenService = refreshTokenService;
     }
 
     public EmailAuthService(
@@ -62,7 +65,7 @@ public class EmailAuthService {
             Duration challengeTtl,
             EmailAuthStore store) {
         this(emailSender, humanVerificationGateway, passwordEncoder, clock, challengeTtl,
-                Duration.ofHours(8), store);
+                Duration.ofHours(8), store, null);
     }
 
     public EmailAuthChallenge issueChallenge(String rawEmail, String humanVerificationToken) {
@@ -156,6 +159,9 @@ public class EmailAuthService {
         }
         store.updatePassword(email, passwordEncoder.encode(rawPassword), now);
         store.revokeSessionsByEmail(email, now);
+        if (refreshTokenService != null) {
+            store.findUserByEmail(email).ifPresent(user -> refreshTokenService.revokeAll(user.id()));
+        }
     }
 
     public EmailAuthUser currentUser(String rawToken) {

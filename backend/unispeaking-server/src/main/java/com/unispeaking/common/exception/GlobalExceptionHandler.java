@@ -30,7 +30,7 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException exception) {
 		HttpStatus status = switch (exception.code()) {
 			case "AUTHENTICATION_REQUIRED", "INVALID_ACCESS_TOKEN", "ACCESS_TOKEN_REVOKED",
-					"INVALID_CREDENTIALS", "USER_NOT_ACTIVE" -> HttpStatus.UNAUTHORIZED;
+					"INVALID_CREDENTIALS", "USER_NOT_ACTIVE", "REFRESH_TOKEN_INVALID" -> HttpStatus.UNAUTHORIZED;
 			case "SESSION_ACCESS_DENIED", "ADMIN_ACCESS_DENIED",
 					InterviewErrorCode.INTERVIEW_SCENE_ACCESS_DENIED -> HttpStatus.FORBIDDEN;
 			case "ACHIEVEMENT_UNLOCK_NOT_FOUND", "FEEDBACK_NOT_FOUND",
