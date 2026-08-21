@@ -85,7 +85,7 @@ public class QualityIssueTelemetrySink implements ClientTelemetrySink {
 					    resolved_at = CASE WHEN status IN ('RESOLVED', 'VERIFIED') THEN NULL ELSE resolved_at END,
 					    updated_at = CURRENT_TIMESTAMP
 					WHERE issue_id = ?
-					""", occurredAt, occurredAt, occurredAt, issueId);
+					""", timestamp(occurredAt), timestamp(occurredAt), timestamp(occurredAt), issueId);
 		}
 	}
 
