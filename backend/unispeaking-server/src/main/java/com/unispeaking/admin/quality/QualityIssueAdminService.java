@@ -16,8 +16,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class QualityIssueAdminService {
 	private static final String ISSUE_SELECT = """
 			SELECT q.*,
-			       (SELECT COUNT(DISTINCT e.user_id) FROM quality_issue_events e
-			        WHERE e.issue_id = q.issue_id AND e.user_id IS NOT NULL) AS affected_users
+			       (SELECT COUNT(DISTINCT COALESCE(e.user_id::text, 'anon:' || e.anonymous_id))
+			        FROM quality_issue_events e
+			        WHERE e.issue_id = q.issue_id
+			          AND (e.user_id IS NOT NULL OR NULLIF(e.anonymous_id, '') IS NOT NULL)) AS affected_users
 			FROM quality_issues q
 			""";
 
@@ -34,8 +36,10 @@ public class QualityIssueAdminService {
 				    COUNT(*) FILTER (WHERE severity = 'CRITICAL' AND status NOT IN ('VERIFIED', 'IGNORED')) AS critical_issues,
 				    COUNT(*) FILTER (WHERE issue_type = 'OPTIMIZATION' AND status NOT IN ('VERIFIED', 'IGNORED')) AS optimizations,
 				    COALESCE(SUM(occurrence_count) FILTER (WHERE last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'), 0) AS events_7d,
-				    (SELECT COUNT(DISTINCT user_id) FROM quality_issue_events
-				     WHERE user_id IS NOT NULL AND occurred_at >= CURRENT_TIMESTAMP - INTERVAL '7 days') AS affected_users_7d,
+			    (SELECT COUNT(DISTINCT COALESCE(user_id::text, 'anon:' || anonymous_id))
+			     FROM quality_issue_events
+			     WHERE occurred_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
+			       AND (user_id IS NOT NULL OR NULLIF(anonymous_id, '') IS NOT NULL)) AS affected_users_7d,
 				    COUNT(*) FILTER (WHERE status IN ('RESOLVED', 'VERIFIED')
 				                     AND updated_at >= CURRENT_TIMESTAMP - INTERVAL '7 days') AS resolved_7d
 				FROM quality_issues
