@@ -12,6 +12,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -106,7 +109,21 @@ public class QualityIssueTelemetrySink implements ClientTelemetrySink {
 		fields.put("error_name", error.getClass().getSimpleName());
 		fields.put("message", error.getMessage());
 		fields.put("stack", stackSummary(error));
+		String authenticatedUserId = authenticatedUserId();
+		if (authenticatedUserId != null) fields.put("user_id", authenticatedUserId);
 		write(new ClientTelemetryRecord(fields));
+	}
+
+	private String authenticatedUserId() {
+		Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+		if (authentication == null || !(authentication.getPrincipal() instanceof Jwt jwt)) return null;
+		String subject = jwt.getSubject();
+		try {
+			return subject == null ? null : UUID.fromString(subject).toString();
+		}
+		catch (IllegalArgumentException ignored) {
+			return null;
+		}
 	}
 
 	private int insertEvent(
