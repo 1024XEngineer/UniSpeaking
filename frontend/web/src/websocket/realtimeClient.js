@@ -1194,16 +1194,19 @@ export function createRealtimeClient({
       closingResponseRequested = true;
       armScenarioCompletionTimeout();
     }
-    try {
-      sendProviderEvent(buildResponseCreateEvent({
-        id: eventId(closing ? "closing_response" : "turn_response"),
-        instructions,
-      }));
-    } catch (error) {
-      responsePending = false;
-      if (closing) closingResponseRequested = false;
-      throw error;
-    }
+	try {
+	  sendProviderEvent(buildResponseCreateEvent({
+	    id: eventId(closing ? "closing_response" : "turn_response"),
+	    instructions,
+	  }));
+	} catch (error) {
+	  responsePending = false;
+	  if (closing) closingResponseRequested = false;
+	  // A remote close can race the readyState check. Treat that as a
+	  // normal disconnected turn; the next connected turn can retry safely.
+	  if (!isRealtimeChannelOpen(channel)) return false;
+	  throw error;
+	}
     return true;
   }
 
@@ -1939,9 +1942,6 @@ export function createRealtimeClient({
   }
 
   function requestResponse() {
-    if (!channel || channel.readyState !== "open") {
-      throw new Error("实时数据通道尚未连接");
-    }
     return requestTurnResponse();
   }
 

@@ -1174,6 +1174,18 @@ public class EvaluationProcessor {
 					List.of()));
 			return result;
 		}
+		if (command.audio() == null || command.audio().length == 0) {
+			DialogueTurnEvaluationResult result =
+					UnavailableTurnEvaluationPolicy.createResult(
+						command.turnNo(), command.transcript());
+			turnEvaluationRepository.upsert(toCustomTurn(
+					session, result, List.of()));
+			LOGGER.info(
+					"custom turn pronunciation unavailable; preserving transcript "
+							+ "sessionId={} turnNo={} reason=audio_missing",
+					session.getId(), command.turnNo());
+			return result;
+		}
 
 		PcmWavValidator.validate(command.audio());
 		PronunciationAssessmentResult assessment = AiInvocationContexts.call(
@@ -1219,6 +1231,18 @@ public class EvaluationProcessor {
 					session,
 					result,
 					List.of()));
+			return result;
+		}
+		if (command.audio() == null || command.audio().length == 0) {
+			DialogueTurnEvaluationResult result =
+					UnavailableTurnEvaluationPolicy.createResult(
+						command.turnNo(), command.transcript());
+			turnEvaluationRepository.upsert(toCustomTurn(
+					session, result, List.of()));
+			LOGGER.info(
+					"IELTS turn pronunciation unavailable; preserving transcript "
+							+ "sessionId={} turnNo={} reason=audio_missing",
+					session.getId(), command.turnNo());
 			return result;
 		}
 

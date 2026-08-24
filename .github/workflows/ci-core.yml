@@ -33,6 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       backend: ${{ steps.paths.outputs.backend }}
+      ocr: ${{ steps.paths.outputs.ocr }}
       frontend: ${{ steps.paths.outputs.frontend }}
       mobile: ${{ steps.paths.outputs.mobile }}
       docker_backend: ${{ steps.paths.outputs.docker_backend }}
@@ -58,6 +59,7 @@ jobs:
           git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
 
           backend=false
+          ocr=false
           frontend=false
           mobile=false
           docker_backend=false
@@ -85,6 +87,11 @@ jobs:
                 ;;
             esac
             case "$file" in
+              .github/workflows/ocr-cache.yml|backend/unispeaking-server/.dockerignore|backend/unispeaking-server/Dockerfile|backend/unispeaking-server/docker/ocr/*|backend/unispeaking-server/src/main/resources/ocr/*)
+                ocr=true
+                ;;
+            esac
+            case "$file" in
               backend/unispeaking-server/pom.xml|backend/unispeaking-server/.mvn/*|backend/unispeaking-server/mvnw)
                 dependencies=true
                 ;;
@@ -105,6 +112,7 @@ jobs:
 
           if [[ "$force_all" == true ]]; then
             backend=true
+            ocr=true
             frontend=true
             mobile=true
             docker_backend=true
@@ -116,6 +124,7 @@ jobs:
 
           {
             echo "backend=$backend"
+            echo "ocr=$ocr"
             echo "frontend=$frontend"
             echo "mobile=$mobile"
             echo "docker_backend=$docker_backend"
@@ -401,12 +410,32 @@ jobs:
         with:
           ref: ${{ inputs.merge_sha }}
 
+      - name: 配置 Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
       - name: 验证后端镜像构建
-        run: >-
-          docker build
-          --file backend/unispeaking-server/Dockerfile
-          --tag unispeaking-backend:ci
-          backend/unispeaking-server
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: backend/unispeaking-server
+          file: backend/unispeaking-server/Dockerfile
+          load: true
+          tags: unispeaking-backend:ci
+          cache-from: type=gha,scope=unispeaking-ocr-v1
+
+      - name: 验证 OCR 运行时契约
+        if: needs.changes.outputs.ocr == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 180s docker run --rm --entrypoint /bin/sh unispeaking-backend:ci -ec '
+            test -x /opt/ocr-venv/bin/python
+            test -f /app/ocr/paddle_ocr_runner.py
+            test -d /app/ocr/models/official_models/PP-OCRv5_mobile_det
+            test -d /app/ocr/models/official_models/PP-OCRv5_mobile_rec
+            /opt/ocr-venv/bin/python /app/ocr/paddle_ocr_runner.py --device cpu --text-detection-model-name PP-OCRv5_mobile_det --text-recognition-model-name PP-OCRv5_mobile_rec --disable-doc-orientation --disable-doc-unwarping --disable-textline-orientation --worker </dev/null >/tmp/ocr-ready.json
+            ready="$(cat /tmp/ocr-ready.json)"
+            test "$ready" = "{\"ready\": true}"
+          '
 
   docker_frontend:
     name: 构建前端镜像

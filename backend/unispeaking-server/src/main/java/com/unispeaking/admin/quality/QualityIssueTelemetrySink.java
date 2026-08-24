@@ -5,6 +5,7 @@ import com.unispeaking.telemetry.ClientTelemetrySink;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -12,6 +13,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -68,7 +72,7 @@ public class QualityIssueTelemetrySink implements ClientTelemetrySink {
 				RETURNING issue_id
 				""", UUID.class,
 				fingerprint, platform, severity, title(eventType, apiPath, httpStatus, message), message,
-				errorCode, apiPath, httpStatus, release, occurredAt, occurredAt);
+				errorCode, apiPath, httpStatus, release, timestamp(occurredAt), timestamp(occurredAt));
 
 		int inserted = insertEvent(issueId, fields, platform, eventType, occurredAt);
 		if (inserted == 1) {
@@ -81,7 +85,7 @@ public class QualityIssueTelemetrySink implements ClientTelemetrySink {
 					    resolved_at = CASE WHEN status IN ('RESOLVED', 'VERIFIED') THEN NULL ELSE resolved_at END,
 					    updated_at = CURRENT_TIMESTAMP
 					WHERE issue_id = ?
-					""", occurredAt, occurredAt, occurredAt, issueId);
+					""", timestamp(occurredAt), timestamp(occurredAt), timestamp(occurredAt), issueId);
 		}
 	}
 
@@ -106,7 +110,21 @@ public class QualityIssueTelemetrySink implements ClientTelemetrySink {
 		fields.put("error_name", error.getClass().getSimpleName());
 		fields.put("message", error.getMessage());
 		fields.put("stack", stackSummary(error));
+		String authenticatedUserId = authenticatedUserId();
+		if (authenticatedUserId != null) fields.put("user_id", authenticatedUserId);
 		write(new ClientTelemetryRecord(fields));
+	}
+
+	private String authenticatedUserId() {
+		Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+		if (authentication == null || !(authentication.getPrincipal() instanceof Jwt jwt)) return null;
+		String subject = jwt.getSubject();
+		try {
+			return subject == null ? null : UUID.fromString(subject).toString();
+		}
+		catch (IllegalArgumentException ignored) {
+			return null;
+		}
 	}
 
 	private int insertEvent(
@@ -131,7 +149,11 @@ public class QualityIssueTelemetrySink implements ClientTelemetrySink {
 				text(fields, "api_method"), integer(fields, "http_status"), text(fields, "outcome"),
 				text(fields, "error_code"), text(fields, "error_name"), text(fields, "device_model"),
 				text(fields, "os_name"), text(fields, "os_version"), text(fields, "network_type"),
-				number(fields, "duration_ms"), attributesJson(fields), occurredAt);
+				number(fields, "duration_ms"), attributesJson(fields), timestamp(occurredAt));
+	}
+
+	private Timestamp timestamp(Instant value) {
+		return Timestamp.from(value == null ? Instant.now() : value);
 	}
 
 	private boolean isActionable(Map<String, Object> fields) {
