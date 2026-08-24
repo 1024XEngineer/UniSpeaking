@@ -1,6 +1,7 @@
 package com.unispeaking.infrastructure.persistence.repository.evaluation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -9,6 +10,8 @@ import static org.mockito.Mockito.when;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult;
+import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
+import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.domain.vo.scene.IeltsPart;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.IeltsEvaluationEntity;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.IeltsPartEvaluationEntity;
@@ -87,6 +90,80 @@ class IeltsEvaluationRepositoryTest {
 		assertEquals(existing.getCreatedAt(), captor.getValue().getCreatedAt());
 	}
 
+	@Test
+	void savesFinalEvaluationWithTheFinalMapperAndPreservesExistingCreationTime() {
+		IeltsEvaluationMapper mapper = mock(IeltsEvaluationMapper.class);
+		IeltsPartEvaluationMapper partMapper = mock(IeltsPartEvaluationMapper.class);
+		IeltsEvaluationEntity existing = new IeltsEvaluationEntity();
+		OffsetDateTime createdAt = OffsetDateTime.of(
+				2026, 8, 4, 8, 0, 0, 0, ZoneOffset.UTC);
+		existing.setCreatedAt(createdAt);
+		when(mapper.selectById("ielts_mock_ielts-mock-1")).thenReturn(existing);
+		when(mapper.updateById(any(IeltsEvaluationEntity.class))).thenReturn(1);
+
+		new IeltsEvaluationRepository(mapper, partMapper)
+				.save("ielts-mock-1", "ignored-for-final", finalResult());
+
+		ArgumentCaptor<IeltsEvaluationEntity> captor =
+				ArgumentCaptor.forClass(IeltsEvaluationEntity.class);
+		verify(mapper).updateById(captor.capture());
+		IeltsEvaluationEntity saved = captor.getValue();
+		assertEquals("ielts_mock_ielts-mock-1", saved.getEvaluationId());
+		assertEquals("ielts-mock-1", saved.getIeltsId());
+		assertEquals("COMPLETED", saved.getEvaluationStatus());
+		assertEquals(createdAt, saved.getCreatedAt());
+		assertEquals(new BigDecimal("6.5"), saved.getOverallBandScore());
+		assertEquals(List.of("表达连贯"), List.of(saved.getStrengths()));
+	}
+
+	@Test
+	void convertsMapperFailuresAndUnexpectedAffectedCountsToPersistenceFailures() {
+		IeltsEvaluationMapper mapper = mock(IeltsEvaluationMapper.class);
+		IeltsPartEvaluationMapper partMapper = mock(IeltsPartEvaluationMapper.class);
+		when(partMapper.selectById(any())).thenReturn(null);
+		when(partMapper.insert(any(IeltsPartEvaluationEntity.class))).thenReturn(0);
+		IeltsEvaluationRepository repository =
+				new IeltsEvaluationRepository(mapper, partMapper);
+
+		EvaluationException partFailure = assertThrows(
+				EvaluationException.class,
+				() -> repository.savePart("ielts-1", "session-1", result()));
+		assertEquals(EvaluationErrorCode.PERSISTENCE_FAILED, partFailure.errorCode());
+
+		when(mapper.selectById(any())).thenReturn(null);
+		when(mapper.insert(any(IeltsEvaluationEntity.class))).thenThrow(
+				new IllegalStateException("database unavailable"));
+		EvaluationException finalFailure = assertThrows(
+				EvaluationException.class,
+				() -> repository.saveFinal("ielts-1", finalResult()));
+		assertEquals(EvaluationErrorCode.PERSISTENCE_FAILED, finalFailure.errorCode());
+	}
+
+	@Test
+	void readsPartFinalAndOrderedPartsAndTranslatesReadFailures() {
+		IeltsEvaluationMapper mapper = mock(IeltsEvaluationMapper.class);
+		IeltsPartEvaluationMapper partMapper = mock(IeltsPartEvaluationMapper.class);
+		IeltsPartEvaluationEntity part = new IeltsPartEvaluationEntity();
+		part.setSessionId("session-1");
+		IeltsEvaluationEntity finalEvaluation = new IeltsEvaluationEntity();
+		finalEvaluation.setIeltsId("ielts-1");
+		when(partMapper.selectOne(any())).thenReturn(part);
+		when(mapper.selectOne(any())).thenReturn(finalEvaluation);
+		when(partMapper.selectList(any())).thenReturn(List.of(part));
+		IeltsEvaluationRepository repository =
+				new IeltsEvaluationRepository(mapper, partMapper);
+
+		assertEquals("session-1", repository.findPart("session-1").orElseThrow().getSessionId());
+		assertEquals("ielts-1", repository.findFinal("ielts-1").orElseThrow().getIeltsId());
+		assertEquals(1, repository.findParts("ielts-1").size());
+
+		when(partMapper.selectOne(any())).thenThrow(new IllegalStateException("read failed"));
+		EvaluationException failure = assertThrows(
+				EvaluationException.class,
+				() -> repository.findPart("session-1"));
+		assertEquals(EvaluationErrorCode.PERSISTENCE_FAILED, failure.errorCode());
+	}
+
 	private IeltsEvaluationResult result() {
 		return new IeltsEvaluationResult(
 				IeltsPart.PART_1,
@@ -105,5 +182,25 @@ class IeltsEvaluationRepositoryTest {
 				"能够使用话题词汇，但改述有限。",
 				"简单句准确，复杂结构控制有限。",
 				"基于 3 轮原始语音，整体清晰可懂。");
+	}
+
+	private IeltsEvaluationResult finalResult() {
+		return new IeltsEvaluationResult(
+				null,
+				"FINAL",
+				new BigDecimal("6.5"),
+				new BigDecimal("7.0"),
+				new BigDecimal("6.0"),
+				new BigDecimal("6.0"),
+				new BigDecimal("6.5"),
+				"完整模拟考试。",
+				List.of("表达连贯"),
+				List.of("丰富词汇"),
+				List.of(),
+				List.of("use a wider range"),
+				"流利。",
+				"词汇准确。",
+				"语法稳定。",
+				"发音清晰。");
 	}
 }

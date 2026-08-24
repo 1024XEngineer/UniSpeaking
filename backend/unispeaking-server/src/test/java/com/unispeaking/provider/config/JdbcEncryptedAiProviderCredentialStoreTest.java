@@ -91,6 +91,78 @@ class JdbcEncryptedAiProviderCredentialStoreTest {
 				.isEqualTo("AI_CREDENTIAL_MASTER_KEY_REQUIRED");
 	}
 
+	@Test
+	void usesFallbacksWhenTheMasterKeyIsMissing() {
+		var store = store(database("credential-fallback-no-key"), "");
+
+		assertThat(store.credentialOrFallback("qwen", "fallback")).isEqualTo("fallback");
+		assertThat(store.credentialsOrFallback("qwen", Map.of("apiKey", "fallback")))
+				.containsEntry("apiKey", "fallback");
+		assertThat(store.status("qwen")).satisfies(status -> {
+			assertThat(status.configured()).isFalse();
+			assertThat(status.writable()).isFalse();
+			assertThat(status.fingerprint()).isNull();
+		});
+	}
+
+	@Test
+	void reportsMissingRowsAndDatabaseFailuresAsUnconfiguredOrFallback() {
+		var store = store(database("credential-missing-row"), key());
+		assertThat(store.status("deepseek").configured()).isFalse();
+		assertThat(store.credentialsOrFallback("deepseek", Map.of("apiKey", "fallback")))
+				.containsEntry("apiKey", "fallback");
+
+		var brokenJdbc = org.mockito.Mockito.mock(JdbcTemplate.class);
+		org.mockito.Mockito.when(brokenJdbc.query(org.mockito.ArgumentMatchers.anyString(),
+				org.mockito.ArgumentMatchers.any(org.springframework.jdbc.core.RowMapper.class),
+				org.mockito.ArgumentMatchers.any(Object[].class)))
+				.thenThrow(new org.springframework.dao.DataAccessResourceFailureException("database down"));
+		var broken = store(brokenJdbc, key());
+		assertThat(broken.credentialsOrFallback("qwen", Map.of("apiKey", "fallback")))
+				.containsEntry("apiKey", "fallback");
+		assertThat(broken.status("qwen").configured()).isFalse();
+	}
+
+	@Test
+	void validatesProviderFieldsBlankUnknownAndOversizedChanges() {
+		var store = store(database("credential-validation"), key());
+		assertThatThrownBy(() -> store.replace("qwen", Map.of("unsupported", "value")))
+				.isInstanceOf(BusinessException.class)
+				.extracting(exception -> ((BusinessException) exception).code())
+				.isEqualTo("AI_CREDENTIAL_FIELD_INVALID");
+		assertThatThrownBy(() -> store.replace("qwen", Map.of("apiKey", " ")))
+				.isInstanceOf(BusinessException.class)
+				.extracting(exception -> ((BusinessException) exception).code())
+				.isEqualTo("AI_CREDENTIAL_INVALID");
+		assertThatThrownBy(() -> store.replace("qwen", Map.of("apiKey", "x".repeat(4097))))
+				.isInstanceOf(BusinessException.class)
+				.extracting(exception -> ((BusinessException) exception).code())
+				.isEqualTo("AI_CREDENTIAL_INVALID");
+	}
+
+	@Test
+	void rejectsEmptyChangesUnknownProvidersInvalidMasterKeysAndBadCiphertext() {
+		var store = store(database("credential-invalid-inputs"), key());
+		assertThatThrownBy(() -> store.replace("qwen", Map.of()))
+				.isInstanceOf(BusinessException.class)
+				.extracting(exception -> ((BusinessException) exception).code())
+				.isEqualTo("AI_CREDENTIAL_INVALID");
+		assertThatThrownBy(() -> store.replace("not-a-provider", Map.of("apiKey", "secret")))
+				.isInstanceOf(BusinessException.class)
+				.extracting(exception -> ((BusinessException) exception).code())
+				.isEqualTo("AI_PROVIDER_CREDENTIAL_SCHEMA_MISSING");
+		assertThatThrownBy(() -> store(database("credential-bad-key"), "not-base64"))
+				.isInstanceOf(IllegalStateException.class);
+
+		JdbcTemplate jdbc = database("credential-bad-cipher");
+		jdbc.update("update ai_providers set secret_ciphertext='not-valid-ciphertext' where provider_id='qwen'");
+		var corrupted = store(jdbc, key());
+		assertThatThrownBy(() -> corrupted.credentialsOrFallback("qwen", Map.of()))
+				.isInstanceOf(BusinessException.class)
+				.extracting(exception -> ((BusinessException) exception).code())
+				.isEqualTo("AI_CREDENTIAL_DECRYPTION_FAILED");
+	}
+
 	private static JdbcEncryptedAiProviderCredentialStore store(JdbcTemplate jdbc, String key) {
 		return new JdbcEncryptedAiProviderCredentialStore(jdbc, new ObjectMapper(), key);
 	}

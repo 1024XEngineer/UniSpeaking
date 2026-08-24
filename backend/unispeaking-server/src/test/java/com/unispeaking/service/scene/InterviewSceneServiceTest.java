@@ -38,6 +38,10 @@ import com.unispeaking.domain.po.scene.InterviewSceneDefinition;
 import com.unispeaking.domain.vo.evaluation.ReportStatus;
 import com.unispeaking.domain.vo.provider.AiCapability;
 import com.unispeaking.domain.vo.scene.InterviewDifficulty;
+import com.unispeaking.domain.vo.scene.InterviewTopicEvent;
+import com.unispeaking.domain.vo.scene.InterviewTopicState;
+import com.unispeaking.domain.vo.scene.SceneType;
+import com.unispeaking.domain.vo.session.SessionStatus;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.InterviewReportRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.InterviewSceneRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
@@ -52,6 +56,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.JsonNode;
@@ -188,6 +193,147 @@ class InterviewSceneServiceTest {
 				InterviewErrorCode.INTERVIEW_CONTEXT_LLM_RESPONSE_INVALID,
 				exception.code());
 		verify(repository, never()).save(any());
+	}
+
+	@Test
+	void rejectsNullRequestBeforeCallingLlm() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> service.generate(null));
+
+		assertEquals(InterviewErrorCode.INTERVIEW_MATERIAL_INVALID, exception.code());
+		verify(providerRegistry, never()).executeLlmTaskRouted(anyString(), isNull());
+		verify(repository, never()).save(any());
+	}
+
+	@Test
+	void rejectsMaterialWithoutFinalTextOrQualifications() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		InterviewMaterial missingFinalText = new InterviewMaterial(
+				"后端开发工程师", List.of("负责服务开发"), List.of("掌握 Java"),
+				null, null, null, null, null, null, null, " ");
+		BusinessException finalTextError = assertThrows(
+				BusinessException.class,
+				() -> service.generate(request(missingFinalText, InterviewDifficulty.EASY)));
+		assertEquals(InterviewErrorCode.INTERVIEW_MATERIAL_INVALID, finalTextError.code());
+
+		InterviewMaterial missingQualifications = new InterviewMaterial(
+				"后端开发工程师", List.of("负责服务开发"), List.of(),
+				null, null, null, null, null, null, null, "后端开发工程师");
+		BusinessException qualificationsError = assertThrows(
+				BusinessException.class,
+				() -> service.generate(request(missingQualifications, InterviewDifficulty.EASY)));
+		assertEquals(InterviewErrorCode.INTERVIEW_MATERIAL_INVALID, qualificationsError.code());
+	}
+
+	@Test
+	void acceptsMinimumAndMaximumTopicCountsAndSupportedSelfIntroductionNames() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+				.thenReturn(completed(contextWithTopics(
+						"Tell me about yourself", "项目经历", "技术栈", "职业规划")))
+				.thenReturn(completed(contextWithTopics(
+						"Self-intro", "项目经历", "技术栈", "职业规划", "反问环节")));
+
+		service.generate(request(material(), InterviewDifficulty.STANDARD));
+		service.generate(request(material(), InterviewDifficulty.STANDARD));
+
+		verify(providerRegistry, times(2)).executeLlmTaskRouted(anyString(), isNull());
+		verify(repository, times(2)).save(any(InterviewSceneDefinition.class));
+	}
+
+	@Test
+	void rejectsContextJsonForMalformedFenceDuplicateKeysTrailingTokensAndInvalidTopics() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		String[] invalidResponses = {
+				"```json\n" + validContext() + "\n``` trailing",
+				"{\"candidate_overview\":\"a\",\"candidate_overview\":\"b\","
+						+ "\"role_overview\":\"role\",\"interview_topics\":[\"自我介绍\",\"项目\",\"技术\",\"规划\"]}",
+				validContext() + " trailing",
+				contextWithTopics("项目经历", "技术栈", "职业规划", "反问环节"),
+				contextWithTopics("自我介绍", "重复", "重复", "职业规划"),
+				contextWithTopics("自我介绍", "项目经历", "技术栈")
+		};
+
+		for (String invalid : invalidResponses) {
+			when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+					.thenReturn(completed(invalid), completed(invalid));
+
+			BusinessException exception = assertThrows(
+					BusinessException.class,
+					() -> service.generate(request(material(), InterviewDifficulty.EASY)));
+			assertEquals(
+					InterviewErrorCode.INTERVIEW_CONTEXT_LLM_RESPONSE_INVALID,
+					exception.code());
+		}
+
+		verify(repository, never()).save(any());
+	}
+
+	@Test
+	void rejectsContextTextThatIsBlankWrongTypeOrTooLong() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		String tooLong = "x".repeat(2001);
+		String[] invalidResponses = {
+				"null",
+				"[]",
+				"{\"candidate_overview\":\"\",\"role_overview\":\"role\","
+						+ "\"interview_topics\":[\"自我介绍\",\"项目\",\"技术\",\"规划\"]}",
+				"{\"candidate_overview\":\"" + tooLong + "\",\"role_overview\":\"role\","
+						+ "\"interview_topics\":[\"自我介绍\",\"项目\",\"技术\",\"规划\"]}"
+		};
+
+		for (String invalid : invalidResponses) {
+			when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+					.thenReturn(completed(invalid), completed(invalid));
+			assertThrows(BusinessException.class,
+					() -> service.generate(request(material(), InterviewDifficulty.EASY)));
+		}
+		verify(repository, never()).save(any());
+	}
+
+	@Test
+	void parsesStoredTopicsByFilteringBlankEntriesAndRejectsMalformedJson() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		InterviewSceneDefinition definition = definitionWithContext(
+				"interview_1", "user-1",
+				"{\"interviewTopics\":[\" 自我介绍 \",\"\",42,null,\"项目经历\"]}");
+		when(repository.findById("interview_1")).thenReturn(Optional.of(definition));
+		when(repository.findOwnedById("interview_1", "user-1"))
+				.thenReturn(Optional.of(definition));
+
+		assertEquals(List.of("自我介绍", "项目经历"), service.interviewTopics("interview_1"));
+
+		InterviewSceneDefinition malformed = definitionWithContext(
+				"interview_bad", "user-1", "{not-json");
+		when(repository.findById("interview_bad")).thenReturn(Optional.of(malformed));
+		when(repository.findOwnedById("interview_bad", "user-1"))
+				.thenReturn(Optional.of(malformed));
+		BusinessException exception = assertThrows(BusinessException.class,
+				() -> service.interviewTopics("interview_bad"));
+		assertEquals(InterviewErrorCode.INTERVIEW_REQUEST_INVALID, exception.code());
+	}
+
+	@Test
+	void propagatesQuotaAndPersistenceFailuresWithoutCallingUnrelatedDependencies() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		org.mockito.Mockito.doThrow(new BusinessException("QUOTA", "quota"))
+				.when(dailyQuotaPolicy)
+				.assertWithinQuota("user-1", SceneType.INTERVIEW_SCENE, 5);
+		BusinessException quotaException = assertThrows(BusinessException.class,
+				() -> service.generate(request(material(), InterviewDifficulty.EASY)));
+		assertEquals("QUOTA", quotaException.code());
+		verify(providerRegistry, never()).executeLlmTaskRouted(anyString(), isNull());
+
+		org.mockito.Mockito.reset(dailyQuotaPolicy);
+		when(providerRegistry.executeLlmTaskRouted(anyString(), isNull()))
+				.thenReturn(completed(validContext()));
+		org.mockito.Mockito.doThrow(new IllegalStateException("database down"))
+				.when(repository).save(any(InterviewSceneDefinition.class));
+		assertThrows(IllegalStateException.class,
+				() -> service.generate(request(material(), InterviewDifficulty.EASY)));
 	}
 
 	@Test
@@ -400,12 +546,158 @@ class InterviewSceneServiceTest {
 	}
 
 	@Test
+	void advanceTopicStateInitializesFromPersistedTopicsBeforeAdvancing() {
+		InterviewSceneDefinition definition = definitionWithContext(
+				"interview_1", "user-1", "{\"interviewTopics\":[\"自我介绍\",\"项目经历\"]}");
+		InterviewTopicState expected = new InterviewTopicState(
+				"自我介绍", 0, 1, 0, 0, false, false, "继续追问");
+		when(stateMachine.current("session-1")).thenReturn(null);
+		when(repository.findById("interview_1")).thenReturn(Optional.of(definition));
+		when(stateMachine.advance("session-1", 1,
+				new InterviewTopicEvent("自我介绍", false))).thenReturn(expected);
+
+		InterviewTopicState actual = service.advanceTopicState(
+				"interview_1", "session-1", 1,
+				new InterviewTopicEvent("自我介绍", false));
+
+		assertEquals(expected, actual);
+		verify(stateMachine).start(
+				"session-1", List.of("自我介绍", "项目经历"), InterviewDifficulty.HARD);
+		verify(stateMachine).advance("session-1", 1,
+				new InterviewTopicEvent("自我介绍", false));
+	}
+
+	@Test
+	void advanceTopicStateRejectsMissingSceneBeforeStartingStateMachine() {
+		when(stateMachine.current("session-1")).thenReturn(null);
+		when(repository.findById("missing")).thenReturn(Optional.empty());
+
+		BusinessException exception = assertThrows(BusinessException.class,
+				() -> service.advanceTopicState(
+						"missing", "session-1", 1, InterviewTopicEvent.unknown()));
+
+		assertEquals(InterviewErrorCode.INTERVIEW_SCENE_NOT_FOUND, exception.code());
+		verify(stateMachine, never()).start(anyString(), any(), any());
+		verify(stateMachine, never()).advance(
+				anyString(), org.mockito.ArgumentMatchers.anyInt(), any());
+	}
+
+	@Test
+	void interviewTopicsRejectsStoredContextWithoutUsableTopics() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		InterviewSceneDefinition definition = definitionWithContext(
+				"interview_1", "user-1", "{\"interviewTopics\":[]}");
+		when(repository.findById("interview_1")).thenReturn(Optional.of(definition));
+		when(repository.findOwnedById("interview_1", "user-1"))
+				.thenReturn(Optional.of(definition));
+
+		BusinessException exception = assertThrows(BusinessException.class,
+				() -> service.interviewTopics("interview_1"));
+
+		assertEquals(InterviewErrorCode.INTERVIEW_REQUEST_INVALID, exception.code());
+	}
+
+	@Test
+	void deleteSceneCleansUpEveryAssociatedRecordingAfterSoftDelete() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		InterviewSceneDefinition definition = definition("interview_1", "user-1");
+		when(repository.findById("interview_1")).thenReturn(Optional.of(definition));
+		when(repository.findOwnedById("interview_1", "user-1"))
+				.thenReturn(Optional.of(definition));
+		when(practiceSessionRepository.findBySceneId("interview_1")).thenReturn(List.of(
+				new com.unispeaking.domain.po.session.PracticeSessionRecord(
+						"session-1", UUID.randomUUID(), "interview_1",
+						SceneType.INTERVIEW_SCENE, SessionStatus.COMPLETED,
+						java.time.Instant.EPOCH, java.time.Instant.EPOCH),
+				new com.unispeaking.domain.po.session.PracticeSessionRecord(
+						"session-2", UUID.randomUUID(), "interview_1",
+						SceneType.INTERVIEW_SCENE, SessionStatus.COMPLETED,
+						java.time.Instant.EPOCH, java.time.Instant.EPOCH)));
+
+		service.deleteScene("interview_1");
+
+		verify(repository).softDelete("interview_1", "user-1");
+		verify(interviewRecordingStore).deleteSessionAudio("session-1");
+		verify(interviewRecordingStore).deleteSessionAudio("session-2");
+	}
+
+	@Test
 	void isOcrAvailableDelegatesToOcrProvider() {
 		when(ocrProvider.available()).thenReturn(true);
 		assertTrue(service.isOcrAvailable());
 
 		when(ocrProvider.available()).thenReturn(false);
 		assertFalse(service.isOcrAvailable());
+	}
+
+	@Test
+	void prepareDialogueAndTopicQueriesRejectMissingOrUnauthorizedScenes() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		when(repository.findById("missing")).thenReturn(Optional.empty());
+		BusinessException missing = assertThrows(BusinessException.class,
+				() -> service.prepareDialogue("missing"));
+		assertEquals(InterviewErrorCode.INTERVIEW_SCENE_NOT_FOUND, missing.code());
+
+		InterviewSceneDefinition definition = definition("interview_1", "owner");
+		when(repository.findById("interview_1")).thenReturn(Optional.of(definition));
+		when(repository.findOwnedById("interview_1", "user-1")).thenReturn(Optional.empty());
+		BusinessException denied = assertThrows(BusinessException.class,
+				() -> service.interviewTopics("interview_1"));
+		assertEquals(InterviewErrorCode.INTERVIEW_SCENE_ACCESS_DENIED, denied.code());
+	}
+
+	@Test
+	void listOwnedScenesNormalizesMalformedAndBlankJobTitlesAndNullReportStatus() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		InterviewSceneDefinition invalidJson = definitionWithContext("bad", "user-1", "{}");
+		InterviewSceneDefinition malformedJson = new InterviewSceneDefinition(
+				"malformed", "user-1", "not-json", "final", "{}", null,
+				"prompt", OffsetDateTime.now(ZoneOffset.UTC), OffsetDateTime.now(ZoneOffset.UTC), null);
+		InterviewReportRecord nullStatus = new InterviewReportRecord(
+				"session-null", "bad", "user-1", null, null, null, null, null, null,
+				null, null, null, null, null, null, null, null, null, null, null, null, 0, null, null, null);
+		when(repository.findByUserId("user-1")).thenReturn(List.of(invalidJson, malformedJson));
+		when(interviewReportRepository.findBySceneId("bad")).thenReturn(List.of(nullStatus));
+		when(interviewReportRepository.findBySceneId("malformed")).thenReturn(List.of());
+
+		List<InterviewAssetItem> items = service.listOwnedScenes();
+
+		assertEquals(2, items.size());
+		assertNull(items.getFirst().jobTitle());
+		assertNull(items.getFirst().latestReportStatus());
+		assertEquals("session-null", items.getFirst().latestSessionId());
+		assertNull(items.get(1).jobTitle());
+		assertNull(items.get(1).difficulty());
+	}
+
+	@Test
+	void advanceTopicStateUsesExistingStateWithoutReloadingScene() {
+		InterviewTopicState current = new InterviewTopicState(
+				"项目经历", 1, 1, 0, 0, false, false, "继续");
+		InterviewTopicEvent event = new InterviewTopicEvent("项目经历", true);
+		when(stateMachine.current("session-1")).thenReturn(current);
+		when(stateMachine.advance("session-1", 2, event)).thenReturn(current);
+
+		assertEquals(current, service.advanceTopicState("interview_1", "session-1", 2, event));
+		verify(repository, never()).findById(anyString());
+		verify(stateMachine, never()).start(anyString(), any(), any());
+	}
+
+	@Test
+	void prepareMaterialsPropagatesExtractionAndDesensitizerFailures() {
+		when(authService.requireUserId(null)).thenReturn("user-1");
+		when(materialTextExtraction.extract(any()))
+				.thenThrow(new IllegalArgumentException("unsupported file"));
+		assertThrows(IllegalArgumentException.class,
+				() -> service.prepareMaterials(new InterviewMaterialPreparationInput("resume", null, "jd", null)));
+
+		org.mockito.Mockito.reset(materialTextExtraction);
+		when(materialTextExtraction.extract(any()))
+				.thenReturn(new MaterialTextExtraction.MaterialTextResult("jd", "resume", false));
+		when(materialDesensitizer.desensitize("jd"))
+				.thenThrow(new IllegalStateException("desensitizer down"));
+		assertThrows(IllegalStateException.class,
+				() -> service.prepareMaterials(new InterviewMaterialPreparationInput("resume", null, "jd", null)));
 	}
 
 	private InterviewReportRecord completedReport(
@@ -450,6 +742,16 @@ class InterviewSceneServiceTest {
 				null);
 	}
 
+	private InterviewSceneDefinition definitionWithContext(
+			String sceneId,
+			String userId,
+			String contextJson) {
+		OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+		return new InterviewSceneDefinition(
+				sceneId, userId, "{}", "final text", contextJson,
+				InterviewDifficulty.HARD, "面试系统提示词", now, now, null);
+	}
+
 	private InterviewMaterial material() {
 		return new InterviewMaterial(
 				"后端开发工程师",
@@ -474,18 +776,13 @@ class InterviewSceneServiceTest {
 	}
 
 	private String validContext() {
-		return """
-				{
-				  "candidate_overview": "候选人有三年后端开发经验，熟悉支付系统。",
-				  "role_overview": "负责支付系统的设计与性能优化。",
-				  "interview_topics": [
-				    "自我介绍",
-				    "项目经历",
-				    "技术栈",
-				    "职业规划"
-				  ]
-				}
-				""";
+		return contextWithTopics("自我介绍", "项目经历", "技术栈", "职业规划");
+	}
+
+	private String contextWithTopics(String... topics) {
+		return "{\"candidate_overview\":\"候选人有三年后端开发经验，熟悉支付系统。\","
+				+ "\"role_overview\":\"负责支付系统的设计与性能优化。\",\"interview_topics\":"
+				+ objectMapper.writeValueAsString(java.util.Arrays.asList(topics)) + "}";
 	}
 
 	private String invalidContext() {

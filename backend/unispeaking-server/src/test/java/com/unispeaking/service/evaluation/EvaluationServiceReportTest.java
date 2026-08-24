@@ -1,9 +1,11 @@
 package com.unispeaking.service.evaluation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.domain.dto.session.Message;
@@ -33,6 +35,42 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class EvaluationServiceReportTest {
+
+	@Test
+	void returnsPersistedReportWithoutReevaluatingTheDialogue() {
+		String sessionId = "scene_cached_report";
+		CustomSceneSession session = new CustomSceneSession(sessionId, "user_1");
+		session.setSceneId("custom_2001");
+		session.setSceneType(SceneType.CUSTOM_SCENE);
+		ActiveSessionRegistry runtimeStore = mock(ActiveSessionRegistry.class);
+		when(runtimeStore.findById(sessionId)).thenReturn(Optional.of(session));
+		SessionEvaluationRepository reportRepository =
+				mock(SessionEvaluationRepository.class);
+		var savedReport = new com.unispeaking.domain.dto.evaluation.DialogueReportResult(
+				new BigDecimal("81"), new BigDecimal("82"), new BigDecimal("83"),
+				new BigDecimal("84"), new BigDecimal("85"), new BigDecimal("83"),
+				"已缓存的报告", List.of("表达清晰"), List.of("补充细节"));
+		when(reportRepository.find(sessionId)).thenReturn(Optional.of(savedReport));
+		TurnEvaluationRepository turnRepository = mock(TurnEvaluationRepository.class);
+		EvaluationLlmClient llmClient = mock(EvaluationLlmClient.class);
+
+		EvaluationProcessor service = new EvaluationProcessor(
+				mock(PronunciationAssessmentClient.class), llmClient, runtimeStore,
+				mock(SceneRepository.class), mock(SessionMessageRepository.class), turnRepository,
+				reportRepository, mock(SceneSentenceReadingRepository.class),
+				mock(IeltsPracticeRepository.class),
+				mock(com.unispeaking.infrastructure.persistence.repository.scene.IeltsRepository.class),
+				mock(IeltsSceneFlowService.class), mock(PracticeSessionRepository.class),
+				mock(IeltsEvaluationRepository.class), mock(IeltsEvaluationLlmClient.class),
+				mock(AuthService.class), mock(com.unispeaking.provider.ObjectStorageProvider.class),
+				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
+				mock(com.unispeaking.component.recording.RecordingStore.class));
+
+		assertSame(savedReport, service.generateDialogueReport(sessionId, List.of(
+				new Message(0, "How can I help you?", null),
+				new Message(1, "I would like a coffee, please.", null))));
+		verifyNoInteractions(turnRepository, llmClient);
+	}
 
 	@Test
 	void allZeroSpeechResultIsNotAggregatedIntoAZeroScoreReport() {

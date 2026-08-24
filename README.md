@@ -3,6 +3,8 @@
 [![后端测试](https://github.com/1024XEngineer/UniSpeaking/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/1024XEngineer/UniSpeaking/actions/workflows/coverage.yml)
 [![后端覆盖率](https://codecov.io/gh/1024XEngineer/UniSpeaking/branch/main/graph/badge.svg?flag=backend)](https://codecov.io/gh/1024XEngineer/UniSpeaking)
 
+后端 Codecov 使用独立的 `backend` flag，统计 JaCoCo 合并的单元测试与 PostgreSQL/Redis 集成测试覆盖率；README 徽章显示的是 main 分支最新报告，目标为保持在 90% 以上。
+
 UniSpeaking 是一个面向英语口语训练的 AI 实时陪练系统。仓库包含 Spring Boot 后端、
 React Web 客户端、React Native 移动端、PostgreSQL 数据模型以及 Docker/Nginx 部署配置。
 

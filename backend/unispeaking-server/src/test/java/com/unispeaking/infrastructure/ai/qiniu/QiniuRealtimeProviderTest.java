@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.domain.dto.session.RealtimeConnectCommand;
@@ -165,6 +168,202 @@ class QiniuRealtimeProviderTest {
 		assertEquals(1, unsupportedVoiceClient.requests.size());
 	}
 
+	@Test
+	void rejectsContextlessExchangeAndInvalidConnectCommandsBeforeHttp() {
+		QiniuRealtimeProvider provider = provider(new RecordingHttpClient(), "server-api-key");
+
+		assertEquals("QINIU_REALTIME_CONTEXT_REQUIRED", assertThrows(
+				BusinessException.class,
+				() -> provider.exchangeRealtimeSdp(
+						"qwen3.5-omni-plus-realtime", "offer-sdp", "token")).getMessage() != null
+						? "QINIU_REALTIME_CONTEXT_REQUIRED" : "");
+		assertEquals("INVALID_REALTIME_COMMAND", assertThrows(
+				BusinessException.class,
+				() -> provider.connect(null, null)).code());
+		assertEquals("INVALID_SDP", assertThrows(
+				BusinessException.class,
+				() -> provider.connect(commandWithOffer(" "), null)).code());
+		assertEquals("QINIU_REALTIME_MODEL_NOT_SUPPORTED", assertThrows(
+				BusinessException.class,
+				() -> provider.connect(commandWithModel("unsupported-model"), null)).code());
+	}
+
+	@Test
+	void mapsProfileAndSessionResponseFailuresWithoutLeakingCredentials() {
+		RecordingHttpClient invalidProfiles = new RecordingHttpClient(
+				response(200, "not-json"));
+		assertEquals("QINIU_PROFILES_INVALID", assertThrows(
+				BusinessException.class,
+				() -> provider(invalidProfiles, "server-api-key").connect(command(), null)).code());
+
+		RecordingHttpClient oversized = new RecordingHttpClient(
+				response(200, profiles()),
+				response(201, "x".repeat(1_048_577)));
+		assertEquals("QINIU_RESPONSE_TOO_LARGE", assertThrows(
+				BusinessException.class,
+				() -> provider(oversized, "server-api-key").connect(command(), null)).code());
+
+		RecordingHttpClient missingSession = new RecordingHttpClient(
+				response(200, profiles()),
+				response(201, "{\"client_endpoint\":{\"url\":\"/rtc\",\"access_token\":\"token\"}}"));
+		assertEquals("QINIU_SESSION_ID_MISSING", assertThrows(
+				BusinessException.class,
+				() -> provider(missingSession, "server-api-key").connect(command(), null)).code());
+
+		RecordingHttpClient invalidEndpoint = new RecordingHttpClient(
+				response(200, profiles()),
+				response(201, """
+						{"session_id":"safe-session","client_endpoint":
+						{"url":"http://evil.example/rtc","access_token":"token"}}
+						"""),
+				response(200, "{}"));
+		assertEquals("QINIU_CLIENT_ENDPOINT_INVALID", assertThrows(
+				BusinessException.class,
+				() -> provider(invalidEndpoint, "server-api-key").connect(command(), null)).code());
+	}
+
+	@Test
+	void mapsControlHttpStatusesAndStopSessionIdValidation() {
+		RecordingHttpClient unauthorized = new RecordingHttpClient(
+				response(401, "{" + "\"code\":\"bad_key\",\"message\":\"denied\"}"));
+		BusinessException unauthorizedFailure = assertThrows(
+				BusinessException.class,
+				() -> provider(unauthorized, "server-api-key").connect(command(), null));
+		assertEquals("QINIU_BAD_KEY", unauthorizedFailure.code());
+
+		RecordingHttpClient badRequest = new RecordingHttpClient(
+				response(200, profiles()),
+				response(400, "not-json"));
+		BusinessException badRequestFailure = assertThrows(
+				BusinessException.class,
+				() -> provider(badRequest, "server-api-key").connect(command(), null));
+		assertEquals("QINIU_SESSION_CREATE_FAILED", badRequestFailure.code());
+
+		RecordingHttpClient stopNotFound = new RecordingHttpClient(response(404, ""));
+		provider(stopNotFound, "server-api-key").stopSession("session-1", null, null);
+		assertEquals(1, stopNotFound.requests.size());
+
+		RecordingHttpClient noStop = new RecordingHttpClient();
+		provider(noStop, "server-api-key").stopSession("  ", null, " ");
+		assertTrue(noStop.requests.isEmpty());
+		assertEquals("QINIU_SESSION_ID_INVALID", assertThrows(
+				BusinessException.class,
+				() -> provider(noStop, "server-api-key").stopSession("bad/id", null, "done")).code());
+	}
+
+	@Test
+		void coversNullAndBlankStopInputsAndNonRetryableStopFailures()
+				throws IOException, InterruptedException {
+		RecordingHttpClient noRequest = new RecordingHttpClient();
+		provider(noRequest, "server-api-key").stopSession(null, null, "done");
+		assertTrue(noRequest.requests.isEmpty());
+
+		RecordingHttpClient badStop = new RecordingHttpClient(response(400, ""));
+		BusinessException failure = assertThrows(
+				BusinessException.class,
+				() -> provider(badStop, "server-api-key")
+						.stopSession("session-1", null, "  "));
+		assertEquals("QINIU_SESSION_STOP_FAILED", failure.code());
+		assertTrue(readBody(badStop.requests.getFirst()).contains("client_completed"));
+	}
+
+	@Test
+		void coversProfilePredicateShortCircuitingAndCommandsWithoutOptionalFields()
+				throws IOException, InterruptedException {
+		RecordingHttpClient client = new RecordingHttpClient(
+				response(200, ""),
+				response(200, "{\"profiles\":["
+						+ "{\"model_profile\":\"wrong\",\"role_profiles\":[],"
+						+ "\"voice_profiles\":[],\"client_transports\":[]},"
+						+ "{\"model_profile\":\"qwen3.5-omni-plus-realtime\","
+						+ "\"role_profiles\":[\"wrong-role\"],\"voice_profiles\":[],"
+						+ "\"client_transports\":[]},"
+						+ "{\"model_profile\":\"qwen3.5-omni-plus-realtime\","
+						+ "\"role_profiles\":[\"default_assistant\"],"
+						+ "\"voice_profiles\":[\"Tina\"],"
+						+ "\"client_transports\":[\"platform_rtc\"]}]}") );
+		BusinessException unavailable = assertThrows(
+				BusinessException.class,
+				() -> provider(client, "server-api-key").connect(command(), null));
+		assertEquals("QINIU_PROFILE_UNAVAILABLE", unavailable.code());
+
+		RecordingHttpClient optional = successfulConnectionClient("optional-fields");
+		RealtimeConnectCommand command = new RealtimeConnectCommand(
+				null,
+				"offer-sdp",
+				"user-1",
+				"local-session-1",
+				"freechat-scene-1",
+				null,
+				"Tina");
+		var result = provider(optional, "server-api-key").connect(command, null);
+		assertEquals("optional-fields", result.providerSessionId());
+		assertFalse(readBody(optional.requests.get(1)).contains("scenario"));
+	}
+
+	@Test
+	void mapsMissingQiniuResponseFieldsAndNullBodies() {
+		RecordingHttpClient nullProfiles = new RecordingHttpClient(response(200, null));
+		assertEquals("QINIU_PROFILE_UNAVAILABLE", assertThrows(
+				BusinessException.class,
+				() -> provider(nullProfiles, "server-api-key").connect(command(), null)).code());
+
+		RecordingHttpClient missingEndpointUrl = new RecordingHttpClient(
+				response(200, profiles()),
+				response(201, "{\"session_id\":\"safe-session\","
+						+ "\"client_endpoint\":{\"access_token\":\"token\"}}"));
+		assertEquals("QINIU_CLIENT_ENDPOINT_MISSING", assertThrows(
+				BusinessException.class,
+				() -> provider(missingEndpointUrl, "server-api-key").connect(command(), null)).code());
+
+		RecordingHttpClient missingToken = new RecordingHttpClient(
+				response(200, profiles()),
+				response(201, "{\"session_id\":\"safe-session\","
+						+ "\"client_endpoint\":{\"url\":\"/rtc\"}}"));
+		assertEquals("QINIU_CLIENT_TOKEN_MISSING", assertThrows(
+				BusinessException.class,
+				() -> provider(missingToken, "server-api-key").connect(command(), null)).code());
+
+		RecordingHttpClient missingAnswer = new RecordingHttpClient(
+				response(200, profiles()),
+				response(201, "{\"session_id\":\"safe-session\","
+						+ "\"client_endpoint\":{\"url\":\"/rtc\","
+						+ "\"access_token\":\"token\"}}"),
+				response(200, "{}"),
+				response(200, "{}"));
+		assertEquals("QINIU_ANSWER_SDP_MISSING", assertThrows(
+				BusinessException.class,
+				() -> provider(missingAnswer, "server-api-key").connect(command(), null)).code());
+	}
+
+	@Test
+	void mapsQiniuIoAndInterruptedRequests() throws Exception {
+		HttpClient ioClient = mock(HttpClient.class);
+		doThrow(new IOException("network")).when(ioClient)
+				.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+		QiniuRealtimeProperties properties = properties("server-api-key");
+		assertEquals("QINIU_PROFILES_IO_ERROR", assertThrows(
+				BusinessException.class,
+				() -> new QiniuRealtimeProvider(ioClient, new ObjectMapper(), properties)
+						.connect(command(), null)).code());
+
+		HttpClient interruptedClient = mock(HttpClient.class);
+		doThrow(new InterruptedException("cancelled")).when(interruptedClient)
+				.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+		Thread.interrupted();
+		try {
+			assertEquals("QINIU_REQUEST_INTERRUPTED", assertThrows(
+					BusinessException.class,
+					() -> new QiniuRealtimeProvider(
+							interruptedClient, new ObjectMapper(), properties)
+							.connect(command(), null)).code());
+			assertTrue(Thread.currentThread().isInterrupted());
+		}
+		finally {
+			Thread.interrupted();
+		}
+	}
+
 	private RecordingHttpClient successfulConnectionClient(String sessionId) {
 		return new RecordingHttpClient(
 				response(200, profiles()),
@@ -177,7 +376,13 @@ class QiniuRealtimeProviderTest {
 	}
 
 	private QiniuRealtimeProvider provider(RecordingHttpClient client, String apiKey) {
-		QiniuRealtimeProperties properties = new QiniuRealtimeProperties(
+		QiniuRealtimeProperties properties = properties(apiKey);
+		properties.validate();
+		return new QiniuRealtimeProvider(client, new ObjectMapper(), properties);
+	}
+
+	private QiniuRealtimeProperties properties(String apiKey) {
+		return new QiniuRealtimeProperties(
 				"https://miku-rtic.qiniuapi.com",
 				apiKey,
 				"unispeaking_001",
@@ -192,8 +397,6 @@ class QiniuRealtimeProviderTest {
 				"cn-east",
 				Duration.ofSeconds(20),
 				1_048_576);
-		properties.validate();
-		return new QiniuRealtimeProvider(client, new ObjectMapper(), properties);
 	}
 
 	private RealtimeConnectCommand command() {
@@ -209,6 +412,18 @@ class QiniuRealtimeProviderTest {
 				"freechat-scene-1",
 				SceneType.FREE_CHAT,
 				voiceId);
+	}
+
+	private RealtimeConnectCommand commandWithOffer(String offerSdp) {
+		return new RealtimeConnectCommand(
+				"qwen3.5-omni-plus-realtime", offerSdp, "user-1", "local-session-1",
+				"freechat-scene-1", SceneType.FREE_CHAT, "Tina");
+	}
+
+	private RealtimeConnectCommand commandWithModel(String modelId) {
+		return new RealtimeConnectCommand(
+				modelId, "offer-sdp", "user-1", "local-session-1",
+				"freechat-scene-1", SceneType.FREE_CHAT, "Tina");
 	}
 
 	private String profiles() {
@@ -228,7 +443,7 @@ class QiniuRealtimeProviderTest {
 		return new StubResponse(status, body);
 	}
 
-	private static String readBody(HttpRequest request) throws IOException, InterruptedException {
+	private static String readBody(HttpRequest request) {
 		var subscriber = new BodySubscriber();
 		request.bodyPublisher().orElseThrow().subscribe(subscriber);
 		return subscriber.result.join();

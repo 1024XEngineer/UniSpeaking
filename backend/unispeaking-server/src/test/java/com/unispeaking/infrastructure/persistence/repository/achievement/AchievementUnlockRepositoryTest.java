@@ -139,6 +139,123 @@ class AchievementUnlockRepositoryTest {
 		verify(unlockMapper, never()).update(any(), any());
 	}
 
+	@Test
+	void mapsStateAndUnlockQueriesAndConvertsMapperFailures() {
+		assertTrue(repository.findState(userId).isEmpty());
+		when(stateMapper.selectById(userId)).thenReturn(stateEntity());
+		assertEquals(new UserAchievementState(userId, unlockedAt),
+				repository.findState(userId).orElseThrow());
+
+		UserAchievementUnlockEntity acknowledged = unlockEntity(
+				unlockedAt.plusSeconds(5));
+		when(unlockMapper.selectList(any())).thenReturn(List.of(
+				unlockEntity(null), acknowledged));
+		List<UserAchievementUnlock> unlocks = repository.findAll(userId);
+		assertEquals(2, unlocks.size());
+		assertTrue(unlocks.getFirst().pendingNotification());
+		assertEquals(unlockedAt.plusSeconds(5), unlocks.get(1).acknowledgedAt());
+
+		when(unlockMapper.selectList(any())).thenThrow(
+				new IllegalStateException("database unavailable"));
+		BusinessException failure = assertThrows(BusinessException.class,
+				() -> repository.findPending(userId));
+		assertEquals("ACHIEVEMENT_PERSISTENCE_FAILED", failure.code());
+	}
+
+	@Test
+	void rejectsAcknowledgementBeforeUnlockWithoutUpdating() {
+		when(unlockMapper.selectOne(any())).thenReturn(unlockEntity(null));
+
+		BusinessException exception = assertThrows(BusinessException.class,
+				() -> repository.acknowledge(
+						userId, "conversation-1", unlockedAt.minusSeconds(1)));
+
+		assertEquals("ACHIEVEMENT_PERSISTENCE_FAILED", exception.code());
+		verify(unlockMapper, never()).update(any(), any());
+	}
+
+	@Test
+	void acknowledgesConcurrentUpdateByReadingPersistedAcknowledgement() {
+		Instant acknowledgedAt = unlockedAt.plusSeconds(5);
+		when(unlockMapper.selectOne(any())).thenReturn(
+				unlockEntity(null), unlockEntity(acknowledgedAt));
+		when(unlockMapper.update(any(), any())).thenReturn(0);
+
+		UserAchievementUnlock result = repository.acknowledge(
+				userId, " conversation-1 ", acknowledgedAt);
+
+		assertEquals(acknowledgedAt, result.acknowledgedAt());
+		assertFalse(result.pendingNotification());
+	}
+
+	@Test
+	void rejectsBlankIdsAndUnexpectedCreateOrInitializeResults() {
+		BusinessException blankId = assertThrows(BusinessException.class,
+				() -> repository.find(userId, " \t"));
+		assertEquals("ACHIEVEMENT_UNLOCK_NOT_FOUND", blankId.code());
+
+		when(unlockMapper.insert(any(UserAchievementUnlockEntity.class))).thenReturn(0);
+		BusinessException createFailure = assertThrows(BusinessException.class,
+				() -> repository.create(pendingUnlock()));
+		assertEquals("ACHIEVEMENT_PERSISTENCE_FAILED", createFailure.code());
+
+		when(stateMapper.insert(any(UserAchievementStateEntity.class))).thenReturn(0);
+		BusinessException initializeFailure = assertThrows(BusinessException.class,
+				() -> repository.initialize(new UserAchievementState(userId, unlockedAt)));
+		assertEquals("ACHIEVEMENT_PERSISTENCE_FAILED", initializeFailure.code());
+	}
+
+	@Test
+	void findReturnsEmptyForMissingUnlockAndWrapsReadFailures() {
+		when(unlockMapper.selectOne(any())).thenReturn(null);
+		assertTrue(repository.find(userId, " conversation-1 ").isEmpty());
+		when(unlockMapper.selectOne(any())).thenThrow(new IllegalStateException("read"));
+		assertEquals("ACHIEVEMENT_PERSISTENCE_FAILED", assertThrows(BusinessException.class,
+				() -> repository.find(userId, "conversation-1")).code());
+
+		when(stateMapper.selectById(userId)).thenThrow(new IllegalStateException("read"));
+		assertEquals("ACHIEVEMENT_PERSISTENCE_FAILED", assertThrows(BusinessException.class,
+				() -> repository.findState(userId)).code());
+	}
+
+	@Test
+	void findAllPreservesAcknowledgedAndEmptyResultSemantics() {
+		when(unlockMapper.selectList(any())).thenReturn(List.of());
+		assertTrue(repository.findAll(userId).isEmpty());
+
+		UserAchievementUnlockEntity acknowledged = unlockEntity(unlockedAt.plusSeconds(30));
+		when(unlockMapper.selectList(any())).thenReturn(List.of(acknowledged));
+		UserAchievementUnlock result = repository.findAll(userId).getFirst();
+		assertEquals(unlockedAt.plusSeconds(30), result.acknowledgedAt());
+		assertFalse(result.pendingNotification());
+	}
+
+	@Test
+	void concurrentAcknowledgementMustObservePersistedTerminalState() {
+		when(unlockMapper.selectOne(any())).thenReturn(unlockEntity(null), unlockEntity(null));
+		when(unlockMapper.update(any(), any())).thenReturn(0);
+
+		BusinessException failure = assertThrows(BusinessException.class,
+				() -> repository.acknowledge(userId, "conversation-1", unlockedAt.plusSeconds(1)));
+
+		assertEquals("ACHIEVEMENT_PERSISTENCE_FAILED", failure.code());
+	}
+
+	@Test
+	void duplicateCreateAndInitializeFailWhenConcurrentRowsCannotBeRead() {
+		when(unlockMapper.insert(any(UserAchievementUnlockEntity.class)))
+				.thenThrow(new DuplicateKeyException("duplicate"));
+		when(unlockMapper.selectOne(any())).thenReturn(null);
+		assertEquals("ACHIEVEMENT_PERSISTENCE_FAILED", assertThrows(BusinessException.class,
+				() -> repository.create(pendingUnlock())).code());
+
+		when(stateMapper.insert(any(UserAchievementStateEntity.class)))
+				.thenThrow(new DuplicateKeyException("duplicate"));
+		when(stateMapper.selectById(userId)).thenReturn(null);
+		assertEquals("ACHIEVEMENT_PERSISTENCE_FAILED", assertThrows(BusinessException.class,
+				() -> repository.initialize(new UserAchievementState(userId, unlockedAt))).code());
+	}
+
 	private UserAchievementUnlock pendingUnlock() {
 		return new UserAchievementUnlock(
 				userId,

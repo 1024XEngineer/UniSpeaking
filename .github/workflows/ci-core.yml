@@ -268,7 +268,7 @@ jobs:
           retention-days: 1
 
   coverage:
-    name: 合并覆盖率并检查 70% 门槛
+    name: 合并覆盖率并检查 85% 门槛
     needs:
       - changes
       - backend

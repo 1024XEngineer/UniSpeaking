@@ -42,4 +42,33 @@ class GatewayKeyPoolTest {
                 .isInstanceOf(GatewayException.class)
                 .hasMessage("NO_HEALTHY_PROVIDER_KEY");
     }
+
+    @Test
+    void validatesInputsFiltersProvidersAndExposesStatuses() {
+        assertThatThrownBy(() -> new GatewayKeyPool(null, Clock.systemUTC(), Duration.ofSeconds(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new GatewayKeyPool(List.of(), Clock.systemUTC(), Duration.ofSeconds(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new GatewayKeyPool(
+                List.of(new GatewayKey("q", ProviderType.QWEN, "s")), null, Duration.ofSeconds(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new GatewayKeyPool(
+                List.of(new GatewayKey("q", ProviderType.QWEN, "s")), Clock.systemUTC(), Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        var pool = new GatewayKeyPool(
+                List.of(new GatewayKey("q", ProviderType.QWEN, "s"),
+                        new GatewayKey("d", ProviderType.DEEPSEEK, "s2")),
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofSeconds(30));
+        assertThatThrownBy(() -> pool.acquire(null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> pool.acquire(ProviderType.IFLYTEK))
+                .isInstanceOf(GatewayException.class);
+        pool.markFailure(null);
+        pool.markFailure(" ");
+        pool.markSuccess("missing");
+        pool.markFailure("q");
+        assertThat(pool.statuses()).anyMatch(s -> s.keyId().equals("q") && !s.healthy());
+        pool.markSuccess("q");
+        assertThat(pool.statuses()).anyMatch(s -> s.keyId().equals("q") && s.healthy());
+    }
 }

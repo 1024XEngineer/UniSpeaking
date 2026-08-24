@@ -373,6 +373,64 @@ class PracticeSessionRepositoryTest {
 								LocalDate.now())).code());
 	}
 
+	@Test
+	void findsBySessionAndSceneWithBlankAndMissingInputsHandled() {
+		PracticeSessionMapper mapper = mock(PracticeSessionMapper.class);
+		PracticeSessionRepository repository = new PracticeSessionRepository(mapper);
+		assertTrue(repository.findBySessionId(null).isEmpty());
+		assertTrue(repository.findBySessionId(" ").isEmpty());
+
+		when(mapper.selectOne(any(Wrapper.class))).thenReturn(null);
+		assertTrue(repository.findBySessionId("missing").isEmpty());
+		PracticeSessionEntity entity = completedEntity();
+		when(mapper.selectOne(any(Wrapper.class))).thenReturn(entity);
+		when(mapper.selectList(any(Wrapper.class))).thenReturn(List.of(entity));
+
+		assertEquals("freechat_session_1",
+				repository.findBySessionId("session").orElseThrow().sessionId());
+		assertEquals(List.of("freechat_session_1"), repository.findBySceneId(entity.getSceneId())
+				.stream().map(PracticeSessionRecord::sessionId).toList());
+	}
+
+	@Test
+	void queriesCompletedSessionsByUserAndSceneTypeAndWrapsFailures() {
+		PracticeSessionMapper mapper = mock(PracticeSessionMapper.class);
+		PracticeSessionRepository repository = new PracticeSessionRepository(mapper);
+		PracticeSessionEntity entity = completedEntity();
+		when(mapper.selectList(any(Wrapper.class))).thenReturn(List.of(entity));
+
+		assertEquals(List.of(entity.getSessionId()),
+				repository.findCompletedByUserAndSceneType(entity.getUserId(), SceneType.FREE_CHAT)
+						.stream().map(PracticeSessionRecord::sessionId).toList());
+		when(mapper.selectOne(any(Wrapper.class))).thenThrow(new IllegalStateException("read"));
+		assertEquals("PRACTICE_SESSION_PERSISTENCE_FAILED", assertThrows(BusinessException.class,
+				() -> repository.findBySessionId("broken")).code());
+		when(mapper.selectList(any(Wrapper.class))).thenThrow(new IllegalStateException("read"));
+		assertEquals("PRACTICE_SESSION_PERSISTENCE_FAILED", assertThrows(BusinessException.class,
+				() -> repository.findBySceneId("broken")).code());
+	}
+
+	@Test
+	void validatesProviderBindingAndNormalizesRealtimeMetadata() {
+		PracticeSessionMapper mapper = mock(PracticeSessionMapper.class);
+		PracticeSessionRepository repository = new PracticeSessionRepository(mapper);
+		UUID userId = UUID.randomUUID();
+		assertEquals("PROVIDER_SESSION_ID_REQUIRED", assertThrows(BusinessException.class,
+				() -> repository.bindProviderSession("session", userId, " ")).code());
+		assertEquals("REALTIME_PROVIDER_METADATA_REQUIRED", assertThrows(BusinessException.class,
+				() -> repository.updateRealtimeProvider("session", userId, "id", null, "model", null)).code());
+		assertEquals("REALTIME_PROVIDER_METADATA_REQUIRED", assertThrows(BusinessException.class,
+				() -> repository.updateRealtimeProvider("session", userId, "id", ProviderType.QINIU, " ", null)).code());
+
+		when(mapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(1);
+		repository.updateRealtimeProvider("session", userId, " ", ProviderType.QINIU, " model ", null);
+		@SuppressWarnings("unchecked")
+		ArgumentCaptor<LambdaUpdateWrapper<PracticeSessionEntity>> update = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+		verify(mapper).update(isNull(), update.capture());
+		assertTrue(update.getValue().getParamNameValuePairs().values().contains("model"));
+		assertTrue(update.getValue().getParamNameValuePairs().values().contains(null));
+	}
+
 	private PracticeSessionEntity completedEntity() {
 		PracticeSessionEntity entity = new PracticeSessionEntity();
 		entity.setSessionId("freechat_session_1");
