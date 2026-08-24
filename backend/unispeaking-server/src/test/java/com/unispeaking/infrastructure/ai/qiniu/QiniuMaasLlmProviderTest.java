@@ -4,6 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -12,8 +16,12 @@ import com.sun.net.httpserver.HttpServer;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.infrastructure.config.QiniuMaasProperties;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
@@ -91,6 +99,28 @@ class QiniuMaasLlmProviderTest {
 				() -> provider.executeLlmTask("hello", null));
 
 		assertEquals("QINIU_MAAS_CREDENTIAL_MISSING", exception.code());
+	}
+
+	@Test
+	void mapsRequestTimeoutsToADedicatedRetryableFailure() throws Exception {
+		HttpClient httpClient = mock(HttpClient.class);
+		doThrow(new HttpTimeoutException("timed out"))
+				.when(httpClient)
+				.send(
+						any(HttpRequest.class),
+						org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any());
+		QiniuMaasProperties properties = properties(
+				"secret-key",
+				"qwen/qwen3.5-plus");
+		QiniuMaasLlmProvider provider = new QiniuMaasLlmProvider(
+				new QiniuMaasLlmClient(httpClient, new ObjectMapper(), properties),
+				properties.primaryModel());
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> provider.executeLlmTask("hello", null));
+
+		assertEquals("QINIU_MAAS_LLM_TIMEOUT", exception.code());
 	}
 
 	@Test
@@ -188,6 +218,104 @@ class QiniuMaasLlmProviderTest {
 		assertFalse(logs.contains("private prompt content"));
 	}
 
+	@Test
+	void mapsMalformedAndEmptyResponsesToSafeProviderFailures() throws Exception {
+		HttpClient httpClient = mock(HttpClient.class);
+		@SuppressWarnings("unchecked")
+		HttpResponse<InputStream> response = (HttpResponse<InputStream>) mock(HttpResponse.class);
+		when(response.statusCode()).thenReturn(200);
+		when(response.body()).thenReturn(new java.io.ByteArrayInputStream("not-json".getBytes(StandardCharsets.UTF_8)));
+		when(httpClient.send(any(HttpRequest.class), org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any()))
+				.thenReturn(response);
+		QiniuMaasProperties properties = properties("key", "qwen/qwen3.5-plus");
+		QiniuMaasLlmProvider provider = new QiniuMaasLlmProvider(
+				new QiniuMaasLlmClient(httpClient, new ObjectMapper(), properties), properties.primaryModel());
+		BusinessException malformed = assertThrows(BusinessException.class,
+				() -> provider.executeLlmTask("hello", null));
+		assertEquals("QINIU_MAAS_LLM_RESPONSE_INVALID", malformed.code());
+
+		when(response.body()).thenReturn(new java.io.ByteArrayInputStream(
+				"{\"choices\":[{\"message\":{\"content\":\"\"}}]}".getBytes(StandardCharsets.UTF_8)));
+		BusinessException empty = assertThrows(BusinessException.class,
+				() -> provider.executeLlmTask("hello", null));
+		assertEquals("QINIU_MAAS_LLM_EMPTY_RESPONSE", empty.code());
+	}
+
+	@Test
+	void mapsHttpFailureAndResponseSizeLimitWithoutLeakingCredentials() throws Exception {
+		HttpClient httpClient = mock(HttpClient.class);
+		@SuppressWarnings("unchecked")
+		HttpResponse<InputStream> response = (HttpResponse<InputStream>) mock(HttpResponse.class);
+		when(response.statusCode()).thenReturn(429);
+		when(response.body()).thenReturn(new java.io.ByteArrayInputStream("{}".getBytes(StandardCharsets.UTF_8)));
+		when(httpClient.send(any(HttpRequest.class), org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any()))
+				.thenReturn(response);
+		QiniuMaasProperties properties = properties("secret-key", "qwen/qwen3.5-plus");
+		QiniuMaasLlmProvider provider = new QiniuMaasLlmProvider(
+				new QiniuMaasLlmClient(httpClient, new ObjectMapper(), properties), properties.primaryModel());
+		BusinessException rateLimited = assertThrows(BusinessException.class,
+				() -> provider.executeLlmTask("hello", null));
+		assertEquals("QINIU_MAAS_LLM_REQUEST_FAILED", rateLimited.code());
+		assertFalse(rateLimited.getMessage().contains("secret-key"));
+
+		QiniuMaasProperties tiny = new QiniuMaasProperties("https://api.qnaigc.com/v1", "key",
+				"qwen/qwen3.5-plus", "deepseek/deepseek-v4-flash", Duration.ofSeconds(10),
+				Duration.ofSeconds(30), 3, 4096);
+		when(response.statusCode()).thenReturn(200);
+		when(response.body()).thenReturn(new java.io.ByteArrayInputStream("1234".getBytes(StandardCharsets.UTF_8)));
+		QiniuMaasLlmProvider limited = new QiniuMaasLlmProvider(
+				new QiniuMaasLlmClient(httpClient, new ObjectMapper(), tiny), tiny.primaryModel());
+		BusinessException oversized = assertThrows(BusinessException.class,
+				() -> limited.executeLlmTask("hello", null));
+		assertEquals("QINIU_MAAS_LLM_RESPONSE_TOO_LARGE", oversized.code());
+	}
+
+	@Test
+	void mapsIoAndInterruptFailuresAndRestoresInterruptStatus() throws Exception {
+		HttpClient httpClient = mock(HttpClient.class);
+		QiniuMaasProperties properties = properties("key", "qwen/qwen3.5-plus");
+		when(httpClient.send(any(HttpRequest.class),
+				org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any()))
+				.thenThrow(new IOException("offline"));
+		QiniuMaasLlmClient client = new QiniuMaasLlmClient(httpClient,
+				new ObjectMapper(), properties);
+		QiniuMaasLlmClient.ProviderFailure io = assertThrows(
+				QiniuMaasLlmClient.ProviderFailure.class,
+				() -> client.execute(properties.primaryModel(), "hello"));
+		assertEquals("QINIU_MAAS_LLM_IO_ERROR", io.code());
+		assertTrue(io.retryable());
+
+		when(httpClient.send(any(HttpRequest.class),
+				org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any()))
+				.thenThrow(new InterruptedException("cancelled"));
+		Thread.interrupted();
+		QiniuMaasLlmClient.ProviderFailure interrupted = assertThrows(
+				QiniuMaasLlmClient.ProviderFailure.class,
+				() -> client.execute(properties.primaryModel(), "hello"));
+		assertEquals("QINIU_MAAS_LLM_INTERRUPTED", interrupted.code());
+		assertFalse(interrupted.retryable());
+		assertTrue(Thread.currentThread().isInterrupted());
+		Thread.interrupted();
+	}
+
+	@Test
+	void marksForbiddenHttpFailuresAsNonRetryable() throws Exception {
+		HttpClient httpClient = mock(HttpClient.class);
+		@SuppressWarnings("unchecked")
+		HttpResponse<InputStream> response = (HttpResponse<InputStream>) mock(HttpResponse.class);
+		when(response.statusCode()).thenReturn(403);
+		when(response.body()).thenReturn(new java.io.ByteArrayInputStream("{}".getBytes(StandardCharsets.UTF_8)));
+		when(httpClient.send(any(HttpRequest.class), org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<InputStream>>any()))
+				.thenReturn(response);
+		QiniuMaasProperties properties = properties("key", "qwen/qwen3.5-plus");
+		QiniuMaasLlmClient.ProviderFailure failure = assertThrows(
+				QiniuMaasLlmClient.ProviderFailure.class,
+				() -> new QiniuMaasLlmClient(httpClient, new ObjectMapper(), properties)
+						.execute(properties.primaryModel(), "hello"));
+		assertEquals("QINIU_MAAS_LLM_REQUEST_FAILED", failure.code());
+		assertFalse(failure.retryable());
+	}
+
 	private QiniuMaasProperties properties(String apiKey, String primaryModel) {
 		return new QiniuMaasProperties(
 				"https://api.qnaigc.com/v1",
@@ -197,7 +325,7 @@ class QiniuMaasLlmProviderTest {
 						? "deepseek/deepseek-v4-flash"
 						: "qwen/qwen3.5-plus",
 				Duration.ofSeconds(10),
-				Duration.ofSeconds(90),
+				Duration.ofSeconds(30),
 				2_097_152,
 				4096);
 	}

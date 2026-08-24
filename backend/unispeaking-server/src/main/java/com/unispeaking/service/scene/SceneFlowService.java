@@ -54,6 +54,16 @@ public class SceneFlowService<S> {
 		return stage;
 	}
 
+	/**
+	 * 从调用方声明的当前阶段推进流程。
+	 * 客户端可以在已解锁阶段之间回退，服务端缓存需要在下一次推进前同步。
+	 */
+	protected S nextFrom(String sceneId, S expectedCurrentStage) {
+		current(sceneId);
+		stages.put(sceneId, expectedCurrentStage);
+		return next(sceneId);
+	}
+
 	/** 判断场景流程是否已经到达结束阶段。 */
 	public boolean isCompleted(String sceneId) {
 		return completionChecker.test(current(sceneId));

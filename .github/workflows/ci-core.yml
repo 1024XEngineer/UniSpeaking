@@ -33,6 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       backend: ${{ steps.paths.outputs.backend }}
+      ocr: ${{ steps.paths.outputs.ocr }}
       frontend: ${{ steps.paths.outputs.frontend }}
       mobile: ${{ steps.paths.outputs.mobile }}
       docker_backend: ${{ steps.paths.outputs.docker_backend }}
@@ -58,6 +59,7 @@ jobs:
           git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
 
           backend=false
+          ocr=false
           frontend=false
           mobile=false
           docker_backend=false
@@ -85,6 +87,11 @@ jobs:
                 ;;
             esac
             case "$file" in
+              .github/workflows/ocr-cache.yml|backend/unispeaking-server/.dockerignore|backend/unispeaking-server/Dockerfile|backend/unispeaking-server/docker/ocr/*|backend/unispeaking-server/src/main/resources/ocr/*)
+                ocr=true
+                ;;
+            esac
+            case "$file" in
               backend/unispeaking-server/pom.xml|backend/unispeaking-server/.mvn/*|backend/unispeaking-server/mvnw)
                 dependencies=true
                 ;;
@@ -105,6 +112,7 @@ jobs:
 
           if [[ "$force_all" == true ]]; then
             backend=true
+            ocr=true
             frontend=true
             mobile=true
             docker_backend=true
@@ -116,6 +124,7 @@ jobs:
 
           {
             echo "backend=$backend"
+            echo "ocr=$ocr"
             echo "frontend=$frontend"
             echo "mobile=$mobile"
             echo "docker_backend=$docker_backend"
@@ -259,7 +268,7 @@ jobs:
           retention-days: 1
 
   coverage:
-    name: 合并覆盖率并检查 70% 门槛
+    name: 合并覆盖率并检查 85% 门槛
     needs:
       - changes
       - backend
@@ -357,7 +366,7 @@ jobs:
         run: npm run build
 
   mobile:
-    name: 移动端类型与 Expo Web 构建
+    name: 移动端测试、覆盖率与 Expo Web 构建
     needs: changes
     if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-latest
@@ -384,6 +393,20 @@ jobs:
       - name: 检查 TypeScript
         run: npx tsc --noEmit
 
+      - name: 运行 Jest 覆盖率门禁
+        run: npm run test:ci
+
+      - name: 保存移动端覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mobile-coverage-${{ inputs.pr_number }}
+          path: |
+            frontend/mobile/coverage/lcov.info
+            frontend/mobile/coverage/coverage-summary.json
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: 导出 Expo Web
         env:
           EXPO_OFFLINE: "1"
@@ -401,12 +424,32 @@ jobs:
         with:
           ref: ${{ inputs.merge_sha }}
 
+      - name: 配置 Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
       - name: 验证后端镜像构建
-        run: >-
-          docker build
-          --file backend/unispeaking-server/Dockerfile
-          --tag unispeaking-backend:ci
-          backend/unispeaking-server
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: backend/unispeaking-server
+          file: backend/unispeaking-server/Dockerfile
+          load: true
+          tags: unispeaking-backend:ci
+          cache-from: type=gha,scope=unispeaking-ocr-v1
+
+      - name: 验证 OCR 运行时契约
+        if: needs.changes.outputs.ocr == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 180s docker run --rm --entrypoint /bin/sh unispeaking-backend:ci -ec '
+            test -x /opt/ocr-venv/bin/python
+            test -f /app/ocr/paddle_ocr_runner.py
+            test -d /app/ocr/models/official_models/PP-OCRv5_mobile_det
+            test -d /app/ocr/models/official_models/PP-OCRv5_mobile_rec
+            /opt/ocr-venv/bin/python /app/ocr/paddle_ocr_runner.py --device cpu --text-detection-model-name PP-OCRv5_mobile_det --text-recognition-model-name PP-OCRv5_mobile_rec --disable-doc-orientation --disable-doc-unwarping --disable-textline-orientation --worker </dev/null >/tmp/ocr-ready.json
+            ready="$(cat /tmp/ocr-ready.json)"
+            test "$ready" = "{\"ready\": true}"
+          '
 
   docker_frontend:
     name: 构建前端镜像
@@ -470,7 +513,8 @@ jobs:
   dependency_review:
     name: 审查新增依赖漏洞
     needs: changes
-    if: needs.changes.outputs.dependencies == 'true'
+    # GitHub does not provide Dependency Graph data for fork repositories.
+    if: needs.changes.outputs.dependencies == 'true' && github.event.repository.fork == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -526,7 +570,7 @@ jobs:
           DOCKER_FRONTEND_REQUIRED: ${{ needs.changes.outputs.docker_frontend }}
           COMPOSE_REQUIRED: ${{ needs.changes.outputs.compose }}
           NGINX_REQUIRED: ${{ needs.changes.outputs.nginx }}
-          DEPENDENCY_REQUIRED: ${{ needs.changes.outputs.dependencies }}
+          DEPENDENCY_REQUIRED: ${{ needs.changes.outputs.dependencies == 'true' && github.event.repository.fork == false }}
         shell: bash
         run: |
           set -euo pipefail

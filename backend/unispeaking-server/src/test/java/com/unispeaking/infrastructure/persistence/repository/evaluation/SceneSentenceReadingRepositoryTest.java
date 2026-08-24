@@ -16,6 +16,7 @@ import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.infrastructure.persistence.repository.evaluation.SceneSentenceReadingRepository;
 import com.unispeaking.common.persistence.codec.evaluation.EvaluationJsonbCodec;
 import com.unispeaking.infrastructure.persistence.entity.evaluation.SentenceEvaluationEntity;
+import com.unispeaking.infrastructure.persistence.entity.evaluation.ReadingDetailsJson;
 import com.unispeaking.infrastructure.persistence.mapper.evaluation.SentenceEvaluationMapper;
 import com.unispeaking.infrastructure.persistence.mapper.scene.SceneSentenceMapper;
 import com.unispeaking.infrastructure.persistence.entity.scene.SceneSentenceEntity;
@@ -83,9 +84,17 @@ class SceneSentenceReadingRepositoryTest {
 		assertEquals("sentence_abc", first.getSentenceId());
 		assertEquals("custom_scene1", first.getSceneId());
 		assertEquals(new BigDecimal("82"), first.getOverallScore());
+		ReadingDetailsJson decoded =
+				codec.decodeReadingDetails(first.getScoreDetail());
 		assertEquals(
 				assessment.overallScore(),
-				codec.decodeReadingDetails(first.getScoreDetail()).overallScore());
+				decoded.overallScore());
+		assertEquals(
+				-1,
+				decoded.words().getFirst().phonemes().get(1).startPosition());
+		assertEquals(
+				-1,
+				decoded.words().getFirst().phonemes().get(1).endPosition());
 	}
 
 	@Test
@@ -161,6 +170,29 @@ class SceneSentenceReadingRepositoryTest {
 		assertEquals(0, repository.countAttemptsBySceneIds(null));
 	}
 
+	@Test
+	void summarizesRepeatedAttemptsWithTheirBestScore() {
+		SentenceEvaluationMapper evaluationMapper =
+				mock(SentenceEvaluationMapper.class);
+		SentenceEvaluationEntity best = new SentenceEvaluationEntity();
+		best.setOverallScore(new BigDecimal("76.40"));
+		when(evaluationMapper.selectCount(any())).thenReturn(11L);
+		when(evaluationMapper.selectList(any())).thenReturn(List.of(best));
+		SceneSentenceReadingRepository repository =
+				new SceneSentenceReadingRepository(
+						mock(SceneSentenceMapper.class),
+						evaluationMapper,
+						new EvaluationJsonbCodec(new ObjectMapper()));
+
+		SceneSentenceReadingRepository.AttemptSummary summary =
+				repository.summarizeAttempts(
+						"custom_scene1",
+						"sentence_1");
+
+		assertEquals(11, summary.attemptCount());
+		assertEquals(new BigDecimal("76.40"), summary.bestScore());
+	}
+
 	private PronunciationAssessmentResult assessment() {
 		PronunciationPhonemeResult phoneme =
 				new PronunciationPhonemeResult(
@@ -170,6 +202,14 @@ class SceneSentenceReadingRepositoryTest {
 						new BigDecimal("83"),
 						0,
 						18);
+		PronunciationPhonemeResult unmatchedPhoneme =
+				new PronunciationPhonemeResult(
+						1,
+						"eɪ",
+						"eɪ",
+						BigDecimal.ZERO,
+						-1,
+						-1);
 		PronunciationWordResult word = new PronunciationWordResult(
 				0,
 				"headache",
@@ -177,7 +217,7 @@ class SceneSentenceReadingRepositoryTest {
 				new BigDecimal("82"),
 				new BigDecimal("83"),
 				false,
-				List.of(phoneme));
+				List.of(phoneme, unmatchedPhoneme));
 		return new PronunciationAssessmentResult(
 				new BigDecimal("82"),
 				new BigDecimal("80"),

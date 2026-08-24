@@ -9,13 +9,16 @@ import com.unispeaking.admin.provider.AiProviderAdminService.UpdateProviderReque
 import com.unispeaking.admin.provider.AiProviderAdminService.UpdateRouteRequest;
 import com.unispeaking.admin.provider.AiProviderAdminService.UpdateCredentialRequest;
 import com.unispeaking.provider.config.AiProviderCredentialStore;
+import com.unispeaking.provider.config.AiProviderCredentialSchema;
 import com.unispeaking.domain.vo.provider.AiCapability;
+import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -40,6 +43,13 @@ public final class AiProviderAdminController {
 		return service.updateModel(modelId, request);
 	}
 
+	@PatchMapping("/models")
+	ModelView updateModelByQuery(
+			@RequestParam String modelId,
+			@RequestBody UpdateModelRequest request) {
+		return service.updateModel(modelId, request);
+	}
+
 	@PutMapping("/routes/{capability}")
 	RouteView updateRoute(@PathVariable AiCapability capability, @RequestBody UpdateRouteRequest request) {
 		return service.replaceRoute(capability, request);
@@ -54,6 +64,10 @@ public final class AiProviderAdminController {
 	AiProviderCredentialStore.CredentialStatus replaceCredential(
 			@PathVariable String providerId,
 			@RequestBody UpdateCredentialRequest request) {
-		return service.replaceCredential(providerId, request.secret());
+		Map<String, String> values = request.values();
+		if ((values == null || values.isEmpty()) && request.secret() != null && !request.secret().isBlank()) {
+			values = Map.of(AiProviderCredentialSchema.definition(providerId).primaryField(), request.secret());
+		}
+		return service.replaceCredential(providerId, values);
 	}
 }

@@ -3,6 +3,8 @@ package com.unispeaking.controller;
 import com.unispeaking.common.response.ApiResponse;
 import com.unispeaking.domain.dto.auth.EmailAuthChallenge;
 import com.unispeaking.domain.dto.auth.AuthResponse;
+import com.unispeaking.domain.dto.auth.MobileAuthResponse;
+import com.unispeaking.service.auth.RefreshTokenService;
 import com.unispeaking.domain.dto.auth.LoginRequest;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.service.auth.EmailAuthService;
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** JWT-returning email auth endpoints for native clients without browser cookie storage. */
 @RestController
@@ -39,15 +42,29 @@ public final class MobileEmailAuthController {
             @NotBlank String password) {
     }
 
+    public record ResetPasswordRequest(
+            @NotBlank @Email String email,
+            @NotBlank @Size(min = 12, max = 200) String password,
+            @NotNull UUID challengeId,
+            @NotBlank @Pattern(regexp = "[0-9]{6}") String code) {
+    }
+
     public record ChallengeResponse(UUID challengeId, int expiresInSeconds, int resendAfterSeconds) {
     }
 
     private final EmailAuthService emailAuthService;
     private final AuthService authService;
+    private final RefreshTokenService refreshTokenService;
 
-    public MobileEmailAuthController(EmailAuthService emailAuthService, AuthService authService) {
+    @Autowired
+    public MobileEmailAuthController(EmailAuthService emailAuthService, AuthService authService, RefreshTokenService refreshTokenService) {
         this.emailAuthService = emailAuthService;
         this.authService = authService;
+        this.refreshTokenService = refreshTokenService;
+    }
+
+    public MobileEmailAuthController(EmailAuthService emailAuthService, AuthService authService) {
+        this(emailAuthService, authService, null);
     }
 
     @PostMapping("/challenges")
@@ -57,17 +74,36 @@ public final class MobileEmailAuthController {
                 challenge.challengeId(), challenge.expiresInSeconds(), challenge.resendAfterSeconds()));
     }
 
+    @PostMapping("/password-reset/challenges")
+    public ApiResponse<ChallengeResponse> issuePasswordResetChallenge(@Valid @RequestBody EmailRequest request) {
+        var challenge = emailAuthService.issueMobileChallenge(request.email());
+        return ApiResponse.success(new ChallengeResponse(
+                challenge.challengeId(), challenge.expiresInSeconds(), challenge.resendAfterSeconds()));
+    }
+
+    @PostMapping("/password-reset")
+    public void resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        emailAuthService.resetPassword(
+                request.email(), request.password(), request.challengeId(), request.code());
+    }
+
     @PostMapping("/register")
-    public ApiResponse<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
+    public ApiResponse<?> register(@Valid @RequestBody RegisterRequest request) {
         emailAuthService.register(
                 request.email(), request.password(), request.challengeId(), request.code(), request.nickname());
-        return ApiResponse.success(authService.login(
-                new LoginRequest(request.email(), request.password())));
+        return ApiResponse.success(withRefresh(authService.login(
+                new LoginRequest(request.email(), request.password()))));
     }
 
     @PostMapping("/login")
-    public ApiResponse<AuthResponse> login(@Valid @RequestBody MobileLoginRequest request) {
-        return ApiResponse.success(authService.login(
-                new LoginRequest(request.email(), request.password())));
+    public ApiResponse<?> login(@Valid @RequestBody MobileLoginRequest request) {
+        return ApiResponse.success(withRefresh(authService.login(
+                new LoginRequest(request.email(), request.password()))));
+    }
+
+    private Object withRefresh(AuthResponse auth) {
+        if (refreshTokenService == null) return auth;
+        var issued = refreshTokenService.issue(auth.user().id());
+        return new MobileAuthResponse(auth.tokenType(), auth.accessToken(), auth.expiresAt(), issued.token(), issued.expiresAt(), auth.user());
     }
 }

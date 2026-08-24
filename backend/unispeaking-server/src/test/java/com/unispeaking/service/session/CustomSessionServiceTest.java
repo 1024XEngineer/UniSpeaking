@@ -1,12 +1,15 @@
 package com.unispeaking.service.session;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 import com.unispeaking.component.session.ObsoleteDialogueCleanup;
 import com.unispeaking.component.session.RealtimeSessionCoordinator;
@@ -19,10 +22,13 @@ import com.unispeaking.domain.dto.session.CompleteCustomSceneDialogueResponse;
 import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
 import com.unispeaking.domain.dto.session.StartCustomSessionCommand;
 import com.unispeaking.domain.dto.session.StartSessionResponse;
+import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
+import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.po.session.CustomSceneSession;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.scene.CustomStage;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.service.evaluation.CustomEvaluationService;
 import com.unispeaking.service.scene.CustomSceneFlowService;
 import com.unispeaking.service.scene.CustomSceneService;
@@ -33,19 +39,24 @@ import org.junit.jupiter.api.Test;
 
 class CustomSessionServiceTest {
 
+	private CustomSessionService service(
+			CustomSceneService scenes,
+			SessionLifecycleManager lifecycle,
+			CustomSceneFlowService flow,
+			RealtimeSessionCoordinator coordinator,
+			CustomEvaluationService evaluation,
+			ObsoleteDialogueCleanup cleanup) {
+		return new CustomSessionService(scenes, lifecycle, flow, coordinator, evaluation, cleanup);
+	}
+
 	@Test
 	void repracticeReusesDialogueFlowWithoutReplayingLearningStages() {
 		CustomSceneService scenes = mock(CustomSceneService.class);
 		SessionLifecycleManager lifecycle = mock(SessionLifecycleManager.class);
 		CustomSceneFlowService flow = mock(CustomSceneFlowService.class);
 		RealtimeSessionCoordinator coordinator = mock(RealtimeSessionCoordinator.class);
-		CustomSessionService service = new CustomSessionService(
-				scenes,
-				lifecycle,
-				flow,
-				coordinator,
-				mock(CustomEvaluationService.class),
-				mock(ObsoleteDialogueCleanup.class));
+		CustomSessionService service = service(scenes, lifecycle, flow, coordinator,
+				mock(CustomEvaluationService.class), mock(ObsoleteDialogueCleanup.class));
 		String sceneId = "scene-1";
 		StartCustomSceneDialogueRequest request = mock(StartCustomSceneDialogueRequest.class);
 		CustomDialogueSceneContext context = mock(CustomDialogueSceneContext.class);
@@ -135,5 +146,87 @@ class CustomSessionServiceTest {
 		verify(flow).clearDialogueState(sessionId);
 		verify(coordinator).remove(sessionId);
 		verify(cleanup).retainLatestDialogue(sceneId, sessionId);
+	}
+
+	@Test
+	void startsDialogueFromMissingFlowAndAdvancesThroughLearningStages() {
+		CustomSceneService scenes = mock(CustomSceneService.class);
+		SessionLifecycleManager lifecycle = mock(SessionLifecycleManager.class);
+		CustomSceneFlowService flow = mock(CustomSceneFlowService.class);
+		RealtimeSessionCoordinator coordinator = mock(RealtimeSessionCoordinator.class);
+		CustomDialogueSceneContext context = mock(CustomDialogueSceneContext.class);
+		StartSessionResponse started = mock(StartSessionResponse.class);
+		StartCustomSceneDialogueRequest request = mock(StartCustomSceneDialogueRequest.class);
+		when(scenes.prepareDialogue("scene")).thenReturn(context);
+		when(context.sceneId()).thenReturn("scene");
+		when(context.userId()).thenReturn("user");
+		when(context.scene()).thenReturn(mock(SceneGenerationResponse.class));
+		when(flow.current("scene")).thenThrow(new BusinessException("SCENE_FLOW_NOT_FOUND", "missing"));
+		when(flow.start("scene")).thenReturn(CustomStage.WORD);
+		when(flow.next("scene")).thenReturn(CustomStage.DIALOGUE);
+		when(lifecycle.startSession(any())).thenReturn(started);
+		when(started.sessionId()).thenReturn("session");
+		when(coordinator.connect(any(), any(), any(), any(Boolean.class), any(), any(), any(), any(),
+				any(), any(), any(), any(), any())).thenReturn(mock(StartSceneSessionResponse.class));
+
+		service(scenes, lifecycle, flow, coordinator, mock(CustomEvaluationService.class),
+				mock(ObsoleteDialogueCleanup.class)).startSession(
+				new StartCustomSessionCommand("scene", request));
+
+		verify(flow).start("scene");
+		verify(flow).next("scene");
+	}
+
+	@Test
+	void restartsCompletedFlowAndCleansStateWhenRealtimeConnectFails() {
+		CustomSceneService scenes = mock(CustomSceneService.class);
+		SessionLifecycleManager lifecycle = mock(SessionLifecycleManager.class);
+		CustomSceneFlowService flow = mock(CustomSceneFlowService.class);
+		RealtimeSessionCoordinator coordinator = mock(RealtimeSessionCoordinator.class);
+		CustomDialogueSceneContext context = mock(CustomDialogueSceneContext.class);
+		StartSessionResponse started = mock(StartSessionResponse.class);
+		StartCustomSceneDialogueRequest request = mock(StartCustomSceneDialogueRequest.class);
+		when(scenes.prepareDialogue("scene")).thenReturn(context);
+		when(context.sceneId()).thenReturn("scene");
+		when(context.userId()).thenReturn("user");
+		when(context.scene()).thenReturn(mock(SceneGenerationResponse.class));
+		when(flow.current("scene")).thenReturn(CustomStage.COMPLETED);
+		when(flow.start("scene")).thenReturn(CustomStage.DIALOGUE);
+		when(lifecycle.startSession(any())).thenReturn(started);
+		when(started.sessionId()).thenReturn("session");
+		doThrow(new IllegalStateException("connect failed")).when(coordinator).connect(
+			any(), any(), any(), any(Boolean.class), any(), any(), any(), any(),
+			any(), any(), any(), any(), any());
+
+		assertThrows(IllegalStateException.class, () -> service(scenes, lifecycle, flow, coordinator,
+				mock(CustomEvaluationService.class), mock(ObsoleteDialogueCleanup.class)).startSession(
+				new StartCustomSessionCommand("scene", request)));
+		verify(flow).start("scene");
+		verify(flow).clearDialogueState("session");
+	}
+
+	@Test
+	void rejectsNonCustomSessionBindingAndForwardsMessages() {
+		CustomSceneService scenes = mock(CustomSceneService.class);
+		SessionLifecycleManager lifecycle = mock(SessionLifecycleManager.class);
+		RealtimeSessionCoordinator coordinator = mock(RealtimeSessionCoordinator.class);
+		CustomSceneFlowService flow = mock(CustomSceneFlowService.class);
+		CustomSceneDefinition definition = new CustomSceneDefinition(
+				"scene", "user", "title", "label", null, null, null, "goal", null, null,
+				List.of(), List.of(), List.of());
+		CustomSceneSession session = new CustomSceneSession("session", "user");
+		session.setSceneId("other");
+		session.setSceneType(SceneType.CUSTOM_SCENE);
+		when(scenes.getOwnedDefinition("scene")).thenReturn(definition);
+		when(coordinator.requireOwnedSession("user", "session")).thenReturn(session);
+		CustomSessionService service = service(scenes, lifecycle, flow,
+				coordinator, mock(CustomEvaluationService.class), mock(ObsoleteDialogueCleanup.class));
+
+		BusinessException exception = assertThrows(BusinessException.class,
+				() -> service.endSession(new EndCustomSessionCommand("scene", "session", "time")));
+		assertEquals("SESSION_ACCESS_DENIED", exception.code());
+		Message message = mock(Message.class);
+		service.addMessage("session", message);
+		verify(lifecycle).addMessage("session", message);
 	}
 }

@@ -14,7 +14,9 @@ import com.unispeaking.infrastructure.config.OcrProperties;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -23,8 +25,11 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.zip.CRC32;
 import javax.imageio.ImageIO;
+import java.lang.reflect.Method;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.ObjectMapper;
@@ -192,6 +197,219 @@ class PaddleOcrProviderTest {
 				() -> provider.recognizeText(List.of(new OcrImage(png()))));
 
 		assertSame(OcrErrorCode.RESPONSE_INVALID, exception.errorCode());
+	}
+
+	@Test
+	void startsAndStopsConfiguredWorkerDuringApplicationLifecycle() throws IOException {
+		Path processId = tempRoot.resolve("lifecycle-process-id.txt");
+		Path script = script("""
+				import json, os, pathlib, sys
+				pathlib.Path(r'%s').write_text(str(os.getpid()))
+				print(json.dumps({'ready': True}), flush=True)
+				for line in sys.stdin:
+					pass
+				""".formatted(processId));
+		PaddleOcrProvider provider = provider(script, Duration.ofSeconds(2));
+
+		provider.startWorkerOnApplicationStartup();
+		long pid = Long.parseLong(Files.readString(processId));
+		assertTrue(provider.available());
+
+		provider.stopWorkerOnApplicationShutdown();
+
+		assertAll(
+				() -> assertFalse(provider.available()),
+				() -> assertFalse(ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)));
+	}
+
+	@Test
+	void skipsStartupWhenOcrIsNotConfiguredAndReportsStartupFailure() throws IOException {
+		OcrProperties disabled = properties(Duration.ofSeconds(1));
+		disabled.setEnabled(false);
+		PaddleOcrProvider disabledProvider = new PaddleOcrProvider(disabled, new ObjectMapper());
+		disabledProvider.startWorkerOnApplicationStartup();
+		assertFalse(disabledProvider.available());
+
+		OcrProperties broken = properties(Duration.ofSeconds(1));
+		broken.setRunnerPath(tempRoot.resolve("runner-that-does-not-exist.py").toString());
+		broken.setModelDirectory(createModelDirectory().toString());
+		PaddleOcrProvider brokenProvider = new PaddleOcrProvider(broken, new ObjectMapper());
+		brokenProvider.startWorkerOnApplicationStartup();
+		assertFalse(brokenProvider.available());
+	}
+
+	@Test
+	void rejectsInvalidWorkerReadyLinesAndWorkerErrorResponses() throws IOException {
+		PaddleOcrProvider notReady = provider(script("print('{\\\"ready\\\": false}', flush=True)"),
+				Duration.ofSeconds(2));
+		OcrException startupException = assertThrows(
+				OcrException.class,
+				() -> notReady.recognizeText(List.of(new OcrImage(png()))));
+
+		Path errorScript = script("""
+				import json, sys
+				print(json.dumps({'ready': True}), flush=True)
+				request = json.loads(sys.stdin.readline())
+				print(json.dumps({'id': request['id'], 'error': 'worker rejected request'}), flush=True)
+				""");
+		PaddleOcrProvider workerError = provider(errorScript, Duration.ofSeconds(2));
+		OcrException responseException = assertThrows(
+				OcrException.class,
+				() -> workerError.recognizeText(List.of(new OcrImage(png()))));
+
+		assertAll(
+				() -> assertSame(OcrErrorCode.PROCESS_FAILED, startupException.errorCode()),
+				() -> assertSame(OcrErrorCode.PROCESS_FAILED, responseException.errorCode()),
+				() -> assertFalse(workerError.available()),
+				() -> assertTempDirectoryClean());
+	}
+
+	@Test
+	void rejectsMismatchedAndMalformedWorkerResults() throws IOException {
+		assertWorkerResponseError("""
+				print(json.dumps({'id': 'different-request-id', 'results': []}), flush=True)
+				""", OcrErrorCode.RESPONSE_INVALID);
+		assertWorkerResponseError("""
+				print(json.dumps({'id': request['id'], 'results': []}), flush=True)
+				""", OcrErrorCode.RESPONSE_INVALID);
+		assertWorkerResponseError("""
+				print(json.dumps({'id': request['id'], 'results': [{'text': None}]}), flush=True)
+				""", OcrErrorCode.RESPONSE_INVALID);
+		assertWorkerResponseError("""
+				print(json.dumps({'id': request['id'], 'results': [{'text': '  ' }]}), flush=True)
+				""", null);
+	}
+
+	@Test
+	void coversLimitedOutputNormalTruncatedAndFutureFailurePaths() throws Exception {
+		Object normal = invokeReadLimited(new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8)), 5);
+		Object truncated = invokeReadLimited(new ByteArrayInputStream("hello!".getBytes(StandardCharsets.UTF_8)), 5);
+		assertAll(
+				() -> assertEquals("hello", recordValue(normal, "text")),
+				() -> assertFalse((Boolean) recordValue(normal, "truncated")),
+				() -> assertEquals("hello", recordValue(truncated, "text")),
+				() -> assertTrue((Boolean) recordValue(truncated, "truncated")));
+
+		OcrException interrupted = assertThrows(OcrException.class,
+				() -> invokeGetOutput(new ThrowingFuture(new InterruptedException())));
+		OcrException failed = assertThrows(OcrException.class,
+				() -> invokeGetOutput(new ThrowingFuture(new ExecutionException("failed", null))));
+		assertAll(
+				() -> assertSame(OcrErrorCode.PROCESS_FAILED, interrupted.errorCode()),
+				() -> assertSame(OcrErrorCode.PROCESS_FAILED, failed.errorCode()),
+				() -> assertTrue(Thread.currentThread().isInterrupted()));
+		Thread.interrupted();
+	}
+
+	@Test
+	void rejectsEmptyAndMalformedImageContentBeforeStartingWorker() throws IOException {
+		Path marker = tempRoot.resolve("worker-started.txt");
+		Path script = script("""
+				import pathlib
+				pathlib.Path(r'%s').write_text('started')
+				""".formatted(marker));
+		PaddleOcrProvider provider = provider(script, Duration.ofSeconds(1));
+
+		assertAll(
+				() -> assertError(provider, List.of(new OcrImage(new byte[0])), OcrErrorCode.INPUT_REQUIRED),
+				() -> assertError(provider, List.of(new OcrImage(pngHeader(0, 0))), OcrErrorCode.CONTENT_INVALID),
+				() -> assertError(provider, List.of(new OcrImage(new byte[] {(byte) 0xff, (byte) 0xd8, 1})),
+						OcrErrorCode.CONTENT_INVALID),
+				() -> assertFalse(Files.exists(marker)));
+	}
+
+	private void assertWorkerResponseError(String responseBody, OcrErrorCode expected)
+			throws IOException {
+		Path script = script("""
+				import json, sys
+				print(json.dumps({'ready': True}), flush=True)
+				request = json.loads(sys.stdin.readline())
+				%s
+				""".formatted(responseBody));
+		PaddleOcrProvider provider = provider(script, Duration.ofSeconds(2));
+		if (expected == null) {
+			assertEquals("", provider.recognizeText(List.of(new OcrImage(png()))));
+		}
+		else {
+			OcrException exception = assertThrows(OcrException.class,
+					() -> provider.recognizeText(List.of(new OcrImage(png()))));
+			assertSame(expected, exception.errorCode());
+		}
+	}
+
+	private void assertError(PaddleOcrProvider provider, List<OcrImage> images, OcrErrorCode expected) {
+		OcrException exception = assertThrows(OcrException.class, () -> provider.recognizeText(images));
+		assertSame(expected, exception.errorCode());
+	}
+
+	private Path createModelDirectory() throws IOException {
+		Path modelDirectory = tempRoot.resolve("models-for-test");
+		Files.createDirectories(modelDirectory.resolve("official_models/PP-OCRv5_mobile_det"));
+		Files.createDirectories(modelDirectory.resolve("official_models/PP-OCRv5_mobile_rec"));
+		return modelDirectory;
+	}
+
+	private static Object invokeReadLimited(InputStream input, int limit) throws Exception {
+		Method method = PaddleOcrProvider.class.getDeclaredMethod("readLimited", InputStream.class, int.class);
+		method.setAccessible(true);
+		return method.invoke(null, input, limit);
+	}
+
+	private static Object invokeGetOutput(Future<?> future) throws Exception {
+		Method method = PaddleOcrProvider.class.getDeclaredMethod("getOutput", Future.class);
+		method.setAccessible(true);
+		try {
+			return method.invoke(null, future);
+		}
+		catch (java.lang.reflect.InvocationTargetException exception) {
+			if (exception.getCause() instanceof OcrException ocrException) {
+				throw ocrException;
+			}
+			throw exception;
+		}
+	}
+
+	private static Object recordValue(Object record, String accessor) throws Exception {
+		Method method = record.getClass().getDeclaredMethod(accessor);
+		method.setAccessible(true);
+		return method.invoke(record);
+	}
+
+	private static final class ThrowingFuture implements Future<Object> {
+
+		private final Exception exception;
+
+		private ThrowingFuture(Exception exception) {
+			this.exception = exception;
+		}
+
+		@Override
+		public Object get() throws InterruptedException, ExecutionException {
+			if (exception instanceof InterruptedException interrupted) {
+				throw interrupted;
+			}
+			throw (ExecutionException) exception;
+		}
+
+		@Override
+		public Object get(long timeout, java.util.concurrent.TimeUnit unit) {
+			throw new UnsupportedOperationException();
+		}
+
+		@Override
+		public boolean cancel(boolean mayInterruptIfRunning) {
+			return false;
+		}
+
+		@Override
+		public boolean isCancelled() {
+			return false;
+		}
+
+		@Override
+		public boolean isDone() {
+			return true;
+		}
 	}
 
 	private void assertError(List<OcrImage> images, OcrErrorCode expected) {

@@ -1,4 +1,5 @@
 import type { TokenStore } from '@/infrastructure/auth/SecureTokenStore';
+import { AuthTokenCoordinator, authTokenCoordinator } from '@/infrastructure/auth/AuthTokenCoordinator';
 import { ApiError } from '@/infrastructure/http/ApiClient';
 
 import type {
@@ -24,6 +25,13 @@ export type AuthSessionState = Readonly<{
 type AuthServicePort = {
   login(input: { username: string; password: string }): Promise<AuthResponse>;
   issueEmailChallenge(input: { email: string }): Promise<EmailChallenge>;
+  issuePasswordResetChallenge(input: { email: string }): Promise<EmailChallenge>;
+  resetPassword(input: {
+    email: string;
+    password: string;
+    challengeId: string;
+    code: string;
+  }): Promise<void>;
   register(input: {
     username: string;
     password: string;
@@ -32,6 +40,8 @@ type AuthServicePort = {
     code: string;
   }): Promise<AuthResponse>;
   currentUser(): Promise<UserAccount>;
+  refresh?(refreshToken: string): Promise<AuthResponse>;
+  revoke?(refreshToken: string): Promise<void>;
   getPreference(): Promise<UserPreference>;
   updatePreference(patch: Partial<UserPreference>): Promise<UserPreference>;
 };
@@ -39,6 +49,7 @@ type AuthServicePort = {
 export type AuthSessionDependencies = {
   tokenStore: TokenStore;
   authService: AuthServicePort;
+  tokenCoordinator?: AuthTokenCoordinator;
 };
 
 type AuthStateListener = (state: AuthSessionState) => void;
@@ -80,7 +91,14 @@ export class AuthSessionController {
 
   async bootstrap() {
     this.setState({ ...initialState, status: 'booting' });
-    const token = await this.dependencies.tokenStore.get();
+    let token = await this.dependencies.tokenStore.get();
+    if (!token) {
+      const coordinator = this.dependencies.tokenCoordinator;
+      const refreshToken = await this.dependencies.tokenStore.getRefreshToken?.();
+      if (coordinator && refreshToken) {
+        token = await coordinator.refreshAccessToken();
+      }
+    }
     if (!token) {
       this.setAnonymous();
       return;
@@ -94,7 +112,11 @@ export class AuthSessionController {
       this.setAuthenticated(user, preference);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        await this.dependencies.tokenStore.clear();
+        if (this.dependencies.tokenStore.clearTokens) {
+          await this.dependencies.tokenStore.clearTokens();
+        } else {
+          await this.dependencies.tokenStore.clear();
+        }
       }
       this.setAnonymous(authErrorMessage(error));
     }
@@ -102,6 +124,19 @@ export class AuthSessionController {
 
   issueEmailChallenge(input: { email: string }) {
     return this.dependencies.authService.issueEmailChallenge(input);
+  }
+
+  issuePasswordResetChallenge(input: { email: string }) {
+    return this.dependencies.authService.issuePasswordResetChallenge(input);
+  }
+
+  resetPassword(input: {
+    email: string;
+    password: string;
+    challengeId: string;
+    code: string;
+  }) {
+    return this.dependencies.authService.resetPassword(input);
   }
 
   async login(input: { username: string; password: string }) {
@@ -142,16 +177,30 @@ export class AuthSessionController {
   }
 
   async logout() {
-    await this.unauthorized();
+    const refreshToken = await this.dependencies.tokenStore.getRefreshToken?.();
+    try {
+      if (refreshToken) await this.dependencies.authService.revoke?.(refreshToken);
+    } finally {
+      await this.unauthorized();
+    }
   }
 
   async unauthorized() {
-    await this.dependencies.tokenStore.clear();
+    if (this.dependencies.tokenStore.clearTokens) {
+      await this.dependencies.tokenStore.clearTokens();
+    } else {
+      await this.dependencies.tokenStore.clear();
+    }
     this.setAnonymous();
   }
 
   private async finishAuthentication(auth: AuthResponse) {
-    await this.dependencies.tokenStore.set(auth.accessToken);
+    const coordinator = this.dependencies.tokenCoordinator ?? authTokenCoordinator;
+    if (auth.refreshToken && coordinator.tokenStore.setTokens) {
+      await coordinator.saveTokens(auth);
+    } else {
+      await this.dependencies.tokenStore.set(auth.accessToken);
+    }
     const preference = await this.dependencies.authService.getPreference();
     this.setAuthenticated(auth.user, preference);
   }

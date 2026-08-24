@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ArrowClockwise,
   ArrowRight,
+  ArrowsClockwise,
   BookOpenText,
   Briefcase,
   CalendarBlank,
@@ -57,6 +59,7 @@ import {
   ChartLine,
 } from "lucide-react";
 import { learningItems, levels, plans, recommendations, sceneCategories, teachers } from "../domain/content/data.js";
+import { classifyScoredWord } from "../domain/pronunciationScore.js";
 import {
   AUTH_SESSION_EXPIRED_EVENT,
   changePassword,
@@ -66,6 +69,7 @@ import {
   deleteLearningAsset,
   evaluateSentenceReading,
   generateCustomScene,
+  getDailyPicks,
   getAchievementOverview,
   getAccessToken,
   getCurrentUser,
@@ -445,21 +449,26 @@ const formatCallDuration = (totalSeconds) => {
 
 function CallTimer({ state = "active", paused = false, stopped = false, className }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const startedAt = useRef(Date.now());
+  const startedAt = useRef(null);
+  const terminal = stopped || state === "ended" || state === "error";
+  const running = !terminal && state !== "connecting";
 
   useEffect(() => {
+    if (!running) return undefined;
+    startedAt.current ??= Date.now();
     const updateElapsed = () => {
       setElapsedSeconds(Math.floor((Date.now() - startedAt.current) / 1000));
     };
     updateElapsed();
-    if (stopped || state === "ended") return undefined;
     const interval = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(interval);
-  }, [state, stopped]);
+  }, [running]);
 
   const duration = formatCallDuration(elapsedSeconds);
   const label = state === "connecting"
     ? "连接中"
+    : state === "error"
+      ? "连接失败"
     : state === "ended"
       ? "已结束"
       : paused
@@ -928,28 +937,53 @@ function TeacherSetup({ selectedId, onSelect, onFinish }) {
   );
 }
 
-function AppShell({ page, setPage, teacher, avatarUrl, children }) {
+function TrainingExitConfirmation({ open, onContinue, onConfirm }) {
+  if (!open) return null;
+  return <Modal dismissible={false}><p className="eyebrow">EXIT TRAINING</p><h2>确定要退出当前训练吗？</h2><p className="modal-lead">退出后将返回上一页。</p><div className="modal-actions"><Button variant="secondary" onClick={onContinue}>继续训练</Button><Button onClick={onConfirm}>确认退出</Button></div></Modal>;
+}
+
+function LogoutConfirmation({ open, submitting, onCancel, onConfirm }) {
+  if (!open) return null;
+  return <Modal dismissible={!submitting} onClose={onCancel}><p className="eyebrow">SIGN OUT</p><h2>确定要退出登录吗？</h2><p className="modal-lead">退出后需要重新登录才能继续练习。</p><div className="modal-actions"><Button variant="secondary" disabled={submitting} onClick={onCancel}>取消</Button><Button variant="danger" disabled={submitting} onClick={onConfirm}>{submitting ? "正在退出" : "退出登录"}</Button></div></Modal>;
+}
+
+function AppShell({ page, setPage, teacher, avatarUrl, navigationGuardActive = false, children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingPage, setPendingPage] = useState(null);
   const items = [
     { id: "conversation", label: "自由对话", icon: Waveform },
     { id: "scenes", label: "场景广场", icon: SquaresFour },
     { id: "assets", label: "学习资产", icon: BookOpenText },
   ];
   const activePage = page === "ielts" || page === "interview" ? "scenes" : page === "ielts-assets" || page === "interview-assets" ? "assets" : page;
+  useEffect(() => {
+    if (!navigationGuardActive) setPendingPage(null);
+  }, [navigationGuardActive]);
   const navigateSidebar = (destination) => {
     const targetPage = sidebarPageTarget(page, destination);
     // Keep the current specialty page selected when clicking its active sidebar section.
     if (activePage === destination && targetPage === destination) return;
-    if (targetPage !== page) setPage(targetPage);
+    if (targetPage === page) return;
+    if (navigationGuardActive) {
+      setPendingPage(targetPage);
+      return;
+    }
+    setPage(targetPage);
+  };
+  const confirmNavigation = () => {
+    const targetPage = pendingPage;
+    setPendingPage(null);
+    if (targetPage && targetPage !== page) setPage(targetPage);
   };
   return (
     <div className={cx("app-shell", sidebarOpen && "is-sidebar-open")}>
       <aside className={cx("sidebar", sidebarOpen && "is-open")} onMouseEnter={() => setSidebarOpen(true)} onMouseLeave={() => setSidebarOpen(false)}>
         <Brand compact={!sidebarOpen} />
         <nav>{items.map(({ id, label, icon: Icon }) => <button key={id} className={cx("sidebar__item", activePage === id && "is-active")} onClick={() => navigateSidebar(id)} aria-label={label} title={label}><Icon weight={activePage === id ? "bold" : "regular"} /><span className="sidebar__label"><span>{label}</span></span></button>)}</nav>
-        <button className={cx("sidebar__avatar", ["profile", "insights", "membership", "settings", "help", "about"].includes(page) && "is-active")} onClick={() => setPage("profile")}><img src={avatarUrl || teacher.image} alt="个人中心" /></button>
+        <button className={cx("sidebar__avatar", ["profile", "insights", "membership", "settings", "help", "about"].includes(page) && "is-active")} onClick={() => navigateSidebar("profile")}><img src={avatarUrl || teacher.image} alt="个人中心" /></button>
       </aside>
       <div className="app-main">{children}</div>
+      <TrainingExitConfirmation open={Boolean(pendingPage)} onContinue={() => setPendingPage(null)} onConfirm={confirmNavigation} />
     </div>
   );
 }
@@ -1084,7 +1118,7 @@ function ConversationSettings({ speed, level, teacher, onSave, onClose }) {
   );
 }
 
-function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, onSessionStarted, onSessionEnded }) {
+function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, onSessionStarted, onSessionEnded, onActiveChange }) {
   const [inCall, setInCall] = useState(false);
   const [callState, setCallState] = useState("idle");
   const [callStatus, setCallStatus] = useState("准备开始");
@@ -1248,6 +1282,12 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       setCallStatus("已打断当前回应");
       return;
     }
+    if (event.type === "local.quota_exhausted") {
+      setCallError(event.message);
+      setCallStatus("今日额度已用完");
+      void stopConversation("quota_exhausted");
+      return;
+    }
     if (event.type === "local.ended") {
       if (stopPromiseRef.current) return;
       freeChatAnalyticsRef.current?.complete();
@@ -1359,8 +1399,9 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     }
   };
 
-  const stopConversation = async () => {
+  const stopConversation = async (requestedReason = "user_stop") => {
     if (stopPromiseRef.current) return stopPromiseRef.current;
+    const reason = typeof requestedReason === "string" ? requestedReason : "user_stop";
     const client = clientRef.current;
     const completedSessionId = sessionIdRef.current;
     setCallState("ending");
@@ -1369,7 +1410,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     detachRemoteAudio();
     let operation;
     operation = (async () => {
-      await client?.stop({ reason: "user_stop" });
+      await client?.stop({ reason });
       if (clientRef.current === client) clientRef.current = null;
       sessionIdRef.current = "";
       clientGenerationRef.current += 1;
@@ -1403,6 +1444,13 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       void client?.stop({ notifyBackend: false, reason: "component_unmount" });
     };
   }, []);
+
+  useEffect(() => {
+    onActiveChange?.(inCall);
+    return () => {
+      if (inCall) onActiveChange?.(false);
+    };
+  }, [inCall, onActiveChange]);
 
   if (!inCall) return (
     <main className="conversation standby">
@@ -1460,7 +1508,42 @@ function Scenes({ onStartTraining, onIelts, onInterview, teacher }) {
   const [generationSource, setGenerationSource] = useState(null);
   const [startingTraining, setStartingTraining] = useState(false);
   const [generationError, setGenerationError] = useState("");
+  const [dailyRecommendations, setDailyRecommendations] = useState(recommendations);
+  const [refreshingRecommendations, setRefreshingRecommendations] = useState(false);
+  const [recommendationError, setRecommendationError] = useState("");
+  const dailyPicksRequestRef = useRef(0);
   const examples = ["餐厅点餐并说明忌口", "商场退换一件商品", "问路并确认交通方式", "预约理发并说明需求"];
+
+  const loadDailyPicks = async (excludedIds = [], showFeedback = false) => {
+    const requestId = dailyPicksRequestRef.current + 1;
+    dailyPicksRequestRef.current = requestId;
+    if (showFeedback) {
+      setRefreshingRecommendations(true);
+      setRecommendationError("");
+    }
+    try {
+      const response = await getDailyPicks(excludedIds);
+      if (dailyPicksRequestRef.current !== requestId || !Array.isArray(response?.picks) || response.picks.length !== 3) return;
+      setDailyRecommendations(response.picks.map((item, index) => ({
+        ...item,
+        number: String(item.position || index + 1).padStart(2, "0"),
+      })));
+    } catch {
+      if (showFeedback && dailyPicksRequestRef.current === requestId) {
+        setRecommendationError("暂时无法更换，请稍后再试。");
+      }
+      // Keep the current recommendations when the backend is unavailable.
+    } finally {
+      if (showFeedback && dailyPicksRequestRef.current === requestId) setRefreshingRecommendations(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadDailyPicks();
+    return () => {
+      dailyPicksRequestRef.current += 1;
+    };
+  }, []);
   const syncPrompt = (event) => {
     setPrompt(event.currentTarget.value.slice(0, 200));
   };
@@ -1542,22 +1625,36 @@ function Scenes({ onStartTraining, onIelts, onInterview, teacher }) {
         </section>
 
         <section className="recommendations scene-module">
-          <div className="scene-section-heading"><div><p className="eyebrow">DAILY PICKS</p><h2>每日推荐</h2></div><p>选择一个常用场景，直接开始今天的练习。</p></div>
+          <div className="scene-section-heading recommendation-heading">
+            <div><p className="eyebrow">DAILY PICKS</p><h2>每日推荐</h2></div>
+            <div className="recommendation-heading__actions">
+              <button
+                type="button"
+                className="recommendation-refresh"
+                disabled={refreshingRecommendations || generating}
+                onClick={() => void loadDailyPicks(dailyRecommendations.map((item) => item.id), true)}
+              >
+                <ArrowsClockwise className={refreshingRecommendations ? "is-spinning" : ""} />
+                <span>{refreshingRecommendations ? "更换中" : "换一批"}</span>
+              </button>
+            </div>
+          </div>
+          {recommendationError && <p className="recommendation-error" role="alert">{recommendationError}</p>}
           <div className="recommendation-list">
-            {recommendations.map((item) => {
+            {dailyRecommendations.map((item) => {
               const loading = generationSource === `recommendation:${item.id}`;
               const category = sceneCategories[item.category] || sceneCategories.other;
               return (
                 <article key={item.id} style={{ "--scene-category-bg": category.subtleBackgroundColor, "--scene-category-accent": category.subtleTextColor || category.textColor }}>
                   <span className="recommendation__number">{item.number}</span>
                   <span className="recommendation__title"><SceneCategoryTag category={item.category} subtle /><strong>{item.title}</strong></span>
-                  <small>{item.duration}<i>·</i>{item.level}</small>
+                  <small>{item.duration}</small>
                   <p>{item.goal}</p>
                   <button
                     type="button"
                     className={cx("scene-card-cta", loading && "is-generating")}
                     disabled={generating}
-                    onClick={() => void generate(item.title, item.id)}
+                    onClick={() => void generate(item.sceneInput || item.title, item.id)}
                     aria-label={loading ? `正在生成 ${item.title} 场景` : `开始练习 ${item.title} 场景`}
                   >
                     {loading
@@ -1696,6 +1793,9 @@ function CustomSceneConversation({
   const [error, setError] = useState("");
   const [paused, setPaused] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [connectionFailed, setConnectionFailed] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [realtimeState, setRealtimeState] = useState("connecting");
   const [lines, setLines] = useState([]);
   const [translated, setTranslated] = useState([]);
   const clientRef = useRef(null);
@@ -1704,6 +1804,7 @@ function CustomSceneConversation({
   const endingRef = useRef(false);
   const scenarioCompletedRef = useRef(false);
   const sceneAnalyticsRef = useRef(null);
+  const connectionPromiseRef = useRef(null);
   const { transcriptRef, handleTranscriptScroll } = useTranscriptAutoFollow({
     lines,
     translated,
@@ -1738,9 +1839,13 @@ function CustomSceneConversation({
   };
 
   const handleEvent = (event) => {
-    if (event.type === "local.connecting") setStatus("正在连接模型");
-    else if (event.type === "local.connected") {
+    if (event.type === "local.connecting") {
+      setRealtimeState("connecting");
+      setStatus("正在连接模型");
+    } else if (event.type === "local.connected") {
       sceneAnalyticsRef.current?.started();
+      setConnectionFailed(false);
+      setRealtimeState("connected");
       setStatus("正在建立模型会话");
       sessionIdRef.current = event.sessionId || "";
       onSessionStarted?.(event.sessionId);
@@ -1813,13 +1918,68 @@ function CustomSceneConversation({
       setStatus("本轮状态同步失败，已继续对话");
     } else if (event.type === "local.turn_evaluation_error") {
       setError(event.message);
+    } else if (event.type === "local.quota_exhausted") {
+      setError(event.message);
+      setStatus("今日额度已用完，正在结束本次练习");
+      void endConversation("quota_exhausted");
     } else if (event.type === "local.mic_error") {
+      setRealtimeState("error");
       setError(event.message || "无法访问麦克风");
       setStatus("麦克风不可用，请检查权限");
     } else if (event.type === "error" || event.type === "local.error") {
+      setRealtimeState("error");
       setError(event.message || event.error?.message || "实时会话发生错误");
       setStatus("连接异常");
     }
+  };
+
+  const connectRealtime = (client, { retry = false } = {}) => {
+    if (!client || clientRef.current !== client || endingRef.current) {
+      return Promise.resolve();
+    }
+    if (connectionPromiseRef.current) return connectionPromiseRef.current;
+
+    let operation;
+    operation = (async () => {
+      sceneAnalyticsRef.current = analytics.training({ mode: "SCENE", pageCode: "scene-training" });
+      sceneAnalyticsRef.current.attempt();
+      setConnectionFailed(false);
+      setReconnecting(retry);
+      setError("");
+      setPaused(false);
+      setRealtimeState("connecting");
+      setStatus(retry ? "正在重新连接场景" : "正在连接场景");
+      try {
+        await client.start({
+          voice: teacher.voiceId,
+          speechSpeed: speedCodeByLabel[speed] || "NATURAL",
+        });
+        if (clientRef.current !== client) return;
+        sceneAnalyticsRef.current.started();
+      } catch (startError) {
+        if (clientRef.current !== client) return;
+        sceneAnalyticsRef.current.fail("REALTIME_ERROR");
+        setConnectionFailed(true);
+        setRealtimeState("error");
+        setError(realtimeFailureMessage(startError));
+        setStatus("连接失败");
+      } finally {
+        if (clientRef.current === client) setReconnecting(false);
+      }
+    })();
+    const trackedOperation = operation.finally(() => {
+      if (connectionPromiseRef.current === trackedOperation) {
+        connectionPromiseRef.current = null;
+      }
+    });
+    connectionPromiseRef.current = trackedOperation;
+    return trackedOperation;
+  };
+
+  const reconnectConversation = () => {
+    const client = clientRef.current;
+    if (!connectionFailed || reconnecting || !client) return;
+    void connectRealtime(client, { retry: true });
   };
 
   useEffect(() => {
@@ -1830,8 +1990,6 @@ function CustomSceneConversation({
       return undefined;
     }
     let cancelled = false;
-    sceneAnalyticsRef.current = analytics.training({ mode: "SCENE", pageCode: "scene-training" });
-    sceneAnalyticsRef.current.attempt();
     const client = createRealtimeClient({
       sceneId,
       sceneType: "custom",
@@ -1845,17 +2003,7 @@ function CustomSceneConversation({
       },
     });
     clientRef.current = client;
-    void client.start({
-      voice: teacher.voiceId,
-      speechSpeed: speedCodeByLabel[speed] || "NATURAL",
-    }).then(() => {
-      if (!cancelled) sceneAnalyticsRef.current.started();
-    }).catch((startError) => {
-      if (!cancelled) {
-        sceneAnalyticsRef.current.fail("REALTIME_ERROR");
-        setError(startError instanceof Error ? startError.message : "无法开始场景对话");
-      }
-    });
+    void connectRealtime(client);
     const syncVisibility = () => sceneAnalyticsRef.current?.setVisible(document.visibilityState === "visible");
     document.addEventListener("visibilitychange", syncVisibility);
     syncVisibility();
@@ -1865,6 +2013,7 @@ function CustomSceneConversation({
       sceneAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
       detachSceneRemoteAudio();
       clientRef.current = null;
+      connectionPromiseRef.current = null;
       void client.stop({ notifyBackend: false, reason: "component_unmount", emitEnded: false });
     };
   }, [sceneId, ended]);
@@ -1939,7 +2088,7 @@ function CustomSceneConversation({
           <div className="portrait portrait--small"><img src={teacher.image} alt={teacher.name} /></div>
           <div className="listening-state listening-state--compact">
             <VoiceWaveform active={!ended && !paused && !ending && !error} compact />
-            <CallTimer paused={paused} state={ended || error ? "ended" : "active"} stopped={ending} />
+            <CallTimer paused={paused} state={ended ? "ended" : error ? "error" : realtimeState} stopped={ending} />
             <span>{status}</span>
           </div>
         </div>
@@ -1953,6 +2102,17 @@ function CustomSceneConversation({
           emptyStatus={status}
         />
         {error && <p className="call-error" role="alert">{error}</p>}
+        {(connectionFailed || reconnecting) && (
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={reconnecting}
+            icon={<ArrowClockwise weight="bold" />}
+            onClick={reconnectConversation}
+          >
+            {reconnecting ? "正在重新连接" : "重新连接"}
+          </Button>
+        )}
       </section>
       <CallControls
         paused={paused}
@@ -1987,14 +2147,17 @@ function ScoredSentence({ sentence, words = [] }) {
     const result = resultIndex >= 0 ? words[resultIndex] : null;
     if (resultIndex >= 0) resultCursor = resultIndex + 1;
     const score = Number(result?.wordScore);
+    const scoreClass = classifyScoredWord(expectedWord, result);
     parts.push(
       <mark
         key={`${offset}-${match[0]}`}
         className={cx(
           "sentence-score-word",
-          Number.isFinite(score) && score >= 80 ? "is-correct" : "is-incorrect",
+          scoreClass,
         )}
-        title={Number.isFinite(score) ? `${score.toFixed(0)} 分` : "未正确识别"}
+        title={scoreClass === "is-review"
+          ? "弱读评分可能存在偏差"
+          : Number.isFinite(score) ? `${score.toFixed(0)} 分` : "未正确识别"}
       >
         {match[0]}
       </mark>,
@@ -2067,7 +2230,7 @@ function ReadScoreModal({ feedback, item, onClose }) {
     <Modal dismissible={false} className="read-score-modal">
       <div className="read-score-modal__score"><strong>{feedback.score}</strong><span>/100</span></div>
       <h2>本句发音评估</h2>
-      <p className="read-score-modal__lead">{feedback.passed ? "本句已达到 80 分，可以进入下一句；红色部分仍可继续练习。" : "本句未达到 80 分，请听示范后再次朗读。"}</p>
+      <p className="read-score-modal__lead">{feedback.passed ? "本句已达到练习要求，可以进入下一句；标记部分仍可继续练习。" : "本句暂未达到练习要求，请听示范后再次朗读。"}</p>
       <div className="read-score-modal__focus"><small>逐词结果</small><p><ScoredSentence sentence={item.en} words={feedback.words} /></p></div>
       <button type="button" className="read-score-modal__confirm" onClick={onClose}>知道了</button>
     </Modal>
@@ -2111,7 +2274,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   const score = readScores[readIndex] ?? null;
   const readEvaluation = readEvaluations[readIndex] ?? null;
   const completeStep = (id) => setCompletedSteps((current) => current.includes(id) ? current : [...current, id]);
-  const exitConfirmation = exitOpen && <Modal dismissible={false}><p className="eyebrow">EXIT TRAINING</p><h2>确定要退出当前训练吗？</h2><p className="modal-lead">退出后将返回上一页。</p><div className="modal-actions"><Button variant="secondary" onClick={() => setExitOpen(false)}>继续训练</Button><Button onClick={onExit}>确认退出</Button></div></Modal>;
+  const exitConfirmation = <TrainingExitConfirmation open={exitOpen} onContinue={() => setExitOpen(false)} onConfirm={onExit} />;
   const goToStep = (id) => {
     const targetIndex = steps.findIndex((item) => item.id === id);
     if (targetIndex > unlockedStepIndex) return;
@@ -2405,6 +2568,13 @@ function AssetModulePlaceholder({ module, onBack }) {
   );
 }
 
+function formatAssetDate(value) {
+  if (!value) return "待练习";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "待练习";
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
 function Assets({ sceneId, onPractice, onIelts, onInterview, onOpenRecord, onCloseRecord, initialView = "home", initialRecordTitle }) {
   const [records, setRecords] = useState([]);
   const [selectedId, setSelectedId] = useState(sceneId || "");
@@ -2415,11 +2585,18 @@ function Assets({ sceneId, onPractice, onIelts, onInterview, onOpenRecord, onClo
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [reservedModule, setReservedModule] = useState(null);
-  const visibleRecords = records;
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const filteredRecords = useMemo(() => (
+    selectedCategory === "all"
+      ? records
+      : records.filter((record) => record.label === sceneCategories[selectedCategory]?.label)
+  ), [records, selectedCategory]);
+  const visibleRecords = filteredRecords;
   const selected = visibleRecords.find((record) => record.sceneId === selectedId)
     || visibleRecords.find((record) => record.title === initialRecordTitle)
     || visibleRecords[0]
     || null;
+  const selectedDate = selected?.latestPracticedAt || selected?.createdAt || null;
 
   useEffect(() => {
     let cancelled = false;
@@ -2444,11 +2621,18 @@ function Assets({ sceneId, onPractice, onIelts, onInterview, onOpenRecord, onClo
   }, [sceneId]);
 
   useEffect(() => {
+    if (!visibleRecords.some((record) => record.sceneId === selectedId)) {
+      setSelectedId(visibleRecords[0]?.sceneId || "");
+    }
+  }, [selectedId, visibleRecords]);
+
+  useEffect(() => {
     const targetSceneId = sceneId || selected?.sceneId;
     if (!targetSceneId) {
       setDetail(null);
       return undefined;
     }
+    setDetail(null);
     let cancelled = false;
     getLearningAsset(targetSceneId)
       .then((asset) => {
@@ -2501,19 +2685,31 @@ function Assets({ sceneId, onPractice, onIelts, onInterview, onOpenRecord, onClo
     <main className="page assets-page">
       <PageHeader title="学习资产" subtitle="把场景练习中真正用过的表达，留在这里继续复习。" action={<AssetModuleMenu onIelts={onIelts} onInterview={onInterview} />} />
       {assetError && <p className="call-error" role="alert">{assetError}</p>}
+      <nav className="asset-category-filters" aria-label="学习资产标签筛选">
+        <button type="button" className={cx("asset-category-filter", selectedCategory === "all" && "is-active", "asset-category-filter--all")} onClick={() => setSelectedCategory("all")} aria-pressed={selectedCategory === "all"}>全部</button>
+        {Object.entries(sceneCategories).map(([key, category]) => {
+          const active = selectedCategory === key;
+          return <button key={key} type="button" className={cx("asset-category-filter", active && "is-active")} onClick={() => setSelectedCategory(key)} aria-pressed={active} style={active ? { backgroundColor: category.backgroundColor, borderColor: category.backgroundColor, color: category.textColor } : undefined}>{category.label}</button>;
+        })}
+      </nav>
       <section className="asset-layout">
         <aside className="asset-list asset-list--history" aria-label="场景训练历史">
           <div className="asset-list__heading"><strong>训练记录</strong><span>{visibleRecords.length} 条</span></div>
-          {visibleRecords.map((record) => <button key={record.sceneId} className={selected?.sceneId === record.sceneId ? "is-active" : ""} onClick={() => setSelectedId(record.sceneId)}><small>{record.latestPracticedAt ? new Date(record.latestPracticedAt).toLocaleDateString("zh-CN") : "尚未练习"} · {record.label || "其他"}</small><strong>{record.title}</strong><em>{record.wordCount + record.phraseCount + record.sentenceCount} 个语言资产 · {record.practiceCount ? `已练习 ${record.practiceCount} 次` : "待练习"}{record.latestScore !== null && record.latestScore !== undefined && ` · ${Math.round(Number(record.latestScore))}`}</em></button>)}
-          {!visibleRecords.length && <div className="asset-list__empty">{loading ? "正在加载学习资产" : "暂无场景学习资产"}</div>}
+          {visibleRecords.map((record) => <button key={record.sceneId} className={selected?.sceneId === record.sceneId ? "is-active" : ""} onClick={() => setSelectedId(record.sceneId)}>
+            <span className="asset-record-topline"><strong>{record.title}</strong><span className="asset-record-category" style={(() => { const palette = sceneCategories[sceneCategoryForLabel(record.label)]; return { backgroundColor: palette.backgroundColor, color: palette.textColor }; })()}>{record.label || "其他"}</span></span>
+            <span className="asset-record-bottomline"><small>{formatAssetDate(record.latestPracticedAt || record.createdAt)}</small><em>{record.latestSessionId ? "已完成" : "待练习"}</em></span>
+            {record.latestSessionId && record.latestScore !== null && record.latestScore !== undefined && <span className="asset-record-score">{Math.round(Number(record.latestScore))} 分</span>}
+            <CaretRight className="asset-record-arrow" aria-hidden="true" />
+          </button>)}
+          {!visibleRecords.length && <div className="asset-list__empty">{loading ? "正在加载学习资产" : selectedCategory !== "all" ? "没有匹配的学习资产" : "暂无场景学习资产"}</div>}
         </aside>
         <article className="asset-detail">
           {selected && <header>
-            <div><p className="eyebrow">{selected.label || "其他"}</p><h2>{selected.title}</h2><p>{selected.latestPracticedAt ? `${new Date(selected.latestPracticedAt).toLocaleDateString("zh-CN")} · 已完成 ${selected.practiceCount} 次模拟` : "尚未完成模拟对话"}</p></div>
+            <div><p className="eyebrow">{selected.label || "其他"}</p><h2>{selected.title}</h2><p>{formatAssetDate(selectedDate)} · {selected.latestSessionId ? "已完成" : "待练习"}</p></div>
             <div className="asset-detail__actions"><AnimatedDeleteButton onClick={() => { setDeleteError(""); setDeleteOpen(true); }} /><ExpandingCta className="teacher-cta asset-open-button" onClick={() => onOpenRecord(selected.sceneId)}>打开当前学习资产</ExpandingCta></div>
           </header>}
           <div className="asset-items" aria-label="已保存的单词、短语和句子">
-            {items.map((item) => <div key={`${item.type}-${item.contentId}`}><span className="tag">{item.type}</span><p><strong>{item.englishText}</strong><small>{item.chineseText}</small></p><ScenePlaybackToggle sceneId={selected.sceneId} text={item.englishText} label={`播放 ${item.englishText} 的发音`} /></div>)}
+            {selected && items.map((item) => <div key={`${item.type}-${item.contentId}`}><span className="tag">{item.type}</span><p><strong>{item.englishText}</strong><small>{item.chineseText}</small></p><ScenePlaybackToggle sceneId={selected.sceneId} text={item.englishText} label={`播放 ${item.englishText} 的发音`} /></div>)}
             {selected && !items.length && <div className="asset-list__empty">正在读取该场景的语言资产</div>}
           </div>
         </article>
@@ -2590,6 +2786,18 @@ function Profile({ section, setSection, helpRoute, aboutRoute, onHelpNavigate, o
   const avatarUrl = account?.avatarUrl || teacher.image;
   const [profileEditOpen, setProfileEditOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const confirmLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await onLogout();
+    } finally {
+      setLoggingOut(false);
+      setLogoutOpen(false);
+    }
+  };
   const startRecommendedTraining = (trainingType) => {
     const destination = trainingType === "FREE_CHAT"
       ? "conversation"
@@ -2615,14 +2823,14 @@ function Profile({ section, setSection, helpRoute, aboutRoute, onHelpNavigate, o
           <button className={section === "help" ? "is-active" : ""} onClick={() => setSection("help")}><Lifebuoy />帮助中心</button>
           <button className={section === "about" ? "is-active" : ""} onClick={() => setSection("about")}><Info />关于产品</button>
         </nav>
-        <button className="logout" onClick={onLogout}><SignOut />退出登录</button>
+        <button className="logout" onClick={() => setLogoutOpen(true)}><SignOut />退出登录</button>
       </aside>
       <section className={cx("profile-content", section === "help" && "profile-content--help")}>
         {section === "profile" && <Overview calendar={profile?.calendar} statistics={profile?.statistics} onMonthChange={onMonthChange} onAssets={onAssets} />}
         {section === "insights" && <LearningInsights onStartTraining={startRecommendedTraining} />}
         {section === "membership" && <Membership />}
         {section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} />}
-        {section === "security" && <AccountSecurity email={email} onOpenPassword={() => setPasswordOpen(true)} onLogout={onLogout} />}
+        {section === "security" && <AccountSecurity email={email} onOpenPassword={() => setPasswordOpen(true)} onLogout={() => setLogoutOpen(true)} />}
         {section === "help" && <HelpCenter route={helpRoute} onNavigate={onHelpNavigate} />}
         {section === "about" && (aboutRoute?.screen === "document"
           ? <ProductLegalDocument documentId={aboutRoute.documentId} onNavigate={onAboutNavigate} />
@@ -2630,6 +2838,7 @@ function Profile({ section, setSection, helpRoute, aboutRoute, onHelpNavigate, o
       </section>
       {profileEditOpen && <ProfileEditModal account={account} user={user} avatarUrl={avatarUrl} onClose={() => setProfileEditOpen(false)} onNicknameChange={onNicknameChange} onAvatarChange={onAvatarChange} />}
       {passwordOpen && <PasswordChangeModal onClose={() => setPasswordOpen(false)} onSubmit={onPasswordChange} />}
+      <LogoutConfirmation open={logoutOpen} submitting={loggingOut} onCancel={() => setLogoutOpen(false)} onConfirm={() => void confirmLogout()} />
     </main>
   );
 }
@@ -2931,6 +3140,12 @@ function FeedbackInvitation({ onDismiss, onAccept }) {
 }
 
 export function App() {
+  useEffect(() => {
+    // Migrate away from the previous persistent Web access-token storage. The
+    // current page session is intentionally not restored after the browser
+    // process ends, even if an older build left a token in localStorage.
+    window.localStorage?.removeItem?.("unispeaking.accessToken");
+  }, []);
   const initialRoute = useMemo(() => resolveRoute(window.location), []);
   const {
     synchronizeAchievements,
@@ -2960,8 +3175,10 @@ export function App() {
   const [aboutRoute, setAboutRoute] = useState(initialRoute.aboutRoute || null);
   const [paywall, setPaywall] = useState(null);
   const [feedbackInvitationOpen, setFeedbackInvitationOpen] = useState(false);
+  const [freeConversationActive, setFreeConversationActive] = useState(false);
   const preferenceWriteChainRef = useRef(Promise.resolve());
   const preferenceWriteVersionRef = useRef(0);
+  const profileOverviewRequestVersionRef = useRef(0);
 
   const applyRoute = (route) => {
     setFlow(route.flow);
@@ -3011,6 +3228,19 @@ export function App() {
     }
   };
 
+  const refreshProfileOverview = async (month) => {
+    const requestVersion = ++profileOverviewRequestVersionRef.current;
+    try {
+      const profile = await getProfileOverview(month);
+      if (requestVersion === profileOverviewRequestVersionRef.current) {
+        setProfileOverview(profile);
+      }
+      return profile;
+    } catch {
+      return null;
+    }
+  };
+
   useEffect(() => {
     if (initialRoute.canonicalPath && window.location.pathname !== initialRoute.canonicalPath) {
       window.history.replaceState({}, "", initialRoute.canonicalPath);
@@ -3048,6 +3278,11 @@ export function App() {
   }, [user?.id]);
 
   useEffect(() => {
+    if (page !== "profile" || !user?.id) return;
+    void refreshProfileOverview();
+  }, [page, user?.id]);
+
+  useEffect(() => {
     let cancelled = false;
     const bootstrapAuth = async () => {
       const bootstrapToken = getAccessToken();
@@ -3061,8 +3296,8 @@ export function App() {
         return;
       }
       try {
-        const [currentUser, preference, profile] = await Promise.all([
-          getCurrentUser(),
+        const currentUser = await getCurrentUser();
+        const [preference, profile] = await Promise.all([
           getUserPreference(),
           getProfileOverview(),
         ]);
@@ -3268,11 +3503,8 @@ export function App() {
     }
   };
   const loadProfileMonth = async (month) => {
-    try {
-      setProfileOverview(await getProfileOverview(month));
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "学习日历加载失败");
-    }
+    const profile = await refreshProfileOverview(month);
+    if (!profile) window.alert("学习日历加载失败");
   };
   const updateAvatar = async (file) => {
     if (!["image/jpeg", "image/png"].includes(file.type) || file.size > 2 * 1024 * 1024) {
@@ -3368,9 +3600,7 @@ export function App() {
       },
       result: { completed, evaluation },
     });
-    if (evaluation) {
-      void getProfileOverview().then(setProfileOverview).catch(() => undefined);
-    }
+    void refreshProfileOverview();
     void synchronizeAchievements({ revealNotifications: true });
   };
   const recordCompletedPractice = (practiceType, sessionId) => {
@@ -3454,7 +3684,7 @@ export function App() {
   }
   let content;
   if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={completeScenePractice} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
-  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={(sessionId) => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); recordCompletedPractice("free", sessionId); void synchronizeAchievements({ revealNotifications: true }); }} />;
+  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={(sessionId) => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); recordCompletedPractice("free", sessionId); void refreshProfileOverview(); void synchronizeAchievements({ revealNotifications: true }); }} onActiveChange={setFreeConversationActive} />;
   else if (page === "scenes") content = <Scenes teacher={teacher} onStartTraining={startTraining} onLocked={setPaywall} onIelts={selectIelts} onInterview={selectInterview} />;
   else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => selectMainPage("ielts-assets")} onInterview={() => selectMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: false, returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
@@ -3462,5 +3692,11 @@ export function App() {
   else if (page === "interview") content = <InterviewModule route={interviewRoute} teacher={teacher} speed={conversationSpeed} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} />;
   else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToIelts={() => selectMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} onPractice={(sceneId) => navigateInterview(paths.interview.session(sceneId))} />;
   else content = <Profile section={page} setSection={setMainPage} helpRoute={helpRoute} aboutRoute={aboutRoute} onHelpNavigate={navigateHelp} onAboutNavigate={navigateAbout} user={user} profile={profileOverview} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onMonthChange={loadProfileMonth} onNicknameChange={updateNickname} onAvatarChange={updateAvatar} onPasswordChange={updatePassword} onAssets={() => setMainPage("assets")} onLogout={logout} />;
-  return <AppShell page={page} setPage={selectMainPage} teacher={teacher} avatarUrl={profileOverview?.account?.avatarUrl}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}{feedbackInvitationOpen && <FeedbackInvitation onDismiss={() => setFeedbackInvitationOpen(false)} onAccept={acceptFeedbackInvitation} />}</AppShell>;
+  const navigationGuardActive = Boolean(
+    (training && !result)
+    || freeConversationActive
+    || (page === "ielts" && ieltsRoute?.screen === "session")
+    || (page === "interview" && interviewRoute?.screen === "session"),
+  );
+  return <AppShell page={page} setPage={selectMainPage} teacher={teacher} avatarUrl={profileOverview?.account?.avatarUrl} navigationGuardActive={navigationGuardActive}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}{feedbackInvitationOpen && <FeedbackInvitation onDismiss={() => setFeedbackInvitationOpen(false)} onAccept={acceptFeedbackInvitation} />}</AppShell>;
 }

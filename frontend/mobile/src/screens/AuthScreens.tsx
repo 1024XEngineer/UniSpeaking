@@ -182,10 +182,12 @@ export function AuthFormScreen({
   mode,
   onBack,
   onSwitch,
+  onForgotPassword,
 }: {
   mode: 'login' | 'signup';
   onBack: () => void;
   onSwitch: () => void;
+  onForgotPassword?: () => void;
 }) {
   const { authError, authStatus, issueEmailChallenge, nickname, setNickname, signIn, signUp } = useAppModel();
   const [draftNickname, setDraftNickname] = useState(nickname);
@@ -357,7 +359,16 @@ export function AuthFormScreen({
         <View style={styles.formGroup}>
           <View style={styles.labelRow}>
             <Text style={styles.fieldLabel}>密码</Text>
-            {mode === 'login' ? <Text style={styles.forgotText}>忘记密码？</Text> : null}
+            {mode === 'login' ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="忘记密码？"
+                hitSlop={8}
+                onPress={onForgotPassword}
+              >
+                <Text style={styles.forgotText}>忘记密码？</Text>
+              </Pressable>
+            ) : null}
           </View>
           <View style={styles.passwordField}>
             <TextInput
@@ -368,23 +379,21 @@ export function AuthFormScreen({
               secureTextEntry={!passwordVisible}
               autoCapitalize="none"
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              style={[styles.input, mode === 'signup' && styles.passwordInput, submitted && !passwordValid && styles.inputError]}
+              style={[styles.input, styles.passwordInput, submitted && !passwordValid && styles.inputError]}
               onSubmitEditing={() => void submit()}
             />
-            {mode === 'signup' ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={passwordVisible ? '隐藏密码' : '显示密码'}
-                onPress={() => setPasswordVisible((visible) => !visible)}
-                style={styles.passwordVisibilityButton}
-              >
-                <MaterialIcons
-                  name={passwordVisible ? 'visibility-off' : 'visibility'}
-                  size={20}
-                  color={colors.muted}
-                />
-              </Pressable>
-            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={passwordVisible ? '隐藏密码' : '显示密码'}
+              onPress={() => setPasswordVisible((visible) => !visible)}
+              style={styles.passwordVisibilityButton}
+            >
+              <MaterialIcons
+                name={passwordVisible ? 'visibility-off' : 'visibility'}
+                size={20}
+                color={colors.muted}
+              />
+            </Pressable>
           </View>
           {submitted && !passwordValid ? (
             <Text style={styles.errorText}>{mode === 'signup' ? '密码至少需要 12 位字符' : '请输入正确的密码'}</Text>
@@ -438,6 +447,189 @@ export function AuthFormScreen({
           <Text style={styles.switchStrong}>{mode === 'login' ? ' 创建账号' : ' 直接登录'}</Text>
         </Text>
       </Pressable>
+    </AuthPage>
+  );
+}
+
+export function PasswordResetScreen({
+  onBack,
+  onComplete,
+}: {
+  onBack: () => void;
+  onComplete: () => void;
+}) {
+  const { issuePasswordResetChallenge, resetPassword } = useAppModel();
+  const [step, setStep] = useState<'email' | 'verification' | 'success'>('email');
+  const [email, setEmail] = useState('');
+  const [challengeId, setChallengeId] = useState('');
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const emailValid = /^\S+@\S+\.\S+$/.test(email.trim());
+
+  const sendResetCode = async () => {
+    if (!emailValid) {
+      setLocalError('请输入有效的邮箱地址');
+      return;
+    }
+    setSubmitting(true);
+    setLocalError(null);
+    try {
+      const challenge = await issuePasswordResetChallenge({ email: email.trim() });
+      setChallengeId(challenge.challengeId);
+      setStep('verification');
+    } catch (error) {
+      setLocalError(authErrorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const completeReset = async () => {
+    if (!/^[0-9]{6}$/.test(code)) {
+      setLocalError('请输入 6 位邮箱验证码');
+      return;
+    }
+    if (password.length < 12) {
+      setLocalError('密码至少需要 12 位字符');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setLocalError('两次输入的密码不一致');
+      return;
+    }
+    setSubmitting(true);
+    setLocalError(null);
+    try {
+      await resetPassword({
+        email: email.trim(),
+        password,
+        challengeId,
+        code,
+      });
+      setStep('success');
+    } catch (error) {
+      setLocalError(authErrorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (step === 'success') {
+    return (
+      <AuthPage header={<AuthHeader title="重置密码" onBack={onBack} />}>
+        <View style={styles.heading}>
+          <Text style={styles.authTitle}>密码已重置</Text>
+          <Text style={styles.authSubtitle}>现在可以使用新密码登录。</Text>
+        </View>
+        <AppButton title="返回登录" onPress={onComplete} style={styles.fullWidth} />
+      </AuthPage>
+    );
+  }
+
+  return (
+    <AuthPage header={<AuthHeader title="重置密码" onBack={step === 'email' ? onBack : () => setStep('email')} />}>
+      <View style={styles.heading}>
+        <Text style={styles.authTitle}>{step === 'email' ? '找回账号' : '设置新密码'}</Text>
+        <Text style={styles.authSubtitle}>
+          {step === 'email' ? '输入注册邮箱，我们会发送验证码。' : `验证码已发送至 ${email.trim()}，10 分钟内有效。`}
+        </Text>
+      </View>
+
+      <View style={styles.form}>
+        {step === 'email' ? (
+          <View style={styles.formGroup}>
+            <Text style={styles.fieldLabel}>邮箱</Text>
+            <TextInput
+              value={email}
+              onChangeText={setEmail}
+              placeholder="name@example.com"
+              placeholderTextColor={colors.subtle}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              style={styles.input}
+              onSubmitEditing={() => void sendResetCode()}
+            />
+          </View>
+        ) : (
+          <>
+            <View style={styles.formGroup}>
+              <Text style={styles.fieldLabel}>6 位验证码</Text>
+              <TextInput
+                value={code}
+                onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="000000"
+                placeholderTextColor={colors.subtle}
+                keyboardType="number-pad"
+                autoComplete="one-time-code"
+                maxLength={6}
+                style={[styles.input, styles.codeInput]}
+              />
+            </View>
+            <View style={styles.formGroup}>
+              <Text style={styles.fieldLabel}>新密码</Text>
+              <View style={styles.passwordField}>
+                <TextInput
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="至少 12 位字符"
+                  placeholderTextColor={colors.subtle}
+                  secureTextEntry={!passwordVisible}
+                  autoCapitalize="none"
+                  autoComplete="new-password"
+                  style={[styles.input, styles.passwordInput]}
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={passwordVisible ? '隐藏新密码' : '显示新密码'}
+                  onPress={() => setPasswordVisible((visible) => !visible)}
+                  style={styles.passwordVisibilityButton}
+                >
+                  <MaterialIcons name={passwordVisible ? 'visibility-off' : 'visibility'} size={20} color={colors.muted} />
+                </Pressable>
+              </View>
+            </View>
+            <View style={styles.formGroup}>
+              <Text style={styles.fieldLabel}>确认新密码</Text>
+              <View style={styles.passwordField}>
+                <TextInput
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  placeholder="再次输入新密码"
+                  placeholderTextColor={colors.subtle}
+                  secureTextEntry={!confirmPasswordVisible}
+                  autoCapitalize="none"
+                  autoComplete="new-password"
+                  style={[styles.input, styles.passwordInput]}
+                  onSubmitEditing={() => void completeReset()}
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={confirmPasswordVisible ? '隐藏确认新密码' : '显示确认新密码'}
+                  onPress={() => setConfirmPasswordVisible((visible) => !visible)}
+                  style={styles.passwordVisibilityButton}
+                >
+                  <MaterialIcons name={confirmPasswordVisible ? 'visibility-off' : 'visibility'} size={20} color={colors.muted} />
+                </Pressable>
+              </View>
+            </View>
+          </>
+        )}
+      </View>
+
+      {localError ? <Text accessibilityRole="alert" style={styles.errorText}>{localError}</Text> : null}
+      <AppButton
+        title={submitting ? '正在处理…' : step === 'email' ? '发送重置验证码' : '确认重置'}
+        disabled={submitting}
+        onPress={() => void (step === 'email' ? sendResetCode() : completeReset())}
+        style={styles.fullWidth}
+      />
     </AuthPage>
   );
 }

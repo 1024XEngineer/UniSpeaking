@@ -1,6 +1,8 @@
 package com.unispeaking.service.profile.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -25,6 +27,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import com.unispeaking.common.exception.BusinessException;
+import java.net.URI;
 
 class ProfileOverviewServiceImplTest {
 
@@ -88,5 +92,50 @@ class ProfileOverviewServiceImplTest {
 		assertEquals(7, overview.statistics().lastSevenDays().size());
 		assertEquals(300,
 				overview.statistics().lastSevenDays().getLast().practiceSeconds());
+	}
+
+	@Test
+	void rejectsFutureAndMalformedMonthsAndUnknownUsers() {
+		UserAccountRepository accounts = mock(UserAccountRepository.class);
+		UUID id = UUID.randomUUID();
+		when(accounts.findById(id)).thenReturn(Optional.empty());
+		ProfileOverviewServiceImpl service = new ProfileOverviewServiceImpl(accounts,
+				mock(SceneRepository.class), mock(SessionEvaluationRepository.class),
+				mock(PracticeSessionRepository.class), mock(ObjectStorageProvider.class),
+				new ObjectStorageProperties(), ZoneId.of("UTC"), Clock.fixed(Instant.parse("2026-08-03T00:00:00Z"), ZoneId.of("UTC")));
+		assertEquals("USER_NOT_FOUND", assertThrows(BusinessException.class,
+				() -> service.getOverview(id.toString(), null)).code());
+
+		when(accounts.findById(id)).thenReturn(Optional.of(new UserAccount(id, "user@example.com", "hash", null,
+				UserRole.USER, UserStatus.ACTIVE, 0, null, Instant.now(), Instant.now())));
+		assertEquals("PROFILE_MONTH_INVALID", assertThrows(BusinessException.class,
+				() -> service.getOverview(id.toString(), "2026/08")).code());
+		assertEquals("PROFILE_MONTH_INVALID", assertThrows(BusinessException.class,
+				() -> service.getOverview(id.toString(), "2026-09")).code());
+	}
+
+	@Test
+	void fallsBackToEmailNameAndSignsAvatarWhenStorageIsAvailable() {
+		ZoneId zone = ZoneId.of("UTC");
+		Instant now = Instant.parse("2026-08-03T00:00:00Z");
+		UUID id = UUID.randomUUID();
+		UserAccountRepository accounts = mock(UserAccountRepository.class);
+		SceneRepository scenes = mock(SceneRepository.class);
+		SessionEvaluationRepository evaluations = mock(SessionEvaluationRepository.class);
+		PracticeSessionRepository sessions = mock(PracticeSessionRepository.class);
+		ObjectStorageProvider storage = mock(ObjectStorageProvider.class);
+		when(accounts.findById(id)).thenReturn(Optional.of(new UserAccount(id, "name@example.com", "hash", " ",
+				"avatars/name.png", UserRole.USER, UserStatus.ACTIVE, 0, null, now, now)));
+		when(scenes.findAllIdsByUserId(id.toString())).thenReturn(List.of());
+		when(scenes.countActiveByUserId(id.toString())).thenReturn(0L);
+		when(evaluations.findCreatedAtBySceneIdsBetween(any(), any(), any())).thenReturn(List.of());
+		when(sessions.findCompletedOverlapping(any(), any(), any())).thenReturn(List.of());
+		when(storage.available()).thenReturn(true);
+		when(storage.signGetUrl(any(), any())).thenReturn(URI.create("https://cdn.example/avatar.png"));
+		ProfileOverviewServiceImpl service = new ProfileOverviewServiceImpl(accounts, scenes, evaluations, sessions,
+				storage, new ObjectStorageProperties(), zone, Clock.fixed(now, zone));
+		var overview = service.getOverview(id.toString(), "2026-08");
+		assertEquals("name", overview.account().displayName());
+		assertEquals("https://cdn.example/avatar.png", overview.account().avatarUrl());
 	}
 }

@@ -118,4 +118,21 @@ describe('useInterviewPreparation', () => {
     expect(result.current.error).toBe('服务器暂时不可用');
     expect(result.current.result).toBeNull();
   });
+
+  it('handles missing difficulty, successful file selection, and picker errors', async () => {
+    const { File } = jest.requireMock('expo-file-system') as { File: { pickFileAsync: jest.Mock } };
+    const service = createService();
+    const { result } = await renderHook(() => useInterviewPreparation(service));
+    await act(async () => result.current.start({ jobDescription: 'JD', difficulty: null }));
+    expect(result.current.error).toBe('请选择面试难度');
+    File.pickFileAsync.mockResolvedValueOnce({ canceled: false, result: { name: 'resume.pdf' } });
+    await act(async () => result.current.pickResume());
+    expect(result.current.resumeMode).toBe('file');
+    expect(result.current.resumeFileName).toBe('resume.pdf');
+    File.pickFileAsync.mockRejectedValueOnce(new Error('文件选择失败'));
+    await act(async () => result.current.pickResume());
+    expect(result.current.error).toBe('文件选择失败');
+    await act(async () => result.current.clearError());
+    expect(result.current.error).toBeNull();
+  });
 });

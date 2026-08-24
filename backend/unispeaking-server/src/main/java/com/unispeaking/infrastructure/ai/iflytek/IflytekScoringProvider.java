@@ -343,7 +343,7 @@ public class IflytekScoringProvider extends ScoringProvider {
 				"header",
 				Map.of(
 						"app_id",
-						appId,
+						effectiveAppId(),
 						"status",
 						status));
 		if (first) {
@@ -358,6 +358,7 @@ public class IflytekScoringProvider extends ScoringProvider {
 									Map.entry("phoneme_output", 1),
 									Map.entry("scale", 100),
 									Map.entry("precision", 0.1),
+									Map.entry("slack", 0.2),
 									Map.entry("output_rawtext", 1),
 									Map.entry("dict_type", "IPA88"),
 									Map.entry("dict_dialect", "en_us"),
@@ -461,7 +462,7 @@ public class IflytekScoringProvider extends ScoringProvider {
 							+ requestLine;
 			Mac mac = Mac.getInstance("HmacSHA256");
 			mac.init(new SecretKeySpec(
-					apiSecret.getBytes(StandardCharsets.UTF_8),
+					effectiveApiSecret().getBytes(StandardCharsets.UTF_8),
 					"HmacSHA256"));
 			String signature = Base64.getEncoder().encodeToString(
 					mac.doFinal(signatureOrigin.getBytes(
@@ -629,9 +630,9 @@ public class IflytekScoringProvider extends ScoringProvider {
 	}
 
 	private void requireCredentials() {
-		if (appId.isBlank()
+		if (effectiveAppId().isBlank()
 				|| effectiveApiKey().isBlank()
-				|| apiSecret.isBlank()) {
+				|| effectiveApiSecret().isBlank()) {
 			throw retryableFailure(
 					"IFLYTEK_SUNTONE_CREDENTIAL_MISSING",
 					"Set XFYUN_APP_ID, XFYUN_API_KEY, and "
@@ -641,7 +642,15 @@ public class IflytekScoringProvider extends ScoringProvider {
 	}
 
 	private String effectiveApiKey() {
-		return ProviderCredentialOverride.currentOr(apiKey);
+		return ProviderCredentialOverride.currentOr("apiKey", apiKey);
+	}
+
+	private String effectiveAppId() {
+		return ProviderCredentialOverride.currentOr("appId", appId);
+	}
+
+	private String effectiveApiSecret() {
+		return ProviderCredentialOverride.currentOr("apiSecret", apiSecret);
 	}
 
 	private void requireEndpoint() {

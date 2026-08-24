@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, BackHandler, Image, PanResponder, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, BackHandler, Image, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Reanimated, {
   cancelAnimation,
@@ -22,12 +22,15 @@ import {
   getDailyScenePromptExample,
   learningItems,
   recommendations,
+  type DailyRecommendation,
   type ScenePromptExample,
 } from '@/data/content';
 import { SceneService, type GeneratedScene } from '@/features/scenes/SceneService';
+import { DailyPicksApi } from '@/features/scenes/DailyPicksApi';
 import { SceneTrainingController, type SceneTrainingSnapshot } from '@/features/scenes/SceneTrainingController';
 import { WavRecorder } from '@/features/audio/WavRecorder';
 import { createTurnAudioCapture } from '@/features/audio/TurnAudioCapture';
+import { createNativeWebRtcTurnAudioCapture } from '@/features/audio/WebRtcTurnAudioCapture';
 import { SceneSpeechClient, TtsPlayer } from '@/features/audio/TtsPlayer';
 import {
   useFreeChatSession,
@@ -177,6 +180,45 @@ function StageProgressRail({
   );
 }
 
+function ReadRecordButton({
+  passed,
+  recording,
+  onPress,
+}: {
+  passed: boolean;
+  recording: boolean;
+  onPress: () => void;
+}) {
+  const showSuccess = passed && !recording;
+  const successProgress = useSharedValue(showSuccess ? 1 : 0);
+
+  useEffect(() => {
+    successProgress.value = withTiming(showSuccess ? 1 : 0, {
+      duration: 280,
+      easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
+    });
+  }, [showSuccess, successProgress]);
+
+  const successStyle = useAnimatedStyle(() => ({
+    opacity: successProgress.value,
+    transform: [{ scale: 0.78 + successProgress.value * 0.22 }],
+  }));
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={recording ? '结束朗读' : passed ? '重新朗读' : '开始朗读'}
+      onPress={onPress}
+      style={[styles.readRecordButton, recording && styles.readRecordButtonActive]}
+    >
+      <AppIcon name={recording ? 'microphone' : 'microphone-off'} size={28} color={recording ? '#B94D44' : colors.subtle} />
+      <Reanimated.View pointerEvents="none" style={[styles.readRecordSuccess, successStyle]}>
+        <AppIcon name="check" size={28} color={colors.white} />
+      </Reanimated.View>
+    </Pressable>
+  );
+}
+
 type SceneMetric = { label: string; value: number };
 
 const defaultSceneMetrics: readonly SceneMetric[] = [
@@ -191,13 +233,16 @@ export function sceneMetricsForReport(
   report?: DialogueReport,
 ): readonly SceneMetric[] {
   if (!report) return defaultSceneMetrics;
-  return [
+  const metrics = [
     { label: '准确', value: report.accuracyScore },
     { label: '流利', value: report.fluencyScore },
     { label: '语法', value: report.grammarScore },
     { label: '词汇', value: report.vocabularyScore },
     { label: '自然', value: report.naturalnessScore },
   ];
+  return metrics.some((metric) => Number.isFinite(metric.value) && metric.value > 0)
+    ? metrics
+    : [];
 }
 
 function SceneRadar({ metrics }: { metrics: readonly SceneMetric[] }) {
@@ -246,7 +291,12 @@ function createDefaultSceneController(
       sessionApi: new RealtimeSessionApi(apiClient),
       sessionSocket: new SessionMessageSocket({ baseUrl: backendUrl, tokenStore }),
       sceneDialogue: new SceneDialogueApi(apiClient, sceneId),
-      turnAudioCapture: createTurnAudioCapture(new WavRecorder()),
+      // Android scoring must copy the PCM frames already captured by WebRTC.
+      // Opening AudioStudio here creates a second AudioRecord and degrades VAD,
+      // barge-in, and the scoring WAV on physical devices such as OnePlus.
+      turnAudioCapture:
+        createNativeWebRtcTurnAudioCapture() ??
+        createTurnAudioCapture(new WavRecorder()),
     },
     {
       mode: 'scene',
@@ -338,6 +388,7 @@ export function SceneCallStage({
 
 export function Training({ id, scene, analytics, trainingController: injectedTrainingController, wavRecorder: injectedWavRecorder, ttsPlayer: injectedTtsPlayer, initialStage = 'learn', onBack, onFinish, onViewDetails }: { id?: string; scene?: GeneratedScene; analytics?: AnalyticsTrackerFactory; trainingController?: SceneTrainingController; wavRecorder?: Pick<WavRecorder, 'start' | 'stop' | 'cancel'>; ttsPlayer?: Pick<TtsPlayer, 'play' | 'stop'>; initialStage?: TrainingStage; onBack: () => void; onFinish: () => void; onViewDetails?: (id: string) => void }) {
   const { setImmersiveLearning } = useLearningStage();
+  const { signOut } = useAppModel();
   const sceneId = scene?.sceneId ?? id ?? recommendations[0].id;
   const scenario = scene
     ? { id: scene.sceneId, title: scene.title }
@@ -354,6 +405,8 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   const [readFeedbackOpen, setReadFeedbackOpen] = useState(false);
   const [demoPlaying, setDemoPlaying] = useState(false);
   const demoActive = useRef(false);
+  const [readViewportHeight, setReadViewportHeight] = useState(0);
+  const [overflowingReadContent, setOverflowingReadContent] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [completionOpen, setCompletionOpen] = useState(false);
@@ -362,7 +415,7 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   const readRecordingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [trainingController] = useState<SceneTrainingController | null>(() =>
     scene
-      ? injectedTrainingController ?? new SceneTrainingController(createDefaultSceneService())
+      ? injectedTrainingController ?? new SceneTrainingController(createDefaultSceneService(signOut))
       : null,
   );
   const [wavRecorder] = useState<Pick<WavRecorder, 'start' | 'stop' | 'cancel'> | null>(
@@ -420,6 +473,8 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   const learnItem = learnItems[displayedIndex] ?? learnItems[0] ?? learningItems[0];
   const displayedReadIndex = scene && trainingSnapshot ? trainingSnapshot.index : readIndex;
   const readItem = displayedReadItems[displayedReadIndex] ?? displayedReadItems[0] ?? learningItems[3];
+  const readContentKey = `${displayedReadIndex}:${readItem.en}:${readItem.zh}`;
+  const readContentOverflows = overflowingReadContent === readContentKey;
   const displayedReadPassed = scene && trainingSnapshot
     ? Boolean(trainingSnapshot.readingResult?.passed)
     : readPassed;
@@ -427,6 +482,7 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   const readingResult = trainingSnapshot?.readingResult;
   const trainingTransitioning = trainingSnapshot?.status === 'loading';
   const completionMetrics = sceneMetricsForReport(dialogueCompletion?.evaluation);
+  const completionScoreAvailable = completionMetrics.length > 0;
   const confirmExit = () => {
     Alert.alert(
       '退出当前训练？',
@@ -495,6 +551,21 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
       setLearningGroup('words');
       setLearnIndex(wordItems.length - 1);
     }
+  };
+  const previousRead = () => {
+    ttsPlayer?.stop();
+    demoActive.current = false;
+    setDemoPlaying(false);
+    setRecording(false);
+    if (scene && trainingController) {
+      if (displayedReadIndex > 0) {
+        trainingController.previous();
+      } else {
+        void trainingController.selectStage('learn').catch(() => undefined);
+      }
+      return;
+    }
+    setStage('learn');
   };
   const clearReadRecordingTimer = () => {
     if (!readRecordingTimer.current) return;
@@ -577,10 +648,18 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
         unlockedStage={displayedUnlockedStage}
         onCollapsedChange={setProgressCollapsed}
         onSelect={(nextStage) => {
-          setRecording(false);
-          setDemoPlaying(false);
-          if (scene) return;
-          setStage(nextStage);
+          void (async () => {
+            clearReadRecordingTimer();
+            setRecording(false);
+            setDemoPlaying(false);
+            ttsPlayer?.stop();
+            await wavRecorder?.cancel().catch(() => undefined);
+            if (scene && trainingController) {
+              await trainingController.selectStage(nextStage).catch(() => undefined);
+              return;
+            }
+            setStage(nextStage);
+          })();
         }}
       />
 
@@ -639,35 +718,80 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
             <Text style={styles.stageHeading}>场景句子</Text>
             <Text style={styles.stageCount}>{displayedReadIndex + 1} / {displayedReadItems.length}</Text>
           </View>
-          <View style={styles.readCard}>
-            {displayedReadPassed ? <View style={styles.scoreBadge}><Text style={styles.scoreBadgeValue}>{Math.round(trainingSnapshot?.readingResult?.overallScore ?? 86)}</Text><Text style={styles.scoreBadgeMax}>/100</Text></View> : null}
-            <Text style={styles.readSentence}>
-              {displayedReadPassed ? readItem.en : readItem.en}
-            </Text>
-            <Text style={styles.readTranslation}>{readItem.zh}</Text>
-            <Pressable accessibilityRole="button" accessibilityLabel={recording ? '结束朗读' : '开始朗读'} onPress={() => void toggleReadRecording()} style={[styles.readRecordButton, recording && styles.readRecordButtonActive]}>
-              <AppIcon name={recording ? 'microphone' : 'microphone-off'} size={28} color={recording ? '#B94D44' : colors.subtle} />
-            </Pressable>
-            <Text style={styles.readStatus}>{recording ? '正在听你朗读' : displayedReadPassed ? '朗读通过' : '点击麦克风开始朗读'}</Text>
-            <Text style={styles.readInstruction}>{recording ? '再次点击麦克风结束录音并提交评分，最长录制 30 秒。' : displayedReadPassed ? '本句已达到通过标准，可以进入下一步。' : '再次点击麦克风结束录音并提交评分，最长录制 30 秒。'}</Text>
-            {audioError ? <Text style={styles.generationError}>{audioError}</Text> : null}
-            <Pressable accessibilityRole="button" accessibilityLabel="听标准示范" onPress={() => void toggleDemo(readItem.en)} style={styles.readDemoButton}>
-              <Text style={styles.readDemoText}>{demoPlaying ? '正在播放' : '听标准示范'}</Text>
-              <AppIcon name="volume" size={18} color={colors.subtle} />
-            </Pressable>
+          <View
+            onLayout={(event) => {
+              const nextHeight = event.nativeEvent.layout.height;
+              setReadViewportHeight((currentHeight) => currentHeight === nextHeight ? currentHeight : nextHeight);
+            }}
+            style={styles.readCard}
+          >
+            <ScrollView
+              key={readContentKey}
+              accessibilityLabel="朗读内容"
+              alwaysBounceVertical={false}
+              bounces={false}
+              contentContainerStyle={styles.readCardContent}
+              nestedScrollEnabled
+              overScrollMode="never"
+              scrollEnabled={readContentOverflows}
+              showsVerticalScrollIndicator={readContentOverflows}
+              style={styles.readCardScroll}
+            >
+              <View
+                onLayout={(event) => {
+                  const availableHeight = Math.max(0, readViewportHeight - 48);
+                  const overflows = availableHeight > 0 && event.nativeEvent.layout.height > availableHeight + 1;
+                  setOverflowingReadContent((current) => {
+                    const next = overflows ? readContentKey : null;
+                    return current === next ? current : next;
+                  });
+                }}
+                style={[
+                  styles.readCardInner,
+                  { minHeight: Math.max(0, readViewportHeight - 48) },
+                  !readContentOverflows && styles.readCardInnerCentered,
+                ]}
+              >
+                {displayedReadPassed ? <View style={styles.scoreBadge}><Text style={styles.scoreBadgeValue}>{Math.round(trainingSnapshot?.readingResult?.overallScore ?? 86)}</Text><Text style={styles.scoreBadgeMax}>/100</Text></View> : null}
+                <Text style={styles.readSentence}>
+                  {displayedReadPassed ? readItem.en : readItem.en}
+                </Text>
+                <Text style={styles.readTranslation}>{readItem.zh}</Text>
+                <ReadRecordButton passed={displayedReadPassed} recording={recording} onPress={() => void toggleReadRecording()} />
+                <Text style={styles.readStatus}>{recording ? '正在听你朗读' : displayedReadPassed ? '朗读通过' : '点击麦克风开始朗读'}</Text>
+                <Text style={styles.readInstruction}>{recording ? '再次点击麦克风结束录音并提交评分，最长录制 30 秒。' : displayedReadPassed ? '本句已达到通过标准，可以进入下一步。' : '再次点击麦克风结束录音并提交评分，最长录制 30 秒。'}</Text>
+                {audioError ? <Text style={styles.generationError}>{audioError}</Text> : null}
+                <Pressable accessibilityRole="button" accessibilityLabel="听标准示范" onPress={() => void toggleDemo(readItem.en)} style={styles.readDemoButton}>
+                  <Text style={styles.readDemoText}>{demoPlaying ? '正在播放' : '听标准示范'}</Text>
+                  <AppIcon name="volume" size={18} color={colors.subtle} />
+                </Pressable>
+              </View>
+            </ScrollView>
           </View>
           <View style={styles.stageFooterRow}>
-            <Pressable accessibilityRole="button" onPress={() => setStage('learn')} style={styles.roundNavButton}>
+            <Pressable accessibilityRole="button" accessibilityLabel={displayedReadIndex > 0 ? '上一句' : '返回学习阶段'} onPress={previousRead} style={styles.roundNavButton}>
               <AppIcon name="arrow-left" size={20} />
             </Pressable>
             <Pressable
               accessibilityRole="button"
               disabled={!displayedReadPassed || trainingTransitioning}
               onPress={() => {
-                if (scene && trainingController) void trainingController.next().catch(() => undefined);
-                else { setUnlockedStage(2); setStage('speak'); }
-                setRecording(false);
-                setDemoPlaying(false);
+                void (async () => {
+                  clearReadRecordingTimer();
+                  setRecording(false);
+                  setDemoPlaying(false);
+                  ttsPlayer?.stop();
+                  // Await the native recorder shutdown before WebRTC mounts.
+                  // Otherwise Android can leave the realtime microphone in a
+                  // preparing state or route it through the wrong capture path.
+                  await wavRecorder?.cancel().catch(() => undefined);
+                  if (scene && trainingController) {
+                    await trainingController.next().catch(() => undefined);
+                  } else {
+                    setUnlockedStage(2);
+                    setStage('speak');
+                  }
+                })();
               }}
               style={[styles.primaryPillButton, (!displayedReadPassed || trainingTransitioning) && styles.primaryPillDisabled]}
             >
@@ -732,24 +856,39 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
             <View style={styles.completionHeaderCopy}>
               <Text style={styles.completionEyebrow}>SIMULATION COMPLETE</Text>
               <Text style={styles.completionTitle}>模拟完成</Text>
-              <Text style={styles.completionLead}>本次场景对话已结束，下面是你的五维表现。</Text>
+              <Text style={styles.completionLead}>
+                {completionScoreAvailable
+                  ? '本次场景对话已结束，下面是你的五维表现。'
+                  : dialogueCompletion?.evaluation?.summary ?? '本次有效英文语音不足，暂时无法生成五维评分。'}
+              </Text>
             </View>
             <View style={styles.completionScoreRow}>
-              <Text style={styles.completionScore}>{Math.round(dialogueCompletion?.evaluation?.finalScore ?? 86)}</Text>
-              <Text style={styles.completionScoreMax}>/100</Text>
+              <Text style={completionScoreAvailable ? styles.completionScore : styles.completionScoreUnavailable}>
+                {completionScoreAvailable
+                  ? Math.round(dialogueCompletion?.evaluation?.finalScore ?? 86)
+                  : '暂无评分'}
+              </Text>
+              {completionScoreAvailable ? <Text style={styles.completionScoreMax}>/100</Text> : null}
             </View>
           </View>
-          <View style={styles.completionOverview}>
-            <SceneRadar metrics={completionMetrics} />
-            <View style={styles.completionMetrics}>
-              {completionMetrics.map((metric) => (
-                <View key={metric.label} style={styles.completionMetricRow}>
-                  <Text style={styles.completionMetricLabel}>{metric.label}</Text>
-                  <Text style={styles.completionMetricValue}>{Math.round(metric.value)}</Text>
-                </View>
-              ))}
+          {completionScoreAvailable ? (
+            <View style={styles.completionOverview}>
+              <SceneRadar metrics={completionMetrics} />
+              <View style={styles.completionMetrics}>
+                {completionMetrics.map((metric) => (
+                  <View key={metric.label} style={styles.completionMetricRow}>
+                    <Text style={styles.completionMetricLabel}>{metric.label}</Text>
+                    <Text style={styles.completionMetricValue}>{Math.round(metric.value)}</Text>
+                  </View>
+                ))}
+              </View>
             </View>
-          </View>
+          ) : (
+            <View style={styles.completionUnavailable}>
+              <Text style={styles.completionUnavailableTitle}>有效语音不足</Text>
+              <Text style={styles.completionUnavailableCopy}>请使用完整英文句子完成至少一轮回答后再试。</Text>
+            </View>
+          )}
           <View style={styles.completionActions}>
             <Pressable accessibilityRole="button" onPress={finishTraining} style={[styles.completionActionButton, styles.completionBackButton]}>
               <Text style={styles.completionBackText}>返回场景广场</Text>
@@ -766,12 +905,23 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   );
 }
 
-function createDefaultSceneService() {
+function createDefaultSceneService(onUnauthorized?: () => void | Promise<void>) {
   const tokenStore = new SecureTokenStore();
   return new SceneService(
     new ApiClient({
       baseUrl: getRuntimeConfig().backendUrl,
       tokenStore,
+      onUnauthorized,
+    }),
+  );
+}
+
+function createDefaultDailyPicksApi(onUnauthorized?: () => void | Promise<void>) {
+  return new DailyPicksApi(
+    new ApiClient({
+      baseUrl: getRuntimeConfig().backendUrl,
+      tokenStore: new SecureTokenStore(),
+      onUnauthorized,
     }),
   );
 }
@@ -860,15 +1010,22 @@ export function ScenesHome({
   onStartScene,
   promptExample = getDailyScenePromptExample(),
   sceneService: injectedSceneService,
+  dailyPicksApi: injectedDailyPicksApi,
 }: {
   onOpen: (route: SceneRoute) => void;
   onStartScene?: () => void;
   promptExample?: ScenePromptExample;
   sceneService?: Pick<SceneService, 'generate'>;
+  dailyPicksApi?: Pick<DailyPicksApi, 'getDailyPicks'>;
 }) {
+  const { signOut } = useAppModel();
   const [sceneService] = useState(
-    () => injectedSceneService ?? createDefaultSceneService(),
+    () => injectedSceneService ?? createDefaultSceneService(signOut),
   );
+  const [dailyPicksApi] = useState(
+    () => injectedDailyPicksApi ?? createDefaultDailyPicksApi(signOut),
+  );
+  const [dailyRecommendations, setDailyRecommendations] = useState<readonly DailyRecommendation[]>(recommendations);
   const [prompt, setPrompt] = useState('');
   const [preview, setPreview] = useState<GeneratedScene | null>(null);
   const [previewDisplay, setPreviewDisplay] = useState<Partial<GeneratedScene> | null>(null);
@@ -877,6 +1034,32 @@ export function ScenesHome({
   const [generationError, setGenerationError] = useState<string | null>(null);
   const generating = generatingSource !== null;
   const promptLocked = generating || Boolean(preview);
+  useEffect(() => {
+    let cancelled = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const loadDailyPicks = async () => {
+      try {
+        const response = await dailyPicksApi.getDailyPicks();
+        if (cancelled) return;
+        setDailyRecommendations(response.picks);
+        const nextRefreshAt = Date.parse(response.nextRefreshAt);
+        if (Number.isFinite(nextRefreshAt)) {
+          refreshTimer = setTimeout(
+            () => void loadDailyPicks(),
+            Math.max(1_000, nextRefreshAt - Date.now() + 1_000),
+          );
+        }
+      } catch {
+        // Keep the curated local fallback when the backend is unavailable.
+      }
+    };
+    void loadDailyPicks();
+    return () => {
+      cancelled = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
+  }, [dailyPicksApi]);
+
   useEffect(() => {
     if (Platform.OS !== 'android' || !preview) return;
 
@@ -1026,13 +1209,13 @@ export function ScenesHome({
           </View>
         </View>
         <View style={styles.recommendationList}>
-          {recommendations.map((item) => (
+          {dailyRecommendations.map((item) => (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`生成每日推荐：${item.title}`}
               key={item.id}
               disabled={generating}
-              onPress={() => void generatePreview(`${item.title}：${item.goal}`, item.id)}
+              onPress={() => void generatePreview(item.sceneInput, item.id)}
               style={({ pressed }) => [styles.recommendation, pressed && styles.compactPressed]}
             >
               <View style={styles.recommendationCopy}>
@@ -1380,33 +1563,38 @@ const styles = StyleSheet.create({
   stageMetaRow: { minHeight: 34, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   stageHeading: { marginTop: 3, color: colors.ink, fontSize: 20, lineHeight: 25, fontWeight: '600', letterSpacing: -0.5 },
   stageCount: { color: colors.subtle, fontSize: 11, fontWeight: '500' },
-  languageCard: { flex: 1, minHeight: 250, position: 'relative', paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 22, backgroundColor: colors.white },
+  languageCard: { width: '100%', minWidth: 0, minHeight: 0, flex: 1, paddingHorizontal: 24, paddingVertical: 24, position: 'relative', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 22, backgroundColor: colors.white },
   languageCount: { position: 'absolute', top: 17, right: 18, color: colors.subtle, fontSize: 11, fontWeight: '500' },
   languageType: { color: colors.subtle, fontSize: 10, fontWeight: '600', letterSpacing: 1.4 },
-  languageEnglish: { marginTop: 14, color: colors.ink, fontSize: 34, lineHeight: 40, fontWeight: '600', textAlign: 'center', letterSpacing: -1.2 },
-  pronunciationRow: { minHeight: 34, marginTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
-  phoneticText: { color: colors.muted, fontSize: 16, lineHeight: 24, fontWeight: '300' },
+  languageEnglish: { width: '100%', maxWidth: 350, marginTop: 14, flexShrink: 1, color: colors.ink, fontSize: 34, lineHeight: 40, fontWeight: '600', textAlign: 'center', letterSpacing: -1.2 },
+  pronunciationRow: { width: '100%', minHeight: 34, marginTop: 14, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  phoneticText: { flexShrink: 1, color: colors.muted, fontSize: 16, lineHeight: 24, fontWeight: '300', textAlign: 'center' },
   speakerButton: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 16 },
   speakerButtonActive: { opacity: 0.58, transform: [{ scale: 0.94 }] },
-  languageChinese: { marginTop: 12, color: colors.muted, fontSize: 16, lineHeight: 24, fontWeight: '300', textAlign: 'center' },
+  languageChinese: { width: '100%', maxWidth: 350, marginTop: 12, flexShrink: 1, color: colors.muted, fontSize: 16, lineHeight: 24, fontWeight: '300', textAlign: 'center' },
   stageFooterRow: { minHeight: 52, paddingTop: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   roundNavButton: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 23, backgroundColor: colors.white },
   roundNavDisabled: { opacity: 0.28 },
   primaryPillButton: { minWidth: 132, height: 46, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 23, backgroundColor: colors.ink },
   primaryPillDisabled: { opacity: 0.28 },
   primaryPillText: { color: colors.white, fontSize: 14, fontWeight: '600' },
-  readCard: { flex: 1, minHeight: 350, paddingHorizontal: 22, paddingVertical: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 22, backgroundColor: colors.white },
-  scoreBadge: { position: 'absolute', top: 16, right: 17, flexDirection: 'row', alignItems: 'baseline' },
+  readCard: { width: '100%', minWidth: 0, minHeight: 0, flex: 1, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: colors.line, borderRadius: 22, backgroundColor: colors.white },
+  readCardScroll: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+  readCardContent: { paddingHorizontal: 22, paddingVertical: 24 },
+  readCardInner: { width: '100%', position: 'relative', alignItems: 'center' },
+  readCardInnerCentered: { justifyContent: 'center' },
+  scoreBadge: { position: 'absolute', top: 0, right: -6, flexDirection: 'row', alignItems: 'baseline' },
   scoreBadgeValue: { color: colors.ink, fontSize: 24, fontWeight: '600' },
   scoreBadgeMax: { color: colors.subtle, fontSize: 9, fontWeight: '500' },
-  readSentence: { maxWidth: 350, color: colors.ink, fontSize: 29, lineHeight: 37, fontWeight: '600', textAlign: 'center', letterSpacing: -1 },
-  readTranslation: { marginTop: 12, color: colors.muted, fontSize: 14, fontWeight: '300', textAlign: 'center' },
+  readSentence: { width: '100%', maxWidth: 350, flexShrink: 1, color: colors.ink, fontSize: 29, lineHeight: 37, fontWeight: '600', textAlign: 'center', letterSpacing: -1 },
+  readTranslation: { width: '100%', maxWidth: 350, marginTop: 12, flexShrink: 1, color: colors.muted, fontSize: 14, lineHeight: 21, fontWeight: '300', textAlign: 'center' },
   scoreCorrect: { color: '#278B5B' },
   scoreIncorrect: { color: '#D65349' },
   readRecordButton: { width: 62, height: 62, marginTop: 28, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 31, backgroundColor: colors.white },
+  readRecordSuccess: { position: 'absolute', width: 62, height: 62, alignItems: 'center', justifyContent: 'center', borderRadius: 31, backgroundColor: '#278B5B' },
   readRecordButtonActive: { borderColor: '#E2AAA5', backgroundColor: '#FFF7F6', shadowColor: '#C75950', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 3 },
   readStatus: { marginTop: 15, color: colors.ink, fontSize: 15, fontWeight: '600' },
-  readInstruction: { marginTop: 7, color: colors.muted, fontSize: 11, lineHeight: 17, fontWeight: '300', textAlign: 'center' },
+  readInstruction: { width: '100%', maxWidth: 350, marginTop: 7, flexShrink: 1, color: colors.muted, fontSize: 11, lineHeight: 17, fontWeight: '300', textAlign: 'center' },
   readDemoButton: { minHeight: 36, marginTop: 18, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7 },
   readDemoText: { color: colors.subtle, fontSize: 12, fontWeight: '500' },
   sceneCallStage: { flex: 1, minHeight: 0, marginHorizontal: -2 },
@@ -1432,8 +1620,12 @@ const styles = StyleSheet.create({
   completionLead: { marginTop: 8, color: colors.muted, fontSize: 12, lineHeight: 18, fontWeight: '300' },
   completionScoreRow: { flexDirection: 'row', alignItems: 'flex-end' },
   completionScore: { color: colors.ink, fontSize: 52, lineHeight: 52, fontWeight: '600', letterSpacing: -3 },
+  completionScoreUnavailable: { maxWidth: 100, color: colors.muted, fontSize: 17, lineHeight: 24, fontWeight: '600', textAlign: 'right' },
   completionScoreMax: { marginBottom: 5, marginLeft: 3, color: colors.subtle, fontSize: 12, fontWeight: '500' },
   completionOverview: { paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  completionUnavailable: { minHeight: 208, paddingVertical: 36, alignItems: 'center', justifyContent: 'center' },
+  completionUnavailableTitle: { color: colors.ink, fontSize: 20, lineHeight: 28, fontWeight: '600' },
+  completionUnavailableCopy: { maxWidth: 280, marginTop: 10, color: colors.muted, fontSize: 13, lineHeight: 21, fontWeight: '300', textAlign: 'center' },
   completionMetrics: { flex: 1, borderTopWidth: 1, borderTopColor: colors.line },
   completionMetricRow: { minHeight: 35, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: colors.line },
   completionMetricLabel: { color: colors.muted, fontSize: 12, fontWeight: '300' },

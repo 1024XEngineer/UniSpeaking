@@ -20,12 +20,18 @@ import com.unispeaking.domain.vo.session.SpeakerType;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.component.policy.UserEntitlementPolicy;
+import com.unispeaking.component.policy.UserEntitlementPolicy.QuotaReservation;
 import com.unispeaking.infrastructure.realtime.RealtimeSessionTerminator;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.TaskScheduler;
 
 @Component
 public class SessionLifecycleManager {
@@ -35,6 +41,9 @@ public class SessionLifecycleManager {
 	private final PracticeSessionRepository practiceSessionRepository;
 	private final UserEntitlementPolicy entitlementPolicy;
 	private final RealtimeSessionTerminator realtimeSessionTerminator;
+	private final TaskScheduler taskScheduler;
+	private final Map<String, ScheduledFuture<?>> quotaDeadlineTasks =
+			new ConcurrentHashMap<>();
 
 	public SessionLifecycleManager(
 			ActiveSessionRegistry activeSessionRegistry,
@@ -49,7 +58,17 @@ public class SessionLifecycleManager {
 			PracticeSessionRepository practiceSessionRepository,
 			UserEntitlementPolicy entitlementPolicy) {
 		this(activeSessionRegistry, sessionMessageRepository, practiceSessionRepository,
-				entitlementPolicy, null);
+				entitlementPolicy, null, null);
+	}
+
+	public SessionLifecycleManager(
+			ActiveSessionRegistry activeSessionRegistry,
+			SessionMessageRepository sessionMessageRepository,
+			PracticeSessionRepository practiceSessionRepository,
+			UserEntitlementPolicy entitlementPolicy,
+			RealtimeSessionTerminator realtimeSessionTerminator) {
+		this(activeSessionRegistry, sessionMessageRepository, practiceSessionRepository,
+				entitlementPolicy, realtimeSessionTerminator, null);
 	}
 
 	@Autowired
@@ -58,12 +77,14 @@ public class SessionLifecycleManager {
 			SessionMessageRepository sessionMessageRepository,
 			PracticeSessionRepository practiceSessionRepository,
 			UserEntitlementPolicy entitlementPolicy,
-			RealtimeSessionTerminator realtimeSessionTerminator) {
+			RealtimeSessionTerminator realtimeSessionTerminator,
+			TaskScheduler taskScheduler) {
 		this.activeSessionRegistry = activeSessionRegistry;
 		this.sessionMessageRepository = sessionMessageRepository;
 		this.practiceSessionRepository = practiceSessionRepository;
 		this.entitlementPolicy = entitlementPolicy;
 		this.realtimeSessionTerminator = realtimeSessionTerminator;
+		this.taskScheduler = taskScheduler;
 	}
 
 	public StartSessionResponse startSession(StartSessionCommand command) {
@@ -141,6 +162,52 @@ public class SessionLifecycleManager {
 		activeSessionRegistry.save(session);
 	}
 
+	public SessionActivation activateSession(String userId, String sessionId) {
+		AbstractSceneSession session = requireOwnedSession(userId, sessionId);
+		synchronized (session) {
+			if (session.getStatus() == SessionStatus.COMPLETED
+					|| session.getStatus() == SessionStatus.FAILED) {
+				throw new BusinessException(
+						"SESSION_ALREADY_TERMINATED",
+						"会话已结束");
+			}
+			if (session.isQuotaActivated()) {
+				return activationResponse(session.getQuotaDeadline());
+			}
+			Instant activatedAt = Instant.now();
+			try {
+				QuotaReservation reservation = entitlementPolicy == null
+						? null
+						: entitlementPolicy.reserveRemaining(userId, activatedAt);
+				if (reservation == null) {
+					session.activate();
+				}
+				else {
+					session.activateQuota(
+							reservation.quotaDate(),
+							reservation.reservedSeconds(),
+							activatedAt,
+							reservation.deadline());
+				}
+				activeSessionRegistry.save(session);
+				if (reservation != null && taskScheduler != null) {
+					ScheduledFuture<?> task = taskScheduler.schedule(
+							() -> expireQuota(userId, sessionId),
+							reservation.deadline());
+					if (task != null) {
+						ScheduledFuture<?> previous = quotaDeadlineTasks.put(sessionId, task);
+						if (previous != null) previous.cancel(false);
+					}
+				}
+				return activationResponse(session.getQuotaDeadline());
+			}
+			catch (RuntimeException exception) {
+				terminateAfterActivationFailure(userId, sessionId);
+				throw exception;
+			}
+		}
+	}
+
 	/**
 	 * Shared lifecycle hook used by concrete scene implementations without
 	 * expanding the scene session service interfaces.
@@ -178,6 +245,18 @@ public class SessionLifecycleManager {
 			String sessionId,
 			SessionStatus terminalStatus,
 			Instant endedAt) {
+		terminateSceneSession(userId, sessionId, terminalStatus, endedAt,
+				terminalStatus == SessionStatus.COMPLETED
+						? "client_completed"
+						: "session_failed");
+	}
+
+	private void terminateSceneSession(
+			String userId,
+			String sessionId,
+			SessionStatus terminalStatus,
+			Instant endedAt,
+			String stopReason) {
 		UUID ownerId = requireUserUuid(userId);
 		if (endedAt == null) {
 			throw new BusinessException(
@@ -192,7 +271,10 @@ public class SessionLifecycleManager {
 		}
 		AbstractSceneSession session = requireOwnedSession(userId, sessionId);
 		synchronized (session) {
-			if (session.getStatus() == terminalStatus) return;
+			if (session.getStatus() == terminalStatus) {
+				cancelQuotaDeadline(sessionId);
+				return;
+			}
 			if (session.getStatus() == SessionStatus.COMPLETED
 					|| session.getStatus() == SessionStatus.FAILED) {
 				throw new BusinessException(
@@ -201,24 +283,90 @@ public class SessionLifecycleManager {
 			}
 			if (terminalStatus == SessionStatus.COMPLETED) {
 				practiceSessionRepository.complete(sessionId, ownerId, endedAt);
-				if (entitlementPolicy != null) {
-					entitlementPolicy.recordUsage(userId, session.getCreatedAt(), endedAt);
-				}
+				settleQuota(session, endedAt, true);
 				session.complete(endedAt);
 			}
 			else {
 				practiceSessionRepository.fail(sessionId, ownerId, endedAt);
+				settleQuota(session, endedAt, false);
 				session.fail(endedAt);
 			}
 			activeSessionRegistry.save(session);
+			cancelQuotaDeadline(sessionId);
 		}
 		if (realtimeSessionTerminator != null) {
 			realtimeSessionTerminator.stopBestEffort(
 					session,
-					terminalStatus == SessionStatus.COMPLETED
-							? "client_completed"
-							: "session_failed");
+					stopReason);
 		}
+	}
+
+	private void settleQuota(
+			AbstractSceneSession session,
+			Instant endedAt,
+			boolean recordUnactivatedCompletion) {
+		if (entitlementPolicy == null) return;
+		if (session.hasQuotaReservation()) {
+			entitlementPolicy.settleReservation(
+					session.getUserId(),
+					session.getQuotaDate(),
+					session.getQuotaReservedSeconds(),
+					session.getQuotaStartedAt(),
+					endedAt);
+		}
+		else if (recordUnactivatedCompletion && !session.isQuotaActivated()) {
+			entitlementPolicy.recordUsage(
+					session.getUserId(),
+					session.getCreatedAt(),
+					endedAt);
+		}
+	}
+
+	private void expireQuota(String userId, String sessionId) {
+		quotaDeadlineTasks.remove(sessionId);
+		try {
+			terminateSceneSession(
+					userId,
+					sessionId,
+					SessionStatus.COMPLETED,
+					Instant.now(),
+					"quota_exhausted");
+		}
+		catch (RuntimeException exception) {
+			RealtimeFlowLog.warn(
+					"session.quota.expire.failed sessionId={} error={}",
+					sessionId,
+					exception.getMessage());
+		}
+	}
+
+	private void terminateAfterActivationFailure(String userId, String sessionId) {
+		try {
+			terminateSceneSession(
+					userId,
+					sessionId,
+					SessionStatus.FAILED,
+					Instant.now(),
+					"quota_activation_failed");
+		}
+		catch (RuntimeException cleanupFailure) {
+			RealtimeFlowLog.warn(
+					"session.quota.activation.cleanup.failed sessionId={} error={}",
+					sessionId,
+					cleanupFailure.getMessage());
+		}
+	}
+
+	private void cancelQuotaDeadline(String sessionId) {
+		ScheduledFuture<?> task = quotaDeadlineTasks.remove(sessionId);
+		if (task != null) task.cancel(false);
+	}
+
+	private SessionActivation activationResponse(Instant quotaDeadline) {
+		if (quotaDeadline == null) return new SessionActivation(null, null);
+		return new SessionActivation(
+				quotaDeadline,
+				Math.max(0, Duration.between(Instant.now(), quotaDeadline).toMillis()));
 	}
 
 	public void endSession(String sessionId) {
@@ -425,5 +573,8 @@ public class SessionLifecycleManager {
 					"session prompt must not be blank");
 		}
 		return prompt;
+	}
+
+	public record SessionActivation(Instant quotaDeadline, Long quotaRemainingMillis) {
 	}
 }

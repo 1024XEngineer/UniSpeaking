@@ -1,9 +1,14 @@
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 export interface TokenStore {
   get(): Promise<string | null>;
   set(token: string): Promise<void>;
   clear(): Promise<void>;
+  getAccessToken?(): Promise<string | null>;
+  setTokens?(tokens: { accessToken: string; refreshToken?: string | null }): Promise<void>;
+  getRefreshToken?(): Promise<string | null>;
+  clearTokens?(): Promise<void>;
 }
 
 export interface SecureStoragePort {
@@ -12,12 +17,47 @@ export interface SecureStoragePort {
   deleteItemAsync(key: string): Promise<void>;
 }
 
+interface WebStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+export class WebTokenStorage implements SecureStoragePort {
+  constructor(
+    private readonly storageProvider: () => WebStorage | undefined = () =>
+      typeof globalThis.localStorage === 'undefined'
+        ? undefined
+        : globalThis.localStorage,
+  ) {}
+
+  async getItemAsync(key: string) {
+    return this.storageProvider()?.getItem(key) ?? null;
+  }
+
+  async setItemAsync(key: string, value: string) {
+    this.storageProvider()?.setItem(key, value);
+  }
+
+  async deleteItemAsync(key: string) {
+    this.storageProvider()?.removeItem(key);
+  }
+}
+
+export function createPlatformTokenStorage(
+  platform: string = Platform.OS,
+): SecureStoragePort {
+  return platform === 'web' ? new WebTokenStorage() : SecureStore;
+}
+
 export const accessTokenStorageKey = 'unispeaking.accessToken';
+export const refreshTokenStorageKey = 'unispeaking.refreshToken';
 
 export class SecureTokenStore implements TokenStore {
   constructor(
-    private readonly storage: SecureStoragePort = SecureStore,
+    private readonly storage: SecureStoragePort = createPlatformTokenStorage(),
     private readonly storageKey: string = accessTokenStorageKey,
+    private readonly refreshStorageKey: string = refreshTokenStorageKey,
   ) {}
 
   get() {
@@ -30,5 +70,25 @@ export class SecureTokenStore implements TokenStore {
 
   clear() {
     return this.storage.deleteItemAsync(this.storageKey);
+  }
+
+  getAccessToken() { return this.storage.getItemAsync(this.storageKey); }
+
+  async setTokens(tokens: { accessToken: string; refreshToken?: string | null }) {
+    await this.storage.setItemAsync(this.storageKey, tokens.accessToken);
+    if (tokens.refreshToken) {
+      await this.storage.setItemAsync(this.refreshStorageKey, tokens.refreshToken);
+    } else {
+      await this.storage.deleteItemAsync(this.refreshStorageKey);
+    }
+  }
+
+  getRefreshToken() { return this.storage.getItemAsync(this.refreshStorageKey); }
+
+  async clearTokens() {
+    await Promise.all([
+      this.storage.deleteItemAsync(this.storageKey),
+      this.storage.deleteItemAsync(this.refreshStorageKey),
+    ]);
   }
 }

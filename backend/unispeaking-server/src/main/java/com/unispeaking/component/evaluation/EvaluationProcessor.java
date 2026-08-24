@@ -70,6 +70,7 @@ import com.unispeaking.common.evaluation.validation.EnglishWordCounter;
 import com.unispeaking.common.prompt.evaluation.DialogueTurnEvaluationHistory;
 import com.unispeaking.common.prompt.evaluation.DialogueTurnEvaluationPromptInput;
 import com.unispeaking.common.evaluation.policy.UnavailableTurnEvaluationPolicy;
+import com.unispeaking.common.evaluation.policy.SentenceReadingPassPolicy;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
@@ -96,8 +97,9 @@ public class EvaluationProcessor {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(
 			EvaluationProcessor.class);
-	private static final BigDecimal SENTENCE_PASS_SCORE = new BigDecimal("80");
 	private static final int IELTS_EVALUATION_LOCK_STRIPES = 64;
+	private static final SentenceReadingPassPolicy SENTENCE_READING_PASS_POLICY =
+			new SentenceReadingPassPolicy();
 
 	private final PronunciationAssessmentClient pronunciationClient;
 	private final EvaluationLlmClient llmClient;
@@ -988,9 +990,22 @@ public class EvaluationProcessor {
 				sceneId,
 				sentence,
 				assessment);
+		SceneSentenceReadingRepository.AttemptSummary attemptSummary =
+				sceneSentenceReadingRepository.summarizeAttempts(
+						sceneId,
+						sentenceId);
+		BigDecimal bestScore = attemptSummary == null
+				|| attemptSummary.bestScore() == null
+				? assessment.overallScore()
+				: assessment.overallScore().max(attemptSummary.bestScore());
+		boolean passed = SENTENCE_READING_PASS_POLICY.passes(assessment)
+				|| (attemptSummary != null
+						&& SENTENCE_READING_PASS_POLICY.passesRepeatedBest(
+								attemptSummary.attemptCount(),
+								bestScore));
 		return new SentenceEvaluationResponse(
-				assessment.overallScore(),
-				assessment.overallScore().compareTo(SENTENCE_PASS_SCORE) >= 0,
+				passed ? bestScore : assessment.overallScore(),
+				passed,
 				mapWords(assessment.words()));
 	}
 
@@ -998,6 +1013,9 @@ public class EvaluationProcessor {
 			DialogueTurnEvaluationCommand command) {
 		if (command == null || command.turnNo() < 1) {
 			throw new EvaluationException(EvaluationErrorCode.INVALID_REQUEST);
+		}
+		if (command.transcript().isBlank()) {
+			throw new EvaluationException(EvaluationErrorCode.TRANSCRIPT_REQUIRED);
 		}
 		AbstractSceneSession runtimeSession =
 				findCustomRuntimeSession(command.sessionId());
@@ -1171,6 +1189,18 @@ public class EvaluationProcessor {
 					List.of()));
 			return result;
 		}
+		if (command.audio() == null || command.audio().length == 0) {
+			DialogueTurnEvaluationResult result =
+					UnavailableTurnEvaluationPolicy.createResult(
+						command.turnNo(), command.transcript());
+			turnEvaluationRepository.upsert(toCustomTurn(
+					session, result, List.of()));
+			LOGGER.info(
+					"custom turn pronunciation unavailable; preserving transcript "
+							+ "sessionId={} turnNo={} reason=audio_missing",
+					session.getId(), command.turnNo());
+			return result;
+		}
 
 		PcmWavValidator.validate(command.audio());
 		PronunciationAssessmentResult assessment = AiInvocationContexts.call(
@@ -1216,6 +1246,18 @@ public class EvaluationProcessor {
 					session,
 					result,
 					List.of()));
+			return result;
+		}
+		if (command.audio() == null || command.audio().length == 0) {
+			DialogueTurnEvaluationResult result =
+					UnavailableTurnEvaluationPolicy.createResult(
+						command.turnNo(), command.transcript());
+			turnEvaluationRepository.upsert(toCustomTurn(
+					session, result, List.of()));
+			LOGGER.info(
+					"IELTS turn pronunciation unavailable; preserving transcript "
+							+ "sessionId={} turnNo={} reason=audio_missing",
+					session.getId(), command.turnNo());
 			return result;
 		}
 
@@ -1604,8 +1646,7 @@ public class EvaluationProcessor {
 
 	private boolean isRecoverableTurnFailure(EvaluationException exception) {
 		return switch (exception.errorCode()) {
-			case TRANSCRIPT_REQUIRED,
-					AUDIO_REQUIRED,
+			case AUDIO_REQUIRED,
 					AUDIO_UNSUPPORTED,
 					AUDIO_INVALID,
 					PROVIDER_NOT_CONFIGURED,

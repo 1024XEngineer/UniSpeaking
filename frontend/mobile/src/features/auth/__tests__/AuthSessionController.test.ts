@@ -37,10 +37,13 @@ function createDependencies(
   tokenStore: AuthSessionDependencies['tokenStore'] & {
     set: jest.Mock;
     clear: jest.Mock;
+    clearTokens: jest.Mock;
   };
   authService: AuthSessionDependencies['authService'] & {
     login: jest.Mock;
     issueEmailChallenge: jest.Mock;
+    issuePasswordResetChallenge: jest.Mock;
+    resetPassword: jest.Mock;
     register: jest.Mock;
     currentUser: jest.Mock;
     getPreference: jest.Mock;
@@ -52,6 +55,7 @@ function createDependencies(
       get: jest.fn(async () => token),
       set: jest.fn(async () => undefined),
       clear: jest.fn(async () => undefined),
+      clearTokens: jest.fn(async () => undefined),
     },
     authService: {
       login: jest.fn(async () => authResponse),
@@ -60,6 +64,12 @@ function createDependencies(
         expiresInSeconds: 600,
         resendAfterSeconds: 60,
       })),
+      issuePasswordResetChallenge: jest.fn(async () => ({
+        challengeId: 'reset-challenge-1',
+        expiresInSeconds: 600,
+        resendAfterSeconds: 60,
+      })),
+      resetPassword: jest.fn(async () => undefined),
       register: jest.fn(async () => authResponse),
       currentUser: jest.fn(async () => user),
       getPreference: jest.fn(async () => preference),
@@ -124,7 +134,7 @@ describe('AuthSessionController', () => {
 
     await controller.bootstrap();
 
-    expect(dependencies.tokenStore.clear).toHaveBeenCalledTimes(1);
+    expect(dependencies.tokenStore.clearTokens).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot()).toEqual(
       expect.objectContaining({ status: 'anonymous', error: '登录已过期' }),
     );
@@ -137,7 +147,7 @@ describe('AuthSessionController', () => {
 
     await controller.bootstrap();
 
-    expect(dependencies.tokenStore.clear).not.toHaveBeenCalled();
+    expect(dependencies.tokenStore.clearTokens).not.toHaveBeenCalled();
     expect(controller.getSnapshot()).toEqual(
       expect.objectContaining({ status: 'anonymous', error: 'Network request failed' }),
     );
@@ -178,7 +188,30 @@ describe('AuthSessionController', () => {
 
     await controller.unauthorized();
 
-    expect(dependencies.tokenStore.clear).toHaveBeenCalledTimes(1);
+    expect(dependencies.tokenStore.clearTokens).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot().status).toBe('anonymous');
+  });
+
+  it('maps login/register failures and rejects unauthenticated preference updates', async () => {
+    const loginDeps = createDependencies();
+    loginDeps.authService.login.mockRejectedValueOnce(new Error('登录失败'));
+    await expect(new AuthSessionController(loginDeps).login({ username: 'x', password: 'y' })).rejects.toThrow('登录失败');
+    const registerDeps = createDependencies();
+    registerDeps.authService.register.mockRejectedValueOnce(new Error('注册失败'));
+    await expect(new AuthSessionController(registerDeps).register({ username: 'x', password: 'y', nickname: null, challengeId: 'c', code: '1' })).rejects.toThrow('注册失败');
+    await expect(new AuthSessionController(createDependencies()).updatePreference({ cefrLevel: 'A' })).rejects.toThrow('需要登录');
+  });
+
+  it('uses refresh tokens during bootstrap and revokes on logout', async () => {
+    const dependencies = createDependencies();
+    (dependencies.tokenStore.get as jest.Mock).mockResolvedValue(null);
+    (dependencies.tokenStore as any).getRefreshToken = jest.fn().mockResolvedValue('refresh');
+    const coordinator = { refreshAccessToken: jest.fn().mockResolvedValue('fresh') } as any;
+    const controller = new AuthSessionController({ ...dependencies, tokenCoordinator: coordinator });
+    await controller.bootstrap();
+    expect(coordinator.refreshAccessToken).toHaveBeenCalled();
+    (dependencies.authService as any).revoke = jest.fn().mockResolvedValue(undefined);
+    await controller.logout();
+    expect((dependencies.authService as any).revoke).toHaveBeenCalledWith('refresh');
   });
 });

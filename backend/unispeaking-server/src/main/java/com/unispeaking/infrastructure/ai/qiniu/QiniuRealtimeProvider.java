@@ -149,7 +149,7 @@ public class QiniuRealtimeProvider extends RealtimeProvider {
 			String voiceProfile,
 			String requestId) {
 		var payload = objectMapper.createObjectNode()
-				.put("app_id", properties.appId())
+				.put("app_id", ProviderCredentialOverride.currentOr("appId", properties.appId()))
 				.put("user_id", command.userId())
 				.put("client_id", command.clientId())
 				.put("model_profile", properties.modelProfile())
@@ -233,7 +233,7 @@ public class QiniuRealtimeProvider extends RealtimeProvider {
 	}
 
 	private String apiKey() {
-		return ProviderCredentialOverride.currentOr(properties.apiKey());
+		return ProviderCredentialOverride.currentOr("apiKey", properties.apiKey());
 	}
 
 	private HttpResponse<String> send(HttpRequest request, String ioErrorCode) {

@@ -13,6 +13,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -34,6 +35,27 @@ public class CustomSceneGenerator {
 	private static final int MIN_SENTENCES = 3;
 	private static final int MAX_SENTENCES = 4;
 	private static final int MAX_GENERATION_ATTEMPTS = 2;
+	private static final int MIN_PHRASE_WORDS = 2;
+	private static final int MAX_PHRASE_WORDS = 6;
+	private static final Pattern SENTENCE_ENDING = Pattern.compile("[.!?]+$");
+	private static final Pattern SUBJECT_CLAUSE_START = Pattern.compile(
+			"^(?:i|you|he|she|it|we|they|there|this|that|these|those)\\s+"
+					+ "(?:am|is|are|was|were|have|has|had|do|does|did|can|could|will|would|"
+					+ "shall|should|may|might|must|need|needs|want|wants|"
+					+ "isn't|aren't|wasn't|weren't|haven't|hasn't|hadn't|"
+					+ "don't|doesn't|didn't|can't|couldn't|won't|wouldn't)\\b",
+			Pattern.CASE_INSENSITIVE);
+	private static final Pattern AUXILIARY_QUESTION_START = Pattern.compile(
+			"^(?:am|is|are|was|were|do|does|did|have|has|had|can|could|will|would|"
+					+ "shall|should|may|might|must)\\s+"
+					+ "(?:i|you|he|she|it|we|they|there|this|that|these|those)\\b",
+			Pattern.CASE_INSENSITIVE);
+	private static final Pattern NOMINAL_SUBJECT_CLAUSE_START = Pattern.compile(
+			"^(?:the|a|an|my|your|his|her|our|their)\\s+"
+					+ "(?:[a-z][a-z'-]*\\s+){0,2}"
+					+ "(?:is|are|was|were|has|have|had|can|could|will|would|should|must|"
+					+ "need|needs|want|wants)\\b",
+			Pattern.CASE_INSENSITIVE);
 	private static final Set<String> ALLOWED_LABELS = Set.of(
 			"餐饮",
 			"购物",
@@ -141,12 +163,18 @@ public class CustomSceneGenerator {
 				Use concise Chinese for translations and English for practice content.
 				Adapt vocabulary difficulty, sentence length, roles, and goals to the learner profile.
 				Do not include private company, customer, project, medical, payment, or credential data.
+				The background must contain only facts observable to both roles at the start of the interaction,
+				such as the place and general situation.
+				Do not place learner-side answers, preferences, budget, or desired choices in background.
+				Those details must be introduced by the learner during the role-play.
+				Never preload a fact merely
+				because a generated reference sentence teaches the learner how to express it.
 
 				The JSON shape must be:
 				{
 				  "title": "short Chinese scene title",
 				  "label": "餐饮|购物|出行|住宿|健康|职场|社交|学习|服务|其他",
-				  "background": "specific but privacy-safe scene context",
+				  "background": "mutually observable scene setup only, without learner-side answers",
 				  "ai_role": "the role played by AI",
 				  "user_role": "the role played by the learner",
 				  "learning_goal": "observable speaking goal",
@@ -181,6 +209,14 @@ public class CustomSceneGenerator {
 				Generate about 5 distinct, scene-specific words, about 5 distinct phrases,
 				and about 3 practical reference sentences. Every reference sentence must reuse
 				at least one exact word or phrase from the generated words and phrases.
+				Each phrase must be a reusable lexical chunk or collocation of 2 to 6 English
+				words, not a complete clause or sentence. A phrase must not contain an explicit
+				subject followed by a finite verb, must not be a question, and must not end in
+				period, question-mark, or exclamation-mark punctuation. Valid examples include
+				"money back", "return this item", "proof of purchase", and "ask for a refund".
+				Invalid phrase examples include "There is a hole in it", "I would like to return
+				this", "Can I get my money back?", and "Do you have the receipt?"; put complete
+				sentences like these only in sentences.
 				Required outcomes must contain 3 to 8 observable learner actions.
 				Only make actions required when they are necessary to complete the core
 				real-world interaction. Never require an optional purchase, facility question,
@@ -315,6 +351,9 @@ public class CustomSceneGenerator {
 				throw invalidResponse();
 			}
 			String text = requiredText(node, textField, textLimit);
+			if ("phrase".equals(textField) && !isValidPracticePhrase(text)) {
+				throw invalidResponse();
+			}
 			if (!unique.add(text.toLowerCase(Locale.ROOT))) {
 				throw invalidResponse();
 			}
@@ -325,6 +364,20 @@ public class CustomSceneGenerator {
 					requiredText(node, "phonetic", 255)));
 		}
 		return List.copyOf(items);
+	}
+
+	private boolean isValidPracticePhrase(String text) {
+		String normalized = text.strip();
+		int wordCount = normalized.split("\\s+").length;
+		if (wordCount < MIN_PHRASE_WORDS || wordCount > MAX_PHRASE_WORDS) {
+			return false;
+		}
+		if (SENTENCE_ENDING.matcher(normalized).find()) {
+			return false;
+		}
+		return !SUBJECT_CLAUSE_START.matcher(normalized).find()
+				&& !AUXILIARY_QUESTION_START.matcher(normalized).find()
+				&& !NOMINAL_SUBJECT_CLAUSE_START.matcher(normalized).find();
 	}
 
 	private List<LearningContentItem> parseSentences(

@@ -52,8 +52,10 @@ public class SecurityConfig {
 						.requestMatchers("/error").permitAll()
 						.requestMatchers(HttpMethod.GET, "/api/help-center", "/api/help-center/**").permitAll()
 						.requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/email/**",
-								"/api/auth/mobile/email/**", "/api/auth/logout",
-								"/api/admin/auth/login", "/api/admin/auth/logout", "/actuator/health").permitAll()
+								"/api/auth/mobile/email/**", "/api/auth/web/token/**",
+								"/api/auth/mobile/token/**", "/api/auth/logout",
+								"/api/admin/auth/login", "/api/admin/auth/logout",
+								"/actuator/health", "/actuator/prometheus").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/telemetry/events").permitAll()
 						.requestMatchers(HttpMethod.PATCH, "/api/admin/users/*/entitlement")
 						.hasAnyRole("SUPER_ADMIN", "OPERATIONS")
@@ -61,6 +63,12 @@ public class SecurityConfig {
 						.hasAnyRole("SUPER_ADMIN", "OPERATIONS")
 						.requestMatchers(HttpMethod.PUT, "/api/admin/ai/**")
 						.hasAnyRole("SUPER_ADMIN", "OPERATIONS")
+						.requestMatchers(HttpMethod.POST, "/api/admin/quality/**")
+						.hasAnyRole("SUPER_ADMIN", "OPERATIONS", "TECHNICAL")
+						.requestMatchers(HttpMethod.PATCH, "/api/admin/quality/**")
+						.hasAnyRole("SUPER_ADMIN", "OPERATIONS", "TECHNICAL")
+						.requestMatchers(HttpMethod.GET, "/api/admin/quality/**")
+						.hasAnyRole("SUPER_ADMIN", "OPERATIONS", "TECHNICAL", "AUDITOR")
 						.requestMatchers("/api/admin/**")
 						.hasAnyRole("SUPER_ADMIN", "OPERATIONS", "AUDITOR")
 						.anyRequest().authenticated())
@@ -75,6 +83,10 @@ public class SecurityConfig {
 	BearerTokenResolver bearerTokenResolver() {
 		DefaultBearerTokenResolver headerResolver = new DefaultBearerTokenResolver();
 		return request -> {
+			String path = request.getRequestURI();
+			if (path.startsWith("/api/auth/web/token/") || path.startsWith("/api/auth/mobile/token/")) {
+				return null;
+			}
 			String headerToken = headerResolver.resolve(request);
 			if (StringUtils.hasText(headerToken)) {
 				return headerToken;

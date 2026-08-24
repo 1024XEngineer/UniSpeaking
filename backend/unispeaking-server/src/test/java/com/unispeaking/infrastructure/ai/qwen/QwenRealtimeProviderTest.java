@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -23,6 +24,7 @@ import com.unispeaking.infrastructure.ai.doubao.DoubaoAsrProvider;
 import com.unispeaking.infrastructure.ai.iflytek.IflytekScoringProvider;
 import com.unispeaking.infrastructure.ai.minimax.MiniMaxTtsProvider;
 import com.unispeaking.infrastructure.realtime.RealtimeCredentialIssuer;
+import com.unispeaking.provider.AiProviderRegistry;
 import com.unispeaking.provider.LlmResponseFormat;
 import com.unispeaking.provider.MeteredProviderException;
 import java.io.ByteArrayOutputStream;
@@ -318,6 +320,110 @@ class QwenRealtimeProviderTest {
 		verify(issuer).issue(ProviderType.QWEN);
 	}
 
+	@Test
+	void rejectsInvalidRealtimeInputsAndConfigurationBeforeOpeningHttpConnections() {
+		RecordingHttpClient httpClient = new RecordingHttpClient();
+		RealtimeCredentialIssuer issuer = mock(RealtimeCredentialIssuer.class);
+		QwenRealtimeProvider provider = provider(httpClient, issuer);
+
+		assertEquals("INVALID_SDP", assertThrows(
+				BusinessException.class,
+				() -> provider.exchangeRealtimeSdp(
+						AiProviderRegistry.QWEN_REALTIME_FLASH, "  ", "token")).code());
+		assertEquals("QWEN_CREDENTIAL_MISSING", assertThrows(
+				BusinessException.class,
+				() -> provider.exchangeRealtimeSdp(
+						AiProviderRegistry.QWEN_REALTIME_FLASH, "offer", "  ")).code());
+		assertEquals("QWEN_REALTIME_MODEL_NOT_SUPPORTED", assertThrows(
+				BusinessException.class,
+				() -> provider.exchangeRealtimeSdp(
+						"qwen-other-model", "offer", "token")).code());
+
+		RealtimeProperties missingWorkspace = new RealtimeProperties(
+				"", "", "qwen3.5-omni-flash-realtime", "cn-beijing",
+				"https://dashscope.aliyuncs.com/api/v1/tokens", 300,
+				Duration.ofSeconds(10), Duration.ofSeconds(20), 1_048_576);
+		missingWorkspace.validate();
+		QwenRealtimeProvider unconfigured = new QwenRealtimeProvider(
+				httpClient, missingWorkspace, issuer);
+		assertEquals("QWEN_WORKSPACE_OR_MODEL_MISSING", assertThrows(
+				BusinessException.class,
+				() -> unconfigured.exchangeRealtimeSdp(
+						AiProviderRegistry.QWEN_REALTIME_FLASH, "offer", "token")).code());
+
+		assertTrue(httpClient.requests.isEmpty());
+		verify(issuer, never()).issue(any());
+	}
+
+	@Test
+	void retriesAThreeHundredResponseAndUsesTheFreshCredential() {
+		RecordingHttpClient httpClient = new RecordingHttpClient(
+				new QueuedResponse(302, "redirect"),
+				new QueuedResponse(200, "answer-sdp"));
+		RealtimeCredentialIssuer issuer = mock(RealtimeCredentialIssuer.class);
+		when(issuer.issue(any())).thenReturn(freshCredential("fresh-token"));
+		QwenRealtimeProvider provider = provider(httpClient, issuer);
+
+		assertEquals("answer-sdp", provider.exchangeRealtimeSdp(
+				AiProviderRegistry.QWEN_REALTIME_FLASH, "offer-sdp", "temporary-token"));
+		assertEquals(2, httpClient.requests.size());
+		assertEquals("Bearer temporary-token",
+				httpClient.requests.get(0).headers().firstValue("Authorization").orElseThrow());
+		assertEquals("Bearer fresh-token",
+				httpClient.requests.get(1).headers().firstValue("Authorization").orElseThrow());
+		verify(issuer).issue(ProviderType.QWEN);
+	}
+
+	@Test
+	void rejectsAnOversizedAnswerWithoutRetryingTheSignalingRequest() {
+		RecordingHttpClient httpClient = new RecordingHttpClient(
+				new QueuedResponse(200, "123456789"));
+		RealtimeCredentialIssuer issuer = mock(RealtimeCredentialIssuer.class);
+		QwenRealtimeProvider provider = new QwenRealtimeProvider(
+				httpClient,
+				new RealtimeProperties(
+						"", "workspace-123", "qwen3.5-omni-flash-realtime", "cn-beijing",
+						"https://dashscope.aliyuncs.com/api/v1/tokens", 300,
+						Duration.ofSeconds(10), Duration.ofSeconds(20), 8),
+				issuer);
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> provider.exchangeRealtimeSdp(
+						AiProviderRegistry.QWEN_REALTIME_FLASH, "offer-sdp", "token"));
+
+		assertEquals("QWEN_ANSWER_TOO_LARGE", exception.code());
+		assertEquals(1, httpClient.requests.size());
+		verify(issuer, never()).issue(any());
+	}
+
+	@Test
+	void mapsInterruptedSignalingCallsWithoutRetryingAndRestoresInterruptStatus() throws Exception {
+		HttpClient httpClient = mock(HttpClient.class);
+		doThrow(new InterruptedException("cancelled"))
+				.when(httpClient)
+				.send(any(HttpRequest.class), org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<String>>any());
+		RealtimeCredentialIssuer issuer = mock(RealtimeCredentialIssuer.class);
+		QwenRealtimeProvider interrupted = new QwenRealtimeProvider(
+				httpClient,
+				new RealtimeProperties(
+						"", "workspace-123", "qwen3.5-omni-flash-realtime", "cn-beijing",
+						"https://dashscope.aliyuncs.com/api/v1/tokens", 300,
+						Duration.ofSeconds(10), Duration.ofSeconds(20), 1_048_576),
+				issuer);
+
+		Thread.interrupted();
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> interrupted.exchangeRealtimeSdp(
+						AiProviderRegistry.QWEN_REALTIME_FLASH, "offer-sdp", "token"));
+
+		assertEquals("QWEN_SIGNALING_INTERRUPTED", exception.code());
+		assertTrue(Thread.currentThread().isInterrupted());
+		verify(issuer, never()).issue(any());
+		Thread.interrupted();
+	}
+
 	private QwenRealtimeProvider provider(
 			RecordingHttpClient httpClient,
 			RealtimeCredentialIssuer issuer) {
@@ -481,6 +587,72 @@ class QwenRealtimeProviderTest {
 	}
 
 	@Test
+	void rejectsQwenLlmMissingCredentialAndBlankPromptBeforeSendingRequests() {
+		RecordingHttpClient client = new RecordingHttpClient();
+		QwenLlmProvider configured = qwenLlmProvider(client, "dashscope-key");
+		QwenLlmProvider missingCredential = qwenLlmProvider(client, "");
+
+		assertEquals("INVALID_LLM_PROMPT", assertThrows(
+				BusinessException.class,
+				() -> configured.executeLlmTask("  ", null)).code());
+		assertEquals("QWEN_LLM_CREDENTIAL_MISSING", assertThrows(
+				BusinessException.class,
+				() -> missingCredential.executeLlmTask("hello", null)).code());
+		assertTrue(client.requests.isEmpty());
+	}
+
+	@Test
+	void mapsQwenLlmHttpAndEmptyContentResponsesToBusinessErrors() {
+		RecordingHttpClient httpFailure = new RecordingHttpClient(
+				new QueuedResponse(429, utf8("rate limited")));
+		assertEquals("QWEN_LLM_REQUEST_FAILED", assertThrows(
+				BusinessException.class,
+				() -> qwenLlmProvider(httpFailure, "dashscope-key")
+						.executeLlmTask("hello", null)).code());
+
+		RecordingHttpClient emptyContent = new RecordingHttpClient(
+				new QueuedResponse(200, utf8("{\"choices\":[{\"message\":{\"content\":\"\"}}]}")));
+		assertEquals("QWEN_LLM_EMPTY_RESPONSE", assertThrows(
+				BusinessException.class,
+				() -> qwenLlmProvider(emptyContent, "dashscope-key")
+						.executeLlmTask("hello", null)).code());
+	}
+
+	@Test
+	void mapsQwenLlmTransportAndInterruptedCallsWithoutLeakingCredentials() throws Exception {
+		RecordingHttpClient ioFailure = new RecordingHttpClient(QueuedResponse.ioError());
+		BusinessException ioException = assertThrows(
+				BusinessException.class,
+				() -> qwenLlmProvider(ioFailure, "dashscope-key")
+						.executeLlmTask("hello", null));
+		assertEquals("QWEN_LLM_IO_ERROR", ioException.code());
+		assertFalse(ioException.getMessage().contains("dashscope-key"));
+
+		HttpClient interruptedClient = mock(HttpClient.class);
+		doThrow(new InterruptedException("cancelled"))
+				.when(interruptedClient)
+				.send(any(HttpRequest.class),
+						org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<byte[]>>any());
+		QwenLlmProvider interrupted = new QwenLlmProvider(
+				interruptedClient,
+				new ObjectMapper(),
+				"dashscope-key",
+				URI.create(
+						"https://workspace-123.cn-beijing.maas.aliyuncs.com/"
+								+ "compatible-mode/v1/chat/completions"),
+				"qwen3.5-plus",
+				Duration.ofSeconds(20),
+				128);
+		Thread.interrupted();
+		BusinessException interruptedException = assertThrows(
+				BusinessException.class,
+				() -> interrupted.executeLlmTask("hello", null));
+		assertEquals("QWEN_LLM_INTERRUPTED", interruptedException.code());
+		assertTrue(Thread.currentThread().isInterrupted());
+		Thread.interrupted();
+	}
+
+	@Test
 	void generatesAliyunSpeechAndDownloadsTheReturnedAudio() {
 		byte[] audio = new byte[] {1, 2, 3, 4};
 		String audioUrl = "http://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/test/audio%2Bfile.mp3?Expires=1&Signature=a%2Fb%3D";
@@ -489,7 +661,8 @@ class QwenRealtimeProviderTest {
 						200,
 						utf8("""
 						{"request_id":"req-1","output":{"finish_reason":"stop","audio":{"url":"%s"}}}
-						""".formatted(audioUrl))),
+						""".formatted(audioUrl)),
+						Map.of("x-request-id", List.of("different-header-request-id"))),
 				new QueuedResponse(200, audio));
 		AliyunTtsProvider provider = new AliyunTtsProvider(
 				httpClient,
@@ -503,7 +676,10 @@ class QwenRealtimeProviderTest {
 				Duration.ofSeconds(20),
 				1_048_576);
 
-		var measured = provider.generateSpeechAudioMeasured("Practice makes progress.", null);
+		var measured = provider.generateSpeechAudioMeasured(
+				"Practice makes progress.",
+				null,
+				"configured-voice-only");
 		byte[] response = measured.response();
 
 		assertArrayEquals(new byte[] {1, 2, 3, 4}, response);
@@ -530,7 +706,8 @@ class QwenRealtimeProviderTest {
 						200,
 						utf8("""
 						{"request_id":"qwen-tts-request-1","output":{"finish_reason":"stop","audio":{"url":"%s"}}}
-						""".formatted(audioUrl))),
+						""".formatted(audioUrl)),
+						Map.of("x-request-id", List.of("different-header-request-id"))),
 				new QueuedResponse(200, wav));
 		QwenTtsProvider provider = new QwenTtsProvider(
 				httpClient,
@@ -547,7 +724,8 @@ class QwenRealtimeProviderTest {
 
 		var measured = provider.generateSpeechAudioMeasured(
 				"Practice makes progress.",
-				"must-not-be-used");
+				"must-not-be-used",
+				"Aiden");
 		byte[] response = measured.response();
 		byte[] cachedResponse = provider.generateSpeechAudio(
 				"Practice makes progress.",
@@ -608,6 +786,215 @@ class QwenRealtimeProviderTest {
 		assertEquals(24, exception.usage().inputCharacters());
 		assertEquals(0, exception.usage().audioOutputSeconds());
 		assertEquals(Boolean.TRUE, exception.retryable());
+	}
+
+	@Test
+	void rejectsQwenTtsMissingCredentialAndBlankTextBeforeOpeningHttpConnections() {
+		RecordingHttpClient client = new RecordingHttpClient();
+		QwenTtsProvider configured = qwenTtsProvider(client, "dashscope-key", 128, 128);
+		QwenTtsProvider missingCredential = qwenTtsProvider(client, "", 128, 128);
+
+		assertEquals("INVALID_TTS_TEXT", assertThrows(
+				BusinessException.class,
+				() -> configured.generateSpeechAudio("  ", null)).code());
+		assertEquals("QWEN_TTS_CREDENTIAL_MISSING", assertThrows(
+				BusinessException.class,
+				() -> missingCredential.generateSpeechAudio("hello", null)).code());
+		assertTrue(client.requests.isEmpty());
+	}
+
+	@Test
+	void measuresDefaultVoiceResponsesWithoutAProviderRequestId() {
+		byte[] wav = wavWithSampleRate(24_000);
+		String url = "https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/test/default.wav";
+		RecordingHttpClient client = new RecordingHttpClient(
+				new QueuedResponse(200, utf8("{\"output\":{\"audio\":{\"url\":\""
+						+ url + "\"}}}")),
+				new QueuedResponse(200, wav));
+		QwenTtsProvider provider = qwenTtsProvider(client, "dashscope-key", 128, 128);
+
+		var measured = provider.generateSpeechAudioMeasured("hello", null);
+
+		assertArrayEquals(wav, measured.response());
+		assertEquals(null, measured.providerRequestId());
+		assertEquals("NONE", measured.usage().source());
+	}
+
+	@Test
+	void validatesSpringConfigurationAndRequiredQwenConstructorArguments() {
+		URI endpoint = URI.create(
+				"https://dashscope.aliyuncs.com/api/v1/services/aigc/"
+						+ "multimodal-generation/generation");
+		assertThrows(IllegalArgumentException.class, () -> new QwenTtsProvider(
+				new ObjectMapper(), "key", endpoint.toString(), "model", "voice", "English",
+				0, 1, 128, 128));
+		assertThrows(IllegalArgumentException.class, () -> new QwenTtsProvider(
+				new ObjectMapper(), "key", endpoint.toString(), "model", "voice", "English",
+				1, 0, 128, 128));
+		assertEquals("QWEN_TTS_URL_INVALID", assertThrows(
+				BusinessException.class,
+				() -> new QwenTtsProvider(
+						new ObjectMapper(), "key", "%%%", "model", "voice", "English",
+						1, 1, 128, 128)).code());
+		assertThrows(IllegalArgumentException.class, () -> new QwenTtsProvider(
+				null, new ObjectMapper(), "key", endpoint, "model", "voice", "English",
+				Duration.ofSeconds(1), 128, 128));
+		assertThrows(IllegalArgumentException.class, () -> new QwenTtsProvider(
+				new RecordingHttpClient(), new ObjectMapper(), "key", endpoint, " ", "voice",
+					"English", Duration.ofSeconds(1), 128, 128));
+		assertThrows(IllegalArgumentException.class, () -> new QwenTtsProvider(
+				new RecordingHttpClient(), new ObjectMapper(), "key", endpoint, "model", " ",
+					"English", Duration.ofSeconds(1), 128, 128));
+		assertThrows(IllegalArgumentException.class, () -> new QwenTtsProvider(
+				new RecordingHttpClient(), new ObjectMapper(), "key", endpoint, "model", "voice",
+					" ", Duration.ofSeconds(1), 128, 128));
+	}
+
+	@Test
+	void handlesAnInvalidConfiguredAudioUriAndDefaultLimitFallback() {
+		RecordingHttpClient client = new RecordingHttpClient(
+				new QueuedResponse(200, utf8("{\"output\":{\"audio\":{\"url\":\"https://[::1\"}}}")));
+		QwenTtsProvider provider = qwenTtsProvider(client, "key", 0, 0);
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> provider.generateSpeechAudio("hello", null));
+		assertEquals("QWEN_TTS_URL_INVALID", exception.code());
+	}
+
+	@Test
+	void rejectsOversizedAndMalformedQwenTtsGenerationResponsesWhileReadingThem() {
+		RecordingHttpClient oversized = new RecordingHttpClient(
+				new QueuedResponse(200, utf8("0123456789")));
+		BusinessException oversizedFailure = assertThrows(
+				BusinessException.class,
+				() -> qwenTtsProvider(oversized, "dashscope-key", 4, 128)
+						.generateSpeechAudio("hello", null));
+		assertEquals("QWEN_TTS_RESPONSE_TOO_LARGE", oversizedFailure.code());
+
+		RecordingHttpClient missingAudioUrl = new RecordingHttpClient(
+				new QueuedResponse(200, utf8("{\"output\":{\"audio\":{}}}")));
+		BusinessException malformedFailure = assertThrows(
+				BusinessException.class,
+				() -> qwenTtsProvider(missingAudioUrl, "dashscope-key", 128, 128)
+						.generateSpeechAudio("hello", null));
+		assertEquals("QWEN_TTS_AUDIO_URL_MISSING", malformedFailure.code());
+	}
+
+	@Test
+	void mapsQwenTtsGenerationHttpFailuresToRetryableBusinessErrors() {
+		RecordingHttpClient client = new RecordingHttpClient(
+				new QueuedResponse(503, utf8("temporarily unavailable")));
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> qwenTtsProvider(client, "dashscope-key", 128, 128)
+						.generateSpeechAudio("hello", null));
+
+		assertEquals("QWEN_TTS_REQUEST_FAILED", exception.code());
+	}
+
+	@Test
+	void rejectsUntrustedQwenTtsAudioUrlsAndInvalidDownloadedAudio() {
+		RecordingHttpClient untrustedUrl = new RecordingHttpClient(
+				new QueuedResponse(200, utf8(
+						"{\"output\":{\"audio\":{\"url\":\"https://evil.example/audio.wav\"}}}")));
+		assertEquals("QWEN_TTS_AUDIO_URL_UNTRUSTED", assertThrows(
+				BusinessException.class,
+				() -> qwenTtsProvider(untrustedUrl, "dashscope-key", 128, 128)
+						.generateSpeechAudio("hello", null)).code());
+		assertEquals(1, untrustedUrl.requests.size());
+
+		String trustedUrl = "https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/test/audio.wav";
+		RecordingHttpClient invalidWav = new RecordingHttpClient(
+				new QueuedResponse(200, utf8(
+						"{\"output\":{\"audio\":{\"url\":\"%s\"}}}".formatted(trustedUrl))),
+				new QueuedResponse(200, new byte[] {1, 2, 3}));
+		assertEquals("QWEN_TTS_AUDIO_INVALID", assertThrows(
+				BusinessException.class,
+				() -> qwenTtsProvider(invalidWav, "dashscope-key", 128, 128)
+						.generateSpeechAudio("hello", null)).code());
+	}
+
+	@Test
+	void mapsQwenTtsTransportFailureWithoutLeakingCredentials() {
+		RecordingHttpClient client = new RecordingHttpClient(QueuedResponse.ioError());
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> qwenTtsProvider(client, "dashscope-key", 128, 128)
+						.generateSpeechAudio("hello", null));
+
+		assertEquals("QWEN_TTS_IO_ERROR", exception.code());
+		assertFalse(exception.getMessage().contains("dashscope-key"));
+	}
+
+	@Test
+	void mapsQwenTtsInvalidEndpointAndTextLengthBeforeSendingRequests() {
+		RecordingHttpClient endpointClient = new RecordingHttpClient();
+		QwenTtsProvider invalidEndpoint = new QwenTtsProvider(
+				endpointClient,
+				new ObjectMapper(),
+				"dashscope-key",
+				URI.create("https://evil.example/generation"),
+				"qwen3-tts-flash",
+				"Aiden",
+				"English",
+				Duration.ofSeconds(20),
+				128,
+				128);
+		assertEquals("QWEN_TTS_ENDPOINT_INVALID", assertThrows(
+				BusinessException.class,
+				() -> invalidEndpoint.generateSpeechAudio("hello", null)).code());
+
+		RecordingHttpClient longTextClient = new RecordingHttpClient();
+		assertEquals("TTS_TEXT_TOO_LONG", assertThrows(
+				BusinessException.class,
+				() -> qwenTtsProvider(longTextClient, "dashscope-key", 128, 128)
+						.generateSpeechAudio("x".repeat(5_001), null)).code());
+		assertTrue(endpointClient.requests.isEmpty());
+		assertTrue(longTextClient.requests.isEmpty());
+	}
+
+	@Test
+	void resolvesProductVoiceAliasesAndCachesAudioByVoiceAndText() {
+		byte[] wav = wavWithSampleRate(24_000);
+		String audioUrl = "https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/test/voice.wav";
+		RecordingHttpClient httpClient = new RecordingHttpClient(
+				new QueuedResponse(200, utf8(
+						"{\"output\":{\"audio\":{\"url\":\"%s\"}}}".formatted(audioUrl))),
+				new QueuedResponse(200, wav));
+		QwenTtsProvider provider = qwenTtsProvider(httpClient, "dashscope-key", 128, 128);
+
+		assertArrayEquals(wav, provider.generateSpeechAudio("hello", null, "Harvey"));
+		assertArrayEquals(wav, provider.generateSpeechAudio("hello", null, "Harvey"));
+
+		assertEquals(2, httpClient.requests.size());
+		assertTrue(readBody(httpClient.requests.getFirst()).contains("\"voice\":\"Neil\""));
+	}
+
+	@Test
+	void mapsQwenTtsInterruptedCallsAndRestoresInterruptStatus() throws Exception {
+		HttpClient httpClient = mock(HttpClient.class);
+		doThrow(new InterruptedException("cancelled"))
+				.when(httpClient)
+				.send(any(HttpRequest.class),
+						org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<byte[]>>any());
+		QwenTtsProvider provider = new QwenTtsProvider(
+				httpClient,
+				new ObjectMapper(),
+				"dashscope-key",
+				URI.create(
+						"https://dashscope.aliyuncs.com/api/v1/services/aigc/"
+								+ "multimodal-generation/generation"),
+				"qwen3-tts-flash", "Aiden", "English", Duration.ofSeconds(20), 128, 128);
+
+		Thread.interrupted();
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> provider.generateSpeechAudio("hello", null));
+		assertEquals("QWEN_TTS_INTERRUPTED", exception.code());
+		assertTrue(Thread.currentThread().isInterrupted());
+		Thread.interrupted();
 	}
 
 	@Test
@@ -720,6 +1107,10 @@ class QwenRealtimeProviderTest {
 				"IPA88",
 				startFrame.path("parameter").path("st")
 						.path("dict_type").asString());
+		assertEquals(
+				0.2,
+				startFrame.path("parameter").path("st")
+						.path("slack").asDouble());
 	}
 
 	@Test
@@ -804,6 +1195,66 @@ class QwenRealtimeProviderTest {
 	}
 
 	@Test
+	void rejectsIflytekInvalidReferenceAndAudioBeforeOpeningTheWebSocket() {
+		RecordingWebSocketConnector connector = new RecordingWebSocketConnector("{}");
+		IflytekScoringProvider provider = iflytekProvider(
+				connector,
+				URI.create("wss://cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720"),
+				Duration.ofSeconds(2));
+
+		assertEquals("INVALID_PRONUNCIATION_REFERENCE", assertThrows(
+				BusinessException.class,
+				() -> provider.evaluatePronunciation("  ", wavWithSampleRate(16_000), null)).code());
+		assertEquals("PRONUNCIATION_REFERENCE_TOO_LONG", assertThrows(
+				BusinessException.class,
+				() -> provider.evaluatePronunciation("x".repeat(4_097), wavWithSampleRate(16_000), null)).code());
+		assertEquals("INVALID_AUDIO", assertThrows(
+				BusinessException.class,
+				() -> provider.evaluatePronunciation("hello", new byte[0], null)).code());
+		assertEquals(null, connector.uri);
+	}
+
+	@Test
+	void rejectsIflytekOversizedAudioAndMissingCredentialsBeforeConnecting() {
+		URI endpoint = URI.create("wss://cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720");
+		RecordingWebSocketConnector oversizedConnector = new RecordingWebSocketConnector("{}");
+		IflytekScoringProvider oversized = iflytekProvider(
+				oversizedConnector, endpoint, Duration.ofSeconds(2), "app", "key", "secret", 45);
+		assertEquals("PRONUNCIATION_AUDIO_TOO_LARGE", assertThrows(
+				BusinessException.class,
+				() -> oversized.evaluatePronunciation("hello", wavWithSampleRate(16_000), null)).code());
+		assertEquals(null, oversizedConnector.uri);
+
+		RecordingWebSocketConnector credentialConnector = new RecordingWebSocketConnector("{}");
+		IflytekScoringProvider missingCredentials = iflytekProvider(
+				credentialConnector, endpoint, Duration.ofSeconds(2), "", "", "", 1_048_576);
+		assertEquals("IFLYTEK_SUNTONE_CREDENTIAL_MISSING", assertThrows(
+				BusinessException.class,
+				() -> missingCredentials.evaluatePronunciation(
+						"hello", wavWithSampleRate(16_000), null)).code());
+		assertEquals(null, credentialConnector.uri);
+	}
+
+	@Test
+	void mapsIflytekProviderAndMalformedFinalResponsesToBusinessErrors() {
+		URI endpoint = URI.create("wss://cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720");
+		RecordingWebSocketConnector rateLimited = new RecordingWebSocketConnector(
+				"{\"header\":{\"code\":11202,\"status\":2}}");
+		BusinessException rateLimitFailure = assertThrows(
+				BusinessException.class,
+				() -> iflytekProvider(rateLimited, endpoint, Duration.ofSeconds(2))
+						.evaluatePronunciation("hello", wavWithSampleRate(16_000), null));
+		assertEquals("IFLYTEK_SUNTONE_RATE_LIMITED", rateLimitFailure.code());
+
+		RecordingWebSocketConnector malformed = new RecordingWebSocketConnector("not-json");
+		BusinessException malformedFailure = assertThrows(
+				BusinessException.class,
+				() -> iflytekProvider(malformed, endpoint, Duration.ofSeconds(2))
+						.evaluatePronunciation("hello", wavWithSampleRate(16_000), null));
+		assertEquals("IFLYTEK_SUNTONE_RESPONSE_INVALID", malformedFailure.code());
+	}
+
+	@Test
 	void executesDeepSeekLlmTaskWithTheServerConfiguredCredential() {
 		RecordingHttpClient httpClient = new RecordingHttpClient(new QueuedResponse(
 				200,
@@ -851,6 +1302,116 @@ class QwenRealtimeProviderTest {
 
 		assertEquals("DEEPSEEK_LLM_ENDPOINT_INVALID", exception.code());
 		assertTrue(httpClient.requests.isEmpty());
+	}
+
+	@Test
+	void rejectsDeepSeekMissingCredentialAndBlankPromptBeforeSendingRequests() {
+		RecordingHttpClient httpClient = new RecordingHttpClient();
+		DeepSeekLlmProvider configured = new DeepSeekLlmProvider(
+				httpClient, new ObjectMapper(), "deepseek-key",
+				URI.create("https://api.deepseek.com/chat/completions"),
+				"deepseek-v4-flash", Duration.ofSeconds(20), 128);
+		DeepSeekLlmProvider missingCredential = new DeepSeekLlmProvider(
+				httpClient, new ObjectMapper(), "",
+				URI.create("https://api.deepseek.com/chat/completions"),
+				"deepseek-v4-flash", Duration.ofSeconds(20), 128);
+
+		assertEquals("INVALID_LLM_PROMPT", assertThrows(
+				BusinessException.class,
+				() -> configured.executeLlmTask("  ", null)).code());
+		assertEquals("DEEPSEEK_LLM_CREDENTIAL_MISSING", assertThrows(
+				BusinessException.class,
+				() -> missingCredential.executeLlmTask("hello", null)).code());
+		assertTrue(httpClient.requests.isEmpty());
+	}
+
+	@Test
+	void mapsDeepSeekHttpJsonAndResponseSizeFailures() {
+		RecordingHttpClient httpFailure = new RecordingHttpClient(
+				new QueuedResponse(503, utf8("temporarily unavailable")));
+		assertEquals("DEEPSEEK_LLM_REQUEST_FAILED", assertThrows(
+				BusinessException.class,
+				() -> deepSeekProvider(httpFailure, 128)
+						.executeLlmTask("hello", null)).code());
+
+		RecordingHttpClient malformed = new RecordingHttpClient(
+				new QueuedResponse(200, utf8("not-json")));
+		assertEquals("DEEPSEEK_LLM_RESPONSE_INVALID", assertThrows(
+				BusinessException.class,
+				() -> deepSeekProvider(malformed, 128)
+						.executeLlmTask("hello", null)).code());
+
+		RecordingHttpClient empty = new RecordingHttpClient(
+				new QueuedResponse(200, utf8("{\"choices\":[{\"message\":{\"content\":\" \"}}]}")));
+		assertEquals("DEEPSEEK_LLM_EMPTY_RESPONSE", assertThrows(
+				BusinessException.class,
+				() -> deepSeekProvider(empty, 128)
+						.executeLlmTask("hello", null)).code());
+
+		RecordingHttpClient oversized = new RecordingHttpClient(
+				new QueuedResponse(200, utf8("123456789")));
+		assertEquals("DEEPSEEK_LLM_RESPONSE_TOO_LARGE", assertThrows(
+				BusinessException.class,
+				() -> deepSeekProvider(oversized, 8)
+						.executeLlmTask("hello", null)).code());
+	}
+
+	@Test
+	void recordsDeepSeekProviderUsageAndMapsTransportFailures() {
+		RecordingHttpClient measured = new RecordingHttpClient(new QueuedResponse(
+				200,
+				utf8("""
+				{"id":"request-1","choices":[{"message":{"content":"answer"}}],
+				"usage":{"prompt_tokens":11,"completion_tokens":7}}
+				""")));
+		var response = deepSeekProvider(measured, 128)
+				.executeLlmTaskMeasured("hello", null);
+		assertEquals("answer", response.response());
+		assertEquals("request-1", response.providerRequestId());
+		assertEquals(11, response.usage().inputTokens());
+		assertEquals(7, response.usage().outputTokens());
+		assertEquals("PROVIDER", response.usage().source());
+
+		RecordingHttpClient estimated = new RecordingHttpClient(new QueuedResponse(
+				200, utf8("{\"choices\":[{\"message\":{\"content\":\"answer\"}}]}")));
+		assertEquals("ESTIMATED", deepSeekProvider(estimated, 128)
+				.executeLlmTaskMeasured("hello", null).usage().source());
+
+		RecordingHttpClient ioFailure = new RecordingHttpClient(QueuedResponse.ioError());
+		BusinessException ioException = assertThrows(
+				BusinessException.class,
+				() -> deepSeekProvider(ioFailure, 128).executeLlmTask("hello", null));
+		assertEquals("DEEPSEEK_LLM_IO_ERROR", ioException.code());
+	}
+
+	@Test
+	void mapsInterruptedDeepSeekCallsAndRestoresInterruptStatus() throws Exception {
+		HttpClient httpClient = mock(HttpClient.class);
+		doThrow(new InterruptedException("cancelled"))
+				.when(httpClient)
+				.send(any(HttpRequest.class),
+						org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<byte[]>>any());
+		DeepSeekLlmProvider provider = new DeepSeekLlmProvider(
+				httpClient, new ObjectMapper(), "deepseek-key",
+				URI.create("https://api.deepseek.com/chat/completions"),
+				"deepseek-v4-flash", Duration.ofSeconds(20), 128);
+
+		Thread.interrupted();
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> provider.executeLlmTask("hello", null));
+		assertEquals("DEEPSEEK_LLM_INTERRUPTED", exception.code());
+		assertTrue(Thread.currentThread().isInterrupted());
+		Thread.interrupted();
+	}
+
+	private DeepSeekLlmProvider deepSeekProvider(
+			RecordingHttpClient httpClient,
+			int maxResponseBytes) {
+		return new DeepSeekLlmProvider(
+				httpClient, new ObjectMapper(), "deepseek-key",
+				URI.create("https://api.deepseek.com/chat/completions"),
+				"deepseek-v4-flash", Duration.ofSeconds(20), maxResponseBytes);
 	}
 
 	@Test
@@ -961,6 +1522,111 @@ class QwenRealtimeProviderTest {
 	}
 
 	@Test
+	void rejectsQwenAsrInvalidAudioAndMissingCredentialsBeforeSendingRequests() {
+		RecordingHttpClient client = new RecordingHttpClient();
+		QwenAsrProvider configured = qwenAsrProvider(client, "dashscope-key", 8, 128);
+		QwenAsrProvider missingCredential = qwenAsrProvider(client, "", 8, 128);
+
+		assertEquals("INVALID_AUDIO", assertThrows(
+				BusinessException.class,
+				() -> configured.convertAudioToText(new byte[0], null)).code());
+		assertEquals("TRANSCRIPTION_AUDIO_TOO_LARGE", assertThrows(
+				BusinessException.class,
+				() -> configured.convertAudioToText(new byte[9], null)).code());
+		assertEquals("QWEN_ASR_CREDENTIAL_MISSING", assertThrows(
+				BusinessException.class,
+				() -> missingCredential.convertAudioToText(new byte[] {1}, null)).code());
+		assertTrue(client.requests.isEmpty());
+	}
+
+	@Test
+	void mapsQwenAsrHttpInvalidAndLimitedResponsesToBusinessErrors() {
+		RecordingHttpClient httpFailure = new RecordingHttpClient(
+				new QueuedResponse(502, utf8("bad gateway")));
+		assertEquals("QWEN_ASR_REQUEST_FAILED", assertThrows(
+				BusinessException.class,
+				() -> qwenAsrProvider(httpFailure, "dashscope-key", 128, 128)
+						.convertAudioToText(new byte[] {1}, null)).code());
+
+		RecordingHttpClient invalidJson = new RecordingHttpClient(
+				new QueuedResponse(200, utf8("not-json")));
+		assertEquals("QWEN_ASR_RESPONSE_INVALID", assertThrows(
+				BusinessException.class,
+				() -> qwenAsrProvider(invalidJson, "dashscope-key", 128, 128)
+						.convertAudioToText(new byte[] {1}, null)).code());
+
+		RecordingHttpClient oversized = new RecordingHttpClient(
+				new QueuedResponse(200, utf8("0123456789")));
+		assertEquals("QWEN_ASR_RESPONSE_TOO_LARGE", assertThrows(
+				BusinessException.class,
+				() -> qwenAsrProvider(oversized, "dashscope-key", 128, 4)
+						.convertAudioToText(new byte[] {1}, null)).code());
+	}
+
+	@Test
+	void rejectsUntrustedQwenAsrEndpointsAndEmptyTranscriptions() {
+		RecordingHttpClient untrustedClient = new RecordingHttpClient();
+		QwenAsrProvider untrusted = new QwenAsrProvider(
+				untrustedClient,
+				new ObjectMapper(),
+				"dashscope-key",
+				URI.create("https://evil.example/compatible-mode/v1/chat/completions"),
+				"qwen3-asr-flash",
+				Duration.ofSeconds(20),
+				128,
+				128);
+		assertEquals("QWEN_ASR_ENDPOINT_INVALID", assertThrows(
+				BusinessException.class,
+				() -> untrusted.convertAudioToText(new byte[] {1}, null)).code());
+		assertTrue(untrustedClient.requests.isEmpty());
+
+		RecordingHttpClient emptyResult = new RecordingHttpClient(
+				new QueuedResponse(200, utf8("{\"choices\":[{\"message\":{\"content\":\"\"}}]}")));
+		assertEquals("QWEN_ASR_RESULT_EMPTY", assertThrows(
+				BusinessException.class,
+				() -> qwenAsrProvider(emptyResult, "dashscope-key", 128, 128)
+						.convertAudioToText(new byte[] {1}, null)).code());
+	}
+
+	@Test
+	void mapsQwenAsrTransportFailuresWithoutIncludingCredentials() {
+		RecordingHttpClient client = new RecordingHttpClient(QueuedResponse.ioError());
+
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> qwenAsrProvider(client, "dashscope-key", 128, 128)
+						.convertAudioToText(new byte[] {1}, null));
+
+		assertEquals("QWEN_ASR_IO_ERROR", exception.code());
+		assertFalse(exception.getMessage().contains("dashscope-key"));
+	}
+
+	@Test
+	void mapsQwenAsrInterruptedCallsAndRestoresInterruptStatus() throws Exception {
+		HttpClient httpClient = mock(HttpClient.class);
+		doThrow(new InterruptedException("cancelled"))
+				.when(httpClient)
+				.send(any(HttpRequest.class),
+						org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<byte[]>>any());
+		QwenAsrProvider provider = new QwenAsrProvider(
+				httpClient,
+				new ObjectMapper(),
+				"dashscope-key",
+				URI.create(
+						"https://workspace-123.cn-beijing.maas.aliyuncs.com/"
+								+ "compatible-mode/v1/chat/completions"),
+				"qwen3-asr-flash", Duration.ofSeconds(20), 128, 128);
+
+		Thread.interrupted();
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> provider.convertAudioToText(new byte[] {1}, null));
+		assertEquals("QWEN_ASR_INTERRUPTED", exception.code());
+		assertTrue(Thread.currentThread().isInterrupted());
+		Thread.interrupted();
+	}
+
+	@Test
 	void transcribesAudioWithDoubaoBigAsr() {
 		RecordingHttpClient httpClient = new RecordingHttpClient(new QueuedResponse(
 				200,
@@ -1030,21 +1696,215 @@ class QwenRealtimeProviderTest {
 		assertTrue(exception.getMessage().contains("55000031"));
 	}
 
+	@Test
+	void usesLegacyDoubaoCredentialsWhenApiKeyIsAbsent() {
+		RecordingHttpClient httpClient = new RecordingHttpClient(new QueuedResponse(
+				200,
+				utf8("{\"result\":{\"text\":\"legacy-ok\"}}"),
+				Map.of("X-Api-Status-Code", List.of("20000000"))));
+		DoubaoAsrProvider provider = new DoubaoAsrProvider(
+				httpClient, new ObjectMapper(), "", "app-key", "access-key",
+				"legacy-user",
+				URI.create("https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash"),
+				"resource", Duration.ofSeconds(20), 128, 128);
+
+		assertEquals("legacy-ok", provider.convertAudioToText(new byte[] {1, 2}, null));
+		HttpRequest request = httpClient.requests.getFirst();
+		assertEquals("app-key", request.headers().firstValue("X-Api-App-Key").orElseThrow());
+		assertEquals("access-key", request.headers().firstValue("X-Api-Access-Key").orElseThrow());
+		assertTrue(request.headers().firstValue("X-Api-Key").isEmpty());
+	}
+
+	@Test
+	void rejectsDoubaoInvalidInputsCredentialsEndpointAndResponseSize() {
+		RecordingHttpClient httpClient = new RecordingHttpClient();
+		DoubaoAsrProvider provider = doubaoProvider(httpClient, "doubao-key", 128, 128,
+				URI.create("https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash"));
+		assertEquals("INVALID_AUDIO", assertThrows(
+				BusinessException.class,
+				() -> provider.convertAudioToText(new byte[0], null)).code());
+		assertEquals("TRANSCRIPTION_AUDIO_TOO_LARGE", assertThrows(
+				BusinessException.class,
+				() -> doubaoProvider(
+						new RecordingHttpClient(), "doubao-key", 1, 128,
+						URI.create("https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash"))
+						.convertAudioToText(new byte[] {1, 2}, null)).code());
+
+		DoubaoAsrProvider missingCredential = doubaoProvider(
+				httpClient, "", 128, 128,
+				URI.create("https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash"));
+		assertEquals("DOUBAO_ASR_CREDENTIAL_MISSING", assertThrows(
+				BusinessException.class,
+				() -> missingCredential.convertAudioToText(new byte[] {1}, null)).code());
+
+		DoubaoAsrProvider untrusted = doubaoProvider(
+				httpClient, "doubao-key", 128, 128,
+				URI.create("https://evil.example/api/v3/auc/bigmodel/recognize/flash"));
+		assertEquals("DOUBAO_ASR_ENDPOINT_INVALID", assertThrows(
+				BusinessException.class,
+				() -> untrusted.convertAudioToText(new byte[] {1}, null)).code());
+		assertTrue(httpClient.requests.isEmpty());
+
+		DoubaoAsrProvider oversized = doubaoProvider(
+				new RecordingHttpClient(new QueuedResponse(200, utf8("123456789"),
+						Map.of("X-Api-Status-Code", List.of("20000000")))),
+				"doubao-key", 128, 8,
+				URI.create("https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash"));
+		assertEquals("DOUBAO_ASR_RESPONSE_TOO_LARGE", assertThrows(
+				BusinessException.class,
+				() -> oversized.convertAudioToText(new byte[] {1}, null)).code());
+	}
+
+	@Test
+	void mapsDoubaoHttpJsonEmptyAndTransportFailures() {
+		URI endpoint = URI.create("https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash");
+		RecordingHttpClient httpFailure = new RecordingHttpClient(new QueuedResponse(500, utf8("error")));
+		assertEquals("DOUBAO_ASR_REQUEST_FAILED", assertThrows(
+				BusinessException.class,
+				() -> doubaoProvider(httpFailure, "key", 128, 128, endpoint)
+						.convertAudioToText(new byte[] {1}, null)).code());
+
+		RecordingHttpClient missingStatus = new RecordingHttpClient(new QueuedResponse(
+				200, utf8("{}")));
+		assertEquals("DOUBAO_ASR_REQUEST_FAILED", assertThrows(
+				BusinessException.class,
+				() -> doubaoProvider(missingStatus, "key", 128, 128, endpoint)
+						.convertAudioToText(new byte[] {1}, null)).code());
+
+		RecordingHttpClient empty = new RecordingHttpClient(new QueuedResponse(
+				200, utf8("{\"result\":{\"text\":\"\"}}"),
+				Map.of("X-Api-Status-Code", List.of("20000000"))));
+		assertEquals("DOUBAO_ASR_RESULT_EMPTY", assertThrows(
+				BusinessException.class,
+				() -> doubaoProvider(empty, "key", 128, 128, endpoint)
+						.convertAudioToText(new byte[] {1}, null)).code());
+
+		RecordingHttpClient malformed = new RecordingHttpClient(new QueuedResponse(
+				200, utf8("not-json"), Map.of("X-Api-Status-Code", List.of("20000000"))));
+		assertEquals("DOUBAO_ASR_RESPONSE_INVALID", assertThrows(
+				BusinessException.class,
+				() -> doubaoProvider(malformed, "key", 128, 128, endpoint)
+						.convertAudioToText(new byte[] {1}, null)).code());
+
+		RecordingHttpClient ioFailure = new RecordingHttpClient(QueuedResponse.ioError());
+		assertEquals("DOUBAO_ASR_IO_ERROR", assertThrows(
+				BusinessException.class,
+				() -> doubaoProvider(ioFailure, "key", 128, 128, endpoint)
+						.convertAudioToText(new byte[] {1}, null)).code());
+	}
+
+	@Test
+	void mapsInterruptedDoubaoCallsAndRestoresInterruptStatus() throws Exception {
+		HttpClient httpClient = mock(HttpClient.class);
+		doThrow(new InterruptedException("cancelled"))
+				.when(httpClient)
+				.send(any(HttpRequest.class),
+						org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<byte[]>>any());
+		DoubaoAsrProvider provider = new DoubaoAsrProvider(
+				httpClient, new ObjectMapper(), "key", "", "", "user",
+				URI.create("https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash"),
+				"resource", Duration.ofSeconds(20), 128, 128);
+
+		Thread.interrupted();
+		BusinessException exception = assertThrows(
+				BusinessException.class,
+				() -> provider.convertAudioToText(new byte[] {1}, null));
+		assertEquals("DOUBAO_ASR_INTERRUPTED", exception.code());
+		assertTrue(Thread.currentThread().isInterrupted());
+		Thread.interrupted();
+	}
+
+	private DoubaoAsrProvider doubaoProvider(
+			RecordingHttpClient httpClient,
+			String apiKey,
+			int maxAudioBytes,
+			int maxResponseBytes,
+			URI endpoint) {
+		return new DoubaoAsrProvider(
+				httpClient, new ObjectMapper(), apiKey, "", "", "user", endpoint,
+				"resource", Duration.ofSeconds(20), maxAudioBytes, maxResponseBytes);
+	}
+
+	private QwenTtsProvider qwenTtsProvider(
+			RecordingHttpClient httpClient,
+			String apiKey,
+			int maxResponseBytes,
+			int maxAudioBytes) {
+		return new QwenTtsProvider(
+				httpClient,
+				new ObjectMapper(),
+				apiKey,
+				URI.create(
+						"https://dashscope.aliyuncs.com/api/v1/services/aigc/"
+								+ "multimodal-generation/generation"),
+				"qwen3-tts-flash",
+				"Aiden",
+				"English",
+				Duration.ofSeconds(20),
+				maxResponseBytes,
+				maxAudioBytes);
+	}
+
+	private QwenLlmProvider qwenLlmProvider(
+			RecordingHttpClient httpClient,
+			String apiKey) {
+		return new QwenLlmProvider(
+				httpClient,
+				new ObjectMapper(),
+				apiKey,
+				URI.create(
+						"https://workspace-123.cn-beijing.maas.aliyuncs.com/"
+								+ "compatible-mode/v1/chat/completions"),
+				"qwen3.5-plus",
+				Duration.ofSeconds(20),
+				128);
+	}
+
+	private QwenAsrProvider qwenAsrProvider(
+			RecordingHttpClient httpClient,
+			String apiKey,
+			int maxAudioBytes,
+			int maxResponseBytes) {
+		return new QwenAsrProvider(
+				httpClient,
+				new ObjectMapper(),
+				apiKey,
+				URI.create(
+						"https://workspace-123.cn-beijing.maas.aliyuncs.com/"
+								+ "compatible-mode/v1/chat/completions"),
+				"qwen3-asr-flash",
+				Duration.ofSeconds(20),
+				maxAudioBytes,
+				maxResponseBytes);
+	}
+
 	private IflytekScoringProvider iflytekProvider(
 			RecordingWebSocketConnector connector,
 			URI endpoint,
 			Duration readTimeout) {
+		return iflytekProvider(
+				connector, endpoint, readTimeout, "app-id", "api-key", "api-secret", 1_048_576);
+	}
+
+	private IflytekScoringProvider iflytekProvider(
+			RecordingWebSocketConnector connector,
+			URI endpoint,
+			Duration readTimeout,
+			String appId,
+			String apiKey,
+			String apiSecret,
+			int maxAudioBytes) {
 		return new IflytekScoringProvider(
 				new ObjectMapper(),
 				connector,
-				"app-id",
-				"api-key",
-				"api-secret",
+				appId,
+				apiKey,
+				apiSecret,
 				endpoint,
 				"en",
 				"sent",
 				readTimeout,
-				1_048_576,
+				maxAudioBytes,
 				Duration.ZERO);
 	}
 

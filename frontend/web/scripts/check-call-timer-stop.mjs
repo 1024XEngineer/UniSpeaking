@@ -5,6 +5,28 @@ const appSource = await readFile(
   new URL("../src/controller/App.jsx", import.meta.url),
   "utf8",
 );
+const interviewSource = await readFile(
+  new URL("../src/component/interview/InterviewModule.jsx", import.meta.url),
+  "utf8",
+);
+const ieltsSource = await readFile(
+  new URL("../src/component/ielts/IeltsModule.jsx", import.meta.url),
+  "utf8",
+);
+
+const freeConversationStart = appSource.indexOf("function Conversation(");
+const freeConversationEnd = appSource.indexOf(
+  "function SceneCategoryTag(",
+  freeConversationStart,
+);
+
+assert.notEqual(freeConversationStart, -1, "Conversation must exist");
+assert.notEqual(freeConversationEnd, -1, "Conversation boundary must exist");
+
+const freeConversationSource = appSource.slice(
+  freeConversationStart,
+  freeConversationEnd,
+);
 
 const conversationStart = appSource.indexOf("function CustomSceneConversation(");
 const conversationEnd = appSource.indexOf(
@@ -26,18 +48,53 @@ const timerSource = appSource.slice(timerStart, timerEnd);
 
 assert.match(
   conversationSource,
-  /<CallTimer paused=\{paused\} state=\{ended \|\| error \? "ended" : "active"\} stopped=\{ending\} \/>/,
+  /<CallTimer paused=\{paused\} state=\{ended \? "ended" : error \? "error" : realtimeState\} stopped=\{ending\} \/>/,
   "The scene call timer must stop as soon as report generation begins",
 );
 assert.match(
   timerSource,
-  /if \(stopped \|\| state === "ended"\) return undefined;/,
-  "CallTimer must clear its interval when the call stops",
+  /const terminal = stopped \|\| state === "ended" \|\| state === "error";/,
+  "CallTimer must treat realtime failures as terminal",
 );
 assert.match(
   timerSource,
-  /\}, \[state, stopped\]\);/,
-  "CallTimer must react when the stopped state changes",
+  /const startedAt = useRef\(null\);[\s\S]*?const running = !terminal && state !== "connecting";/,
+  "CallTimer must wait for a successful realtime connection before recording its start time",
+);
+assert.match(
+  timerSource,
+  /if \(!running\) return undefined;[\s\S]*?startedAt\.current \?\?= Date\.now\(\);/,
+  "CallTimer must start only after realtime leaves the connecting state",
+);
+assert.match(
+  timerSource,
+  /return \(\) => window\.clearInterval\(interval\);/,
+  "CallTimer must clear its interval when the call stops or fails",
+);
+assert.match(
+  freeConversationSource,
+  /setCallState\("error"\);[\s\S]*?<CallTimer state=\{callState\}/,
+  "Free conversation must pass realtime failure state to CallTimer",
+);
+assert.match(
+  conversationSource,
+  /setRealtimeState\("connecting"\);[\s\S]*?event\.type === "local\.connected"[\s\S]*?setRealtimeState\("connected"\);/,
+  "Custom scene timing must begin only after local.connected",
+);
+assert.match(
+  interviewSource,
+  /const running = state !== "connecting" && state !== "ended" && state !== "error";[\s\S]*?if \(!running\) return undefined;/,
+  "InterviewTimer must wait for a successful realtime connection",
+);
+assert.match(
+  interviewSource,
+  /event\.type === "local\.connected"[\s\S]*?setRealtimeState\("connected"\);[\s\S]*?<InterviewTimer paused=\{paused\} state=\{ending \? "ended" : error \? "error" : realtimeState\} \/>/,
+  "Interview session must start its timer from local.connected",
+);
+assert.match(
+  ieltsSource,
+  /setRealtimeState\("connected"\);[\s\S]*?if \(ending \|\| realtimeState !== "connected"\) return undefined;/,
+  "IELTS timer must run only after realtime connects",
 );
 
-console.log("Scene call timer completion check passed.");
+console.log("Realtime call timer stop checks passed.");

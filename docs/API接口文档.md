@@ -168,7 +168,28 @@
 
 `AchievementSyncResponse` 包含 `initialized`、`overview`、`newlyUnlocked[]`、`pendingNotifications[]`。
 
-## 5. 自由聊天
+## 5. Realtime 网络配置
+
+基础路径：`/api/realtime`
+
+| 方法 | 路径 | 鉴权 | 请求参数 | 响应 `data` |
+| --- | --- | --- | --- | --- |
+| GET | `/ice-configuration` | 是 | 无 | 当前用户命中的 ICE/TURN 配置 |
+| GET | `/ice-configuration?forceRelay=true` | 是；仅配置的测试用户 | 无 | 强制 relay 测试配置 |
+
+`IceServerConfigurationResponse` 字段：
+
+- `turnEnabled`：当前响应是否包含 TURN；灰度关闭、未命中灰度或测试用户不在白名单时为 `false`。
+- `iceTransportPolicy`：正常灰度为 `all`（直连优先，TURN 作为候选），强制测试为 `relay`。
+- `iceServers`：仅包含服务端配置的 TURN UDP URL、五分钟短期用户名和凭证；凭证不写入日志、不持久化。
+- `expiresAt`：短期凭证过期时间；未启用 TURN 时为 `null`。
+
+服务端默认 `TURN_ROLLOUT_PERCENTAGE=0`，因此新增接口不会改变既有直连路径。灰度按用户 ID
+稳定分桶，建议按 `0 → 5 → 25 → 100` 逐步扩大，并在每一步完成校园网、企业网和普通公网验收。
+`forceRelay=true` 只对 `TURN_RELAY_TEST_USER_IDS` 中的已认证用户生效，不能作为公开的 TURN
+凭证领取入口。
+
+## 6. 自由聊天
 
 基础路径：`/api/scene-sessions`
 
@@ -195,7 +216,7 @@ Realtime 默认路由为七牛 RTI `qwen3.5-omni-plus-realtime`，可回退错�
 客户端；响应中的 `providerSessionId` 是可持久化的七牛 RTI Session ID。结束接口会同步
 完成本地业务会话，并尽最大努力调用供应商 Stop 释放并发额度。
 
-## 6. 自定义场景
+## 7. 自定义场景
 
 基础路径：`/api/custom-scenes`
 
@@ -265,7 +286,7 @@ Realtime 默认路由为七牛 RTI `qwen3.5-omni-plus-realtime`，可回退错�
 
 `SentenceEvaluationResponse`：`overallScore`、`passed`、`words[]`；单词项包含 `word`、`wordScore` 和音素明细。
 
-## 7. IELTS 场景
+## 8. IELTS 场景
 
 基础路径：`/api/ielts`
 
@@ -379,7 +400,7 @@ Realtime 默认路由为七牛 RTI `qwen3.5-omni-plus-realtime`，可回退错�
 
 `IeltsEvaluationHistoryItem` 在上述评分字段之外还包含 `sessionId`、`ieltsId`、`mode`、`topicSelectionMethod`、`topicTitles`、`recordingUrls[]`、`startedAt`、`endedAt`，用于学习资产、趋势图和音频回放。
 
-## 8. 会话通用响应
+## 9. 会话通用响应
 
 `StartSceneSessionResponse`
 
@@ -389,7 +410,7 @@ Realtime 默认路由为七牛 RTI `qwen3.5-omni-plus-realtime`，可回退错�
 
 时间字段均使用 ISO-8601 字符串；分数字段使用 JSON number，允许半分。
 
-## 9. WebSocket 会话消息
+## 10. WebSocket 会话消息
 
 连接：`ws(s)://<host>/ws/session-messages?access_token=<JWT>`。
 
@@ -409,6 +430,7 @@ Realtime 默认路由为七牛 RTI `qwen3.5-omni-plus-realtime`，可回退错�
 ```
 
 - 追加消息支持 `type`：`message`、`session.message`、`addMessage`。
+- WebRTC DataChannel 建立后发送 `type: "activate"`（兼容 `session.activate`），后端从此时开始预占并计算本次会话可用的每日额度。
 - 结束会话支持 `type`：`end`、`session.end`、`endSession`，并通过 `stopTime` 传结束时间。
 - `audio` 是 JSON 中的 Base64 字节数组；大音频应使用专用 multipart 接口。
 
@@ -425,9 +447,11 @@ Realtime 默认路由为七牛 RTI `qwen3.5-omni-plus-realtime`，可回退错�
 }
 ```
 
-失败时 `type` 以 `.failed` 结尾，`code` 为 `SESSION_SOCKET_ERROR`。
+激活成功返回 `session.activate.accepted`，其中 `data.quotaDeadline` 是后端强制截止时间，`data.quotaRemainingMillis` 用于客户端安排本地自动结束；没有治理额度记录的兼容账号两者均为 `null`。额度已用完时激活失败，业务错误为 `USER_QUOTA_EXHAUSTED`，后端同时终止刚创建的 Realtime 会话。
 
-## 10. 公共 Service 接口契约
+失败时 `type` 以 `.failed` 结尾；业务异常保留对应业务 `code`，其他异常使用 `SESSION_SOCKET_ERROR`。
+
+## 11. 公共 Service 接口契约
 
 这些是后端内部稳定接口，不是 HTTP 路由。具体场景实现可以添加自身业务方法，但不得修改公共接口来迁就单一场景。
 
@@ -479,7 +503,7 @@ public interface EvaluationService<R, D> {
 - `ProfileInsightsService`：目标、趋势、薄弱项和建议。
 - `ProfileService`：用户长期偏好。
 
-## 11. 调用顺序
+## 12. 调用顺序
 
 自定义场景：
 

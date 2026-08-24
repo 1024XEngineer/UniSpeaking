@@ -1,7 +1,13 @@
 import { recordTelemetry, setTelemetryUser } from "../../telemetry/clientTelemetry.js";
+import {
+  clearAccessToken,
+  getAccessToken as getCoordinatedAccessToken,
+  refreshAccessToken,
+  revokeWebSession,
+  saveAccessToken,
+} from "../auth/authTokenCoordinator.js";
 
 const API_BASE = (import.meta.env?.VITE_BACKEND_URL || "").replace(/\/$/, "");
-const ACCESS_TOKEN_KEY = "unispeaking.accessToken";
 export const AUTH_SESSION_EXPIRED_EVENT = "unispeaking:auth-session-expired";
 
 async function unwrap(response) {
@@ -16,33 +22,47 @@ async function unwrap(response) {
 }
 
 async function request(path, options = {}) {
-  const token = getAccessToken();
-  const formDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const { expectedStatuses = [], skipAccessToken = false, ...fetchOptions } = options;
+  let token = skipAccessToken ? null : getAccessToken();
+  const formDataBody = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
   const startedAt = performance.now();
   const apiPath = path.split("?", 1)[0];
   let response;
+  const send = (accessToken) => fetch(`${API_BASE}${path}`, {
+    ...fetchOptions,
+    credentials: "include",
+    headers: {
+      ...(fetchOptions.body && !formDataBody ? { "Content-Type": "application/json" } : {}),
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      ...fetchOptions.headers,
+    },
+  });
   try {
-    response = await fetch(`${API_BASE}${path}`, {
-      ...options,
-      credentials: "include",
-      headers: {
-        ...(options.body && !formDataBody ? { "Content-Type": "application/json" } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...options.headers,
-      },
-    });
+    response = await send(token);
   } catch (error) {
     recordTelemetry("api.request", {
       severity: "ERROR",
       message: error instanceof Error ? error.message : "Network request failed",
       attributes: {
         api_path: apiPath,
-        api_method: options.method || "GET",
+        api_method: fetchOptions.method || "GET",
         outcome: "network_error",
         duration_ms: performance.now() - startedAt,
       },
     });
     throw error;
+  }
+  if (response.status === 401 && !skipAccessToken && !path.startsWith("/api/auth/")) {
+    let refreshedToken = null;
+    try {
+      refreshedToken = await refreshAccessToken();
+    } catch (error) {
+      throw error;
+    }
+    if (refreshedToken) {
+      token = refreshedToken;
+      response = await send(refreshedToken);
+    }
   }
   if (response.status === 401 && !path.startsWith("/api/auth/")) {
     // Bind cleanup to the token captured by this request so a delayed 401
@@ -57,7 +77,7 @@ async function request(path, options = {}) {
     recordTelemetry("api.request", {
       attributes: {
         api_path: apiPath,
-        api_method: options.method || "GET",
+        api_method: fetchOptions.method || "GET",
         http_status: response.status,
         outcome: "success",
         duration_ms: performance.now() - startedAt,
@@ -65,14 +85,17 @@ async function request(path, options = {}) {
     });
     return result;
   } catch (error) {
+    // Authentication expiry is an expected client state for every protected
+    // endpoint, even when the response races with navigation to /login.
+    const expectedFailure = response.status === 401 || expectedStatuses.includes(response.status);
     recordTelemetry("api.request", {
-      severity: "ERROR",
+      severity: expectedFailure ? "INFO" : "ERROR",
       message: error instanceof Error ? error.message : "API request failed",
       attributes: {
         api_path: apiPath,
-        api_method: options.method || "GET",
+        api_method: fetchOptions.method || "GET",
         http_status: response.status,
-        outcome: "error",
+        outcome: expectedFailure ? "unauthenticated" : "error",
         duration_ms: performance.now() - startedAt,
       },
     });
@@ -83,19 +106,31 @@ async function request(path, options = {}) {
 export async function fetchAuthenticatedMedia(pathOrUrl) {
   const absolute = /^https?:\/\//i.test(pathOrUrl);
   const target = absolute ? pathOrUrl : `${API_BASE}${pathOrUrl}`;
-  const token = getAccessToken();
-  const response = await fetch(target, {
+  let token = absolute ? null : getAccessToken();
+  const send = (accessToken) => fetch(target, {
     headers: {
-      ...(!absolute && token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(!absolute && accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
   });
+  let response = await send(token);
+  if (response.status === 401 && !absolute) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      token = refreshed;
+      response = await send(refreshed);
+    }
+  }
   if (response.status === 401 && !absolute) clearAuthSession(token);
   if (!response.ok) throw new Error(`录音加载失败（${response.status}）`);
   return response.blob();
 }
 
 export function getAccessToken() {
-  return window.localStorage.getItem(ACCESS_TOKEN_KEY);
+  return getCoordinatedAccessToken();
+}
+
+export async function requestAuthenticated(path, options = {}) {
+  return request(path, options);
 }
 
 export function hasAuthSession() {
@@ -103,15 +138,14 @@ export function hasAuthSession() {
 }
 
 export function saveAuthSession(authResponse) {
-  window.localStorage.setItem(ACCESS_TOKEN_KEY, authResponse.accessToken);
-  setTelemetryUser(authResponse.user?.id || null);
+  saveAccessToken(authResponse);
 }
 
 export function clearAuthSession(expectedToken = null) {
-  if (expectedToken !== null && getAccessToken() !== expectedToken) return;
-  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
-  setTelemetryUser(null);
+  clearAccessToken(expectedToken);
 }
+
+export { revokeWebSession };
 
 export async function register({ username, password, nickname = null }) {
   const auth = await request("/api/auth/register", {
@@ -132,9 +166,14 @@ export async function login({ username, password }) {
 }
 
 export async function getCurrentUser() {
-  const user = await request("/api/auth/me");
+  const user = await request("/api/auth/me", { expectedStatuses: [401] });
   setTelemetryUser(user?.id || null);
   return user;
+}
+
+export function getRealtimeIceConfiguration(forceRelay = false) {
+  const query = forceRelay ? "?forceRelay=true" : "";
+  return request(`/api/realtime/ice-configuration${query}`);
 }
 
 export function getProfileOverview(month) {
@@ -242,6 +281,13 @@ export function createIeltsSceneFlow(sceneId) {
 
 export function getUserPreference() {
   return request("/api/user-preferences");
+}
+
+export function getDailyPicks(excludedIds = []) {
+	const params = new URLSearchParams();
+	excludedIds.forEach((id) => params.append("exclude", id));
+	const query = params.toString();
+	return request(`/api/daily-picks${query ? `?${query}` : ""}`);
 }
 
 export function updateUserPreference(preference) {

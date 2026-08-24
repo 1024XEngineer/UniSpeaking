@@ -46,6 +46,17 @@ export interface CredentialStatus {
   configured: boolean
   fingerprint: string | null
   writable: boolean
+  fields: CredentialFieldStatus[]
+}
+
+export interface CredentialFieldStatus {
+  key: string
+  label: string
+  required: boolean
+  secret: boolean
+  description: string
+  configured: boolean
+  fingerprint: string | null
 }
 
 export interface InvocationUsage {
@@ -55,12 +66,14 @@ export interface InvocationUsage {
   summary: {
     requests: number; attempts: number; succeededAttempts: number; fallbackAttempts: number
     inputTokens: number; outputTokens: number; totalTokens: number
+    ttsCharacters: number
     audioInputSeconds: number; audioOutputSeconds: number; averageDurationMs: number
     estimatedCost: number; currency: string
   }
   byModel: Array<{
     providerId: string; modelId: string; capability: string; attempts: number; successes: number
-    totalTokens: number; averageDurationMs: number; estimatedCost: number
+    totalTokens: number; inputCharacters: number; outputCharacters: number
+    averageDurationMs: number; estimatedCost: number
   }>
   byUser: Array<{
     userId: string | null; email: string | null; requests: number; sessions: number; attempts: number
@@ -71,6 +84,7 @@ export interface InvocationUsage {
     models: Array<{
       providerId: string; modelId: string; capability: string; requests: number; attempts: number
       successes: number; inputTokens: number; outputTokens: number; totalTokens: number
+      inputCharacters: number; outputCharacters: number
       audioInputSeconds: number; audioOutputSeconds: number; totalDurationMs: number; estimatedCost: number
     }>
   }>
@@ -110,9 +124,9 @@ export const updateProvider = (providerId: string, body: Partial<ProviderView>) 
   })
 
 export const updateModel = (modelId: string, body: Partial<ModelView>) =>
-  requestJson<ModelView>(`/api/admin/ai/models/${encodeURIComponent(modelId)}`, {
-    method: 'PATCH', body: JSON.stringify(body),
-  })
+	requestJson<ModelView>(`/api/admin/ai/models?modelId=${encodeURIComponent(modelId)}`, {
+		method: 'PATCH', body: JSON.stringify(body),
+	})
 
 export const replaceRoute = (capability: AiCapability, modelIds: string[]) =>
   requestJson<RouteView>(`/api/admin/ai/routes/${capability}`, {
@@ -122,9 +136,9 @@ export const replaceRoute = (capability: AiCapability, modelIds: string[]) =>
 export const getCredentialStatus = (providerId: string) =>
   requestJson<CredentialStatus>(`/api/admin/ai/providers/${encodeURIComponent(providerId)}/credential`)
 
-export const replaceCredential = (providerId: string, secret: string) =>
+export const replaceCredential = (providerId: string, values: Record<string, string>) =>
   requestJson<CredentialStatus>(`/api/admin/ai/providers/${encodeURIComponent(providerId)}/credential`, {
-    method: 'PUT', body: JSON.stringify({ secret }),
+    method: 'PUT', body: JSON.stringify({ values }),
   })
 
 export function getInvocationUsage(filters: { from?: string; to?: string; userId?: string; providerId?: string; modelId?: string; page?: number; limit?: number }) {

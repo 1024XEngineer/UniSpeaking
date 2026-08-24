@@ -60,10 +60,18 @@ type LearningAssetDetail = {
   } | null;
   latestReport: DialogueReport | null;
   reportHistory: { createdAt: string }[];
+  createdAt?: string;
 };
 
 function displayDate(value: string | null | undefined) {
-  return value?.slice(0, 10) || '待练习';
+  if (!value) return '待练习';
+  const dateParts = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (dateParts) {
+    return `${dateParts[1]}年${Number(dateParts[2])}月${Number(dateParts[3])}日`;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '待练习';
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
 function mapExpressions(
@@ -150,7 +158,7 @@ export class LearningAssetService {
     return {
       id: value.sceneId,
       title: value.title,
-      date: displayDate(latestHistory?.createdAt),
+      date: displayDate(latestHistory?.createdAt ?? value.createdAt),
       status: value.latestSessionId ? '已完成' : '待练习',
       score: value.latestReport?.finalScore ?? null,
       category: sceneCategoryForLabel(value.label),

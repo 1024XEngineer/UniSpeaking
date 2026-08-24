@@ -122,6 +122,22 @@ describe('scene completion report mapping', () => {
       { label: '自然', value: 55 },
     ]);
   });
+
+  it('does not present an all-zero unavailable report as a scored result', () => {
+    expect(
+      sceneMetricsForReport({
+        accuracyScore: 0,
+        fluencyScore: 0,
+        grammarScore: 0,
+        vocabularyScore: 0,
+        naturalnessScore: 0,
+        finalScore: 0,
+        summary: '本次对话已保存，但有效英文语音不足，暂时无法生成完整五维评分。',
+        strengths: [],
+        improvements: ['请使用完整英文句子完成至少一轮回答后再试。'],
+      }),
+    ).toEqual([]);
+  });
 });
 
 describe('ScenesHome backend generation binding', () => {
@@ -267,6 +283,69 @@ describe('ScenesHome backend generation binding', () => {
 });
 
 describe('Training backend content binding', () => {
+  it('fully releases reading audio before entering the realtime speak stage', async () => {
+    const lifecycle: string[] = [];
+    const service = {
+      createFlow: jest.fn(async () => ({
+        sceneId: scene.sceneId,
+        stage: 'SENTENCE_LEARNING' as const,
+        completed: false,
+      })),
+      getContent: jest.fn(async () => scene.sentenceList.slice(0, 1)),
+      advanceStage: jest.fn(async (_sceneId: string, stage: SceneFlowStage) => {
+        if (stage === 'SENTENCE_LEARNING') {
+          lifecycle.push('advance-stage');
+          return new Promise<never>(() => undefined);
+        }
+        return {
+          sceneId: scene.sceneId,
+          stage: (
+            stage === 'WORD_LEARNING'
+              ? 'PHRASE_LEARNING'
+              : stage === 'PHRASE_LEARNING'
+                ? 'SENTENCE_LEARNING'
+                : 'DIALOGUE'
+          ) as SceneFlowStage,
+          completed: false,
+        };
+      }),
+      evaluateSentence: jest.fn(async () => ({
+        overallScore: 88,
+        passed: true,
+        words: [],
+      })),
+    };
+    const controller = new SceneTrainingController(service);
+    const wavRecorder = {
+      start: jest.fn(async () => undefined),
+      stop: jest.fn(async () => 'file:///sentence.wav'),
+      cancel: jest.fn(async () => {
+        lifecycle.push('release-reading-audio');
+      }),
+    };
+    const screen = await render(
+      <Training
+        initialStage="read"
+        scene={scene}
+        trainingController={controller}
+        wavRecorder={wavRecorder}
+        ttsPlayer={{ play: jest.fn(async () => undefined), stop: jest.fn() }}
+        onBack={jest.fn()}
+        onFinish={jest.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('开始朗读')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('开始朗读'));
+    await fireEvent.press(screen.getByLabelText('结束朗读'));
+    await waitFor(() => expect(screen.getByText('朗读通过')).toBeTruthy());
+    await fireEvent.press(screen.getByText('知道了'));
+    await fireEvent.press(screen.getByText('进入模拟'));
+
+    await waitFor(() => expect(service.advanceStage).toHaveBeenCalledTimes(3));
+    expect(lifecycle).toEqual(['release-reading-audio', 'advance-stage']);
+  });
+
   it('renders and advances through generated words, phrases and sentences', async () => {
     const service = {
       createFlow: jest.fn(async () => ({

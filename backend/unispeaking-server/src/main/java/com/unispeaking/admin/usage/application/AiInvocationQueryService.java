@@ -74,12 +74,15 @@ public final class AiInvocationQueryService {
 						+ "count(*) filter (where i.status='SUCCEEDED') succeeded_attempts, "
 						+ "count(*) filter (where i.attempt_no > 1) fallback_attempts, "
 						+ "coalesce(sum(i.input_tokens),0) input_tokens, coalesce(sum(i.output_tokens),0) output_tokens, "
-						+ "coalesce(sum(i.total_tokens),0) total_tokens, coalesce(sum(i.audio_input_seconds),0) audio_input_seconds, "
+						+ "coalesce(sum(i.total_tokens),0) total_tokens, "
+						+ "coalesce(sum(i.input_characters + i.output_characters) filter (where i.capability='TTS'),0) tts_characters, "
+						+ "coalesce(sum(i.audio_input_seconds),0) audio_input_seconds, "
 						+ "coalesce(sum(i.audio_output_seconds),0) audio_output_seconds, coalesce(avg(i.duration_ms),0) average_duration_ms, "
 						+ "coalesce(sum(i.estimated_cost),0) estimated_cost from ai_model_invocations i where " + filter.sql(),
 				(rs, row) -> new Summary(rs.getLong("requests"), rs.getLong("attempts"),
 						rs.getLong("succeeded_attempts"), rs.getLong("fallback_attempts"),
 						rs.getLong("input_tokens"), rs.getLong("output_tokens"), rs.getLong("total_tokens"),
+						rs.getLong("tts_characters"),
 						rs.getBigDecimal("audio_input_seconds"), rs.getBigDecimal("audio_output_seconds"),
 						rs.getBigDecimal("average_duration_ms"), rs.getBigDecimal("estimated_cost"), "CNY"),
 				filter.arguments().toArray());
@@ -89,12 +92,15 @@ public final class AiInvocationQueryService {
 		return jdbc.query(
 				"select i.provider_id, i.model_id, i.capability, count(*) attempts, "
 						+ "count(*) filter (where i.status='SUCCEEDED') successes, coalesce(sum(i.total_tokens),0) total_tokens, "
+						+ "coalesce(sum(i.input_characters),0) input_characters, "
+						+ "coalesce(sum(i.output_characters),0) output_characters, "
 						+ "coalesce(avg(i.duration_ms),0) average_duration_ms, coalesce(sum(i.estimated_cost),0) estimated_cost "
 						+ "from ai_model_invocations i where " + filter.sql()
 						+ " group by i.provider_id, i.model_id, i.capability order by estimated_cost desc, attempts desc",
 				(rs, row) -> new ModelSummary(rs.getString("provider_id"), rs.getString("model_id"),
 						rs.getString("capability"), rs.getLong("attempts"), rs.getLong("successes"),
-						rs.getLong("total_tokens"), rs.getBigDecimal("average_duration_ms"),
+						rs.getLong("total_tokens"), rs.getLong("input_characters"),
+						rs.getLong("output_characters"), rs.getBigDecimal("average_duration_ms"),
 						rs.getBigDecimal("estimated_cost")), filter.arguments().toArray());
 	}
 
@@ -105,7 +111,10 @@ public final class AiInvocationQueryService {
 						+ "count(distinct i.logical_request_id) requests, count(*) attempts, "
 						+ "count(*) filter (where i.status='SUCCEEDED') successes, "
 						+ "coalesce(sum(i.input_tokens),0) input_tokens, coalesce(sum(i.output_tokens),0) output_tokens, "
-						+ "coalesce(sum(i.total_tokens),0) total_tokens, coalesce(sum(i.audio_input_seconds),0) audio_input_seconds, "
+						+ "coalesce(sum(i.total_tokens),0) total_tokens, "
+						+ "coalesce(sum(i.input_characters),0) input_characters, "
+						+ "coalesce(sum(i.output_characters),0) output_characters, "
+						+ "coalesce(sum(i.audio_input_seconds),0) audio_input_seconds, "
 						+ "coalesce(sum(i.audio_output_seconds),0) audio_output_seconds, coalesce(sum(i.duration_ms),0) total_duration_ms, "
 						+ "coalesce(sum(i.estimated_cost),0) estimated_cost from ai_model_invocations i where " + filter.sql()
 						+ " group by i.user_id, i.provider_id, i.model_id, i.capability "
@@ -116,6 +125,7 @@ public final class AiInvocationQueryService {
 							rs.getString("provider_id"), rs.getString("model_id"), rs.getString("capability"),
 							rs.getLong("requests"), rs.getLong("attempts"), rs.getLong("successes"),
 							rs.getLong("input_tokens"), rs.getLong("output_tokens"), rs.getLong("total_tokens"),
+							rs.getLong("input_characters"), rs.getLong("output_characters"),
 							rs.getBigDecimal("audio_input_seconds"), rs.getBigDecimal("audio_output_seconds"),
 							rs.getLong("total_duration_ms"), rs.getBigDecimal("estimated_cost")));
 				}, filter.arguments().toArray());
@@ -223,14 +233,16 @@ public final class AiInvocationQueryService {
 	}
 
 	public record Summary(long requests, long attempts, long succeededAttempts, long fallbackAttempts,
-			long inputTokens, long outputTokens, long totalTokens, BigDecimal audioInputSeconds,
+			long inputTokens, long outputTokens, long totalTokens, long ttsCharacters, BigDecimal audioInputSeconds,
 			BigDecimal audioOutputSeconds, BigDecimal averageDurationMs, BigDecimal estimatedCost, String currency) {}
 
 	public record ModelSummary(String providerId, String modelId, String capability, long attempts,
-			long successes, long totalTokens, BigDecimal averageDurationMs, BigDecimal estimatedCost) {}
+			long successes, long totalTokens, long inputCharacters, long outputCharacters,
+			BigDecimal averageDurationMs, BigDecimal estimatedCost) {}
 
 	public record UserModelSummary(String providerId, String modelId, String capability, long requests,
 			long attempts, long successes, long inputTokens, long outputTokens, long totalTokens,
+			long inputCharacters, long outputCharacters,
 			BigDecimal audioInputSeconds, BigDecimal audioOutputSeconds, long totalDurationMs,
 			BigDecimal estimatedCost) {}
 

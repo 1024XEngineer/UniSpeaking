@@ -93,7 +93,7 @@ public class DeepSeekLlmProvider extends LlmProvider {
 
 	@Override
 	public AiProviderResponse<String> executeLlmTaskMeasured(String prompt, String token) {
-		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		String credential = ProviderCredentialOverride.currentOr("apiKey", apiKey);
 		if (credential.isBlank()) {
 			throw retryableFailure(
 					"DEEPSEEK_LLM_CREDENTIAL_MISSING",

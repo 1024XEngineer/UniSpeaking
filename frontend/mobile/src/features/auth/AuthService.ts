@@ -11,6 +11,8 @@ export type UserAccount = {
 export type AuthResponse = {
   tokenType: string;
   accessToken: string;
+  refreshToken?: string | null;
+  refreshTokenExpiresAt?: string | null;
   expiresAt: string;
   user: UserAccount;
 };
@@ -69,6 +71,25 @@ export class AuthService {
     }) as Promise<EmailChallenge>;
   }
 
+  issuePasswordResetChallenge(input: { email: string }) {
+    return this.client.request('/api/auth/mobile/email/password-reset/challenges', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }) as Promise<EmailChallenge>;
+  }
+
+  resetPassword(input: {
+    email: string;
+    password: string;
+    challengeId: string;
+    code: string;
+  }) {
+    return this.client.request('/api/auth/mobile/email/password-reset', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }) as Promise<void>;
+  }
+
   register(input: {
     username: string;
     password: string;
@@ -86,6 +107,22 @@ export class AuthService {
         code: input.code,
       }),
     }) as Promise<AuthResponse>;
+  }
+
+  refresh(refreshToken: string) {
+    return this.client.request('/api/auth/mobile/token/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+      headers: { 'X-Skip-Authorization': 'true' },
+    }) as Promise<AuthResponse>;
+  }
+
+  revoke(refreshToken: string) {
+    return this.client.request('/api/auth/mobile/token/revoke', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+      headers: { 'X-Skip-Authorization': 'true' },
+    }) as Promise<void>;
   }
 
   currentUser() {

@@ -13,6 +13,7 @@ import com.unispeaking.common.evaluation.model.PronunciationAssessmentResult;
 import com.unispeaking.common.evaluation.model.PronunciationPhonemeResult;
 import com.unispeaking.common.evaluation.model.PronunciationWordResult;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -24,6 +25,9 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class SceneSentenceReadingRepository {
+
+	public record AttemptSummary(long attemptCount, BigDecimal bestScore) {
+	}
 
 	private final SceneSentenceMapper sentenceMapper;
 	private final SentenceEvaluationMapper evaluationMapper;
@@ -109,6 +113,31 @@ public class SceneSentenceReadingRepository {
 							.in(
 									SentenceEvaluationEntity::getSceneId,
 									ownedSceneIds));
+		}
+		catch (RuntimeException exception) {
+			throw persistenceFailure();
+		}
+	}
+
+	public AttemptSummary summarizeAttempts(String sceneId, String sentenceId) {
+		try {
+			LambdaQueryWrapper<SentenceEvaluationEntity> scope =
+					new LambdaQueryWrapper<SentenceEvaluationEntity>()
+							.eq(SentenceEvaluationEntity::getSceneId, sceneId)
+							.eq(SentenceEvaluationEntity::getSentenceId, sentenceId);
+			long count = evaluationMapper.selectCount(scope);
+			List<SentenceEvaluationEntity> rankedAttempts = evaluationMapper.selectList(
+					new LambdaQueryWrapper<SentenceEvaluationEntity>()
+							.select(SentenceEvaluationEntity::getOverallScore)
+							.eq(SentenceEvaluationEntity::getSceneId, sceneId)
+							.eq(SentenceEvaluationEntity::getSentenceId, sentenceId)
+							.orderByDesc(SentenceEvaluationEntity::getOverallScore));
+			SentenceEvaluationEntity best = rankedAttempts.isEmpty()
+					? null
+					: rankedAttempts.getFirst();
+			return new AttemptSummary(
+					count,
+					best == null ? null : best.getOverallScore());
 		}
 		catch (RuntimeException exception) {
 			throw persistenceFailure();

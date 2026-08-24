@@ -167,15 +167,18 @@ function InterviewWaveform({ active = false, compact = false }) {
 
 function InterviewTimer({ state = "active", paused = false }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const startedAt = useRef(null);
+  const running = state !== "connecting" && state !== "ended" && state !== "error";
   useEffect(() => {
-    const startedAt = Date.now();
-    const updateElapsed = () => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    if (!running) return undefined;
+    startedAt.current ??= Date.now();
+    const updateElapsed = () => setElapsedSeconds(Math.floor((Date.now() - startedAt.current) / 1000));
     updateElapsed();
     const interval = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [running]);
   const duration = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`;
-  const label = state === "ended" ? "已结束" : paused ? `已暂停 · ${duration}` : duration;
+  const label = state === "connecting" ? "连接中" : state === "error" ? "连接失败" : state === "ended" ? "已结束" : paused ? `已暂停 · ${duration}` : duration;
   return <time className="call-presence__time">{label}</time>;
 }
 
@@ -403,6 +406,7 @@ function InterviewHome({ onNavigate, onBack }) {
           eyebrow="JOB INTERVIEW"
           title="模拟面试"
           subtitle="上传 JD 与简历，AI 面试官按真实岗位流程向你提问，并在结束后生成五维报告。"
+          action={<SimpleCta className="interview-home-assets-cta" onClick={() => onNavigate(paths.interview.assets.root)}>查看学习资产</SimpleCta>}
         />
         <section className="interview-builder interview-module">
           <div className="scene-section-heading scene-section-heading--primary">
@@ -503,6 +507,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
   const [paused, setPaused] = useState(false);
   const [ending, setEnding] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [realtimeState, setRealtimeState] = useState("connecting");
   const [lines, setLines] = useState([]);
   const [exitOpen, setExitOpen] = useState(false);
   const clientRef = useRef(null);
@@ -538,9 +543,12 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
   };
 
   const handleEvent = (event) => {
-    if (event.type === "local.connecting") setStatus("正在连接面试官");
-    else if (event.type === "local.connected") {
+    if (event.type === "local.connecting") {
+      setRealtimeState("connecting");
+      setStatus("正在连接面试官");
+    } else if (event.type === "local.connected") {
       interviewAnalyticsRef.current?.started();
+      setRealtimeState("connected");
       setStatus("正在建立面试会话");
       sessionIdRef.current = event.sessionId || "";
     } else if (event.type === "session.updated" || event.type === "local.greeting_timeout") {
@@ -597,10 +605,16 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       setError(event.message || "面试自动结束失败");
     } else if (event.type === "local.backend_warning") {
       setError(event.message || "会话记录保存失败，请稍后重试");
+    } else if (event.type === "local.quota_exhausted") {
+      setError(event.message);
+      setStatus("今日额度已用完，正在结束本次面试");
+      void endConversation("quota_exhausted");
     } else if (event.type === "local.mic_error") {
+      setRealtimeState("error");
       setError(event.message || "无法访问麦克风");
       setStatus("麦克风不可用，请检查权限");
     } else if (event.type === "error" || event.type === "local.error") {
+      setRealtimeState("error");
       setError(event.message || event.error?.message || "实时会话发生错误");
       setStatus("连接异常");
     }
@@ -679,6 +693,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     }).catch((startError) => {
       if (!cancelled) {
         interviewAnalyticsRef.current.fail("REALTIME_ERROR");
+        setRealtimeState("error");
         setError(startError instanceof Error ? startError.message : "无法开始面试会话");
       }
     });
@@ -715,15 +730,15 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     }
   };
 
-  const endConversation = async () => {
+  const endConversation = async (reason = "user_stop") => {
     if (endingRef.current) return;
     endingRef.current = true;
     setEnding(true);
-    setError("");
+    if (reason !== "quota_exhausted") setError("");
     setStatus("正在结束面试并生成报告");
     detachInterviewRemoteAudio();
     try {
-      const completion = await clientRef.current?.stop({ reason: "user_stop" });
+      const completion = await clientRef.current?.stop({ reason });
       clientRef.current = null;
       interviewAnalyticsRef.current?.complete();
       onEndInterviewRef.current?.(sceneId, sessionIdRef.current, completion?.reportStatus || null);
@@ -762,7 +777,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
           <div className="portrait portrait--small interview-call-portrait"><img src={teacher?.image} alt={teacher?.name} /></div>
           <div className="listening-state listening-state--compact">
             <InterviewWaveform active={!ending && !paused && !error} compact />
-            <InterviewTimer paused={paused} state={ending || error ? "ended" : "active"} />
+            <InterviewTimer paused={paused} state={ending ? "ended" : error ? "error" : realtimeState} />
             {(!ending || closing) && <span>{status}</span>}
           </div>
         </div>
@@ -1241,7 +1256,7 @@ export function InterviewAssets({ route, onNavigate, onBack, onBackToAssets, onB
   return (
     <main className={cx("page", "page--interview", "interview-assets-page", tab === "overview" && "interview-assets-page--overview", tab === "trends" && "interview-assets-page--trends")}>
       <button className="ielts-back" onClick={onBack}><ArrowLeft />返回</button>
-      <PageHeader title="面试学习资产" action={<div className="ielts-assets-actions">{otherAssetsMenu}<SimpleCta className="ielts-assets-header-cta" onClick={onTraining}>返回训练中心</SimpleCta></div>} />
+      <PageHeader title="面试学习资产" action={<div className="ielts-assets-actions interview-assets-actions">{otherAssetsMenu}<SimpleCta className="ielts-assets-header-cta" onClick={onTraining}>返回训练中心</SimpleCta></div>} />
       <nav className="interview-assets-tabs" ref={tabRef} aria-label="面试学习资产视图">
         <span className={cx("interview-assets-tab-indicator", tabIndicator.ready && "is-ready")} style={{ width: tabIndicator.width, transform: `translateX(${tabIndicator.x}px)` }} />
         {interviewAssetTabs.map((item) => <button ref={(node) => { tabButtons.current[item.id] = node; }} key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}

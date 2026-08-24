@@ -18,6 +18,7 @@ import com.unispeaking.domain.vo.scene.IeltsContent;
 import com.unispeaking.domain.vo.scene.IeltsMode;
 import com.unispeaking.domain.vo.scene.IeltsPart;
 import com.unispeaking.domain.vo.scene.IeltsStage;
+import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.infrastructure.persistence.repository.scene.IeltsPracticeRepository;
 import com.unispeaking.infrastructure.persistence.repository.scene.SceneRepository;
 import com.unispeaking.service.scene.CustomSceneFlowService;
@@ -41,7 +42,7 @@ class SceneFlowServiceTest {
 				.collect(Collectors.toSet());
 
 		assertEquals(
-				Set.of("start", "current", "next", "isCompleted", "clear"),
+				Set.of("start", "current", "next", "nextFrom", "isCompleted", "clear"),
 				methods);
 		assertFalse(SceneFlowService.class.isInterface());
 		assertTrue(SceneFlowService.class.isAssignableFrom(
@@ -86,6 +87,38 @@ class SceneFlowServiceTest {
 		assertEquals(CustomStage.DIALOGUE, service.next(scene.sceneId()));
 		assertEquals(CustomStage.COMPLETED, service.next(scene.sceneId()));
 		assertTrue(service.isCompleted(scene.sceneId()));
+	}
+
+	@Test
+	void customFlowResynchronizesAfterClientReturnsToAnEarlierStage() {
+		SceneRepository repository = mock(SceneRepository.class);
+		SceneGenerationResponse scene = scene("custom_rewind");
+		when(repository.findGeneratedById(scene.sceneId()))
+				.thenReturn(Optional.of(scene));
+		CustomSceneFlowService service = new CustomSceneFlowService(
+				repository,
+				mock(ScenarioDialogueStateMachine.class),
+				mock(RealtimeSessionCoordinator.class));
+
+		service.start(scene.sceneId());
+		service.next(scene.sceneId());
+		service.next(scene.sceneId());
+
+		assertEquals(
+				CustomStage.PHRASE,
+				service.next(scene.sceneId(), SceneFlowStage.WORD_LEARNING));
+		assertEquals(
+				"ask about",
+				service.content(scene.sceneId(), SceneFlowStage.PHRASE_LEARNING)
+						.getFirst().englishText());
+		assertEquals(CustomStage.PHRASE, service.current(scene.sceneId()));
+		assertEquals(
+				"Could you help me?",
+				service.content(scene.sceneId(), SceneFlowStage.SENTENCE_LEARNING)
+						.getFirst().englishText());
+		assertEquals(
+				CustomStage.DIALOGUE,
+				service.next(scene.sceneId(), SceneFlowStage.SENTENCE_LEARNING));
 	}
 
 	@Test

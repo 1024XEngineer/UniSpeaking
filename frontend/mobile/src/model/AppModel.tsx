@@ -18,6 +18,7 @@ import {
   type SceneLearningRecord,
 } from '@/data/learningAssets';
 import { SecureTokenStore } from '@/infrastructure/auth/SecureTokenStore';
+import { authTokenCoordinator } from '@/infrastructure/auth/AuthTokenCoordinator';
 import { getRuntimeConfig } from '@/infrastructure/config/runtimeConfig';
 import { ApiClient } from '@/infrastructure/http/ApiClient';
 import { levels, teachers, type Teacher } from '@/theme/tokens';
@@ -28,6 +29,13 @@ export type AppModelAuthController = {
   bootstrap(): Promise<void>;
   login(input: { username: string; password: string }): Promise<void>;
   issueEmailChallenge(input: { email: string }): Promise<EmailChallenge>;
+  issuePasswordResetChallenge(input: { email: string }): Promise<EmailChallenge>;
+  resetPassword(input: {
+    email: string;
+    password: string;
+    challengeId: string;
+    code: string;
+  }): Promise<void>;
   register(input: {
     username: string;
     password: string;
@@ -49,6 +57,13 @@ type AppModelValue = {
   authError: string | null;
   signIn: (input: { username: string; password: string }) => Promise<void>;
   issueEmailChallenge: (input: { email: string }) => Promise<EmailChallenge>;
+  issuePasswordResetChallenge: (input: { email: string }) => Promise<EmailChallenge>;
+  resetPassword: (input: {
+    email: string;
+    password: string;
+    challengeId: string;
+    code: string;
+  }) => Promise<void>;
   signUp: (input: {
     username: string;
     password: string;
@@ -96,9 +111,15 @@ function createDefaultAuthController(): AppModelAuthController {
     tokenStore,
     onUnauthorized: () => controller.unauthorized(),
   });
+  const authService = new AuthService(apiClient);
+  authTokenCoordinator.configure({
+    refresh: (refreshToken) => authService.refresh(refreshToken),
+    onRefreshFailure: () => authTokenCoordinator.clear(),
+  });
   controller = new AuthSessionController({
     tokenStore,
-    authService: new AuthService(apiClient),
+    tokenCoordinator: authTokenCoordinator,
+    authService,
   });
   return controller;
 }
@@ -163,6 +184,17 @@ export function AppModelProvider({
 
   const issueEmailChallenge = useCallback(
     (input: { email: string }) => authController.issueEmailChallenge(input),
+    [authController],
+  );
+
+  const issuePasswordResetChallenge = useCallback(
+    (input: { email: string }) => authController.issuePasswordResetChallenge(input),
+    [authController],
+  );
+
+  const resetPassword = useCallback(
+    (input: { email: string; password: string; challengeId: string; code: string }) =>
+      authController.resetPassword(input),
     [authController],
   );
 
@@ -242,6 +274,8 @@ export function AppModelProvider({
       authError: authState.error,
       signIn,
       issueEmailChallenge,
+      issuePasswordResetChallenge,
+      resetPassword,
       signUp,
       completeOnboarding,
       signOut,
@@ -277,6 +311,8 @@ export function AppModelProvider({
       isModelReady,
       isAuthenticated,
       issueEmailChallenge,
+      issuePasswordResetChallenge,
+      resetPassword,
       authState.error,
       authState.status,
       authState.user,

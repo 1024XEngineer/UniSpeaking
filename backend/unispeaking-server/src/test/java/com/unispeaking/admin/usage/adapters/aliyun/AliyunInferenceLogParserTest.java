@@ -162,6 +162,85 @@ class AliyunInferenceLogParserTest {
         assertThat(record.usage().totalTokens()).isZero();
     }
 
+    @Test
+    void acceptsFailedHttpRecordsWithoutUsageAndNonWsProtocolsWithoutTaskUuid() {
+        var record = parser.parse("""
+                {
+                  "start_unix_timestamp":"1787106742708",
+                  "status_code":"500",
+                  "extras":{"protocol":"HTTP"},
+                  "apikey_id":"6126227",
+                  "duration":"0",
+                  "workspace_id":"ws-67zfnonsdn4x96ia",
+                  "model":"qwen3-tts-flash",
+                  "request_id":"request-failed-1"
+                }
+                """);
+
+        assertThat(record.statusCode()).isEqualTo("500");
+        assertThat(record.taskUuid()).isNull();
+        assertThat(record.usage().responseCount()).isZero();
+        assertThat(record.usage().totalTokens()).isZero();
+    }
+
+    @Test
+    void acceptsWebrtcWithTaskUuidAndOptionalZeroDetails() {
+        var record = parser.parse("""
+                {
+                  "start_unix_timestamp":"1787106742708",
+                  "status_code":"200",
+                  "usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,
+                    "input_tokens_details":{},"output_tokens_details":{}},
+                  "extras":{"protocol":"webrtc"},
+                  "apikey_id":"6126227",
+                  "duration":"0",
+                  "workspace_id":"ws-67zfnonsdn4x96ia",
+                  "model":"qwen3.5-omni-flash-realtime",
+                  "task_uuid":"task-1",
+                  "request_id":"request-webrtc-1"
+                }
+                """);
+
+        assertThat(record.protocol()).isEqualTo("webrtc");
+        assertThat(record.taskUuid()).isEqualTo("task-1");
+        assertThat(record.usage().inputTextTokens()).isZero();
+        assertThat(record.usage().outputAudioTokens()).isZero();
+    }
+
+    @Test
+    void rejectsMalformedNestedObjectsMissingRequiredFieldsAndInvalidJson() {
+        assertThatThrownBy(() -> parser.parse("not-json"))
+                .isInstanceOf(OfficialUsageSchemaException.class);
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("\"extras\": {\"protocol\": \"ws\"}", "\"extras\": []")))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("extras");
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("\"usage\": {", "\"usage\": \"not-json\"")))
+                .isInstanceOf(OfficialUsageSchemaException.class);
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("\"model\": \"qwen3.5-omni-flash-realtime\"", "\"model\": \"\"")))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("model");
+    }
+
+    @Test
+    void rejectsNegativeTimestampAndMissingRealtimeTaskUuid() {
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("\"start_unix_timestamp\": \"1784534676105\"", "\"start_unix_timestamp\": \"-1\"")))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("start_unix_timestamp");
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("\"task_uuid\": \"sess_41tAWSq7xIR1b2EDelEgS\",", "")))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("task_uuid");
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("\"protocol\": \"ws\"", "\"protocol\": \"webrtc\"")
+                .replace("\"task_uuid\": \"sess_41tAWSq7xIR1b2EDelEgS\",", "")))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("task_uuid");
+    }
+
     private static String validJson() {
         return """
                 {

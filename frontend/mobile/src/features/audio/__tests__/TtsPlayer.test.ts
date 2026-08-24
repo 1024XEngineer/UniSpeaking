@@ -44,6 +44,13 @@ describe('SceneSpeechClient', () => {
       expect.objectContaining({ byteLength: 4 }),
     );
   });
+
+  it('surfaces JSON speech errors and does not send an auth header without a token', async () => {
+    const fetchImpl = jest.fn(async () => ({ ok: false, status: 422, headers: { get: () => 'application/json' }, json: async () => ({ message: '文本过长' }) } as unknown as Response));
+    const client = new SceneSpeechClient({ baseUrl: 'https://api.example.com', tokenStore: { get: async () => null }, fetchImpl });
+    await expect(client.synthesize('scene', 'hello')).rejects.toThrow('文本过长');
+    expect((fetchImpl as jest.Mock).mock.calls[0][1]).toEqual(expect.objectContaining({ headers: { 'Content-Type': 'application/json' } }));
+  });
 });
 
 describe('TtsPlayer', () => {
@@ -103,5 +110,12 @@ describe('TtsPlayer', () => {
 
     expect(asset.remove).toHaveBeenCalledTimes(1);
     expect(nativePlayer.play).not.toHaveBeenCalled();
+  });
+
+  it('releases the synthesized asset when playback preparation fails', async () => {
+    const asset = { uri: 'file:///bad.wav', remove: jest.fn() };
+    const player = new TtsPlayer({ speechClient: { synthesize: jest.fn().mockResolvedValue(asset) }, preparePlayback: jest.fn().mockRejectedValue(new Error('audio unavailable')), createPlayer: jest.fn() });
+    await expect(player.play('scene', 'hello')).rejects.toThrow('audio unavailable');
+    expect(asset.remove).toHaveBeenCalled();
   });
 });

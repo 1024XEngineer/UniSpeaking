@@ -2,7 +2,9 @@ package com.unispeaking.common.evaluation.parser;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
@@ -26,19 +28,145 @@ class ConversationLanguageAssessmentParserTest {
 	}
 
 	@Test
-	void rejectsInsufficientAssessmentAsNoFormalScore() {
-		assertThrows(
-				EvaluationException.class,
-				() -> parser.parse(validJson().replace("\"ok\"", "\"insufficient_data\"")));
+	void rejectsNullBlankMalformedAndNonObjectDocuments() {
+		assertError(null, EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+		assertError(" \t\n ", EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+		assertError("not json", EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError("[]", EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError("```JSON\n{}\n```", EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError("```json\n{}", EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError("```json\n\n```", EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
 	}
 
 	@Test
-	void rejectsEnglishOnlyReasons() {
-		assertThrows(
+	void rejectsStatusAndRootFieldViolations() {
+		assertError(validJson().replace(
+				"\"data_quality_notes\":[]",
+				"\"extra\":1,\"data_quality_notes\":[]"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson().replace(
+				"\"assessment_status\":\"ok\"",
+				"\"assessment_status\":\"pending\""),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson().replace(
+				"\"assessment_status\":\"ok\"",
+				"\"assessment_status\":\"insufficient_data\""),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+		assertError(validJson().replace(
+				"\"assessment_status\":\"ok\"",
+				"\"assessment_status\":null"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+		assertError(validJson().replace(
+				"\"assessment_status\":\"ok\"",
+				"\"assessment_status\":123"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson().replace(
+				"\"data_quality_notes\":[]",
+				"\"data_quality_notes\":null"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+	}
+
+	@Test
+	void rejectsScoreRangePrecisionAndConfidenceViolations() {
+		assertError(validJson().replace("\"grammar\":76", "\"grammar\":-0.01"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson().replace("\"grammar\":76", "\"grammar\":100.01"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson().replace("\"grammar\":76", "\"grammar\":76.123"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson().replace("\"grammar\":76", "\"grammar\":\"76\""),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson().replace("\"grammar\":76", "\"grammar\":null"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+		assertError(validJson().replace("\"confidence\":0.8", "\"confidence\":-0.1"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson().replace("\"confidence\":0.8", "\"confidence\":1.01"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson().replace("\"confidence\":0.8", "\"confidence\":\"0.8\""),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+		assertError(validJson().replace("\"confidence\":0.8", "\"confidence\":null"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+	}
+
+	@Test
+	void rejectsDimensionAndFeedbackShapeViolations() {
+		assertError(validJson().replace(
+				"\"dimensions\":{",
+				"\"dimensions\":[]"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson().replace(
+				"\"grammar\":{",
+				"\"grammar\":{\"extra\":1,"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson().replace(
+				"\"strengths\":[{\"evidence\":\"I went\",\"reason\":\"时态正确\"}]",
+				"\"strengths\":null"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+		assertError(validJson().replace(
+				"\"strengths\":[{\"evidence\":\"I went\",\"reason\":\"时态正确\"}]",
+				"\"strengths\":[1]"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson().replace(
+				"\"improvements\":[{\"evidence\":\"go yesterday\",\"correction\":\"went yesterday\",\"reason\":\"使用过去式\"}]",
+				"\"improvements\":[{\"evidence\":\"go yesterday\",\"reason\":\"使用过去式\"}]"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+		assertError(validJson().replace(
+				"\"improvements\":[{\"evidence\":\"go yesterday\",\"correction\":\"went yesterday\",\"reason\":\"使用过去式\"}]",
+				"\"improvements\":[{\"evidence\":\"go yesterday\",\"correction\":\"   \",\"reason\":\"使用过去式\"}]"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+	}
+
+	@Test
+	void rejectsFeedbackLanguageLimitsAndUnknownFields() {
+		assertError(validJson().replace(
+				"\"reason\":\"时态正确\"",
+				"\"reason\":\"The tense is correct\""),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertEquals("I went：时态正确", parser.parse(validJson().replace(
+				"\"reason\":\"时态正确\"",
+				"\"reason\":\"时态正确\",\"reazon\":\"额外信息\""))
+				.strengths().getFirst());
+		assertEquals("go yesterday → went yesterday：使用过去式", parser.parse(validJson().replace(
+				"\"correction\":\"went yesterday\"",
+				"\"correction\":\"went yesterday\",\"suggestion\":\"went\""))
+				.improvements().getFirst());
+		String tooManyStrengths = validJson().replace(
+				"\"strengths\":[{\"evidence\":\"I went\",\"reason\":\"时态正确\"}]",
+				"\"strengths\":[{\"evidence\":\"I went\",\"reason\":\"时态正确\"},{\"evidence\":\"I ran\",\"reason\":\"表达清楚\"},{\"evidence\":\"I ate\",\"reason\":\"内容完整\"},{\"evidence\":\"I slept\",\"reason\":\"信息准确\"}]");
+		assertError(tooManyStrengths, EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+	}
+
+	@Test
+	void acceptsBoundaryScoresAndUsesPreferredCorrectionField() {
+		String document = validJson()
+				.replace("\"grammar\":76", "\"grammar\":0.00")
+				.replace("\"vocabulary\":72", "\"vocabulary\":100.00")
+				.replace("\"text_naturalness\":74", "\"text_naturalness\":74.25")
+				.replace("\"evidence\":\"I went\"", "\"evidence\":\"  I went  \"");
+
+		var result = parser.parse(document);
+
+		assertEquals(0, result.grammarScore().compareTo(new BigDecimal("0.00")));
+		assertEquals(0, result.vocabularyScore().compareTo(new BigDecimal("100.00")));
+		assertEquals(0, result.textNaturalnessScore().compareTo(new BigDecimal("74.25")));
+		assertTrue(result.strengths().getFirst().startsWith("I went："));
+		assertTrue(result.improvements().getFirst().contains("went yesterday"));
+	}
+
+	@Test
+	void rejectsDuplicateKeysAndTrailingTokens() {
+		assertError(validJson().replace(
+				"\"assessment_status\":\"ok\"",
+				"\"assessment_status\":\"ok\",\"assessment_status\":\"ok\""),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		assertError(validJson() + " trailing", EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+	}
+
+	private void assertError(String document, EvaluationErrorCode expected) {
+		EvaluationException exception = assertThrows(
 				EvaluationException.class,
-				() -> parser.parse(validJson().replace(
-						"时态正确",
-						"The tense is correct")));
+				() -> parser.parse(document));
+		assertEquals(expected, exception.errorCode());
 	}
 
 	private String validJson() {

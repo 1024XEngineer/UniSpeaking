@@ -10,6 +10,7 @@ import com.unispeaking.provider.config.AiProviderCredentialStore;
 import java.math.BigDecimal;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -63,9 +64,11 @@ public class AiProviderAdminService {
 
 	@Transactional
 	public AiProviderCredentialStore.CredentialStatus replaceCredential(
-			String providerId, String secret) {
+			String providerId, Map<String, String> values) {
 		provider(providerId);
-		return credentialStore.replace(providerId, secret);
+		var status = credentialStore.replace(providerId, values);
+		store.invalidate();
+		return status;
 	}
 
 	@Transactional
@@ -171,5 +174,5 @@ public class AiProviderAdminService {
 	public record UpdateProviderRequest(String displayName, Boolean enabled) {}
 	public record UpdateModelRequest(String displayName, Boolean enabled, String billingUnit, BigDecimal inputPricePerMillion, BigDecimal outputPricePerMillion, BigDecimal characterPricePerMillion, BigDecimal audioInputPricePerMinute, BigDecimal audioOutputPricePerMinute, BigDecimal requestPricePerCall) {}
 	public record UpdateRouteRequest(String routeKey, List<String> modelIds) {}
-	public record UpdateCredentialRequest(String secret) {}
+	public record UpdateCredentialRequest(Map<String, String> values, String secret) {}
 }

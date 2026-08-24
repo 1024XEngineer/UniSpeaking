@@ -1,11 +1,15 @@
 package com.unispeaking.service.recording;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.unispeaking.common.exception.BusinessException;
@@ -110,6 +114,120 @@ class RecordingStoreInterviewTest {
 		assertFalse(Files.exists(stale));
 	}
 
+	@Test
+	void validatesConstructorAndStorageInputLimits() {
+	RecordingProperties blankDirectory = new RecordingProperties();
+		blankDirectory.setDirectory(" ");
+		assertThrows(IllegalArgumentException.class, () -> new RecordingStore(
+				blankDirectory, mock(PracticeSessionRepository.class),
+				mock(AuthService.class), Set.of(SceneType.INTERVIEW_SCENE),
+				"/api/interview-scenes/", RecordingStore.INTERVIEW_FILE_NAME,
+				"NOT_FOUND", "PERSISTENCE_FAILED"));
+
+		RecordingProperties invalidSize = new RecordingProperties();
+		invalidSize.setDirectory(tempDirectory.toString());
+		invalidSize.setMaxBytes(0);
+		assertThrows(IllegalArgumentException.class, () -> new RecordingStore(
+				invalidSize, mock(PracticeSessionRepository.class),
+				mock(AuthService.class), Set.of(SceneType.INTERVIEW_SCENE),
+				"/api/interview-scenes/", RecordingStore.INTERVIEW_FILE_NAME,
+				"NOT_FOUND", "PERSISTENCE_FAILED"));
+
+		RecordingStore limited = storeWithMaxBytes(3);
+		assertPersistenceFailure(() -> limited.storeTurn("session-1", 0, new byte[]{1}));
+		assertPersistenceFailure(() -> limited.storeTurn("session-1", 1, null));
+		assertPersistenceFailure(() -> limited.storeTurn("session-1", 1, new byte[]{1, 2, 3, 4}));
+		assertPersistenceFailure(() -> limited.storeAiAudio("session-1", new byte[0]));
+		assertPersistenceFailure(() -> limited.storeSessionAudio("session-1", new byte[]{1, 2, 3, 4}));
+	}
+
+	@Test
+	void rejectsUnsafeIdentifiersAndInvalidFilesWithoutTouchingOwnership() {
+		PracticeSessionRepository repository = mock(PracticeSessionRepository.class);
+		AuthService authService = mock(AuthService.class);
+		RecordingStore store = store(repository, authService);
+
+		assertPersistenceFailure("INTERVIEW_RECORDING_PERSISTENCE_FAILED",
+				() -> store.storeTurn("../escape", 1, new byte[]{1}));
+		assertPersistenceFailure("INTERVIEW_RECORDING_PERSISTENCE_FAILED",
+				() -> store.storeTurn(null, 1, new byte[]{1}));
+		assertDoesNotThrow(() -> store.delete("bad/id", 1));
+		assertPersistenceFailure("INTERVIEW_RECORDING_PERSISTENCE_FAILED",
+				() -> store.readAudio("bad/id", "turn-1.wav"));
+		assertFalse(store.hasAudio("bad/id", "turn-1.wav"));
+		assertTrue(throwsNotFound(() -> store.loadOwned(
+				"scene-1", "session-1", null)));
+		assertTrue(throwsNotFound(() -> store.loadOwned(
+				"scene-1", "session-1", "../turn-1.wav")));
+		verify(authService, never()).requireUserId(null);
+		verify(repository, never()).findBySessionId("session-1");
+	}
+
+	@Test
+	void readsSessionRecordingAndEnforcesOwnerSceneTypeAndSceneBinding() throws Exception {
+		UUID ownerId = UUID.randomUUID();
+		PracticeSessionRepository repository = mock(PracticeSessionRepository.class);
+		AuthService authService = mock(AuthService.class);
+		when(authService.requireUserId(null)).thenReturn(ownerId.toString());
+		when(repository.findBySessionId("session-1")).thenReturn(Optional.of(
+				new PracticeSessionRecord(
+					"session-1", ownerId, "scene-1", SceneType.INTERVIEW_SCENE,
+					SessionStatus.COMPLETED, Instant.now(), Instant.now())));
+		RecordingStore store = store(repository, authService);
+		store.storeSessionAudio("session-1", new byte[]{9, 8, 7});
+
+		assertArrayEquals(new byte[]{9, 8, 7}, store.loadSessionRecording(
+				"scene-1", "session-1").getInputStream().readAllBytes());
+
+		when(repository.findBySessionId("wrong-owner")).thenReturn(Optional.of(
+				new PracticeSessionRecord(
+					"wrong-owner", UUID.randomUUID(), "scene-1", SceneType.INTERVIEW_SCENE,
+					SessionStatus.COMPLETED, Instant.now(), Instant.now())));
+		assertTrue(throwsNotFound(() -> store.loadOwned(
+				"scene-1", "wrong-owner", "session.wav")));
+
+		when(repository.findBySessionId("wrong-type")).thenReturn(Optional.of(
+				new PracticeSessionRecord(
+					"wrong-type", ownerId, "scene-1", SceneType.IELTS_SCENE,
+					SessionStatus.COMPLETED, Instant.now(), Instant.now())));
+		assertTrue(throwsNotFound(() -> store.loadOwned(
+				"scene-1", "wrong-type", "session.wav")));
+	}
+
+	@Test
+	void reportsMissingAndInvalidInternalAudioAndHandlesCleanupNoOps() throws Exception {
+		RecordingStore store = store();
+		assertNull(store.readAudio("session-1", "session.wav"));
+		assertNull(store.readAudio("session-1", "not-a-recording.txt"));
+		assertFalse(store.hasAudio("session-1", null));
+		assertFalse(store.hasAudio("session-1", "../session.wav"));
+
+		store.delete("session-1", 0);
+		store.delete(null, 1);
+		store.deleteSessionAudio(null);
+		store.deleteSessionAudio("../escape");
+		store.cleanupExpired(null);
+		store.cleanupExpired(Duration.ZERO);
+		store.cleanupExpired(Duration.ofSeconds(-1));
+	}
+
+	@Test
+	void cleanupExpiredKeepsFreshFilesAndIgnoresMissingRoot() throws Exception {
+		RecordingStore store = store();
+		store.storeTurn("session-1", 1, new byte[]{1, 2});
+		Path fresh = tempDirectory.resolve("session-1/turn-1.wav");
+		store.cleanupExpired(Duration.ofDays(7));
+		assertTrue(Files.exists(fresh));
+
+		RecordingProperties missingRoot = new RecordingProperties();
+		missingRoot.setDirectory(tempDirectory.resolve("does-not-exist").toString());
+		RecordingStore missing = new RecordingStore(
+				missingRoot, mock(PracticeSessionRepository.class), mock(AuthService.class),
+				Set.of(SceneType.INTERVIEW_SCENE), "/api/interview-scenes/",
+				RecordingStore.INTERVIEW_FILE_NAME, "NOT_FOUND", "PERSISTENCE_FAILED");
+		assertDoesNotThrow(() -> missing.cleanupExpired(Duration.ofDays(1)));
+	}
+
 	private boolean throwsNotFound(Runnable runnable) {
 		try {
 			runnable.run();
@@ -122,6 +240,25 @@ class RecordingStoreInterviewTest {
 
 	private RecordingStore store() {
 		return store(mock(PracticeSessionRepository.class), mock(AuthService.class));
+	}
+
+	private RecordingStore storeWithMaxBytes(long maxBytes) {
+		RecordingProperties properties = new RecordingProperties();
+		properties.setDirectory(tempDirectory.toString());
+		properties.setMaxBytes(maxBytes);
+		return new RecordingStore(
+				properties, mock(PracticeSessionRepository.class), mock(AuthService.class),
+				Set.of(SceneType.INTERVIEW_SCENE), "/api/interview-scenes/",
+				RecordingStore.INTERVIEW_FILE_NAME, "NOT_FOUND", "PERSISTENCE_FAILED");
+	}
+
+	private void assertPersistenceFailure(Runnable action) {
+		assertPersistenceFailure("PERSISTENCE_FAILED", action);
+	}
+
+	private void assertPersistenceFailure(String code, Runnable action) {
+		BusinessException exception = assertThrows(BusinessException.class, action::run);
+		assertEquals(code, exception.code());
 	}
 
 	private RecordingStore store(

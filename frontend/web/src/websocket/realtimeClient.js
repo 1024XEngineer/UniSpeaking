@@ -1,4 +1,4 @@
-import { getAccessToken } from "../infrastructure/http/apiClient.js";
+import { getAccessToken, requestAuthenticated } from "../infrastructure/http/apiClient.js";
 import {
   advanceCustomDialogueState,
   advanceIeltsDialogueState,
@@ -9,6 +9,7 @@ import {
   evaluateIeltsDialogueTurn,
   getCustomDialogueEvaluation,
   getInterviewReport,
+  getRealtimeIceConfiguration,
   submitInterviewTurn,
 } from "../infrastructure/http/apiClient.js";
 import { createPcmWavSegmentRecorder } from "../infrastructure/audio/audioRecorder.js";
@@ -87,6 +88,66 @@ export function defaultIceServers() {
     }
   }
   return DEFAULT_ICE_SERVERS;
+}
+
+export function normalizeIceTransportPolicy(value) {
+  return String(value || "").trim().toLowerCase() === "relay" ? "relay" : "all";
+}
+
+export function realtimeIceTransportPolicy() {
+  return normalizeIceTransportPolicy(import.meta.env?.VITE_REALTIME_ICE_TRANSPORT_POLICY);
+}
+
+export function realtimeTurnEnabled() {
+  return String(import.meta.env?.VITE_REALTIME_TURN_ENABLED || "").trim().toLowerCase() === "true";
+}
+
+export function realtimePeerConnectionConfig(
+  iceServers = defaultIceServers(),
+  iceTransportPolicy = realtimeIceTransportPolicy(),
+) {
+  return {
+    iceServers,
+    // The default remains browser-native ICE selection. `relay` is an explicit
+    // test-only switch used to validate a TURN deployment in a controlled build.
+    iceTransportPolicy,
+  };
+}
+
+function isTurnIceServer(server) {
+  const urls = Array.isArray(server?.urls) ? server.urls : [server?.urls];
+  return urls.some((url) => /^turns?:/i.test(String(url || "")));
+}
+
+export async function resolveRealtimePeerConnectionConfig({
+  turnEnabled = realtimeTurnEnabled(),
+  forceRelay = realtimeIceTransportPolicy() === "relay",
+  loadConfiguration = getRealtimeIceConfiguration,
+} = {}) {
+  const base = realtimePeerConnectionConfig();
+  if (!turnEnabled && !forceRelay) return base;
+  try {
+    const configuration = await loadConfiguration(forceRelay);
+    const turnServers = Array.isArray(configuration?.iceServers)
+      ? configuration.iceServers.filter(isTurnIceServer)
+      : [];
+    if (!configuration?.turnEnabled || turnServers.length === 0) {
+      if (forceRelay) {
+        throw createRealtimeError(
+          "WEBRTC_TURN_NOT_CONFIGURED",
+          "TURN 强制测试已启用，但服务端未返回可用的中继配置",
+        );
+      }
+      return base;
+    }
+    return realtimePeerConnectionConfig(
+      forceRelay ? turnServers : [...base.iceServers, ...turnServers],
+      forceRelay ? "relay" : "all",
+    );
+  } catch (error) {
+    if (forceRelay) throw error;
+    return base;
+  }
 }
 
 export function buildResponseCreateEvent({ id, instructions = "" } = {}) {
@@ -169,20 +230,6 @@ export function buildRealtimeStartPayload(offerSdp, { ielts = false, voice = DEF
   };
 }
 
-async function unwrapResponse(response) {
-  const contentType = response.headers.get("content-type") || "";
-  const body = contentType.includes("application/json") ? await response.json() : await response.text();
-  if (!response.ok) {
-    const message = body?.message || body?.error || body?.code || `后端请求失败（${response.status}）`;
-    throw new Error(message);
-  }
-  if (body && typeof body === "object" && "success" in body) {
-    if (!body.success) throw new Error(body.message || body.code || "后端请求失败");
-    return body.data ?? null;
-  }
-  return body;
-}
-
 function normalizeSdp(sdp) {
   const normalized = String(sdp || "").trim().replace(/\r?\n/g, "\r\n");
   return normalized.endsWith("\r\n") ? normalized : `${normalized}\r\n`;
@@ -196,17 +243,86 @@ function candidateType(candidate) {
   return match?.[1]?.toLowerCase() || "unknown";
 }
 
+function candidateProtocol(candidate) {
+  const structuredProtocol = String(candidate?.protocol || "").toLowerCase();
+  if (["udp", "tcp"].includes(structuredProtocol)) return structuredProtocol;
+  const match = String(candidate?.candidate || candidate || "")
+    .match(/^(?:a=)?candidate:\S+\s+\d+\s+(udp|tcp)\s+/i);
+  return match?.[1]?.toLowerCase() || "unknown";
+}
+
+function emptyCandidateSummary() {
+  return {
+    host: 0,
+    srflx: 0,
+    prflx: 0,
+    relay: 0,
+    unknown: 0,
+    protocols: { udp: 0, tcp: 0, unknown: 0 },
+  };
+}
+
+function addCandidateToSummary(summary, candidate) {
+  summary[candidateType(candidate)] += 1;
+  summary.protocols[candidateProtocol(candidate)] += 1;
+}
+
 function candidateSummaryFromSdp(sdp) {
-  const summary = { host: 0, srflx: 0, prflx: 0, relay: 0, unknown: 0 };
+  const summary = emptyCandidateSummary();
   String(sdp || "").split(/\r?\n/).forEach((line) => {
     if (!line.startsWith("a=candidate:")) return;
-    summary[candidateType(line)] += 1;
+    addCandidateToSummary(summary, line);
   });
   return summary;
 }
 
 function candidateTotal(summary) {
-  return Object.values(summary).reduce((total, count) => total + count, 0);
+  return ["host", "srflx", "prflx", "relay", "unknown"]
+    .reduce((total, type) => total + (summary?.[type] || 0), 0);
+}
+
+export async function collectIceConnectionDiagnostics(peer, candidates = emptyCandidateSummary()) {
+  const diagnostics = {
+    candidates,
+    selectedCandidatePair: null,
+    relayProtocols: { udp: 0, tcp: 0, tls: 0, unknown: 0 },
+  };
+  if (typeof peer?.getStats !== "function") return diagnostics;
+  try {
+    const reports = await peer.getStats();
+    const localCandidates = new Map();
+    const remoteCandidates = new Map();
+    reports.forEach((report) => {
+      if (report.type === "remote-candidate") {
+        remoteCandidates.set(report.id, report);
+        return;
+      }
+      if (report.type !== "local-candidate") return;
+      localCandidates.set(report.id, report);
+      const relayProtocol = String(report.relayProtocol || "").toLowerCase();
+      if (report.candidateType === "relay") {
+        diagnostics.relayProtocols[relayProtocol in diagnostics.relayProtocols
+          ? relayProtocol : "unknown"] += 1;
+      }
+    });
+    reports.forEach((report) => {
+      if (report.type !== "candidate-pair") return;
+      if (report.state !== "succeeded" && !report.nominated) return;
+      const local = localCandidates.get(report.localCandidateId);
+      const remote = remoteCandidates.get(report.remoteCandidateId);
+      diagnostics.selectedCandidatePair = {
+        state: report.state || "unknown",
+        nominated: Boolean(report.nominated),
+        localCandidateType: local?.candidateType || "unknown",
+        localProtocol: local?.protocol || "unknown",
+        relayProtocol: local?.relayProtocol || null,
+        remoteCandidateType: remote?.candidateType || "unknown",
+      };
+    });
+  } catch {
+    // Browser stats are optional and must never affect connection handling.
+  }
+  return diagnostics;
 }
 
 function createRealtimeError(code, message, diagnostics = null) {
@@ -250,9 +366,14 @@ export function waitForIceGathering(peer, { timeoutMs = 10_000 } = {}) {
     };
     const currentSummary = () => {
       const fromDescription = candidateSummaryFromSdp(peer?.localDescription?.sdp);
-      const merged = {};
-      Object.keys(candidates).forEach((type) => {
+      const merged = emptyCandidateSummary();
+      ["host", "srflx", "prflx", "relay", "unknown"].forEach((type) => {
         merged[type] = Math.max(candidates[type], fromDescription[type]);
+      });
+      ["udp", "tcp", "unknown"].forEach((protocol) => {
+        merged.protocols[protocol] = Math.max(
+          candidates.protocols[protocol], fromDescription.protocols[protocol],
+        );
       });
       return merged;
     };
@@ -269,7 +390,7 @@ export function waitForIceGathering(peer, { timeoutMs = 10_000 } = {}) {
     const handleCandidate = (event) => {
       if (!supportsEventListeners) previousCandidateHandler?.call(peer, event);
       if (!event?.candidate) return;
-      candidates[candidateType(event.candidate)] += 1;
+      addCandidateToSummary(candidates, event.candidate);
     };
 
     const timer = window.setTimeout(() => {
@@ -340,6 +461,10 @@ export function releaseRealtimeTransport({
   } catch {
     // The peer connection may already be closed.
   }
+}
+
+export function isRealtimeChannelOpen(dataChannel) {
+  return dataChannel?.readyState === "open";
 }
 
 function waitForChannel(channel, peer) {
@@ -432,6 +557,14 @@ export function extractCompletedAssistantMessage(event) {
     id: item.id || event.response_id || event.response?.id || event.event_id,
     text,
   };
+}
+
+export function assistantResponseInvitesReply(text) {
+  const terminalText = String(text || "")
+    .trim()
+    .replace(/["'\u2019\u201D)\]]+$/, "")
+    .trimEnd();
+  return /[?\uFF1F]$/.test(terminalText);
 }
 
 export function isActiveResponseConflict(event) {
@@ -535,7 +668,9 @@ export function createRealtimeClient({
   const customSceneId = sceneType === "custom" ? sceneId : null;
   const ieltsSceneId = sceneType === "ielts" ? sceneId : null;
   const interviewSceneId = sceneType === "interview" ? sceneId : null;
-  const manualTurnResponses = Boolean(customSceneId || ieltsSceneId || interviewSceneId);
+  // Custom scenes keep the native Realtime VAD/response path. IELTS and
+  // interviews still require deterministic application-owned prompts.
+  const manualTurnResponses = Boolean(ieltsSceneId || interviewSceneId);
   let peer = null;
   let rtcTelemetry = null;
   let channel = null;
@@ -583,9 +718,13 @@ export function createRealtimeClient({
   let activeInputItemId = null;
   let ieltsTimedOutTurn = null;
   let closingInstructions = "";
+  let customSceneTurnPending = false;
+  let customSceneTurnResponseCompleted = false;
+  let customSceneAssistantTranscript = "";
   let pendingInterviewReportStatus = null;
   let providerSessionId = null;
   let providerSessionBound = false;
+  let quotaDeadlineTimer = null;
 
   const emit = (event) => onEvent(event);
 
@@ -611,17 +750,23 @@ export function createRealtimeClient({
     throw createRealtimeError("WEBRTC_START_CANCELLED", "实时会话启动已取消");
   }
 
-  function startFailureDiagnostic(error, stage, startedAt, iceResult) {
+  async function startFailureDiagnostic(error, stage, startedAt, iceResult) {
     const code = error?.code || (isMicFailure(error)
       ? "WEBRTC_MICROPHONE_UNAVAILABLE"
       : {
         microphone: "WEBRTC_MICROPHONE_UNAVAILABLE",
+        ice_configuration: "WEBRTC_ICE_CONFIGURATION_FAILED",
         ice_gathering: "WEBRTC_ICE_GATHERING_FAILED",
         backend_start: "WEBRTC_SIGNALING_FAILED",
         session_websocket: "SESSION_WEBSOCKET_FAILED",
         remote_description: "WEBRTC_REMOTE_DESCRIPTION_FAILED",
         data_channel: "WEBRTC_DATA_CHANNEL_FAILED",
+        session_activation: "SESSION_ACTIVATION_FAILED",
       }[stage] || "WEBRTC_START_FAILED");
+    const diagnostics = await collectIceConnectionDiagnostics(
+      peer,
+      iceResult?.candidates || error?.realtimeDiagnostics?.candidates,
+    );
     return {
       code,
       stage,
@@ -632,8 +777,10 @@ export function createRealtimeClient({
       connectionState: peer?.connectionState || "unknown",
       signalingState: peer?.signalingState || "unknown",
       dataChannelState: channel?.readyState || "unknown",
-      candidates: iceResult?.candidates || error?.realtimeDiagnostics?.candidates
-        || { host: 0, srflx: 0, prflx: 0, relay: 0, unknown: 0 },
+      iceTransportPolicy: realtimeIceTransportPolicy(),
+      candidates: diagnostics.candidates || error?.realtimeDiagnostics?.candidates,
+      selectedCandidatePair: diagnostics.selectedCandidatePair,
+      relayProtocols: diagnostics.relayProtocols,
     };
   }
 
@@ -646,7 +793,7 @@ export function createRealtimeClient({
     // answer recorder for that interviewer-only interval; speech_started will
     // start it when the candidate actually interrupts.
     if (enabled && (customSceneId || ieltsSceneId || interviewSceneId)
-      && (!interviewSceneId || !responsePending)) {
+      && (!(customSceneId || interviewSceneId) || !responsePending)) {
       turnAudioCapture?.start();
     }
   }
@@ -756,7 +903,10 @@ export function createRealtimeClient({
     if (ack.success) {
       pending.resolve(ack);
     } else {
-      pending.reject(new Error(ack.message || ack.code || "会话消息处理失败"));
+      pending.reject(createRealtimeError(
+        ack.code || "SESSION_SOCKET_ERROR",
+        ack.message || ack.code || "会话消息处理失败",
+      ));
     }
   }
 
@@ -793,7 +943,7 @@ export function createRealtimeClient({
   async function sendSessionFrame(type, message = null, stopTime = null, providerSessionId = null) {
     if (!sessionId) throw new Error("会话 ID 尚未建立");
     const socket = await connectSessionSocket();
-    const operation = type === "end" ? "end" : type === "bind" ? "bind" : "message";
+    const operation = ["activate", "bind", "end"].includes(type) ? type : "message";
     const ack = new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
         pendingAcks = pendingAcks.filter((pending) => pending.resolve !== resolve);
@@ -876,6 +1026,25 @@ export function createRealtimeClient({
       window.clearTimeout(initialResponseFallbackTimer);
       initialResponseFallbackTimer = null;
     }
+    if (quotaDeadlineTimer) {
+      window.clearTimeout(quotaDeadlineTimer);
+      quotaDeadlineTimer = null;
+    }
+  }
+
+  function scheduleQuotaDeadline(rawRemainingMs) {
+    if (rawRemainingMs == null) return;
+    const remainingMs = Number(rawRemainingMs);
+    if (!Number.isFinite(remainingMs)) return;
+    const expire = () => {
+      quotaDeadlineTimer = null;
+      emit({
+        type: "local.quota_exhausted",
+        message: "今日练习额度已用完，本次会话已自动结束",
+      });
+      void stop({ reason: "quota_exhausted" });
+    };
+    quotaDeadlineTimer = window.setTimeout(expire, Math.max(0, remainingMs));
   }
 
   function sendSessionUpdate() {
@@ -1012,23 +1181,56 @@ export function createRealtimeClient({
     Promise.resolve(drain).catch(() => {}).then(finish);
   }
 
+  function scheduleCustomSceneCompletionIfResponseFinished() {
+    if (!customSceneId
+      || !scenarioCompletionPending
+      || responsePending
+      || !customSceneTurnResponseCompleted) return false;
+    if (scenarioCompletionTimer) {
+      window.clearTimeout(scenarioCompletionTimer);
+      scenarioCompletionTimer = null;
+    }
+    scheduleScenarioCompletionAfterAudioDrain();
+    return true;
+  }
+
+  function deferCustomSceneCompletionForAssistantQuestion() {
+    if (!customSceneId
+      || !scenarioCompletionPending
+      || responsePending
+      || !customSceneTurnResponseCompleted
+      || !assistantResponseInvitesReply(customSceneAssistantTranscript)) return false;
+    scenarioCompletionPending = false;
+    if (scenarioCompletionTimer) {
+      window.clearTimeout(scenarioCompletionTimer);
+      scenarioCompletionTimer = null;
+    }
+    inputReady = true;
+    setTrackEnabled();
+    return true;
+  }
+
   function requestTurnResponse({ closing = false, instructions = "" } = {}) {
+    if (!isRealtimeChannelOpen(channel)) return false;
     if (responsePending) return false;
     responsePending = true;
     if (closing) {
       closingResponseRequested = true;
       armScenarioCompletionTimeout();
     }
-    try {
-      sendProviderEvent(buildResponseCreateEvent({
-        id: eventId(closing ? "closing_response" : "turn_response"),
-        instructions,
-      }));
-    } catch (error) {
-      responsePending = false;
-      if (closing) closingResponseRequested = false;
-      throw error;
-    }
+	try {
+	  sendProviderEvent(buildResponseCreateEvent({
+	    id: eventId(closing ? "closing_response" : "turn_response"),
+	    instructions,
+	  }));
+	} catch (error) {
+	  responsePending = false;
+	  if (closing) closingResponseRequested = false;
+	  // A remote close can race the readyState check. Treat that as a
+	  // normal disconnected turn; the next connected turn can retry safely.
+	  if (!isRealtimeChannelOpen(channel)) return false;
+	  throw error;
+	}
     return true;
   }
 
@@ -1085,7 +1287,7 @@ export function createRealtimeClient({
     return state;
   }
 
-  function applyScenarioState(state) {
+  function applyScenarioState(state, { requestResponse = true } = {}) {
     if (!state) return;
     emit({ type: "local.scenario_state", state });
     const instruction = String(state.controlInstruction || "").trim();
@@ -1100,15 +1302,15 @@ export function createRealtimeClient({
     }
     if (state.completed) {
       scenarioCompletionPending = true;
+      closingInstructions = String(state.controlInstruction || "").trim();
       inputReady = false;
       setTrackEnabled();
       turnAudioCapture?.stop();
     }
-    requestTurnResponse(buildScenarioResponseRequest(state));
+    if (requestResponse) requestTurnResponse(buildScenarioResponseRequest(state));
   }
 
   async function postStart({ offerSdp, voice }) {
-    const accessToken = getAccessToken();
     const path = customSceneId
       ? `/api/custom-scenes/${encodeURIComponent(customSceneId)}/sessions`
       : ieltsSceneId
@@ -1116,18 +1318,13 @@ export function createRealtimeClient({
         : interviewSceneId
           ? `/api/interview-scenes/${encodeURIComponent(interviewSceneId)}/sessions`
       : "/api/scene-sessions";
-    const response = await fetch(`${base}${path}`, {
+    return requestAuthenticated(path, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      },
       body: JSON.stringify(buildRealtimeStartPayload(offerSdp, {
         ielts: Boolean(ieltsSceneId),
         voice,
       })),
     });
-    return unwrapResponse(response);
   }
 
   async function handleProviderEvent(raw) {
@@ -1190,10 +1387,10 @@ export function createRealtimeClient({
         window.clearTimeout(sessionUpdateRetryTimer);
         sessionUpdateRetryTimer = null;
       }
-      // The interview uses provider-managed VAD, but the backend state machine
-      // is the only producer of interviewer responses. VAD only detects the
-      // candidate turn and never creates a response by itself.
-      inputReady = !manualTurnResponses || interviewSceneId;
+      // Keep custom-scene scoring capture closed until the opening response
+      // starts. response.created opens the track for native VAD barge-in, while
+      // the turn recorder itself waits for speech_started.
+      inputReady = !customSceneId && (!manualTurnResponses || interviewSceneId);
       setTrackEnabled();
       requestInitialResponse();
       return;
@@ -1210,6 +1407,10 @@ export function createRealtimeClient({
         ieltsTimedOutTurn = null;
       }
       activeInputItemId = startedItemId;
+      if (customSceneId) {
+        customSceneTurnPending = true;
+        customSceneTurnResponseCompleted = false;
+      }
       if (interviewSceneId && responsePending && !scenarioCompletionPending) {
         // Keep deliberate barge-in: VAD detects the candidate speech and the
         // active interviewer response is cancelled. Since interview VAD does
@@ -1221,7 +1422,7 @@ export function createRealtimeClient({
         }
         emit({ type: "local.interview_interrupted" });
       }
-      turnAudioCapture?.start();
+      if (!customSceneId || !responsePending) turnAudioCapture?.start();
       return;
     }
 
@@ -1234,7 +1435,9 @@ export function createRealtimeClient({
       clearIeltsInputRecovery();
       initialResponseStarted = true;
       responsePending = true;
-      inputReady = !manualTurnResponses || interviewSceneId;
+      if (customSceneId) customSceneAssistantTranscript = "";
+      inputReady = (!manualTurnResponses || interviewSceneId)
+        && !scenarioCompletionPending;
       if (initialResponseFallbackTimer) {
         window.clearTimeout(initialResponseFallbackTimer);
         initialResponseFallbackTimer = null;
@@ -1251,6 +1454,7 @@ export function createRealtimeClient({
       }
       const transcript = String(event.transcript || event.text || "").trim();
       if (!transcript) return;
+      if (customSceneId) customSceneTurnResponseCompleted = false;
       const completedInputItemId = event.item_id || event.item?.id || null;
       const timedOutTurn = ieltsActivePart === "PART_3"
         && ieltsTimedOutTurn
@@ -1359,8 +1563,11 @@ export function createRealtimeClient({
         });
       }
       if (customSceneId && persisted) {
+        customSceneTurnPending = false;
         const turnNo = ++learnerTurnNo;
-        const wavAudio = await turnAudioCapture?.take();
+        const wavAudioOperation = Promise.resolve()
+          .then(() => turnAudioCapture?.take())
+          .catch(() => null);
         const stateOperation = statePipeline.then(() => advanceCustomDialogueState(
           customSceneId,
           sessionId,
@@ -1368,13 +1575,14 @@ export function createRealtimeClient({
           transcript,
         ));
         statePipeline = stateOperation.catch(() => null);
-        const evaluationOperation = evaluateCustomDialogueTurn(
-          customSceneId,
-          sessionId,
-          turnNo,
-          transcript,
-          wavAudio,
-        );
+        const evaluationOperation = wavAudioOperation.then((wavAudio) =>
+          evaluateCustomDialogueTurn(
+            customSceneId,
+            sessionId,
+            turnNo,
+            transcript,
+            wavAudio,
+          ));
         pendingOperations.add(stateOperation);
         pendingOperations.add(evaluationOperation);
         void evaluationOperation.then((turnResult) => {
@@ -1393,19 +1601,23 @@ export function createRealtimeClient({
         }).finally(() => {
           pendingOperations.delete(evaluationOperation);
         });
-        try {
-          const scenarioState = await stateOperation;
-          applyScenarioState(scenarioState);
-        } catch (error) {
+        void stateOperation.then((scenarioState) => {
+          if (turnNo !== learnerTurnNo || customSceneTurnPending) return;
+          applyScenarioState(scenarioState, { requestResponse: false });
+          if (scenarioState?.completed) {
+            if (deferCustomSceneCompletionForAssistantQuestion()) return;
+            armScenarioCompletionTimeout();
+            scheduleCustomSceneCompletionIfResponseFinished();
+          }
+        }).catch((error) => {
           emit({
             type: "local.scenario_state_error",
             turnNo,
             message: error instanceof Error ? error.message : "场景状态推进失败",
           });
-          requestTurnResponse();
-        } finally {
+        }).finally(() => {
           pendingOperations.delete(stateOperation);
-        }
+        });
       }
       if (interviewSceneId && persisted) {
         const turnNo = ++learnerTurnNo;
@@ -1469,6 +1681,10 @@ export function createRealtimeClient({
 
     const completedAssistantMessage = extractCompletedAssistantMessage(event);
     if (completedAssistantMessage) {
+      const assistantText = String(completedAssistantMessage.text || "").trim();
+      if (customSceneId && assistantText) {
+        customSceneAssistantTranscript = assistantText;
+      }
       scheduleIeltsInputRecovery();
       if (scenarioCompletionPending && interviewSceneId) {
         // 收尾期间会话已被后端终态化：跳过 WS 落库（否则 Session not found），仅展示收尾语
@@ -1491,13 +1707,18 @@ export function createRealtimeClient({
     }
     if (event.type === "response.done") {
       responsePending = false;
+      if (customSceneId) customSceneTurnResponseCompleted = true;
       if (ieltsActivePart === "PART_2" && ieltsDialogueCompleted) {
         inputReady = false;
         setTrackEnabled();
         emit({ type: "local.ielts_part2_completion_ready" });
       }
       if (scenarioCompletionPending) {
-        if (closingResponseRequested) {
+        if (customSceneId) {
+          if (!deferCustomSceneCompletionForAssistantQuestion()) {
+            scheduleCustomSceneCompletionIfResponseFinished();
+          }
+        } else if (closingResponseRequested) {
           if (scenarioCompletionTimer) {
             window.clearTimeout(scenarioCompletionTimer);
             scenarioCompletionTimer = null;
@@ -1528,10 +1749,15 @@ export function createRealtimeClient({
     const startedAt = Date.now();
     let stage = "peer_connection";
     let iceResult = null;
+    let peerConfiguration = null;
     emit({ type: "local.connecting" });
 
     try {
-      peer = new RTCPeerConnection({ iceServers: defaultIceServers() });
+      stage = "ice_configuration";
+      peerConfiguration = await resolveRealtimePeerConnectionConfig();
+      assertCurrentStart(attempt);
+      stage = "peer_connection";
+      peer = new RTCPeerConnection(peerConfiguration);
       rtcTelemetry = createRtcTelemetryMonitor(peer, {
         sessionId: () => sessionId,
         model: DEFAULT_MODEL,
@@ -1622,18 +1848,14 @@ export function createRealtimeClient({
         includeVoice: backend.voiceId !== "Cherry",
         model: DEFAULT_MODEL,
         speechSpeed,
-        // Interview and IELTS both keep the provider VAD open through a
-        // natural three-second thinking pause. Interview response.create is
-        // still orchestrated after the backend state transition, but turn
-        // detection and interruption are automatic at the provider.
-        // Scenario/interview state machines own the next prompt. Provider VAD
-        // remains automatic, but it must not create a competing response.
+        // Custom scenes use the provider's native VAD response and barge-in
+        // path. IELTS and interview prompts remain application-controlled.
         automaticTurnResponses: !manualTurnResponses,
         silenceDurationMs: silenceDurationMs ?? (interviewSceneId || ieltsSceneId ? 3_000 : 600),
         turnDetectionType: turnDetectionType ?? (isDeterministicIeltsPart() ? "server_vad" : null),
         interruptResponse: interruptResponse ?? (interviewSceneId || ieltsActivePart !== "PART_2"),
-        vadThreshold: interviewSceneId ? 0.8 : 0.5,
-        prefixPaddingMs: interviewSceneId ? 1_000 : 500,
+        vadThreshold: interviewSceneId ? 0.8 : customSceneId ? 0.4 : 0.5,
+        prefixPaddingMs: interviewSceneId || customSceneId ? 1_000 : 500,
       });
       baseSessionInstructions = sessionConfig.instructions;
 
@@ -1646,6 +1868,10 @@ export function createRealtimeClient({
       stage = "data_channel";
       await waitForChannel(channel, peer);
       assertCurrentStart(attempt);
+      stage = "session_activation";
+      const activation = await sendSessionFrame("activate");
+      assertCurrentStart(attempt);
+      scheduleQuotaDeadline(activation?.data?.quotaRemainingMillis);
       rtcTelemetry?.connected();
       started = true;
       const connectedAudioTrack = localStream?.getAudioTracks?.()[0];
@@ -1662,10 +1888,23 @@ export function createRealtimeClient({
           sendSessionUpdate();
         }
       }, 2_000);
-      emit({ type: "local.connected", sessionId, backend });
+      const networkDiagnostics = await collectIceConnectionDiagnostics(peer, iceResult?.candidates);
+      const connectedDiagnostic = {
+        iceTransportPolicy: peerConfiguration?.iceTransportPolicy || realtimeIceTransportPolicy(),
+        turnConfigured: peerConfiguration?.iceServers?.some(isTurnIceServer) || false,
+        iceGatheringState: peer?.iceGatheringState || "unknown",
+        iceConnectionState: peer?.iceConnectionState || "unknown",
+        connectionState: peer?.connectionState || "unknown",
+        dataChannelState: channel?.readyState || "unknown",
+        ...networkDiagnostics,
+      };
+      if (connectedDiagnostic.iceTransportPolicy === "relay") {
+        console.info("realtime.turn-test.connected", connectedDiagnostic);
+      }
+      emit({ type: "local.connected", sessionId, backend, diagnostic: connectedDiagnostic });
       return { sessionId, backend };
     } catch (error) {
-      const diagnostic = startFailureDiagnostic(error, stage, startedAt, iceResult);
+      const diagnostic = await startFailureDiagnostic(error, stage, startedAt, iceResult);
       releaseCurrentTransport();
       await stop({ notifyBackend: false, reason: "start_failed", emitEnded: false });
       if (diagnostic.code === "WEBRTC_START_CANCELLED") throw error;
@@ -1731,9 +1970,6 @@ export function createRealtimeClient({
   }
 
   function requestResponse() {
-    if (!channel || channel.readyState !== "open") {
-      throw new Error("实时数据通道尚未连接");
-    }
     return requestTurnResponse();
   }
 
@@ -1947,6 +2183,9 @@ export function createRealtimeClient({
       responsePending = false;
       closingResponseRequested = false;
       closingInstructions = "";
+      customSceneTurnPending = false;
+      customSceneTurnResponseCompleted = false;
+      customSceneAssistantTranscript = "";
       pendingInterviewReportStatus = null;
       statePipeline = Promise.resolve();
       ieltsActivePart = null;

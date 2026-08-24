@@ -39,6 +39,8 @@ public class AliyunTtsProvider extends TtsProvider {
 	private final HttpClient httpClient;
 	private final ObjectMapper objectMapper;
 	private final String apiKey;
+	private final String workspaceId;
+	private final String region;
 	private final URI endpoint;
 	private final String model;
 	private final String voice;
@@ -67,6 +69,8 @@ public class AliyunTtsProvider extends TtsProvider {
 						.build(),
 				objectMapper,
 				apiKey,
+				workspaceId,
+				region,
 				buildEndpoint(workspaceId, region),
 				model,
 				voice,
@@ -87,10 +91,29 @@ public class AliyunTtsProvider extends TtsProvider {
 			int sampleRate,
 			Duration readTimeout,
 			int maxAudioBytes) {
+		this(httpClient, objectMapper, apiKey, "", "", endpoint, model, voice, format,
+				sampleRate, readTimeout, maxAudioBytes);
+	}
+
+	private AliyunTtsProvider(
+			HttpClient httpClient,
+			ObjectMapper objectMapper,
+			String apiKey,
+			String workspaceId,
+			String region,
+			URI endpoint,
+			String model,
+			String voice,
+			String format,
+			int sampleRate,
+			Duration readTimeout,
+			int maxAudioBytes) {
 		super("aliyun", Set.of(requiredText(model, "Aliyun TTS model")));
 		this.httpClient = require(httpClient, "Aliyun TTS HTTP client");
 		this.objectMapper = require(objectMapper, "Aliyun TTS JSON mapper");
 		this.apiKey = trim(apiKey);
+		this.workspaceId = trim(workspaceId);
+		this.region = trim(region);
 		this.endpoint = endpoint;
 		this.model = requiredText(model, "Aliyun TTS model");
 		this.voice = requiredText(voice, "Aliyun TTS voice");
@@ -102,7 +125,7 @@ public class AliyunTtsProvider extends TtsProvider {
 
 	@Override
 	public byte[] generateSpeechAudio(String text, String token) {
-		String credential = ProviderCredentialOverride.currentOr(apiKey);
+		String credential = ProviderCredentialOverride.currentOr("apiKey", apiKey);
 		if (credential.isBlank()) {
 			throw retryableFailure(
 					"ALIYUN_TTS_CREDENTIAL_MISSING",
@@ -144,7 +167,8 @@ public class AliyunTtsProvider extends TtsProvider {
 					"TTS_TEXT_TOO_LONG",
 					"Speech synthesis text exceeds " + MAX_TEXT_LENGTH + " characters");
 		}
-		requireHttpsEndpoint(endpoint, "ALIYUN_TTS_ENDPOINT_INVALID");
+		URI requestEndpoint = effectiveEndpoint();
+		requireHttpsEndpoint(requestEndpoint, "ALIYUN_TTS_ENDPOINT_INVALID");
 
 		try {
 			Map<String, Object> input = Map.of(
@@ -157,7 +181,7 @@ public class AliyunTtsProvider extends TtsProvider {
 					"model", model,
 					"input", input));
 			HttpRequest synthesisRequest = HttpRequest.newBuilder()
-					.uri(endpoint)
+					.uri(requestEndpoint)
 					.timeout(readTimeout)
 					.header("Authorization", "Bearer " + credential)
 					.header("Content-Type", "application/json")
@@ -229,16 +253,16 @@ public class AliyunTtsProvider extends TtsProvider {
 	}
 
 	private String officialRequestId(HttpResponse<byte[]> response, String responseBody) throws JacksonException {
-		String header = response.headers().firstValue("x-request-id")
-				.or(() -> response.headers().firstValue("x-dashscope-request-id"))
-				.orElse("")
-				.trim();
-		if (!header.isBlank()) return header;
 		String bodyRequestId = objectMapper.readTree(responseBody)
 				.path("request_id")
 				.asString("")
 				.trim();
-		return bodyRequestId.isBlank() ? null : bodyRequestId;
+		if (!bodyRequestId.isBlank()) return bodyRequestId;
+		String header = response.headers().firstValue("x-request-id")
+				.or(() -> response.headers().firstValue("x-dashscope-request-id"))
+				.orElse("")
+				.trim();
+		return header.isBlank() ? null : header;
 	}
 
 	private URI audioUri(String responseBody) throws JacksonException {
@@ -305,6 +329,15 @@ public class AliyunTtsProvider extends TtsProvider {
 		}
 		return URI.create("https://" + workspace + "." + endpointRegion
 				+ ".maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer");
+	}
+
+	private URI effectiveEndpoint() {
+		String effectiveWorkspaceId = ProviderCredentialOverride.currentOr("workspaceId", workspaceId);
+		String effectiveRegion = ProviderCredentialOverride.currentOr("region", region);
+		if (!effectiveWorkspaceId.isBlank() || !effectiveRegion.isBlank()) {
+			return buildEndpoint(effectiveWorkspaceId, effectiveRegion);
+		}
+		return endpoint;
 	}
 
 	private static void requireHttpsEndpoint(URI uri, String errorCode) {

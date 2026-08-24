@@ -6,6 +6,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -47,6 +49,7 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.mock.web.MockMultipartFile;
 
 class IELTSSceneControllerTest {
 
@@ -340,5 +343,107 @@ class IELTSSceneControllerTest {
 
 		verify(sessionService).startSession(
 				new StartIeltsSessionCommand("ielts_123", request));
+	}
+
+	@Test
+	void updatesSettingsAndIncludesStreakFields() throws Exception {
+		IeltsSceneService sceneService = mock(IeltsSceneService.class);
+		IeltsEvaluationService evaluationService = mock(IeltsEvaluationService.class);
+		var settings = new IeltsSettingsResponse(
+				new BigDecimal("7.5"), 3, "id-2", "Katerina", null,
+				4, 12, java.time.LocalDate.parse("2026-08-21"));
+		when(sceneService.updateSettings(new com.unispeaking.domain.dto.scene.UpdateIeltsSettingsRequest(
+				new BigDecimal("7.5"), "id-2"))).thenReturn(settings);
+		when(evaluationService.getLatestEstimatedScore()).thenReturn(new BigDecimal("7.0"));
+		MockMvc mvc = MockMvcBuilders.standaloneSetup(new IELTSSceneController(
+				sceneService, mock(IeltsSceneFlowService.class), evaluationService,
+				mock(IeltsSessionService.class), mock(RecordingStore.class))).build();
+
+		mvc.perform(put("/api/ielts/settings")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"targetScore\":7.5,\"examinerId\":\"id-2\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.targetScore").value(7.5))
+				.andExpect(jsonPath("$.data.latestEstimatedScore").value(7.0))
+				.andExpect(jsonPath("$.data.currentStreakDays").value(4))
+				.andExpect(jsonPath("$.data.lastCheckInDate").value("2026-08-21"));
+		verify(sceneService).updateSettings(new com.unispeaking.domain.dto.scene.UpdateIeltsSettingsRequest(
+				new BigDecimal("7.5"), "id-2"));
+	}
+
+	@Test
+	void validatesTopicsTrainingAndDialogueStateEndpoints() throws Exception {
+		IeltsSceneService sceneService = mock(IeltsSceneService.class);
+		IeltsSceneFlowService flowService = mock(IeltsSceneFlowService.class);
+		when(flowService.getDialogueState("ielts_1", "session_1"))
+				.thenReturn(new com.unispeaking.domain.dto.session.IeltsDialogueStateResponse(
+					"ielts_1", "session_1", IeltsPart.PART_1, true, 2, 3, false, "Next question"));
+		when(flowService.getPart2State("ielts_1", "session_1"))
+				.thenReturn(new IeltsPart2StateResponse("ielts_1", "session_1", "LONG_TURN", false, "Speak now"));
+		when(flowService.advanceDialogueState("ielts_1", "session_1", 2, true))
+				.thenReturn(new com.unispeaking.domain.dto.session.IeltsDialogueStateResponse(
+					"ielts_1", "session_1", IeltsPart.PART_1, true, 3, 3, true, "Completed"));
+		MockMvc mvc = MockMvcBuilders.standaloneSetup(new IELTSSceneController(
+				sceneService, flowService, mock(IeltsEvaluationService.class),
+				mock(IeltsSessionService.class), mock(RecordingStore.class))).build();
+
+		mvc.perform(get("/api/ielts/ielts_1/sessions/session_1/state"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.answeredQuestions").value(2));
+		mvc.perform(post("/api/ielts/ielts_1/sessions/session_1/turns/2/state")
+					.param("timedOut", "true"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.completed").value(true));
+		mvc.perform(get("/api/ielts/ielts_1/sessions/session_1/part2/state"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.controlInstruction").value("Speak now"));
+		verify(flowService).advanceDialogueState("ielts_1", "session_1", 2, true);
+	}
+
+	@Test
+	void evaluatesTurnWithAndWithoutAudioAndExposesEvaluationHistory() throws Exception {
+		IeltsEvaluationService evaluationService = mock(IeltsEvaluationService.class);
+		var result = new com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationResult(
+				2, "answer", new BigDecimal("7.0"), new BigDecimal("6.5"), new BigDecimal("7.0"),
+				new BigDecimal("7.0"), new BigDecimal("6.0"), new BigDecimal("6.5"),
+				"Good", "Try this", List.of());
+		when(evaluationService.evaluateTurn(org.mockito.ArgumentMatchers.any())).thenReturn(result);
+		when(evaluationService.getHistory()).thenReturn(List.of());
+		MockMvc mvc = MockMvcBuilders.standaloneSetup(new IELTSSceneController(
+				mock(IeltsSceneService.class), mock(IeltsSceneFlowService.class), evaluationService,
+				mock(IeltsSessionService.class), mock(RecordingStore.class))).build();
+
+		mvc.perform(multipart("/api/ielts/ielts_1/sessions/session_1/turns/2/evaluation")
+					.param("transcript", "answer"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.turnNo").value(2));
+		mvc.perform(multipart("/api/ielts/ielts_1/sessions/session_1/turns/2/evaluation")
+					.param("transcript", "answer")
+					.file(new MockMultipartFile("audio", "a.wav", "audio/wav", new byte[] {1, 2})))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.overallScore").value(7.0));
+		mvc.perform(get("/api/ielts/evaluations"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data").isArray());
+	}
+
+	@Test
+	void generatesEvaluationForSession() throws Exception {
+		IeltsEvaluationService evaluationService = mock(IeltsEvaluationService.class);
+		when(evaluationService.generateEvaluation("ielts_1", "session_1"))
+				.thenReturn(new com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult(
+					IeltsPart.PART_1, "MOCK_FINAL", new BigDecimal("7.0"), null, null, null, null,
+					"Summary", List.of("Strength"), List.of("Improve")));
+		MockMvc mvc = MockMvcBuilders.standaloneSetup(new IELTSSceneController(
+				mock(IeltsSceneService.class), mock(IeltsSceneFlowService.class), evaluationService,
+				mock(IeltsSessionService.class), mock(RecordingStore.class))).build();
+		mvc.perform(post("/api/ielts/ielts_1/sessions/session_1/evaluation"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.assessmentType").value("MOCK_FINAL"));
+		verify(evaluationService).generateEvaluation("ielts_1", "session_1");
+	}
+
+	@Test
+	void rejectsInvalidTopicPaginationAndPart2Event() throws Exception {
+		MockMvc mvc = MockMvcBuilders.standaloneSetup(new IELTSSceneController(
+				mock(IeltsSceneService.class), mock(IeltsSceneFlowService.class),
+				mock(IeltsEvaluationService.class), mock(IeltsSessionService.class),
+				mock(RecordingStore.class))).build();
+		mvc.perform(post("/api/ielts/ielts_1/sessions/session_1/part2/state")
+					.contentType(MediaType.APPLICATION_JSON).content("{}"))
+				.andExpect(status().isBadRequest());
 	}
 }
