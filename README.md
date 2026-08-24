@@ -1,8 +1,9 @@
 # UniSpeaking
 
-[![后端测试](https://github.com/1024XEngineer/UniSpeaking/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/1024XEngineer/UniSpeaking/actions/workflows/coverage.yml)
+后端： [![后端测试](https://github.com/1024XEngineer/UniSpeaking/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/1024XEngineer/UniSpeaking/actions/workflows/coverage.yml)
 [![后端覆盖率](https://codecov.io/gh/1024XEngineer/UniSpeaking/branch/main/graph/badge.svg?flag=backend)](https://codecov.io/gh/1024XEngineer/UniSpeaking)
-[![移动端覆盖率](https://codecov.io/gh/1024XEngineer/UniSpeaking/branch/main/graph/badge.svg?flag=mobile)](https://codecov.io/gh/1024XEngineer/UniSpeaking)
+
+移动端： [![移动端覆盖率](https://codecov.io/gh/1024XEngineer/UniSpeaking/branch/main/graph/badge.svg?flag=mobile)](https://codecov.io/gh/1024XEngineer/UniSpeaking)
 
 后端与移动端 Codecov 使用独立的 `backend`、`mobile` flag，分别统计后端 JaCoCo 合并测试和移动端 Jest 行覆盖率；README 徽章显示 main 分支最新报告，移动端目标为保持在 80% 以上。
 
