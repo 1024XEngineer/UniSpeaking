@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ArrowClockwise,
   ArrowRight,
   BookOpenText,
   Briefcase,
@@ -1699,6 +1700,8 @@ function CustomSceneConversation({
   const [error, setError] = useState("");
   const [paused, setPaused] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [connectionFailed, setConnectionFailed] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [lines, setLines] = useState([]);
   const [translated, setTranslated] = useState([]);
   const clientRef = useRef(null);
@@ -1707,6 +1710,7 @@ function CustomSceneConversation({
   const endingRef = useRef(false);
   const scenarioCompletedRef = useRef(false);
   const sceneAnalyticsRef = useRef(null);
+  const connectionPromiseRef = useRef(null);
   const { transcriptRef, handleTranscriptScroll } = useTranscriptAutoFollow({
     lines,
     translated,
@@ -1744,6 +1748,7 @@ function CustomSceneConversation({
     if (event.type === "local.connecting") setStatus("正在连接模型");
     else if (event.type === "local.connected") {
       sceneAnalyticsRef.current?.started();
+      setConnectionFailed(false);
       setStatus("正在建立模型会话");
       sessionIdRef.current = event.sessionId || "";
       onSessionStarted?.(event.sessionId);
@@ -1825,6 +1830,53 @@ function CustomSceneConversation({
     }
   };
 
+  const connectRealtime = (client, { retry = false } = {}) => {
+    if (!client || clientRef.current !== client || endingRef.current) {
+      return Promise.resolve();
+    }
+    if (connectionPromiseRef.current) return connectionPromiseRef.current;
+
+    let operation;
+    operation = (async () => {
+      sceneAnalyticsRef.current = analytics.training({ mode: "SCENE", pageCode: "scene-training" });
+      sceneAnalyticsRef.current.attempt();
+      setConnectionFailed(false);
+      setReconnecting(retry);
+      setError("");
+      setPaused(false);
+      setStatus(retry ? "正在重新连接场景" : "正在连接场景");
+      try {
+        await client.start({
+          voice: teacher.voiceId,
+          speechSpeed: speedCodeByLabel[speed] || "NATURAL",
+        });
+        if (clientRef.current !== client) return;
+        sceneAnalyticsRef.current.started();
+      } catch (startError) {
+        if (clientRef.current !== client) return;
+        sceneAnalyticsRef.current.fail("REALTIME_ERROR");
+        setConnectionFailed(true);
+        setError(realtimeFailureMessage(startError));
+        setStatus("连接失败");
+      } finally {
+        if (clientRef.current === client) setReconnecting(false);
+      }
+    })();
+    const trackedOperation = operation.finally(() => {
+      if (connectionPromiseRef.current === trackedOperation) {
+        connectionPromiseRef.current = null;
+      }
+    });
+    connectionPromiseRef.current = trackedOperation;
+    return trackedOperation;
+  };
+
+  const reconnectConversation = () => {
+    const client = clientRef.current;
+    if (!connectionFailed || reconnecting || !client) return;
+    void connectRealtime(client, { retry: true });
+  };
+
   useEffect(() => {
     if (ended) {
       setEnding(true);
@@ -1833,8 +1885,6 @@ function CustomSceneConversation({
       return undefined;
     }
     let cancelled = false;
-    sceneAnalyticsRef.current = analytics.training({ mode: "SCENE", pageCode: "scene-training" });
-    sceneAnalyticsRef.current.attempt();
     const client = createRealtimeClient({
       sceneId,
       sceneType: "custom",
@@ -1848,17 +1898,7 @@ function CustomSceneConversation({
       },
     });
     clientRef.current = client;
-    void client.start({
-      voice: teacher.voiceId,
-      speechSpeed: speedCodeByLabel[speed] || "NATURAL",
-    }).then(() => {
-      if (!cancelled) sceneAnalyticsRef.current.started();
-    }).catch((startError) => {
-      if (!cancelled) {
-        sceneAnalyticsRef.current.fail("REALTIME_ERROR");
-        setError(startError instanceof Error ? startError.message : "无法开始场景对话");
-      }
-    });
+    void connectRealtime(client);
     const syncVisibility = () => sceneAnalyticsRef.current?.setVisible(document.visibilityState === "visible");
     document.addEventListener("visibilitychange", syncVisibility);
     syncVisibility();
@@ -1868,6 +1908,7 @@ function CustomSceneConversation({
       sceneAnalyticsRef.current?.abandon("COMPONENT_UNMOUNT");
       detachSceneRemoteAudio();
       clientRef.current = null;
+      connectionPromiseRef.current = null;
       void client.stop({ notifyBackend: false, reason: "component_unmount", emitEnded: false });
     };
   }, [sceneId, ended]);
@@ -1956,6 +1997,17 @@ function CustomSceneConversation({
           emptyStatus={status}
         />
         {error && <p className="call-error" role="alert">{error}</p>}
+        {(connectionFailed || reconnecting) && (
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={reconnecting}
+            icon={<ArrowClockwise weight="bold" />}
+            onClick={reconnectConversation}
+          >
+            {reconnecting ? "正在重新连接" : "重新连接"}
+          </Button>
+        )}
       </section>
       <CallControls
         paused={paused}
