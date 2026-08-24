@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowsClockwise,
   BookOpenText,
   Briefcase,
   CalendarBlank,
@@ -66,6 +67,7 @@ import {
   deleteLearningAsset,
   evaluateSentenceReading,
   generateCustomScene,
+  getDailyPicks,
   getAchievementOverview,
   getAccessToken,
   getCurrentUser,
@@ -1463,7 +1465,42 @@ function Scenes({ onStartTraining, onIelts, onInterview, teacher }) {
   const [generationSource, setGenerationSource] = useState(null);
   const [startingTraining, setStartingTraining] = useState(false);
   const [generationError, setGenerationError] = useState("");
+  const [dailyRecommendations, setDailyRecommendations] = useState(recommendations);
+  const [refreshingRecommendations, setRefreshingRecommendations] = useState(false);
+  const [recommendationError, setRecommendationError] = useState("");
+  const dailyPicksRequestRef = useRef(0);
   const examples = ["餐厅点餐并说明忌口", "商场退换一件商品", "问路并确认交通方式", "预约理发并说明需求"];
+
+  const loadDailyPicks = async (excludedIds = [], showFeedback = false) => {
+    const requestId = dailyPicksRequestRef.current + 1;
+    dailyPicksRequestRef.current = requestId;
+    if (showFeedback) {
+      setRefreshingRecommendations(true);
+      setRecommendationError("");
+    }
+    try {
+      const response = await getDailyPicks(excludedIds);
+      if (dailyPicksRequestRef.current !== requestId || !Array.isArray(response?.picks) || response.picks.length !== 3) return;
+      setDailyRecommendations(response.picks.map((item, index) => ({
+        ...item,
+        number: String(item.position || index + 1).padStart(2, "0"),
+      })));
+    } catch {
+      if (showFeedback && dailyPicksRequestRef.current === requestId) {
+        setRecommendationError("暂时无法更换，请稍后再试。");
+      }
+      // Keep the current recommendations when the backend is unavailable.
+    } finally {
+      if (showFeedback && dailyPicksRequestRef.current === requestId) setRefreshingRecommendations(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadDailyPicks();
+    return () => {
+      dailyPicksRequestRef.current += 1;
+    };
+  }, []);
   const syncPrompt = (event) => {
     setPrompt(event.currentTarget.value.slice(0, 200));
   };
@@ -1545,22 +1582,36 @@ function Scenes({ onStartTraining, onIelts, onInterview, teacher }) {
         </section>
 
         <section className="recommendations scene-module">
-          <div className="scene-section-heading"><div><p className="eyebrow">DAILY PICKS</p><h2>每日推荐</h2></div><p>选择一个常用场景，直接开始今天的练习。</p></div>
+          <div className="scene-section-heading recommendation-heading">
+            <div><p className="eyebrow">DAILY PICKS</p><h2>每日推荐</h2></div>
+            <div className="recommendation-heading__actions">
+              <button
+                type="button"
+                className="recommendation-refresh"
+                disabled={refreshingRecommendations || generating}
+                onClick={() => void loadDailyPicks(dailyRecommendations.map((item) => item.id), true)}
+              >
+                <ArrowsClockwise className={refreshingRecommendations ? "is-spinning" : ""} />
+                <span>{refreshingRecommendations ? "更换中" : "换一批"}</span>
+              </button>
+            </div>
+          </div>
+          {recommendationError && <p className="recommendation-error" role="alert">{recommendationError}</p>}
           <div className="recommendation-list">
-            {recommendations.map((item) => {
+            {dailyRecommendations.map((item) => {
               const loading = generationSource === `recommendation:${item.id}`;
               const category = sceneCategories[item.category] || sceneCategories.other;
               return (
                 <article key={item.id} style={{ "--scene-category-bg": category.subtleBackgroundColor, "--scene-category-accent": category.subtleTextColor || category.textColor }}>
                   <span className="recommendation__number">{item.number}</span>
                   <span className="recommendation__title"><SceneCategoryTag category={item.category} subtle /><strong>{item.title}</strong></span>
-                  <small>{item.duration}<i>·</i>{item.level}</small>
+                  <small>{item.duration}</small>
                   <p>{item.goal}</p>
                   <button
                     type="button"
                     className={cx("scene-card-cta", loading && "is-generating")}
                     disabled={generating}
-                    onClick={() => void generate(item.title, item.id)}
+                    onClick={() => void generate(item.sceneInput || item.title, item.id)}
                     aria-label={loading ? `正在生成 ${item.title} 场景` : `开始练习 ${item.title} 场景`}
                   >
                     {loading

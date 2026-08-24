@@ -1,17 +1,20 @@
 import type { SceneCategory } from './sceneCategories';
 
-export const recommendations = [
-  { id: 'coffee', title: '咖啡店点单', category: 'food', duration: '8–10 分钟', level: '初级', goal: '流利点单，清晰表达需求' },
-  { id: 'hotel', title: '酒店入住', category: 'accommodation', duration: '10–12 分钟', level: '中级', goal: '礼貌沟通，确认入住细节' },
-  { id: 'pharmacy', title: '药店咨询', category: 'health', duration: '8–10 分钟', level: '中级', goal: '描述症状，确认用法与注意事项' },
-] as const satisfies readonly {
+export type DailyRecommendation = {
   id: string;
   title: string;
   category: SceneCategory;
   duration: string;
   level: string;
   goal: string;
-}[];
+  sceneInput: string;
+};
+
+export const recommendations = [
+  { id: 'coffee-order', title: '咖啡店点单', category: 'food', duration: '8–10 分钟', level: '初级', goal: '流利点单，清晰表达需求', sceneInput: '在咖啡店点单，选择杯型、温度和甜度，并确认价格' },
+  { id: 'hotel-check-in', title: '酒店入住', category: 'accommodation', duration: '10–12 分钟', level: '中级', goal: '礼貌沟通，确认入住细节', sceneInput: '在酒店前台办理入住，确认房型、早餐和退房时间' },
+  { id: 'pharmacy-advice', title: '药店咨询', category: 'health', duration: '8–10 分钟', level: '中级', goal: '描述症状，确认用法与注意事项', sceneInput: '在药店描述轻微症状，咨询非处方药的用法和注意事项' },
+] as const satisfies readonly DailyRecommendation[];
 
 export type ScenePromptExample = {
   id: string;

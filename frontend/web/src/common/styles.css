@@ -460,6 +460,14 @@ svg { display: block; }
 .scene-section-heading--primary { align-items: flex-start; margin-bottom: 22px; }
 .scene-section-heading--primary h2 { margin-top: 7px; font-size: 34px; letter-spacing: -.045em; }
 .scene-section-heading--primary div > p:last-child { max-width: 670px; margin-top: 10px; font-size: 15px; line-height: 1.65; }
+.recommendation-heading__actions { display: flex; align-items: center; gap: 14px; }
+.recommendation-refresh { min-height: 36px; padding: 0 14px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid #d9d9d4; border-radius: 999px; background: #fff; color: #4d4d49; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; transition: border-color .2s, color .2s, background .2s, transform .2s; }
+.recommendation-refresh:hover:not(:disabled) { border-color: #aaa9a4; color: var(--ink); background: #f8f8f5; transform: translateY(-1px); }
+.recommendation-refresh:disabled { opacity: .55; cursor: not-allowed; }
+.recommendation-refresh svg { width: 15px; height: 15px; }
+.recommendation-refresh svg.is-spinning { animation: recommendation-refresh-spin .8s linear infinite; }
+.recommendation-error { margin: -4px 0 10px; color: #bd4037; font-size: 12px; text-align: right; }
+@keyframes recommendation-refresh-spin { to { transform: rotate(360deg); } }
 .scene-builder { padding: 26px 28px 28px; border: 1px solid #dce3ed; border-radius: 24px; background: linear-gradient(110deg, #f4f8ff 0%, #fbf9ff 100%); box-shadow: 0 8px 28px rgba(91,141,239,.07); transition: transform .28s, border-color .28s, box-shadow .28s; }
 .scene-builder:focus-within { transform: translateY(-2px); border-color: #9fc1f5; box-shadow: 0 18px 46px rgba(91,141,239,.11); }
 .scene-builder .scene-section-heading .eyebrow { color: #5b8def; }
@@ -557,6 +565,7 @@ svg { display: block; }
 @media (max-width: 760px) {
   .page--scenes { padding: 28px 22px; }
   .scene-section-heading, .scene-section-heading--primary { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .recommendation-heading__actions { width: 100%; align-items: flex-start; justify-content: space-between; }
   .scene-builder { padding: 22px; border-radius: 20px; }
   .scene-input textarea { height: 140px; font-size: 17px; }
   .scene-input__footer { padding: 14px; }

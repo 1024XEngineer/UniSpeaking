@@ -22,9 +22,11 @@ import {
   getDailyScenePromptExample,
   learningItems,
   recommendations,
+  type DailyRecommendation,
   type ScenePromptExample,
 } from '@/data/content';
 import { SceneService, type GeneratedScene } from '@/features/scenes/SceneService';
+import { DailyPicksApi } from '@/features/scenes/DailyPicksApi';
 import { SceneTrainingController, type SceneTrainingSnapshot } from '@/features/scenes/SceneTrainingController';
 import { WavRecorder } from '@/features/audio/WavRecorder';
 import { createTurnAudioCapture } from '@/features/audio/TurnAudioCapture';
@@ -914,6 +916,16 @@ function createDefaultSceneService(onUnauthorized?: () => void | Promise<void>) 
   );
 }
 
+function createDefaultDailyPicksApi(onUnauthorized?: () => void | Promise<void>) {
+  return new DailyPicksApi(
+    new ApiClient({
+      baseUrl: getRuntimeConfig().backendUrl,
+      tokenStore: new SecureTokenStore(),
+      onUnauthorized,
+    }),
+  );
+}
+
 function createDefaultTtsPlayer() {
   const tokenStore = new SecureTokenStore();
   return new TtsPlayer({
@@ -998,16 +1010,22 @@ export function ScenesHome({
   onStartScene,
   promptExample = getDailyScenePromptExample(),
   sceneService: injectedSceneService,
+  dailyPicksApi: injectedDailyPicksApi,
 }: {
   onOpen: (route: SceneRoute) => void;
   onStartScene?: () => void;
   promptExample?: ScenePromptExample;
   sceneService?: Pick<SceneService, 'generate'>;
+  dailyPicksApi?: Pick<DailyPicksApi, 'getDailyPicks'>;
 }) {
   const { signOut } = useAppModel();
   const [sceneService] = useState(
     () => injectedSceneService ?? createDefaultSceneService(signOut),
   );
+  const [dailyPicksApi] = useState(
+    () => injectedDailyPicksApi ?? createDefaultDailyPicksApi(signOut),
+  );
+  const [dailyRecommendations, setDailyRecommendations] = useState<readonly DailyRecommendation[]>(recommendations);
   const [prompt, setPrompt] = useState('');
   const [preview, setPreview] = useState<GeneratedScene | null>(null);
   const [previewDisplay, setPreviewDisplay] = useState<Partial<GeneratedScene> | null>(null);
@@ -1016,6 +1034,32 @@ export function ScenesHome({
   const [generationError, setGenerationError] = useState<string | null>(null);
   const generating = generatingSource !== null;
   const promptLocked = generating || Boolean(preview);
+  useEffect(() => {
+    let cancelled = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const loadDailyPicks = async () => {
+      try {
+        const response = await dailyPicksApi.getDailyPicks();
+        if (cancelled) return;
+        setDailyRecommendations(response.picks);
+        const nextRefreshAt = Date.parse(response.nextRefreshAt);
+        if (Number.isFinite(nextRefreshAt)) {
+          refreshTimer = setTimeout(
+            () => void loadDailyPicks(),
+            Math.max(1_000, nextRefreshAt - Date.now() + 1_000),
+          );
+        }
+      } catch {
+        // Keep the curated local fallback when the backend is unavailable.
+      }
+    };
+    void loadDailyPicks();
+    return () => {
+      cancelled = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
+  }, [dailyPicksApi]);
+
   useEffect(() => {
     if (Platform.OS !== 'android' || !preview) return;
 
@@ -1165,13 +1209,13 @@ export function ScenesHome({
           </View>
         </View>
         <View style={styles.recommendationList}>
-          {recommendations.map((item) => (
+          {dailyRecommendations.map((item) => (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`生成每日推荐：${item.title}`}
               key={item.id}
               disabled={generating}
-              onPress={() => void generatePreview(`${item.title}：${item.goal}`, item.id)}
+              onPress={() => void generatePreview(item.sceneInput, item.id)}
               style={({ pressed }) => [styles.recommendation, pressed && styles.compactPressed]}
             >
               <View style={styles.recommendationCopy}>
