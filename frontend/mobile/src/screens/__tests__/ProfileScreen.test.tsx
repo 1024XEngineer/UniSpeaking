@@ -1,7 +1,7 @@
 import { Alert } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
 
-import { CalendarCard, requestLogoutConfirmation } from '../ProfileScreen';
+import { CalendarCard, Membership, requestLogoutConfirmation } from '../ProfileScreen';
 
 const calendarFor = (month: string) => ({
   month,
@@ -65,5 +65,20 @@ describe('requestLogoutConfirmation', () => {
     actions?.find((action) => action.text === '取消')?.onPress?.();
     expect(logout).not.toHaveBeenCalled();
     alert.mockRestore();
+  });
+});
+
+describe('Membership', () => {
+  it('shows the plans without exposing a fake purchase action', async () => {
+    const onBack = jest.fn();
+    const view = await render(<Membership onBack={onBack} />);
+    expect(view.getByText('免费版')).toBeTruthy();
+    expect(view.getByText('专业版')).toBeTruthy();
+    expect(view.getByText('特训版')).toBeTruthy();
+    expect(view.getAllByText('暂未开放')).toHaveLength(2);
+    expect(view.getByRole('button', { name: '当前方案' })).toBeDisabled();
+    await fireEvent.press(view.getByRole('button', { name: '返回' }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+    view.unmount();
   });
 });
