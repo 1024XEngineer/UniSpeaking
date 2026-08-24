@@ -9,6 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
 
 import com.unispeaking.common.evaluation.model.EndingTone;
 import com.unispeaking.common.evaluation.model.IeltsTextAssessment;
@@ -18,8 +19,12 @@ import com.unispeaking.common.evaluation.model.PronunciationWordResult;
 import com.unispeaking.common.evaluation.model.WordReadStatus;
 import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
+import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.component.session.ActiveSessionRegistry;
 import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationCommand;
+import com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.po.scene.IeltsPracticeRecord;
 import com.unispeaking.domain.po.session.CustomSceneSession;
@@ -44,6 +49,11 @@ import com.unispeaking.infrastructure.persistence.repository.session.PracticeSes
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import com.unispeaking.service.auth.AuthService;
 import com.unispeaking.component.evaluation.EvaluationProcessor;
+import com.unispeaking.component.session.SessionLifecycleManager;
+import com.unispeaking.domain.dto.evaluation.IeltsEvaluationDetail;
+import com.unispeaking.domain.dto.evaluation.IeltsEvaluationReport;
+import com.unispeaking.domain.dto.session.SessionDetail;
+import com.unispeaking.domain.vo.scene.IeltsPart;
 import com.unispeaking.service.scene.IeltsSceneFlowService;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -56,6 +66,174 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 class IeltsEvaluationServiceTest {
+
+	@Test
+	void delegatesTurnReportDetailAndHistoryOperations() {
+		EvaluationProcessor delegate = mock(EvaluationProcessor.class);
+		SessionLifecycleManager lifecycle = mock(SessionLifecycleManager.class);
+		IeltsEvaluationService service = new IeltsEvaluationService(delegate, lifecycle);
+		IeltsEvaluationResult result = new IeltsEvaluationResult(
+				IeltsPart.PART_2,
+				"DIAGNOSTIC",
+				new BigDecimal("7.0"),
+				new BigDecimal("7.5"),
+				new BigDecimal("6.5"),
+				new BigDecimal("7.0"),
+				new BigDecimal("7.0"),
+				"summary",
+				List.of("strength"),
+				List.of("improvement"),
+				List.of(),
+				List.of());
+		when(lifecycle.getSession("session-1")).thenReturn(new SessionDetail(
+				"session-1", "scene-1", SceneType.IELTS_SCENE, "PART2", List.of()));
+		when(delegate.evaluateIeltsTurn(eq("scene-1"), any())).thenReturn(null);
+		when(lifecycle.getBySceneId("scene-1")).thenReturn(List.of(
+				new SessionDetail("session-1", "scene-1", SceneType.IELTS_SCENE,
+						"PART2", List.of())));
+		when(delegate.generateIeltsEvaluation("scene-1", "session-1")).thenReturn(result);
+		when(delegate.getLatestIeltsEstimatedScore()).thenReturn(new BigDecimal("6.5"));
+		when(delegate.getIeltsEvaluationHistory()).thenReturn(List.of());
+
+		assertEquals(null, service.evaluateTurn(new DialogueTurnEvaluationCommand(
+				"session-1", 1, null, "answer")));
+		IeltsEvaluationReport report = service.generateReport("scene-1");
+		assertEquals(new BigDecimal("7.0"), report.bandScore());
+		IeltsEvaluationDetail detail = service.getEvaluation("scene-1");
+		assertEquals("summary", detail.result().summary());
+		assertEquals(new BigDecimal("6.5"), service.getLatestEstimatedScore());
+		assertEquals(List.of(), service.getHistory());
+	}
+
+	@Test
+	void rejectsReportAndDetailWhenSceneHasNoSessions() {
+		SessionLifecycleManager lifecycle = mock(SessionLifecycleManager.class);
+		when(lifecycle.getBySceneId("missing-scene")).thenReturn(List.of());
+		IeltsEvaluationService service = new IeltsEvaluationService(
+				mock(EvaluationProcessor.class), lifecycle);
+
+		BusinessException exception = org.junit.jupiter.api.Assertions.assertThrows(
+				BusinessException.class, () -> service.generateReport("missing-scene"));
+		assertEquals("SESSION_NOT_FOUND", exception.code());
+		org.junit.jupiter.api.Assertions.assertThrows(
+				BusinessException.class, () -> service.getEvaluation("missing-scene"));
+	}
+
+	@Test
+	void returnsCompletedMockEvaluationFromCacheWithoutCallingProvidersOrIncrementing() {
+		UUID userId = UUID.fromString("3d8f80be-6390-4db9-a6cf-c10a0145d4c3");
+		String ieltsId = "ielts_mock_cached";
+		List<PracticeSessionRecord> sessions = List.of(
+				session("cached-p1", userId, ieltsId, 0),
+				session("cached-p2", userId, ieltsId, 1),
+				session("cached-p3", userId, ieltsId, 2));
+		IeltsPracticeRepository practiceRepository = mock(IeltsPracticeRepository.class);
+		when(practiceRepository.findPractice(ieltsId)).thenReturn(Optional.of(
+				new IeltsPracticeRecord(ieltsId, userId, IeltsMode.MOCK_TEST,
+						null, null, "RANDOM", "topic-p1", "topic-p2", "topic-p3",
+						new IeltsContent(List.of(), List.of(), List.of()))));
+		PracticeSessionRepository sessionRepository = mock(PracticeSessionRepository.class);
+		when(sessionRepository.findBySceneId(ieltsId)).thenReturn(sessions);
+		IeltsEvaluationEntity cached = new IeltsEvaluationEntity();
+		cached.setEvaluationId("final_cached");
+		cached.setIeltsId(ieltsId);
+		cached.setEvaluationStatus("COMPLETED");
+		cached.setOverallBandScore(new BigDecimal("7.5"));
+		cached.setFluencyCoherenceScore(new BigDecimal("7.0"));
+		cached.setLexicalResourceScore(new BigDecimal("7.5"));
+		cached.setGrammaticalRangeAccuracyScore(new BigDecimal("7.0"));
+		cached.setPronunciationScore(new BigDecimal("8.0"));
+		cached.setSummary("已缓存的完整模考报告");
+		IeltsEvaluationRepository evaluationRepository = mock(IeltsEvaluationRepository.class);
+		when(evaluationRepository.findFinal(ieltsId)).thenReturn(Optional.of(cached));
+		when(evaluationRepository.findParts(ieltsId)).thenReturn(List.of(
+				savedPart(ieltsId, "cached-p1",
+						com.unispeaking.domain.vo.scene.IeltsPart.PART_1, "7.5")));
+		AuthService authService = mock(AuthService.class);
+		when(authService.requireUserId(null)).thenReturn(userId.toString());
+		IeltsEvaluationLlmClient ieltsLlmClient = mock(IeltsEvaluationLlmClient.class);
+
+		EvaluationProcessor processor = new EvaluationProcessor(
+				mock(PronunciationAssessmentClient.class), mock(EvaluationLlmClient.class),
+				mock(ActiveSessionRegistry.class), mock(SceneRepository.class),
+				mock(SessionMessageRepository.class), mock(TurnEvaluationRepository.class),
+				mock(SessionEvaluationRepository.class), mock(SceneSentenceReadingRepository.class),
+				practiceRepository,
+				mock(com.unispeaking.infrastructure.persistence.repository.scene.IeltsRepository.class),
+				mock(IeltsSceneFlowService.class), sessionRepository, evaluationRepository,
+				ieltsLlmClient, authService,
+				mock(com.unispeaking.provider.ObjectStorageProvider.class),
+				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
+				mock(com.unispeaking.component.recording.RecordingStore.class));
+
+		var result = processor.generateIeltsEvaluation(ieltsId, "cached-p3");
+
+		assertEquals("FINAL", result.assessmentType());
+		assertEquals(new BigDecimal("7.5"), result.overallBandScore());
+		assertEquals(1, result.partEvaluations().size());
+		verify(ieltsLlmClient, never()).assessPart(
+				org.mockito.ArgumentMatchers.any(),
+				org.mockito.ArgumentMatchers.anyString(),
+				org.mockito.ArgumentMatchers.nullable(String.class),
+				org.mockito.ArgumentMatchers.anyString());
+		verify(evaluationRepository, never()).saveFinal(
+				eq(ieltsId), org.mockito.ArgumentMatchers.any());
+		verify(practiceRepository, never()).incrementCompletedCount(userId);
+	}
+
+	@Test
+	void returnsDiagnosticHistoryWithStoredRecordingAndFallbackTopicTitle() {
+		UUID userId = UUID.fromString("3d8f80be-6390-4db9-a6cf-c10a0145d4c3");
+		String ieltsId = "ielts_part_history";
+		PracticeSessionRecord completedSession = session(
+				"history-session", userId, ieltsId, 0);
+		IeltsPracticeRepository practiceRepository = mock(IeltsPracticeRepository.class);
+		when(practiceRepository.findPractice(ieltsId)).thenReturn(Optional.of(
+				new IeltsPracticeRecord(ieltsId, userId, IeltsMode.PART_PRACTICE,
+						com.unispeaking.domain.vo.scene.IeltsPart.PART_2, "missing-topic",
+						new IeltsContent(List.of(), List.of(), List.of()))));
+		PracticeSessionRepository sessionRepository = mock(PracticeSessionRepository.class);
+		when(sessionRepository.findCompletedByUserAndSceneType(
+				userId, SceneType.IELTS_SCENE)).thenReturn(List.of(completedSession));
+		IeltsPartEvaluationEntity part = savedPart(ieltsId, "history-session",
+				com.unispeaking.domain.vo.scene.IeltsPart.PART_2, "6.5");
+		part.setStrengths(null);
+		part.setImprovements(null);
+		part.setRecommendedExpressions(null);
+		IeltsEvaluationRepository evaluationRepository = mock(IeltsEvaluationRepository.class);
+		when(evaluationRepository.findPart("history-session")).thenReturn(Optional.of(part));
+		SessionMessageRepository messageRepository = mock(SessionMessageRepository.class);
+		when(messageRepository.findAudioUrls("history-session")).thenReturn(List.of(
+				"https://recordings.example/history-session.wav"));
+		AuthService authService = mock(AuthService.class);
+		when(authService.requireUserId(null)).thenReturn(userId.toString());
+		var topicRepository = mock(
+				com.unispeaking.infrastructure.persistence.repository.scene.IeltsRepository.class);
+		when(topicRepository.findTopicsByIds(any())).thenReturn(List.of());
+
+		EvaluationProcessor processor = new EvaluationProcessor(
+				mock(PronunciationAssessmentClient.class), mock(EvaluationLlmClient.class),
+				mock(ActiveSessionRegistry.class), mock(SceneRepository.class),
+				messageRepository, mock(TurnEvaluationRepository.class),
+				mock(SessionEvaluationRepository.class), mock(SceneSentenceReadingRepository.class),
+				practiceRepository, topicRepository, mock(IeltsSceneFlowService.class),
+				sessionRepository, evaluationRepository, mock(IeltsEvaluationLlmClient.class),
+				authService, mock(com.unispeaking.provider.ObjectStorageProvider.class),
+				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
+				mock(com.unispeaking.component.recording.RecordingStore.class));
+
+		var history = processor.getIeltsEvaluationHistory();
+
+		assertEquals(1, history.size());
+		assertEquals("DIAGNOSTIC", history.getFirst().assessmentType());
+		assertEquals(com.unispeaking.domain.vo.scene.IeltsPart.PART_2,
+				history.getFirst().part());
+		assertEquals("missing-topic", history.getFirst().topicTitles().get(
+				com.unispeaking.domain.vo.scene.IeltsPart.PART_2));
+		assertEquals(List.of("https://recordings.example/history-session.wav"),
+				history.getFirst().recordingUrls());
+		assertEquals(List.of(), history.getFirst().strengths());
+	}
 
 	@Test
 	void preservesPronunciationWhenIeltsLanguageFeedbackProviderFails() {
