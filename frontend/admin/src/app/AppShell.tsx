@@ -11,6 +11,12 @@ const navigation = [
   { label: '总览', to: '/', icon: 'overview', end: true },
   { label: '用户与权益', to: '/users', icon: 'users' },
   { label: '用量与计费', to: '/billing', icon: 'usage' },
+  {
+    label: '用户追踪',
+    to: 'https://cloud.umami.is/analytics/us/websites/3ae2dee9-d585-43a9-93f3-fcafcd14b258',
+    icon: 'tracking',
+    external: true,
+  },
   { label: '系统管理', to: '/system', icon: 'settings' },
 ] as const
 
@@ -29,6 +35,7 @@ function NavIcon({ name }: { name: string }) {
     pulse: <><path d="M3 12h4l2.2-5 4.1 10 2.2-5H21" /><circle cx="12" cy="12" r="9" /></>,
     usage: <><path d="M5 19V9M12 19V5M19 19v-7" /><path d="M3 19h18" /></>,
     alerts: <><path d="M6 9a6 6 0 0 1 12 0c0 7 3 7 3 8H3c0-1 3-1 3-8Z" /><path d="M10 21h4" /></>,
+    tracking: <><path d="M10.6 13.4 13.4 10.6" /><path d="M7.5 16.5 6 18a3 3 0 0 1-4.2-4.2l3-3a3 3 0 0 1 4.2 0" /><path d="m16.5 7.5 1.5-1.5A3 3 0 0 1 22.2 10l-3 3a3 3 0 0 1-4.2 0" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></>,
   }
   return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>
@@ -58,17 +65,22 @@ export function AppShell({ administrator, logout }: AppShellProps) {
         </div>
 
         <nav className="primary-nav" aria-label="管理后台主导航">
-          {navigation.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={'end' in item ? item.end : false}
-              className={({ isActive }) => `nav-link${isActive ? ' nav-link--active' : ''}`}
-            >
-              <NavIcon name={item.icon} />
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
+          {navigation.map((item) => {
+            const content = <><NavIcon name={item.icon} /><span>{item.label}</span></>
+            if ('external' in item && item.external) {
+              return <a key={item.to} className="nav-link" href={item.to} target="_blank" rel="noreferrer" title="打开 Umami 用户追踪看板">{content}</a>
+            }
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={'end' in item ? item.end : false}
+                className={({ isActive }) => `nav-link${isActive ? ' nav-link--active' : ''}`}
+              >
+                {content}
+              </NavLink>
+            )
+          })}
         </nav>
 
         <div className="sidebar-status">

@@ -18,13 +18,27 @@ describe('AppShell', () => {
       </MemoryRouter>,
     )
 
-    const labels = ['总览', '用户与权益', '用量与计费', '系统管理']
+    const labels = ['总览', '用户与权益', '用量与计费', '用户追踪', '系统管理']
     for (const label of labels) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
     expect(screen.queryByRole('link', { name: 'Realtime 监测' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '用量对账' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '用户与权益' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('links the user tracking item to the Umami dashboard', () => {
+    render(
+      <MemoryRouter>
+        <AppShell administrator={administrator} logout={async () => undefined} />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('link', { name: '用户追踪' })).toHaveAttribute(
+      'href',
+      'https://cloud.umami.is/analytics/us/websites/3ae2dee9-d585-43a9-93f3-fcafcd14b258',
+    )
+    expect(screen.getByRole('link', { name: '用户追踪' })).toHaveAttribute('target', '_blank')
   })
 
   it('invokes logout once', async () => {
