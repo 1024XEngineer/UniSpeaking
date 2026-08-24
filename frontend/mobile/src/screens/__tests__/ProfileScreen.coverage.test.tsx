@@ -77,6 +77,12 @@ const insights = {
   recommendations: [{ dimension: 'fluency', trainingType: 'FREE_CHAT', reason: '每天练习' }],
 };
 
+const confirmLastLogout = () => {
+  const calls = (Alert.alert as jest.Mock).mock.calls;
+  const actions = calls[calls.length - 1]?.[2] as Array<{ text?: string; onPress?: () => void }> | undefined;
+  actions?.find((action) => action.text === '退出登录')?.onPress?.();
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockApi.getOverview.mockResolvedValue(overview);
@@ -131,7 +137,8 @@ describe('ProfileScreen exported pages', () => {
     expect(view.getByText('用户名需为 1 到 32 个字符')).toBeTruthy();
     await fireEvent.press(view.getByText('取消'));
     await fireEvent.press(view.getByText('退出登录'));
-    expect(onLogout).toHaveBeenCalledTimes(1);
+    confirmLastLogout();
+    await waitFor(() => expect(onLogout).toHaveBeenCalledTimes(1));
     view.unmount();
   });
 
@@ -224,7 +231,8 @@ describe('ProfileScreen exported pages', () => {
     fireEvent.press(view.getByText('确认修改'));
     await waitFor(() => expect(view.getByText('密码长度需为 6 到 72 位')).toBeTruthy());
     fireEvent.press(view.getByText('退出当前账号'));
-    expect(logout).toHaveBeenCalled();
+    confirmLastLogout();
+    await waitFor(() => expect(logout).toHaveBeenCalled());
   });
 
   it('loads an article and renders its refreshed timestamp and body', async () => {
