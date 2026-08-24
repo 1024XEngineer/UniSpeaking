@@ -76,6 +76,14 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+export function requestLogoutConfirmation(onLogout?: () => void | Promise<void>) {
+  if (!onLogout) return;
+  Alert.alert('退出登录', '确定要退出当前账号吗？退出后需要重新登录才能继续练习。', [
+    { text: '取消', style: 'cancel' },
+    { text: '退出登录', style: 'destructive', onPress: () => void onLogout() },
+  ]);
+}
+
 function useProfileApi() {
   const { signOut } = useAppModel();
   return useMemo(() => {
@@ -1138,7 +1146,7 @@ export function AssistantSettings({ onBack }: { onBack: () => void }) {
   );
 }
 
-export function AccountSettings({ onBack, onLogout }: { onBack: () => void; onLogout?: () => void }) {
+export function AccountSettings({ onBack, onLogout }: { onBack: () => void; onLogout?: () => void | Promise<void> }) {
   const api = useProfileApi();
   const { nickname, setNickname, email } = useAppModel();
   const [draft, setDraft] = useState(nickname);
@@ -1217,7 +1225,7 @@ export function AccountSettings({ onBack, onLogout }: { onBack: () => void; onLo
           icon="logout"
           danger
           meta="退出登录"
-          onPress={onLogout}
+          onPress={() => requestLogoutConfirmation(onLogout)}
         />
       </Card>
       {nicknameOpen ? (
@@ -1677,7 +1685,7 @@ export function ProfileHome({
 }: {
   activeRoute?: ProfileRoute;
   onOpen: (route: ProfileRoute) => void;
-  onLogout?: () => void;
+  onLogout?: () => void | Promise<void>;
 }) {
   const api = useProfileApi();
   const { nickname, setNickname, email, teacher } = useAppModel();
@@ -1797,7 +1805,7 @@ export function ProfileHome({
           onPress={() => onOpen('about')}
         />
       </View>
-      <Pressable accessibilityRole="button" onPress={onLogout} style={styles.logout}>
+      <Pressable accessibilityRole="button" onPress={() => requestLogoutConfirmation(onLogout)} style={styles.logout}>
         <AppIcon name="logout" size={19} color={colors.red} />
         <Text style={styles.logoutText}>退出登录</Text>
       </Pressable>

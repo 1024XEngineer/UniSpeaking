@@ -942,6 +942,11 @@ function TrainingExitConfirmation({ open, onContinue, onConfirm }) {
   return <Modal dismissible={false}><p className="eyebrow">EXIT TRAINING</p><h2>确定要退出当前训练吗？</h2><p className="modal-lead">退出后将返回上一页。</p><div className="modal-actions"><Button variant="secondary" onClick={onContinue}>继续训练</Button><Button onClick={onConfirm}>确认退出</Button></div></Modal>;
 }
 
+function LogoutConfirmation({ open, submitting, onCancel, onConfirm }) {
+  if (!open) return null;
+  return <Modal dismissible={!submitting} onClose={onCancel}><p className="eyebrow">SIGN OUT</p><h2>确定要退出登录吗？</h2><p className="modal-lead">退出后需要重新登录才能继续练习。</p><div className="modal-actions"><Button variant="secondary" disabled={submitting} onClick={onCancel}>取消</Button><Button variant="danger" disabled={submitting} onClick={onConfirm}>{submitting ? "正在退出" : "退出登录"}</Button></div></Modal>;
+}
+
 function AppShell({ page, setPage, teacher, avatarUrl, navigationGuardActive = false, children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingPage, setPendingPage] = useState(null);
@@ -2770,6 +2775,18 @@ function Profile({ section, setSection, helpRoute, aboutRoute, onHelpNavigate, o
   const avatarUrl = account?.avatarUrl || teacher.image;
   const [profileEditOpen, setProfileEditOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const confirmLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await onLogout();
+    } finally {
+      setLoggingOut(false);
+      setLogoutOpen(false);
+    }
+  };
   const startRecommendedTraining = (trainingType) => {
     const destination = trainingType === "FREE_CHAT"
       ? "conversation"
@@ -2795,14 +2812,14 @@ function Profile({ section, setSection, helpRoute, aboutRoute, onHelpNavigate, o
           <button className={section === "help" ? "is-active" : ""} onClick={() => setSection("help")}><Lifebuoy />帮助中心</button>
           <button className={section === "about" ? "is-active" : ""} onClick={() => setSection("about")}><Info />关于产品</button>
         </nav>
-        <button className="logout" onClick={onLogout}><SignOut />退出登录</button>
+        <button className="logout" onClick={() => setLogoutOpen(true)}><SignOut />退出登录</button>
       </aside>
       <section className={cx("profile-content", section === "help" && "profile-content--help")}>
         {section === "profile" && <Overview calendar={profile?.calendar} statistics={profile?.statistics} onMonthChange={onMonthChange} onAssets={onAssets} />}
         {section === "insights" && <LearningInsights onStartTraining={startRecommendedTraining} />}
         {section === "membership" && <Membership />}
         {section === "settings" && <Settings teacher={teacher} speed={speed} level={level} onSettingsChange={onSettingsChange} />}
-        {section === "security" && <AccountSecurity email={email} onOpenPassword={() => setPasswordOpen(true)} onLogout={onLogout} />}
+        {section === "security" && <AccountSecurity email={email} onOpenPassword={() => setPasswordOpen(true)} onLogout={() => setLogoutOpen(true)} />}
         {section === "help" && <HelpCenter route={helpRoute} onNavigate={onHelpNavigate} />}
         {section === "about" && (aboutRoute?.screen === "document"
           ? <ProductLegalDocument documentId={aboutRoute.documentId} onNavigate={onAboutNavigate} />
@@ -2810,6 +2827,7 @@ function Profile({ section, setSection, helpRoute, aboutRoute, onHelpNavigate, o
       </section>
       {profileEditOpen && <ProfileEditModal account={account} user={user} avatarUrl={avatarUrl} onClose={() => setProfileEditOpen(false)} onNicknameChange={onNicknameChange} onAvatarChange={onAvatarChange} />}
       {passwordOpen && <PasswordChangeModal onClose={() => setPasswordOpen(false)} onSubmit={onPasswordChange} />}
+      <LogoutConfirmation open={logoutOpen} submitting={loggingOut} onCancel={() => setLogoutOpen(false)} onConfirm={() => void confirmLogout()} />
     </main>
   );
 }

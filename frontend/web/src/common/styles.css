@@ -109,6 +109,8 @@ svg { display: block; }
 .button--primary:hover:not(:disabled) { background: #30302f; }
 .button--secondary { background: #fff; color: var(--ink); border-color: #dcdcd7; }
 .button--secondary:hover:not(:disabled) { background: var(--soft); }
+.button--danger { background: #b63a32; color: #fff; }
+.button--danger:hover:not(:disabled) { background: #982f29; }
 .text-button, .back-link, .forgot-link { border: 0; background: none; cursor: pointer; font-weight: 600; }
 .eyebrow { color: #90908b; font-size: 11px; font-weight: 750; letter-spacing: .16em; text-transform: uppercase; }
 
