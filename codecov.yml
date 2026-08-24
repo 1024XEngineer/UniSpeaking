@@ -1,0 +1,10 @@
+flags:
+  backend:
+    paths:
+      - backend/**
+    carryforward: true
+
+  mobile:
+    paths:
+      - frontend/mobile/src/**
+    carryforward: true
