@@ -4,11 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 import com.qiniu.http.Response;
 import com.qiniu.storage.BucketManager;
@@ -98,5 +100,31 @@ class QiniuObjectStorageProviderTest {
 						uploadManager,
 						bucketManager,
 						properties));
+	}
+
+	@Test
+	void mapsUploadDeleteSigningAndDomainFailures() throws Exception {
+		when(uploadManager.put(any(byte[].class), anyString(), anyString(), isNull(), anyString(), eq(false)))
+				.thenThrow(new com.qiniu.common.QiniuException(new java.io.IOException("upload failed")));
+		assertEquals("OBJECT_STORAGE_FAILED", assertThrows(
+				com.unispeaking.common.exception.BusinessException.class,
+				() -> provider.put(OBJECT_KEY, new byte[] {1}, "image/png")).code());
+		when(bucketManager.delete(BUCKET, OBJECT_KEY))
+				.thenThrow(new com.qiniu.common.QiniuException(new java.io.IOException("delete failed")));
+		assertEquals("OBJECT_STORAGE_FAILED", assertThrows(
+				com.unispeaking.common.exception.BusinessException.class,
+				() -> provider.delete(OBJECT_KEY)).code());
+		assertThrows(com.unispeaking.common.exception.BusinessException.class,
+				() -> provider.signGetUrl(OBJECT_KEY, Duration.ZERO));
+		assertThrows(com.unispeaking.common.exception.BusinessException.class,
+				() -> provider.signGetUrl(OBJECT_KEY, null));
+		assertTrue(provider.available());
+		for (String domain : new String[] {"https://x.example.com/path", "https://user:x@example.com",
+				"https://x.example.com?x=1", "https://x.example.com#f", "http://x.example.com"}) {
+			ObjectStorageProperties properties = new ObjectStorageProperties();
+			properties.setDomain(domain);
+			assertThrows(IllegalArgumentException.class, () -> new QiniuObjectStorageProvider(
+					Auth.create("a", "b"), uploadManager, bucketManager, properties));
+		}
 	}
 }
