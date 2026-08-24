@@ -936,28 +936,48 @@ function TeacherSetup({ selectedId, onSelect, onFinish }) {
   );
 }
 
-function AppShell({ page, setPage, teacher, avatarUrl, children }) {
+function TrainingExitConfirmation({ open, onContinue, onConfirm }) {
+  if (!open) return null;
+  return <Modal dismissible={false}><p className="eyebrow">EXIT TRAINING</p><h2>确定要退出当前训练吗？</h2><p className="modal-lead">退出后将返回上一页。</p><div className="modal-actions"><Button variant="secondary" onClick={onContinue}>继续训练</Button><Button onClick={onConfirm}>确认退出</Button></div></Modal>;
+}
+
+function AppShell({ page, setPage, teacher, avatarUrl, navigationGuardActive = false, children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingPage, setPendingPage] = useState(null);
   const items = [
     { id: "conversation", label: "自由对话", icon: Waveform },
     { id: "scenes", label: "场景广场", icon: SquaresFour },
     { id: "assets", label: "学习资产", icon: BookOpenText },
   ];
   const activePage = page === "ielts" || page === "interview" ? "scenes" : page === "ielts-assets" || page === "interview-assets" ? "assets" : page;
+  useEffect(() => {
+    if (!navigationGuardActive) setPendingPage(null);
+  }, [navigationGuardActive]);
   const navigateSidebar = (destination) => {
     const targetPage = sidebarPageTarget(page, destination);
     // Keep the current specialty page selected when clicking its active sidebar section.
     if (activePage === destination && targetPage === destination) return;
-    if (targetPage !== page) setPage(targetPage);
+    if (targetPage === page) return;
+    if (navigationGuardActive) {
+      setPendingPage(targetPage);
+      return;
+    }
+    setPage(targetPage);
+  };
+  const confirmNavigation = () => {
+    const targetPage = pendingPage;
+    setPendingPage(null);
+    if (targetPage && targetPage !== page) setPage(targetPage);
   };
   return (
     <div className={cx("app-shell", sidebarOpen && "is-sidebar-open")}>
       <aside className={cx("sidebar", sidebarOpen && "is-open")} onMouseEnter={() => setSidebarOpen(true)} onMouseLeave={() => setSidebarOpen(false)}>
         <Brand compact={!sidebarOpen} />
         <nav>{items.map(({ id, label, icon: Icon }) => <button key={id} className={cx("sidebar__item", activePage === id && "is-active")} onClick={() => navigateSidebar(id)} aria-label={label} title={label}><Icon weight={activePage === id ? "bold" : "regular"} /><span className="sidebar__label"><span>{label}</span></span></button>)}</nav>
-        <button className={cx("sidebar__avatar", ["profile", "insights", "membership", "settings", "help", "about"].includes(page) && "is-active")} onClick={() => setPage("profile")}><img src={avatarUrl || teacher.image} alt="个人中心" /></button>
+        <button className={cx("sidebar__avatar", ["profile", "insights", "membership", "settings", "help", "about"].includes(page) && "is-active")} onClick={() => navigateSidebar("profile")}><img src={avatarUrl || teacher.image} alt="个人中心" /></button>
       </aside>
       <div className="app-main">{children}</div>
+      <TrainingExitConfirmation open={Boolean(pendingPage)} onContinue={() => setPendingPage(null)} onConfirm={confirmNavigation} />
     </div>
   );
 }
@@ -1092,7 +1112,7 @@ function ConversationSettings({ speed, level, teacher, onSave, onClose }) {
   );
 }
 
-function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, onSessionStarted, onSessionEnded }) {
+function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, onSessionStarted, onSessionEnded, onActiveChange }) {
   const [inCall, setInCall] = useState(false);
   const [callState, setCallState] = useState("idle");
   const [callStatus, setCallStatus] = useState("准备开始");
@@ -1411,6 +1431,13 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       void client?.stop({ notifyBackend: false, reason: "component_unmount" });
     };
   }, []);
+
+  useEffect(() => {
+    onActiveChange?.(inCall);
+    return () => {
+      if (inCall) onActiveChange?.(false);
+    };
+  }, [inCall, onActiveChange]);
 
   if (!inCall) return (
     <main className="conversation standby">
@@ -2227,7 +2254,7 @@ function Training({ sceneId, sessionId, sceneTitle, sceneContent, teacher, speed
   const score = readScores[readIndex] ?? null;
   const readEvaluation = readEvaluations[readIndex] ?? null;
   const completeStep = (id) => setCompletedSteps((current) => current.includes(id) ? current : [...current, id]);
-  const exitConfirmation = exitOpen && <Modal dismissible={false}><p className="eyebrow">EXIT TRAINING</p><h2>确定要退出当前训练吗？</h2><p className="modal-lead">退出后将返回上一页。</p><div className="modal-actions"><Button variant="secondary" onClick={() => setExitOpen(false)}>继续训练</Button><Button onClick={onExit}>确认退出</Button></div></Modal>;
+  const exitConfirmation = <TrainingExitConfirmation open={exitOpen} onContinue={() => setExitOpen(false)} onConfirm={onExit} />;
   const goToStep = (id) => {
     const targetIndex = steps.findIndex((item) => item.id === id);
     if (targetIndex > unlockedStepIndex) return;
@@ -3115,6 +3142,7 @@ export function App() {
   const [aboutRoute, setAboutRoute] = useState(initialRoute.aboutRoute || null);
   const [paywall, setPaywall] = useState(null);
   const [feedbackInvitationOpen, setFeedbackInvitationOpen] = useState(false);
+  const [freeConversationActive, setFreeConversationActive] = useState(false);
   const preferenceWriteChainRef = useRef(Promise.resolve());
   const preferenceWriteVersionRef = useRef(0);
   const profileOverviewRequestVersionRef = useRef(0);
@@ -3623,7 +3651,7 @@ export function App() {
   }
   let content;
   if (training) content = <Training sceneId={training.sceneId} sessionId={training.sessionId} sceneTitle={sceneTitle} sceneContent={generatedScene} teacher={teacher} speed={conversationSpeed} initialStep={training.initialStep} initialStage={training.stage} standaloneSpeak={training.standaloneSpeak} result={result} onExit={() => setMainPage(training.returnPage || "scenes")} onComplete={completeScenePractice} onBack={() => setMainPage(training.returnPage || "scenes")} onAssets={openCompletedAssetDetail} onStageChange={navigateSceneStage} />;
-  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={(sessionId) => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); recordCompletedPractice("free", sessionId); void refreshProfileOverview(); void synchronizeAchievements({ revealNotifications: true }); }} />;
+  else if (page === "conversation") content = <Conversation teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onBeforeStart={() => preferenceWriteChainRef.current.catch(() => undefined)} onSessionStarted={(sessionId) => navigate(paths.conversation.session(sessionId), { page: "conversation", conversationSessionId: sessionId, authMode })} onSessionEnded={(sessionId) => { navigate(paths.conversation.root, { page: "conversation", conversationSessionId: null, authMode }, true); recordCompletedPractice("free", sessionId); void refreshProfileOverview(); void synchronizeAchievements({ revealNotifications: true }); }} onActiveChange={setFreeConversationActive} />;
   else if (page === "scenes") content = <Scenes teacher={teacher} onStartTraining={startTraining} onLocked={setPaywall} onIelts={selectIelts} onInterview={selectInterview} />;
   else if (page === "assets") content = <Assets sceneId={assetSceneId} initialView={assetView} initialRecordTitle={sceneTitle} onOpenRecord={openCompletedAssetDetail} onCloseRecord={() => navigate(paths.assets.root, { assetView: "home", assetSceneId: null, authMode })} onIelts={() => selectMainPage("ielts-assets")} onInterview={() => selectMainPage("interview-assets")} onPractice={(scene) => startTraining(scene, "speak", { standaloneSpeak: false, returnPage: "assets" })} />;
   else if (page === "ielts") content = <IeltsTrainingCenter route={ieltsRoute} onNavigate={navigateIelts} onExit={() => setMainPage("scenes")} onAssets={() => navigateIelts(paths.ielts.assets.root)} />;
@@ -3631,5 +3659,11 @@ export function App() {
   else if (page === "interview") content = <InterviewModule route={interviewRoute} teacher={teacher} speed={conversationSpeed} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} />;
   else if (page === "interview-assets") content = <InterviewAssets route={interviewRoute} onNavigate={navigateInterview} onBack={() => setMainPage("scenes")} onBackToAssets={() => setMainPage("assets")} onBackToIelts={() => selectMainPage("ielts-assets")} onTraining={() => navigateInterview(paths.interview.root)} onPractice={(sceneId) => navigateInterview(paths.interview.session(sceneId))} />;
   else content = <Profile section={page} setSection={setMainPage} helpRoute={helpRoute} aboutRoute={aboutRoute} onHelpNavigate={navigateHelp} onAboutNavigate={navigateAbout} user={user} profile={profileOverview} teacher={teacher} speed={conversationSpeed} level={level} onSettingsChange={persistSettings} onMonthChange={loadProfileMonth} onNicknameChange={updateNickname} onAvatarChange={updateAvatar} onPasswordChange={updatePassword} onAssets={() => setMainPage("assets")} onLogout={logout} />;
-  return <AppShell page={page} setPage={selectMainPage} teacher={teacher} avatarUrl={profileOverview?.account?.avatarUrl}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}{feedbackInvitationOpen && <FeedbackInvitation onDismiss={() => setFeedbackInvitationOpen(false)} onAccept={acceptFeedbackInvitation} />}</AppShell>;
+  const navigationGuardActive = Boolean(
+    (training && !result)
+    || freeConversationActive
+    || (page === "ielts" && ieltsRoute?.screen === "session")
+    || (page === "interview" && interviewRoute?.screen === "session"),
+  );
+  return <AppShell page={page} setPage={selectMainPage} teacher={teacher} avatarUrl={profileOverview?.account?.avatarUrl} navigationGuardActive={navigationGuardActive}>{content}{paywall && <Paywall title={paywall} onClose={() => setPaywall(null)} onMembership={() => { setPaywall(null); setMainPage("membership"); }} />}{feedbackInvitationOpen && <FeedbackInvitation onDismiss={() => setFeedbackInvitationOpen(false)} onAccept={acceptFeedbackInvitation} />}</AppShell>;
 }

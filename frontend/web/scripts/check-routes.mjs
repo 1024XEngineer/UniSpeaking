@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { paths, resolveRoute, sidebarPageTarget } from "../src/controller/router.js";
 
 const route = (pathname, search = "") => resolveRoute({ pathname, search });
@@ -91,4 +92,43 @@ assert.equal(sidebarPageTarget("interview-assets", "scenes"), "interview");
 assert.equal(sidebarPageTarget("scenes", "assets"), "assets");
 assert.equal(sidebarPageTarget("assets", "scenes"), "scenes");
 
-console.log(`Route contract passed: ${cases.length + 41} assertions`);
+const appSource = await readFile(
+  new URL("../src/controller/App.jsx", import.meta.url),
+  "utf8",
+);
+const appShellSource = appSource.slice(
+  appSource.indexOf("function AppShell("),
+  appSource.indexOf("function PageHeader("),
+);
+const trainingSource = appSource.slice(
+  appSource.indexOf("function Training("),
+  appSource.indexOf("function AssetModuleMenu("),
+);
+
+assert.match(
+  appShellSource,
+  /if \(navigationGuardActive\) \{\s+setPendingPage\(targetPage\);\s+return;/,
+  "Active practice must defer sidebar navigation until confirmation",
+);
+assert.match(
+  appShellSource,
+  /onClick=\{\(\) => navigateSidebar\("profile"\)\}/,
+  "Profile navigation must use the same practice guard as sidebar items",
+);
+assert.match(
+  appShellSource,
+  /<TrainingExitConfirmation open=\{Boolean\(pendingPage\)\}/,
+  "Guarded navigation must reuse the existing training exit confirmation",
+);
+assert.match(
+  trainingSource,
+  /<TrainingExitConfirmation open=\{exitOpen\}/,
+  "The custom training close button must use the shared exit confirmation",
+);
+assert.match(
+  appSource,
+  /\(training && !result\)[\s\S]*?freeConversationActive[\s\S]*?ieltsRoute\?\.screen === "session"[\s\S]*?interviewRoute\?\.screen === "session"/,
+  "Navigation guard must cover unfinished custom, free, IELTS, and interview practice",
+);
+
+console.log(`Route contract passed: ${cases.length + 46} assertions`);
