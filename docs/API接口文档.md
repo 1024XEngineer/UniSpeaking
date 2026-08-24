@@ -430,6 +430,7 @@ Realtime 默认路由为七牛 RTI `qwen3.5-omni-plus-realtime`，可回退错�
 ```
 
 - 追加消息支持 `type`：`message`、`session.message`、`addMessage`。
+- WebRTC DataChannel 建立后发送 `type: "activate"`（兼容 `session.activate`），后端从此时开始预占并计算本次会话可用的每日额度。
 - 结束会话支持 `type`：`end`、`session.end`、`endSession`，并通过 `stopTime` 传结束时间。
 - `audio` 是 JSON 中的 Base64 字节数组；大音频应使用专用 multipart 接口。
 
@@ -446,7 +447,9 @@ Realtime 默认路由为七牛 RTI `qwen3.5-omni-plus-realtime`，可回退错�
 }
 ```
 
-失败时 `type` 以 `.failed` 结尾，`code` 为 `SESSION_SOCKET_ERROR`。
+激活成功返回 `session.activate.accepted`，其中 `data.quotaDeadline` 是后端强制截止时间，`data.quotaRemainingMillis` 用于客户端安排本地自动结束；没有治理额度记录的兼容账号两者均为 `null`。额度已用完时激活失败，业务错误为 `USER_QUOTA_EXHAUSTED`，后端同时终止刚创建的 Realtime 会话。
+
+失败时 `type` 以 `.failed` 结尾；业务异常保留对应业务 `code`，其他异常使用 `SESSION_SOCKET_ERROR`。
 
 ## 11. 公共 Service 接口契约
 

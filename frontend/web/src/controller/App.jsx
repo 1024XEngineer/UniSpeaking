@@ -1282,6 +1282,12 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
       setCallStatus("已打断当前回应");
       return;
     }
+    if (event.type === "local.quota_exhausted") {
+      setCallError(event.message);
+      setCallStatus("今日额度已用完");
+      void stopConversation("quota_exhausted");
+      return;
+    }
     if (event.type === "local.ended") {
       if (stopPromiseRef.current) return;
       freeChatAnalyticsRef.current?.complete();
@@ -1393,8 +1399,9 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     }
   };
 
-  const stopConversation = async () => {
+  const stopConversation = async (requestedReason = "user_stop") => {
     if (stopPromiseRef.current) return stopPromiseRef.current;
+    const reason = typeof requestedReason === "string" ? requestedReason : "user_stop";
     const client = clientRef.current;
     const completedSessionId = sessionIdRef.current;
     setCallState("ending");
@@ -1403,7 +1410,7 @@ function Conversation({ teacher, speed, level, onSettingsChange, onBeforeStart, 
     detachRemoteAudio();
     let operation;
     operation = (async () => {
-      await client?.stop({ reason: "user_stop" });
+      await client?.stop({ reason });
       if (clientRef.current === client) clientRef.current = null;
       sessionIdRef.current = "";
       clientGenerationRef.current += 1;
@@ -1911,6 +1918,10 @@ function CustomSceneConversation({
       setStatus("本轮状态同步失败，已继续对话");
     } else if (event.type === "local.turn_evaluation_error") {
       setError(event.message);
+    } else if (event.type === "local.quota_exhausted") {
+      setError(event.message);
+      setStatus("今日额度已用完，正在结束本次练习");
+      void endConversation("quota_exhausted");
     } else if (event.type === "local.mic_error") {
       setRealtimeState("error");
       setError(event.message || "无法访问麦克风");

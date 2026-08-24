@@ -64,6 +64,12 @@ public class SessionMessageDispatcher {
 		lifecycle.bindProviderSession(userId, sessionId, providerSessionId);
 	}
 
+	public SessionLifecycleManager.SessionActivation activateSession(
+			String userId,
+			String sessionId) {
+		return lifecycle.activateSession(userId, sessionId);
+	}
+
 	private SceneType sceneType(String userId, String sessionId) {
 		return lifecycle.requireSceneType(userId, sessionId);
 	}

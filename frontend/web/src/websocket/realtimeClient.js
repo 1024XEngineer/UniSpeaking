@@ -724,6 +724,7 @@ export function createRealtimeClient({
   let pendingInterviewReportStatus = null;
   let providerSessionId = null;
   let providerSessionBound = false;
+  let quotaDeadlineTimer = null;
 
   const emit = (event) => onEvent(event);
 
@@ -760,6 +761,7 @@ export function createRealtimeClient({
         session_websocket: "SESSION_WEBSOCKET_FAILED",
         remote_description: "WEBRTC_REMOTE_DESCRIPTION_FAILED",
         data_channel: "WEBRTC_DATA_CHANNEL_FAILED",
+        session_activation: "SESSION_ACTIVATION_FAILED",
       }[stage] || "WEBRTC_START_FAILED");
     const diagnostics = await collectIceConnectionDiagnostics(
       peer,
@@ -901,7 +903,10 @@ export function createRealtimeClient({
     if (ack.success) {
       pending.resolve(ack);
     } else {
-      pending.reject(new Error(ack.message || ack.code || "会话消息处理失败"));
+      pending.reject(createRealtimeError(
+        ack.code || "SESSION_SOCKET_ERROR",
+        ack.message || ack.code || "会话消息处理失败",
+      ));
     }
   }
 
@@ -938,7 +943,7 @@ export function createRealtimeClient({
   async function sendSessionFrame(type, message = null, stopTime = null, providerSessionId = null) {
     if (!sessionId) throw new Error("会话 ID 尚未建立");
     const socket = await connectSessionSocket();
-    const operation = type === "end" ? "end" : type === "bind" ? "bind" : "message";
+    const operation = ["activate", "bind", "end"].includes(type) ? type : "message";
     const ack = new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
         pendingAcks = pendingAcks.filter((pending) => pending.resolve !== resolve);
@@ -1021,6 +1026,25 @@ export function createRealtimeClient({
       window.clearTimeout(initialResponseFallbackTimer);
       initialResponseFallbackTimer = null;
     }
+    if (quotaDeadlineTimer) {
+      window.clearTimeout(quotaDeadlineTimer);
+      quotaDeadlineTimer = null;
+    }
+  }
+
+  function scheduleQuotaDeadline(rawRemainingMs) {
+    if (rawRemainingMs == null) return;
+    const remainingMs = Number(rawRemainingMs);
+    if (!Number.isFinite(remainingMs)) return;
+    const expire = () => {
+      quotaDeadlineTimer = null;
+      emit({
+        type: "local.quota_exhausted",
+        message: "今日练习额度已用完，本次会话已自动结束",
+      });
+      void stop({ reason: "quota_exhausted" });
+    };
+    quotaDeadlineTimer = window.setTimeout(expire, Math.max(0, remainingMs));
   }
 
   function sendSessionUpdate() {
@@ -1844,6 +1868,10 @@ export function createRealtimeClient({
       stage = "data_channel";
       await waitForChannel(channel, peer);
       assertCurrentStart(attempt);
+      stage = "session_activation";
+      const activation = await sendSessionFrame("activate");
+      assertCurrentStart(attempt);
+      scheduleQuotaDeadline(activation?.data?.quotaRemainingMillis);
       rtcTelemetry?.connected();
       started = true;
       const connectedAudioTrack = localStream?.getAudioTracks?.()[0];

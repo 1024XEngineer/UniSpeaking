@@ -7,6 +7,7 @@ import com.unispeaking.domain.vo.scene.IeltsPart;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -28,6 +29,11 @@ public abstract class AbstractSceneSession {
 	private String model;
 	private String voiceId;
 	private Instant credentialExpiresAt;
+	private boolean quotaActivated;
+	private LocalDate quotaDate;
+	private double quotaReservedSeconds;
+	private Instant quotaStartedAt;
+	private Instant quotaDeadline;
 	private String errorCode;
 	private String errorMessage;
 
@@ -50,6 +56,19 @@ public abstract class AbstractSceneSession {
 
 	public void activate() {
 		status = SessionStatus.ACTIVE;
+	}
+
+	public void activateQuota(
+			LocalDate quotaDate,
+			double reservedSeconds,
+			Instant startedAt,
+			Instant deadline) {
+		quotaActivated = true;
+		this.quotaDate = quotaDate;
+		this.quotaReservedSeconds = reservedSeconds;
+		this.quotaStartedAt = startedAt;
+		this.quotaDeadline = deadline;
+		activate();
 	}
 
 	public void pause() {
@@ -121,6 +140,15 @@ public abstract class AbstractSceneSession {
 	public void setCredentialExpiresAt(Instant credentialExpiresAt) {
 		this.credentialExpiresAt = credentialExpiresAt;
 	}
+	public boolean isQuotaActivated() { return quotaActivated; }
+	public boolean hasQuotaReservation() {
+		return quotaDate != null && quotaReservedSeconds > 0
+				&& quotaStartedAt != null && quotaDeadline != null;
+	}
+	public LocalDate getQuotaDate() { return quotaDate; }
+	public double getQuotaReservedSeconds() { return quotaReservedSeconds; }
+	public Instant getQuotaStartedAt() { return quotaStartedAt; }
+	public Instant getQuotaDeadline() { return quotaDeadline; }
 	public String getErrorCode() { return errorCode; }
 	public String getErrorMessage() { return errorMessage; }
 }

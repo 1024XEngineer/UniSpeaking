@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -15,6 +16,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.component.policy.UserEntitlementPolicy;
+import com.unispeaking.component.policy.UserEntitlementPolicy.QuotaReservation;
 import com.unispeaking.domain.dto.session.Message;
 import com.unispeaking.domain.dto.session.SessionDetail;
 import com.unispeaking.domain.dto.session.StartSessionCommand;
@@ -28,10 +30,13 @@ import com.unispeaking.domain.vo.session.SessionStatus;
 import com.unispeaking.infrastructure.persistence.repository.session.PracticeSessionRepository;
 import com.unispeaking.infrastructure.persistence.repository.session.SessionMessageRepository;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ScheduledFuture;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.scheduling.TaskScheduler;
 
 class SessionLifecycleManagerCoverageTest {
 
@@ -109,6 +114,44 @@ class SessionLifecycleManagerCoverageTest {
 		verify(entitlement, never()).recordUsage(
 				eq(ownerId.toString()), eq(failed.getCreatedAt()), eq(failedAt));
 		assertEquals(SessionStatus.FAILED, failed.getStatus());
+	}
+
+	@Test
+	void activatesQuotaAtWebrtcConnectionAndStopsAtTheServerDeadline() {
+		CustomSceneSession session = customSession("session-quota");
+		sessions.save(session);
+		TaskScheduler scheduler = mock(TaskScheduler.class);
+		ScheduledFuture<?> future = mock(ScheduledFuture.class);
+		Instant deadline = Instant.now().plusSeconds(10);
+		when(entitlement.reserveRemaining(eq(ownerId.toString()), any(Instant.class)))
+				.thenAnswer(invocation -> new QuotaReservation(
+						LocalDate.now(),
+						10,
+						invocation.getArgument(1),
+						deadline));
+		doReturn(future).when(scheduler).schedule(any(Runnable.class), (Instant) eq(deadline));
+		var terminator = mock(com.unispeaking.infrastructure.realtime.RealtimeSessionTerminator.class);
+		SessionLifecycleManager managedLifecycle = new SessionLifecycleManager(
+				sessions, messages, practices, entitlement, terminator, scheduler);
+
+		var activation = managedLifecycle.activateSession(ownerId.toString(), session.getId());
+
+		assertEquals(deadline, activation.quotaDeadline());
+		assertTrue(activation.quotaRemainingMillis() > 0);
+		assertEquals(SessionStatus.ACTIVE, session.getStatus());
+		ArgumentCaptor<Runnable> deadlineTask = ArgumentCaptor.forClass(Runnable.class);
+		verify(scheduler).schedule(deadlineTask.capture(), (Instant) eq(deadline));
+
+		deadlineTask.getValue().run();
+
+		verify(practices).complete(eq(session.getId()), eq(ownerId), any(Instant.class));
+		verify(entitlement).settleReservation(
+				eq(ownerId.toString()),
+				eq(session.getQuotaDate()),
+				eq(10d),
+				eq(session.getQuotaStartedAt()),
+				any(Instant.class));
+		verify(terminator).stopBestEffort(session, "quota_exhausted");
 	}
 
 	@Test
