@@ -605,6 +605,10 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
       setError(event.message || "面试自动结束失败");
     } else if (event.type === "local.backend_warning") {
       setError(event.message || "会话记录保存失败，请稍后重试");
+    } else if (event.type === "local.quota_exhausted") {
+      setError(event.message);
+      setStatus("今日额度已用完，正在结束本次面试");
+      void endConversation("quota_exhausted");
     } else if (event.type === "local.mic_error") {
       setRealtimeState("error");
       setError(event.message || "无法访问麦克风");
@@ -726,15 +730,15 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     }
   };
 
-  const endConversation = async () => {
+  const endConversation = async (reason = "user_stop") => {
     if (endingRef.current) return;
     endingRef.current = true;
     setEnding(true);
-    setError("");
+    if (reason !== "quota_exhausted") setError("");
     setStatus("正在结束面试并生成报告");
     detachInterviewRemoteAudio();
     try {
-      const completion = await clientRef.current?.stop({ reason: "user_stop" });
+      const completion = await clientRef.current?.stop({ reason });
       clientRef.current = null;
       interviewAnalyticsRef.current?.complete();
       onEndInterviewRef.current?.(sceneId, sessionIdRef.current, completion?.reportStatus || null);

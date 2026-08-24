@@ -46,6 +46,38 @@ class UserEntitlementPolicyTest {
     }
 
     @Test
+    void reservesTheRemainingQuotaAndRefundsUnusedSeconds() {
+        JdbcDataSource dataSource = new JdbcDataSource();
+        dataSource.setURL("jdbc:h2:mem:user-entitlement-reservation;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        jdbc.execute("create table user_entitlements (user_id uuid, quota_date date, quota_seconds numeric(12,3), used_seconds numeric(12,3), status varchar(32), updated_at timestamp with time zone)");
+        UUID userId = UUID.randomUUID();
+        jdbc.update("insert into user_entitlements values (?, current_date, 600, 590, 'active', current_timestamp)", userId);
+        var policy = new UserEntitlementPolicy(jdbc);
+        Instant startedAt = Instant.parse("2026-08-24T05:00:00Z");
+
+        var reservation = policy.reserveRemaining(userId.toString(), startedAt);
+
+        assertEquals(10d, reservation.reservedSeconds());
+        assertEquals(startedAt.plusSeconds(10), reservation.deadline());
+        assertEquals(600d, jdbc.queryForObject(
+                "select used_seconds from user_entitlements where user_id = ?", Double.class, userId));
+        assertEquals("USER_QUOTA_EXHAUSTED", assertThrows(
+                BusinessException.class,
+                () -> policy.reserveRemaining(userId.toString(), startedAt)).code());
+
+        policy.settleReservation(
+                userId.toString(),
+                reservation.quotaDate(),
+                reservation.reservedSeconds(),
+                reservation.startedAt(),
+                startedAt.plusSeconds(4));
+
+        assertEquals(594d, jdbc.queryForObject(
+                "select used_seconds from user_entitlements where user_id = ?", Double.class, userId));
+    }
+
+    @Test
     void preservesSuspendedStatusWhenTheLedgerRollsIntoANewDay() {
         JdbcDataSource dataSource = new JdbcDataSource();
         dataSource.setURL("jdbc:h2:mem:user-entitlement-rollover;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");

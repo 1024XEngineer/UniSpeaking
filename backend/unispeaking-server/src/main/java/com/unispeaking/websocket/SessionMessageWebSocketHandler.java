@@ -1,5 +1,6 @@
 package com.unispeaking.websocket;
 
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.logging.RealtimeFlowLog;
 import com.unispeaking.component.session.SessionMessageDispatcher;
 import com.unispeaking.domain.dto.session.SessionSocketAck;
@@ -34,7 +35,9 @@ public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 			send(webSocketSession, SessionSocketAck.failure(
 					ackType(frame.type(), "failed"),
 					frame.sessionId(),
-					"SESSION_SOCKET_ERROR",
+					exception instanceof BusinessException businessException
+							? businessException.code()
+							: "SESSION_SOCKET_ERROR",
 					exception.getMessage()));
 		}
 	}
@@ -43,6 +46,12 @@ public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 		String sessionId = requireSessionId(frame.sessionId());
 		String userId = requireAuthenticatedUserId(webSocketSession);
 		switch (normalize(frame.type())) {
+			case "activate" -> send(
+					webSocketSession,
+					SessionSocketAck.success(
+							"session.activate.accepted",
+							sessionId,
+							sessionDispatcher.activateSession(userId, sessionId)));
 			case "message" -> {
 				sessionDispatcher.addMessage(userId, sessionId, frame.message());
 				RealtimeFlowLog.info("session.websocket.message sessionId={} owner={} content={} audioBytes={}",
@@ -81,6 +90,7 @@ public class SessionMessageWebSocketHandler extends TextWebSocketHandler {
 			return "message";
 		}
 		return switch (type.trim()) {
+			case "activate", "session.activate" -> "activate";
 			case "message", "session.message", "addMessage" -> "message";
 			case "end", "session.end", "endSession" -> "end";
 			case "bind", "session.bind", "bindProviderSession" -> "bind";

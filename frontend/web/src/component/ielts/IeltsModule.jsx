@@ -801,6 +801,10 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
           setError(event.message || "IELTS 题目状态推进失败");
         } else if (event.type === "local.backend_warning") {
           setError("会话记录保存失败，请稍后重试");
+        } else if (event.type === "local.quota_exhausted") {
+          setError(event.message);
+          setStatus("今日额度已用完，正在结束本次练习");
+          void finishRef.current?.("quota_exhausted");
         } else if (event.type === "local.mic_error") {
           setRealtimeState("error");
           setError(event.message || "无法访问麦克风");
@@ -859,11 +863,11 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
     return () => window.clearInterval(timer);
   }, [ending, realtimeState]);
 
-  const finish = async () => {
+  const finish = async (reason = "user_stop") => {
     if (finishingRef.current) return;
     finishingRef.current = true;
     setEnding(true);
-    setError("");
+    if (reason !== "quota_exhausted") setError("");
     clearPartTwoTimer();
     clearPartTwoCompletionTimer();
     clearPartTwoSilenceTimer();
@@ -876,7 +880,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
         ? client?.waitForEvaluations()
         : null;
       await client?.stop({
-        reason: "user_stop",
+        reason,
         awaitEvaluations: !deferEvaluation,
       });
       clientRef.current = null;

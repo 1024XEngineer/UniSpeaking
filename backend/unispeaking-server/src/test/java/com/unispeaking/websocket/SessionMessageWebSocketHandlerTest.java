@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.component.session.SessionMessageDispatcher;
 import java.util.HashMap;
 import org.junit.jupiter.api.Test;
@@ -49,6 +50,35 @@ class SessionMessageWebSocketHandlerTest {
 		var ack = org.mockito.ArgumentCaptor.forClass(TextMessage.class);
 		verify(socket).sendMessage(ack.capture());
 		assertTrue(ack.getValue().getPayload().contains("session.bind.accepted"));
+	}
+
+	@Test
+	void activatesQuotaForTheAuthenticatedSession() throws Exception {
+		SessionMessageDispatcher dispatcher = mock(SessionMessageDispatcher.class);
+		SessionMessageWebSocketHandler handler = new SessionMessageWebSocketHandler(
+				new ObjectMapper(), dispatcher);
+		WebSocketSession socket = authenticatedSocket("user-1");
+
+		handler.handleMessage(socket, new TextMessage(
+				"{\"type\":\"activate\",\"sessionId\":\"session-1\"}"));
+
+		verify(dispatcher).activateSession("user-1", "session-1");
+		assertTrue(ack(socket).contains("session.activate.accepted"));
+	}
+
+	@Test
+	void preservesTheQuotaErrorCodeWhenActivationIsRejected() throws Exception {
+		SessionMessageDispatcher dispatcher = mock(SessionMessageDispatcher.class);
+		when(dispatcher.activateSession("user-1", "session-1"))
+				.thenThrow(new BusinessException("USER_QUOTA_EXHAUSTED", "今日练习额度已用完"));
+		SessionMessageWebSocketHandler handler = new SessionMessageWebSocketHandler(
+				new ObjectMapper(), dispatcher);
+		WebSocketSession socket = authenticatedSocket("user-1");
+
+		handler.handleMessage(socket, new TextMessage(
+				"{\"type\":\"activate\",\"sessionId\":\"session-1\"}"));
+
+		assertTrue(ack(socket).contains("USER_QUOTA_EXHAUSTED"));
 	}
 
 	@Test
@@ -123,5 +153,6 @@ class SessionMessageWebSocketHandlerTest {
 		verify(dispatcher, never()).addMessage(any(), any(), any());
 		verify(dispatcher, never()).endSession(any(), any(), any());
 		verify(dispatcher, never()).bindProviderSession(any(), any(), any());
+		verify(dispatcher, never()).activateSession(any(), any());
 	}
 }

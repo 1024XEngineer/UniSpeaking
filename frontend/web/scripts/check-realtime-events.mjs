@@ -561,8 +561,8 @@ assert.doesNotMatch(realtimeSource, /console\.warn\([^\n]*(?:offerSdp|answerSdp|
 
 const appSource = await readFile(new URL("../src/controller/App.jsx", import.meta.url), "utf8");
 const freeChatStopSource = appSource.slice(
-  appSource.indexOf("const stopConversation = async () =>"),
-  appSource.indexOf("useEffect(() =>", appSource.indexOf("const stopConversation = async () =>")),
+  appSource.indexOf("const stopConversation = async ("),
+  appSource.indexOf("useEffect(() =>", appSource.indexOf("const stopConversation = async (")),
 );
 assert.ok(
   freeChatStopSource.indexOf("await client?.stop") < freeChatStopSource.indexOf("setInCall(false)"),
@@ -570,6 +570,26 @@ assert.ok(
 );
 assert.match(freeChatStopSource, /stopPromiseRef\.current/);
 assert.match(freeChatStopSource, /detachRemoteAudio\(\)/);
+assert.match(
+  realtimeSource,
+  /await waitForChannel\(channel, peer\);[\s\S]*?await sendSessionFrame\("activate"\);[\s\S]*?scheduleQuotaDeadline/,
+  "daily quota must start only after the WebRTC data channel connects",
+);
+assert.match(
+  realtimeSource,
+  /type: "local\.quota_exhausted"[\s\S]*?stop\(\{ reason: "quota_exhausted" \}\)/,
+  "the client must reuse the normal session completion path at the quota deadline",
+);
+assert.match(
+  realtimeSource,
+  /const operation = \["activate", "bind", "end"\]\.includes\(type\) \? type : "message";/,
+  "session activation acknowledgements must be correlated independently",
+);
+assert.match(
+  realtimeSource,
+  /pending\.reject\(createRealtimeError\([\s\S]*?ack\.code \|\| "SESSION_SOCKET_ERROR"/,
+  "session WebSocket business error codes must reach the realtime startup failure",
+);
 
 assert.match(appSource, /const detachSceneRemoteAudio = \(\) => \{/);
 assert.match(appSource, /sceneAnalyticsRef\.current\?\.abandon\("COMPONENT_UNMOUNT"\);\s+detachSceneRemoteAudio\(\);/);
@@ -592,6 +612,11 @@ assert.match(
   /\{reconnecting \? "正在重新连接" : "重新连接"\}/,
   "custom scene must expose an explicit reconnect action after startup failure",
 );
+assert.match(
+  customSceneConversationSource,
+  /event\.type === "local\.quota_exhausted"[\s\S]*?endConversation\("quota_exhausted"\)/,
+  "custom scenes must finish through their existing report flow when quota expires",
+);
 assert.doesNotMatch(
   customSceneConversationSource,
   /setTimeout\([^)]*connectRealtime/,
@@ -605,6 +630,7 @@ const ieltsSource = await readFile(
 assert.match(ieltsSource, /const finishingRef = useRef\(false\);/);
 assert.match(ieltsSource, /if \(finishingRef\.current\) return;\s+finishingRef\.current = true;/);
 assert.match(ieltsSource, /ieltsAnalyticsRef\.current\?\.abandon\("COMPONENT_UNMOUNT"\);[\s\S]*?detachIeltsRemoteAudio\(\);[\s\S]*?clientRef\.current = null;/);
+assert.match(ieltsSource, /local\.quota_exhausted[\s\S]*?finishRef\.current\?\.\("quota_exhausted"\)/);
 
 const interviewSource = await readFile(
   new URL("../src/component/interview/InterviewModule.jsx", import.meta.url),
@@ -613,5 +639,6 @@ const interviewSource = await readFile(
 assert.match(interviewSource, /const detachInterviewRemoteAudio = \(\) => \{/);
 assert.match(interviewSource, /interviewAnalyticsRef\.current\?\.abandon\("COMPONENT_UNMOUNT"\);\s+detachInterviewRemoteAudio\(\);/);
 assert.match(interviewSource, /const abandon = async \(\) => \{\s+if \(endingRef\.current\) return;\s+endingRef\.current = true;/);
+assert.match(interviewSource, /local\.quota_exhausted[\s\S]*?endConversation\("quota_exhausted"\)/);
 
 console.log("Realtime event normalization checks passed.");
