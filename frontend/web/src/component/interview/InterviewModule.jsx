@@ -167,16 +167,18 @@ function InterviewWaveform({ active = false, compact = false }) {
 
 function InterviewTimer({ state = "active", paused = false }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const startedAt = useRef(Date.now());
+  const startedAt = useRef(null);
+  const running = state !== "connecting" && state !== "ended" && state !== "error";
   useEffect(() => {
+    if (!running) return undefined;
+    startedAt.current ??= Date.now();
     const updateElapsed = () => setElapsedSeconds(Math.floor((Date.now() - startedAt.current) / 1000));
     updateElapsed();
-    if (state === "ended" || state === "error") return undefined;
     const interval = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(interval);
-  }, [state]);
+  }, [running]);
   const duration = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`;
-  const label = state === "error" ? "连接失败" : state === "ended" ? "已结束" : paused ? `已暂停 · ${duration}` : duration;
+  const label = state === "connecting" ? "连接中" : state === "error" ? "连接失败" : state === "ended" ? "已结束" : paused ? `已暂停 · ${duration}` : duration;
   return <time className="call-presence__time">{label}</time>;
 }
 
@@ -504,6 +506,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
   const [paused, setPaused] = useState(false);
   const [ending, setEnding] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [realtimeState, setRealtimeState] = useState("connecting");
   const [lines, setLines] = useState([]);
   const [exitOpen, setExitOpen] = useState(false);
   const clientRef = useRef(null);
@@ -539,9 +542,12 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
   };
 
   const handleEvent = (event) => {
-    if (event.type === "local.connecting") setStatus("正在连接面试官");
-    else if (event.type === "local.connected") {
+    if (event.type === "local.connecting") {
+      setRealtimeState("connecting");
+      setStatus("正在连接面试官");
+    } else if (event.type === "local.connected") {
       interviewAnalyticsRef.current?.started();
+      setRealtimeState("connected");
       setStatus("正在建立面试会话");
       sessionIdRef.current = event.sessionId || "";
     } else if (event.type === "session.updated" || event.type === "local.greeting_timeout") {
@@ -599,9 +605,11 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     } else if (event.type === "local.backend_warning") {
       setError(event.message || "会话记录保存失败，请稍后重试");
     } else if (event.type === "local.mic_error") {
+      setRealtimeState("error");
       setError(event.message || "无法访问麦克风");
       setStatus("麦克风不可用，请检查权限");
     } else if (event.type === "error" || event.type === "local.error") {
+      setRealtimeState("error");
       setError(event.message || event.error?.message || "实时会话发生错误");
       setStatus("连接异常");
     }
@@ -680,6 +688,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
     }).catch((startError) => {
       if (!cancelled) {
         interviewAnalyticsRef.current.fail("REALTIME_ERROR");
+        setRealtimeState("error");
         setError(startError instanceof Error ? startError.message : "无法开始面试会话");
       }
     });
@@ -763,7 +772,7 @@ function InterviewSession({ sceneId, teacher, speed, onEndInterview, onExit }) {
           <div className="portrait portrait--small interview-call-portrait"><img src={teacher?.image} alt={teacher?.name} /></div>
           <div className="listening-state listening-state--compact">
             <InterviewWaveform active={!ending && !paused && !error} compact />
-            <InterviewTimer paused={paused} state={ending ? "ended" : error ? "error" : "active"} />
+            <InterviewTimer paused={paused} state={ending ? "ended" : error ? "error" : realtimeState} />
             {(!ending || closing) && <span>{status}</span>}
           </div>
         </div>

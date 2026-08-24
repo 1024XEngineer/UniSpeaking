@@ -446,18 +446,20 @@ const formatCallDuration = (totalSeconds) => {
 
 function CallTimer({ state = "active", paused = false, stopped = false, className }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const startedAt = useRef(Date.now());
+  const startedAt = useRef(null);
   const terminal = stopped || state === "ended" || state === "error";
+  const running = !terminal && state !== "connecting";
 
   useEffect(() => {
+    if (!running) return undefined;
+    startedAt.current ??= Date.now();
     const updateElapsed = () => {
       setElapsedSeconds(Math.floor((Date.now() - startedAt.current) / 1000));
     };
     updateElapsed();
-    if (terminal) return undefined;
     const interval = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(interval);
-  }, [terminal]);
+  }, [running]);
 
   const duration = formatCallDuration(elapsedSeconds);
   const label = state === "connecting"
@@ -1702,6 +1704,7 @@ function CustomSceneConversation({
   const [ending, setEnding] = useState(false);
   const [connectionFailed, setConnectionFailed] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [realtimeState, setRealtimeState] = useState("connecting");
   const [lines, setLines] = useState([]);
   const [translated, setTranslated] = useState([]);
   const clientRef = useRef(null);
@@ -1745,10 +1748,13 @@ function CustomSceneConversation({
   };
 
   const handleEvent = (event) => {
-    if (event.type === "local.connecting") setStatus("正在连接模型");
-    else if (event.type === "local.connected") {
+    if (event.type === "local.connecting") {
+      setRealtimeState("connecting");
+      setStatus("正在连接模型");
+    } else if (event.type === "local.connected") {
       sceneAnalyticsRef.current?.started();
       setConnectionFailed(false);
+      setRealtimeState("connected");
       setStatus("正在建立模型会话");
       sessionIdRef.current = event.sessionId || "";
       onSessionStarted?.(event.sessionId);
@@ -1822,9 +1828,11 @@ function CustomSceneConversation({
     } else if (event.type === "local.turn_evaluation_error") {
       setError(event.message);
     } else if (event.type === "local.mic_error") {
+      setRealtimeState("error");
       setError(event.message || "无法访问麦克风");
       setStatus("麦克风不可用，请检查权限");
     } else if (event.type === "error" || event.type === "local.error") {
+      setRealtimeState("error");
       setError(event.message || event.error?.message || "实时会话发生错误");
       setStatus("连接异常");
     }
@@ -1844,6 +1852,7 @@ function CustomSceneConversation({
       setReconnecting(retry);
       setError("");
       setPaused(false);
+      setRealtimeState("connecting");
       setStatus(retry ? "正在重新连接场景" : "正在连接场景");
       try {
         await client.start({
@@ -1856,6 +1865,7 @@ function CustomSceneConversation({
         if (clientRef.current !== client) return;
         sceneAnalyticsRef.current.fail("REALTIME_ERROR");
         setConnectionFailed(true);
+        setRealtimeState("error");
         setError(realtimeFailureMessage(startError));
         setStatus("连接失败");
       } finally {
@@ -1983,7 +1993,7 @@ function CustomSceneConversation({
           <div className="portrait portrait--small"><img src={teacher.image} alt={teacher.name} /></div>
           <div className="listening-state listening-state--compact">
             <VoiceWaveform active={!ended && !paused && !ending && !error} compact />
-            <CallTimer paused={paused} state={ended ? "ended" : error ? "error" : "active"} stopped={ending} />
+            <CallTimer paused={paused} state={ended ? "ended" : error ? "error" : realtimeState} stopped={ending} />
             <span>{status}</span>
           </div>
         </div>
