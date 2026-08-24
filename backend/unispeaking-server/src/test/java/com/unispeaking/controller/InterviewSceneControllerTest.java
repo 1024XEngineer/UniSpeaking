@@ -4,17 +4,23 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 
 import com.unispeaking.component.recording.RecordingStore;
 import com.unispeaking.domain.dto.asset.InterviewAssetItem;
 import com.unispeaking.domain.dto.scene.InterviewMaterial;
 import com.unispeaking.domain.dto.scene.InterviewMaterialDraft;
 import com.unispeaking.domain.dto.session.StartSceneSessionResponse;
+import com.unispeaking.domain.dto.evaluation.InterviewEndResponse;
+import com.unispeaking.domain.dto.evaluation.InterviewReportResponse;
+import com.unispeaking.domain.vo.evaluation.ReportStatus;
 import com.unispeaking.service.scene.InterviewSceneService;
 import com.unispeaking.service.session.InterviewSessionService;
 import java.math.BigDecimal;
@@ -25,6 +31,7 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.core.io.ByteArrayResource;
 
 class InterviewSceneControllerTest {
 
@@ -218,5 +225,72 @@ class InterviewSceneControllerTest {
 				.andExpect(jsonPath("$.data.state.currentTopic").value("自我介绍"))
 				.andExpect(jsonPath("$.data.state.completedTopicCount").value(1))
 				.andExpect(jsonPath("$.data.state.coveredTopicCount").value(1));
+	}
+
+	@Test
+	void coversInterviewLifecycleReportAudioAndDeleteEndpoints() throws Exception {
+		InterviewSceneService scenes = mock(InterviewSceneService.class);
+		InterviewSessionService sessions = mock(InterviewSessionService.class);
+		RecordingStore recordings = mock(RecordingStore.class);
+		when(sessions.endInterview("scene-1", "session-1"))
+				.thenReturn(new InterviewEndResponse("session-1", ReportStatus.PROCESSING));
+		when(sessions.getReport("scene-1", "session-1"))
+				.thenReturn(new InterviewReportResponse("session-1", "scene-1", ReportStatus.PROCESSING, null, null));
+		when(sessions.retryReport("scene-1", "session-1"))
+				.thenReturn(new InterviewReportResponse("session-1", "scene-1", ReportStatus.COMPLETED, null, null));
+		when(sessions.uploadAiAudio("scene-1", "session-1", new byte[] {9, 8}))
+				.thenReturn("audio/object.wav");
+		when(recordings.loadSessionRecording("scene-1", "session-1"))
+				.thenReturn(new ByteArrayResource(new byte[] {1, 2}));
+		when(recordings.loadOwned("scene-1", "session-1", "turn-1.wav"))
+				.thenReturn(new ByteArrayResource(new byte[] {3, 4}));
+		MockMvc mvc = MockMvcBuilders.standaloneSetup(new InterviewSceneController(
+				scenes, sessions, recordings)).build();
+
+		mvc.perform(post("/api/interview-scenes/scene-1/sessions/session-1/end"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.reportStatus").value("PROCESSING"));
+		mvc.perform(get("/api/interview-scenes/scene-1/sessions/session-1/report"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("PROCESSING"));
+		mvc.perform(post("/api/interview-scenes/scene-1/sessions/session-1/report/retry"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("COMPLETED"));
+		mvc.perform(multipart("/api/interview-scenes/scene-1/sessions/session-1/ai-audio")
+					.file(new MockMultipartFile("audio", "ai.wav", "audio/wav", new byte[] {9, 8})))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data").value("audio/object.wav"));
+		mvc.perform(get("/api/interview-scenes/scene-1/sessions/session-1/recording"))
+				.andExpect(status().isOk()).andExpect(
+						org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentType("audio/wav"))
+				.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes(new byte[] {1, 2}));
+		mvc.perform(get("/api/interview-scenes/scene-1/sessions/session-1/recordings/turn-1.wav"))
+				.andExpect(status().isOk()).andExpect(
+						org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes(new byte[] {3, 4}));
+		mvc.perform(delete("/api/interview-scenes/scene-1"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true));
+
+		verify(sessions).endInterview("scene-1", "session-1");
+		verify(sessions).getReport("scene-1", "session-1");
+		verify(sessions).retryReport("scene-1", "session-1");
+		verify(sessions).uploadAiAudio("scene-1", "session-1", new byte[] {9, 8});
+		verify(scenes).deleteScene("scene-1");
+	}
+
+	@Test
+	void generateAndPrepareMaterialsSupportNullOptionalUploads() throws Exception {
+		InterviewSceneService scenes = mock(InterviewSceneService.class);
+		var material = new InterviewMaterial(
+				"Java 工程师", List.of("职责"), List.of("要求"), List.of(), "",
+				List.of(), List.of(), List.of(), List.of(), List.of(), "最终文本");
+		var result = new com.unispeaking.domain.dto.scene.InterviewSceneResult(
+				"scene-2", "system prompt");
+		when(scenes.generate(any())).thenReturn(result);
+		when(scenes.prepareMaterials(any())).thenReturn(new InterviewMaterialDraft(material));
+		MockMvc mvc = MockMvcBuilders.standaloneSetup(new InterviewSceneController(
+				scenes, mock(InterviewSessionService.class), mock(RecordingStore.class))).build();
+
+		mvc.perform(post("/api/interview-scenes")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"material\":{\"jobTitle\":\"Java 工程师\",\"responsibilities\":[\"职责\"],\"qualificationRequirements\":[\"要求\"],\"finalText\":\"最终文本\"},\"difficulty\":\"STANDARD\"}"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.sceneId").value("scene-2"));
+		mvc.perform(multipart("/api/interview-scenes/prepare-materials"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.data.material.finalText").value("最终文本"));
 	}
 }

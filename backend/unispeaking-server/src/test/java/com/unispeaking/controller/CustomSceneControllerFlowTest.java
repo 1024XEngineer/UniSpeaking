@@ -5,8 +5,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.unispeaking.domain.dto.scene.AdvanceSceneStageRequest;
+import com.unispeaking.domain.dto.scene.CompleteSceneFlowRequest;
+import com.unispeaking.domain.dto.scene.CreateSceneFlowRequest;
 import com.unispeaking.domain.dto.scene.SceneFlowResponse;
+import com.unispeaking.domain.dto.session.AdvanceScenarioDialogueTurnRequest;
+import com.unispeaking.domain.dto.scene.AdvanceSceneStageRequest;
 import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.service.asset.LearningAssetService;
 import com.unispeaking.service.evaluation.CustomEvaluationService;
@@ -44,6 +47,67 @@ class CustomSceneControllerFlowTest {
 				SceneFlowStage.WORD_LEARNING);
 
 		verify(flow).content("scene_1", SceneFlowStage.WORD_LEARNING);
+	}
+
+	@Test
+	void createFlowStartsTheFlowBeforeReadingItsResponse() {
+		CustomSceneFlowService flow = mock(CustomSceneFlowService.class);
+		CustomSceneController controller = controller(flow);
+
+		controller.createFlow(new CreateSceneFlowRequest("scene_1"));
+
+		verify(flow).start("scene_1");
+		verify(flow).response("scene_1");
+	}
+
+	@Test
+	void advanceWithoutAStageUsesTheServerCurrentStage() {
+		CustomSceneFlowService flow = mock(CustomSceneFlowService.class);
+		CustomSceneController controller = controller(flow);
+
+		controller.advanceStage(new AdvanceSceneStageRequest("scene_1", null));
+
+		verify(flow).next("scene_1");
+		verify(flow, never()).next("scene_1", SceneFlowStage.WORD_LEARNING);
+		verify(flow).response("scene_1");
+	}
+
+	@Test
+	void completingAnIncompleteFlowAdvancesUntilCompletedThenClearsIt() {
+		CustomSceneFlowService flow = mock(CustomSceneFlowService.class);
+		when(flow.isCompleted("scene_1")).thenReturn(false, false, true);
+		CustomSceneController controller = controller(flow);
+
+		controller.completeFlow(new CompleteSceneFlowRequest("scene_1", true));
+
+		verify(flow, org.mockito.Mockito.times(2)).next("scene_1");
+		verify(flow).clear("scene_1");
+	}
+
+	@Test
+	void incompleteFlagDoesNotAdvanceOrClearTheFlow() {
+		CustomSceneFlowService flow = mock(CustomSceneFlowService.class);
+		CustomSceneController controller = controller(flow);
+
+		controller.completeFlow(new CompleteSceneFlowRequest("scene_1", false));
+
+		verify(flow, never()).isCompleted("scene_1");
+		verify(flow, never()).next("scene_1");
+		verify(flow, never()).clear("scene_1");
+	}
+
+	@Test
+	void dialogueStateEndpointsDelegateAllPathAndBodyParameters() {
+		CustomSceneFlowService flow = mock(CustomSceneFlowService.class);
+		CustomSceneController controller = controller(flow);
+		AdvanceScenarioDialogueTurnRequest request =
+				new AdvanceScenarioDialogueTurnRequest("answer");
+
+		controller.advanceDialogueState("scene_1", "session_1", 3, request);
+		controller.getDialogueState("scene_1", "session_1");
+
+		verify(flow).advanceDialogueState("scene_1", "session_1", 3, "answer");
+		verify(flow).getDialogueState("scene_1", "session_1");
 	}
 
 	private CustomSceneController controller(CustomSceneFlowService flow) {
