@@ -11,6 +11,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.common.exception.InterviewErrorCode;
 import com.unispeaking.domain.po.evaluation.InterviewReportRecord;
@@ -20,10 +22,21 @@ import com.unispeaking.infrastructure.persistence.mapper.evaluation.InterviewRep
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /** Additional contract tests kept separate from mapper-focused repository tests. */
 class InterviewReportRepositoryContractTest {
+
+	@BeforeAll
+	static void initializeMybatisMetadata() {
+		TableInfoHelper.initTableInfo(
+				new MapperBuilderAssistant(
+						new MybatisConfiguration(),
+						"interview-report-repository-contract-test"),
+				InterviewReportEntity.class);
+	}
 
 	@Test
 	void findByIdHandlesBlankMissingAndNullablePersistedFields() {
