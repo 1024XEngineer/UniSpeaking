@@ -177,7 +177,7 @@ class SceneSentenceReadingRepositoryTest {
 		SentenceEvaluationEntity best = new SentenceEvaluationEntity();
 		best.setOverallScore(new BigDecimal("76.40"));
 		when(evaluationMapper.selectCount(any())).thenReturn(11L);
-		when(evaluationMapper.selectOne(any())).thenReturn(best);
+		when(evaluationMapper.selectList(any())).thenReturn(List.of(best));
 		SceneSentenceReadingRepository repository =
 				new SceneSentenceReadingRepository(
 						mock(SceneSentenceMapper.class),

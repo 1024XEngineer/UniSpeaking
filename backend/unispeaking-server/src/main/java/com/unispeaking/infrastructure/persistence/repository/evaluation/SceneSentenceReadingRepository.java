@@ -126,13 +126,15 @@ public class SceneSentenceReadingRepository {
 							.eq(SentenceEvaluationEntity::getSceneId, sceneId)
 							.eq(SentenceEvaluationEntity::getSentenceId, sentenceId);
 			long count = evaluationMapper.selectCount(scope);
-			SentenceEvaluationEntity best = evaluationMapper.selectOne(
+			List<SentenceEvaluationEntity> rankedAttempts = evaluationMapper.selectList(
 					new LambdaQueryWrapper<SentenceEvaluationEntity>()
 							.select(SentenceEvaluationEntity::getOverallScore)
 							.eq(SentenceEvaluationEntity::getSceneId, sceneId)
 							.eq(SentenceEvaluationEntity::getSentenceId, sentenceId)
-							.orderByDesc(SentenceEvaluationEntity::getOverallScore)
-							.last("LIMIT 1"));
+							.orderByDesc(SentenceEvaluationEntity::getOverallScore));
+			SentenceEvaluationEntity best = rankedAttempts.isEmpty()
+					? null
+					: rankedAttempts.getFirst();
 			return new AttemptSummary(
 					count,
 					best == null ? null : best.getOverallScore());
