@@ -406,6 +406,7 @@ function InterviewHome({ onNavigate, onBack }) {
           eyebrow="JOB INTERVIEW"
           title="模拟面试"
           subtitle="上传 JD 与简历，AI 面试官按真实岗位流程向你提问，并在结束后生成五维报告。"
+          action={<SimpleCta className="interview-home-assets-cta" onClick={() => onNavigate(paths.interview.assets.root)}>查看学习资产</SimpleCta>}
         />
         <section className="interview-builder interview-module">
           <div className="scene-section-heading scene-section-heading--primary">
@@ -1251,7 +1252,7 @@ export function InterviewAssets({ route, onNavigate, onBack, onBackToAssets, onB
   return (
     <main className={cx("page", "page--interview", "interview-assets-page", tab === "overview" && "interview-assets-page--overview", tab === "trends" && "interview-assets-page--trends")}>
       <button className="ielts-back" onClick={onBack}><ArrowLeft />返回</button>
-      <PageHeader title="面试学习资产" action={<div className="ielts-assets-actions">{otherAssetsMenu}<SimpleCta className="ielts-assets-header-cta" onClick={onTraining}>返回训练中心</SimpleCta></div>} />
+      <PageHeader title="面试学习资产" action={<div className="ielts-assets-actions interview-assets-actions">{otherAssetsMenu}<SimpleCta className="ielts-assets-header-cta" onClick={onTraining}>返回训练中心</SimpleCta></div>} />
       <nav className="interview-assets-tabs" ref={tabRef} aria-label="面试学习资产视图">
         <span className={cx("interview-assets-tab-indicator", tabIndicator.ready && "is-ready")} style={{ width: tabIndicator.width, transform: `translateX(${tabIndicator.x}px)` }} />
         {interviewAssetTabs.map((item) => <button ref={(node) => { tabButtons.current[item.id] = node; }} key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}

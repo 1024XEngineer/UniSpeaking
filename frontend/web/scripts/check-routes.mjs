@@ -131,4 +131,29 @@ assert.match(
   "Navigation guard must cover unfinished custom, free, IELTS, and interview practice",
 );
 
-console.log(`Route contract passed: ${cases.length + 46} assertions`);
+const interviewSource = await readFile(
+  new URL("../src/component/interview/InterviewModule.jsx", import.meta.url),
+  "utf8",
+);
+const stylesSource = await readFile(
+  new URL("../src/common/styles.css", import.meta.url),
+  "utf8",
+);
+
+assert.match(
+  interviewSource,
+  /className="interview-home-assets-cta" onClick=\{\(\) => onNavigate\(paths\.interview\.assets\.root\)\}/,
+  "Interview home must link directly to interview learning assets",
+);
+assert.match(
+  interviewSource,
+  /className="ielts-assets-actions interview-assets-actions"/,
+  "Interview asset header actions must have a module-specific layout hook",
+);
+assert.match(
+  stylesSource,
+  /\.interview-assets-page \.page-header \{ width: 100%;[\s\S]*?\.interview-assets-actions \{ margin-right: 0; \}/,
+  "Interview asset header and actions must align with the full content width",
+);
+
+console.log(`Route contract passed: ${cases.length + 49} assertions`);

@@ -2488,7 +2488,8 @@ svg { display: block; }
 .page--interview .page-header { width: min(1360px, 100%); margin-bottom: 24px; }
 .page--interview .page-header h1 { margin-bottom: 8px; font-size: 48px; }
 .page--interview .page-header > div > p:last-child { font-size: 15px; }
-.interview-home { width: min(1360px, 100%); }
+.interview-home,
+.interview-home .page-header { width: 100%; }
 
 .interview-builder {
   padding: 26px 28px 28px;
@@ -3293,7 +3294,7 @@ button.ielts-training-cta:not(:disabled) svg { color: #fff !important; }
   isolation: isolate;
   overflow: hidden;
   align-items: center;
-  padding: 30px clamp(230px, 29vw, 420px) 30px 34px;
+  padding: 30px 34px;
   border: 1px solid rgba(76, 145, 214, .55);
   border-radius: 18px;
   background-color: var(--interview-hero);
@@ -3303,6 +3304,15 @@ button.ielts-training-cta:not(:disabled) svg { color: #fff !important; }
   background-size: cover;
   box-shadow: 0 12px 30px rgba(18, 50, 85, .18);
 }
+.interview-home .page-header > div:first-child { max-width: min(700px, 65%); }
+.interview-home-assets-cta {
+  min-width: 150px;
+  flex: 0 0 auto;
+  border-color: rgba(255, 255, 255, .72);
+  color: var(--interview-hero);
+  background: rgba(247, 251, 255, .96);
+}
+.interview-home-assets-cta:hover { border-color: #fff; background: #fff; }
 .interview-home .page-header::after {
   content: "";
   position: absolute;
@@ -3532,8 +3542,9 @@ button.ielts-training-cta:not(:disabled) svg { color: #fff !important; }
 .interview-report-pending > p:not(.eyebrow) { color: var(--interview-muted); }
 
 /* Interview learning assets */
-.interview-assets-page .page-header { padding-bottom: 24px; border-bottom: 1px solid var(--interview-border); }
+.interview-assets-page .page-header { width: 100%; padding-bottom: 24px; border-bottom: 1px solid var(--interview-border); }
 .interview-assets-page .page-header > div > p:last-child { color: var(--interview-muted); }
+.interview-assets-actions { margin-right: 0; }
 .interview-assets-page .ielts-assets-actions .ielts-assets-header-cta,
 .interview-other-assets .asset-module-menu__trigger,
 .interview-other-assets .asset-module-menu__popover {
@@ -3626,10 +3637,12 @@ button.ielts-training-cta:not(:disabled) svg { color: #fff !important; }
 .interview-assets-tab-indicator.is-ready { opacity: 1; }
 
 .interview-assets-overview {
+  min-width: 0;
   display: grid;
   gap: 16px;
   padding-top: 20px;
 }
+.interview-assets-overview > * { min-width: 0; }
 .interview-assets-hero {
   min-height: 176px;
   padding: 26px 30px;
@@ -3803,11 +3816,15 @@ button.ielts-training-cta:not(:disabled) svg { color: #fff !important; }
   .page--interview .ielts-back { margin-top: 0; }
   .interview-home .page-header {
     min-height: 240px;
-    align-items: flex-end;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 18px;
     padding: 28px 22px;
     background-position: 60% 62%;
     background-size: auto 180%;
   }
+  .interview-home .page-header > div:first-child { max-width: none; }
+  .interview-home-assets-cta { width: 100%; }
   .interview-home .page-header::after { background: rgba(10, 43, 82, .68); }
   .interview-home .page-header h1 { font-size: 38px; }
   .interview-home .page-header > div > p:last-child { font-size: 13px; }
@@ -3834,8 +3851,8 @@ button.ielts-training-cta:not(:disabled) svg { color: #fff !important; }
   .interview-assets-hero > div:nth-child(2) { padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--interview-border); }
   .interview-assets-weekly { min-height: 0; padding: 22px; }
   .interview-assets-weekly__bars { min-height: 160px; gap: 3px; }
-  .interview-assets-weekly__bars > span { width: 32px; }
-  .interview-assets-weekly__bars i { width: 20px; }
+  .interview-assets-weekly__bars > span { width: 24px; }
+  .interview-assets-weekly__bars i { width: 16px; }
   .interview-assets-recent > div { grid-template-columns: 1fr; }
   .interview-assets-recent button,
   .interview-assets-recent article { border-left: 0; border-top: 1px solid var(--interview-border); }
