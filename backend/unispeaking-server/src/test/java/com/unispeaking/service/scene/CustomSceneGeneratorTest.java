@@ -88,6 +88,10 @@ class CustomSceneGeneratorTest {
 				"reusable lexical chunk or collocation of 2 to 6 English"));
 		assertTrue(prompt.getValue().contains(
 				"not a complete clause or sentence"));
+		assertTrue(prompt.getValue().contains(
+				"background must contain only facts observable to both roles"));
+		assertTrue(prompt.getValue().contains(
+				"Do not place learner-side answers, preferences, budget, or desired choices in background"));
 	}
 
 	@Test

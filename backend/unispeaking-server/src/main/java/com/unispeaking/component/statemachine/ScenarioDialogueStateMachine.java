@@ -202,8 +202,11 @@ public class ScenarioDialogueStateMachine {
 				response concise and remain in role. Prioritize the learner's newest intent
 				over the original script: respond directly to changed requests, accept a
 				clear refusal, and never repeat an optional question, offer, or detail the
-				learner already declined. Do not make the learner repeat information merely
-				to prove they remember it. When still relevant, guide the learner toward
+				learner already declined. Ask at most one necessary question per turn.
+				Do not offer guessed values or answer choices for information the learner should
+				contribute, and never turn the unresolved outcomes into a quiz or checklist.
+				Do not make the learner repeat information merely to prove they remember it.
+				When still relevant, guide the learner toward
 				these unresolved outcomes: %s. Treat them as flexible semantic goals, not a
 				fixed questionnaire. Never mention tracking, slots, or a state machine.
 				The conversation has a hard limit of %d effective learner turns.

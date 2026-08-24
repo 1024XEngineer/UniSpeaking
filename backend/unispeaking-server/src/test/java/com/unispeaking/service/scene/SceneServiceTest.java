@@ -1,6 +1,8 @@
 package com.unispeaking.service.scene;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -140,6 +142,74 @@ class SceneServiceTest {
 		verify(repository).saveCustomScene(
 				any(CustomSceneDefinition.class),
 				any(SceneGenerationResponse.class));
+	}
+
+	@Test
+	void existingGiftShopSceneRebuildsActorPromptWithoutLearnerAnswers() {
+		String sceneId = "custom_49053a45e217471abcb0c5cee7c8912e";
+		String userId = "11111111-1111-4111-8111-111111111111";
+		AuthService authService = mock(AuthService.class);
+		ProfileService profileService = mock(ProfileService.class);
+		SceneRepository repository = mock(SceneRepository.class);
+		UserProfile profile = new UserProfile(
+				userId,
+				"B",
+				"Katerina",
+				"NATURAL",
+				"zh-CN",
+				"");
+		SceneConfig config = new SceneConfig(
+				SceneType.CUSTOM_SCENE,
+				ProviderType.QWEN,
+				null,
+				"Katerina",
+				true);
+		List<LearningContentItem> sentences = List.of(
+				new LearningContentItem("sentence_1", "I am looking for a gift for my friend.", "", ""),
+				new LearningContentItem("sentence_2", "My budget is twenty dollars.", "", ""),
+				new LearningContentItem("sentence_3", "She likes reading and tea.", "", ""));
+		CustomSceneDefinition definition = new CustomSceneDefinition(
+				sceneId,
+				userId,
+				"挑选生日礼物",
+				"购物",
+				"一家礼品店。",
+				"Friendly shop assistant",
+				"Customer looking for a gift",
+				"向店员说明需求并挑选礼物",
+				"保持自然的购物对话",
+				"{}",
+				List.of(),
+				List.of(),
+				sentences);
+		SceneGenerationResponse generated = new SceneGenerationResponse(
+				sceneId,
+				List.of(),
+				List.of(),
+				sentences,
+				"");
+
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(profileService.getProfile(userId)).thenReturn(profile);
+		when(repository.findCustomDefinitionById(sceneId)).thenReturn(Optional.of(definition));
+		when(repository.findGeneratedById(sceneId)).thenReturn(Optional.of(generated));
+		when(repository.findByType(SceneType.CUSTOM_SCENE)).thenReturn(Optional.of(config));
+		var service = new CustomSceneService(
+				authService,
+				profileService,
+				repository,
+				new FiveLayerPromptBuilder(""),
+				mock(CustomSceneGenerator.class),
+				mock(AiProviderRegistry.class),
+				new ObjectMapper());
+
+		String prompt = service.prepareDialogue(sceneId).prompt();
+
+		assertTrue(prompt.contains("You are only Friendly shop assistant"));
+		assertTrue(prompt.contains("The learner is Customer looking for a gift"));
+		assertFalse(prompt.contains("I am looking for a gift for my friend."));
+		assertFalse(prompt.contains("My budget is twenty dollars."));
+		assertFalse(prompt.contains("She likes reading and tea."));
 	}
 
 	private List<LearningContentItem> items(String prefix, int count) {

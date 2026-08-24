@@ -163,12 +163,18 @@ public class CustomSceneGenerator {
 				Use concise Chinese for translations and English for practice content.
 				Adapt vocabulary difficulty, sentence length, roles, and goals to the learner profile.
 				Do not include private company, customer, project, medical, payment, or credential data.
+				The background must contain only facts observable to both roles at the start of the interaction,
+				such as the place and general situation.
+				Do not place learner-side answers, preferences, budget, or desired choices in background.
+				Those details must be introduced by the learner during the role-play.
+				Never preload a fact merely
+				because a generated reference sentence teaches the learner how to express it.
 
 				The JSON shape must be:
 				{
 				  "title": "short Chinese scene title",
 				  "label": "餐饮|购物|出行|住宿|健康|职场|社交|学习|服务|其他",
-				  "background": "specific but privacy-safe scene context",
+				  "background": "mutually observable scene setup only, without learner-side answers",
 				  "ai_role": "the role played by AI",
 				  "user_role": "the role played by the learner",
 				  "learning_goal": "observable speaking goal",
