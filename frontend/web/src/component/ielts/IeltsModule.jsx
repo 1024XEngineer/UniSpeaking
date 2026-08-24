@@ -854,7 +854,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
   }, [generated?.ieltsId, generated?.voiceId, examiner.id]);
 
   useEffect(() => {
-    if (ending || realtimeState === "error") return undefined;
+    if (ending || realtimeState !== "connected") return undefined;
     const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000);
     return () => window.clearInterval(timer);
   }, [ending, realtimeState]);
@@ -956,7 +956,7 @@ function IeltsConversationSession({ part, examiner, training, generated, onExit,
             <span className={cx("voice-wave", subtitles && "voice-wave--compact", "is-fallback")} aria-hidden="true">
               {[.28, .52, .78, 1, .72, .48, .3].map((level, index) => <i key={index} className="voice-wave__bar" style={{ "--rest-level": level }} />)}
             </span>
-            <time className="call-presence__time">{realtimeState === "error" ? "连接失败" : isPartTwo ? formatTime(partTwoRemaining) : isPartThree && partThreeRemaining != null ? formatTime(partThreeRemaining) : formatTime(elapsed)}</time>
+            <time className="call-presence__time">{realtimeState === "connecting" ? "连接中" : realtimeState === "error" ? "连接失败" : isPartTwo ? formatTime(partTwoRemaining) : isPartThree && partThreeRemaining != null ? formatTime(partThreeRemaining) : formatTime(elapsed)}</time>
             {!subtitles && <span>{status}</span>}
           </div>
         </div>

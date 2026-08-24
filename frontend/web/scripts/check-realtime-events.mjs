@@ -573,6 +573,30 @@ assert.match(freeChatStopSource, /detachRemoteAudio\(\)/);
 
 assert.match(appSource, /const detachSceneRemoteAudio = \(\) => \{/);
 assert.match(appSource, /sceneAnalyticsRef\.current\?\.abandon\("COMPONENT_UNMOUNT"\);\s+detachSceneRemoteAudio\(\);/);
+const customSceneConversationSource = appSource.slice(
+  appSource.indexOf("function CustomSceneConversation("),
+  appSource.indexOf("const sentenceWordPattern"),
+);
+assert.match(
+  customSceneConversationSource,
+  /const \[connectionFailed, setConnectionFailed\] = useState\(false\);/,
+  "custom scene must track retryable connection failures",
+);
+assert.match(
+  customSceneConversationSource,
+  /if \(!connectionFailed \|\| reconnecting \|\| !client\) return;\s+void connectRealtime\(client, \{ retry: true \}\);/,
+  "custom scene reconnect must reuse the current realtime client and prevent duplicate attempts",
+);
+assert.match(
+  customSceneConversationSource,
+  /\{reconnecting \? "正在重新连接" : "重新连接"\}/,
+  "custom scene must expose an explicit reconnect action after startup failure",
+);
+assert.doesNotMatch(
+  customSceneConversationSource,
+  /setTimeout\([^)]*connectRealtime/,
+  "custom scene reconnect must remain user initiated",
+);
 
 const ieltsSource = await readFile(
   new URL("../src/component/ielts/IeltsModule.jsx", import.meta.url),
