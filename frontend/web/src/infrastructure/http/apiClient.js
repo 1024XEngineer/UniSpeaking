@@ -283,6 +283,13 @@ export function getUserPreference() {
   return request("/api/user-preferences");
 }
 
+export function getDailyPicks(excludedIds = []) {
+	const params = new URLSearchParams();
+	excludedIds.forEach((id) => params.append("exclude", id));
+	const query = params.toString();
+	return request(`/api/daily-picks${query ? `?${query}` : ""}`);
+}
+
 export function updateUserPreference(preference) {
 	return request("/api/user-preferences", {
 		method: "PUT",
