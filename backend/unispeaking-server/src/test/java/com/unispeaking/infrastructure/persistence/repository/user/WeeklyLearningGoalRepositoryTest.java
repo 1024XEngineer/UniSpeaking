@@ -125,4 +125,31 @@ class WeeklyLearningGoalRepositoryTest {
 				() -> repository.findByUserId(userId));
 		assertEquals("PROFILE_GOALS_PERSISTENCE_FAILED", failure.code());
 	}
+
+	@Test
+	void readsJsonTargetsAndTranslatesSaveFailures() {
+		UUID userId = UUID.randomUUID();
+		UserPreferenceMapper mapper = mock(UserPreferenceMapper.class);
+		UserPreferenceEntity entity = new UserPreferenceEntity();
+		entity.setPreferences("{\"weekly_duration_target_minutes\":210,\"weekly_training_count_target\":9}");
+		when(mapper.selectById(userId)).thenReturn(entity);
+		var goals = new WeeklyLearningGoalRepository(mapper, objectMapper).findByUserId(userId).orElseThrow();
+		assertEquals(210, goals.durationTargetMinutes());
+		assertEquals(9, goals.trainingCountTarget());
+		entity.setPreferences("[]");
+		assertThrows(BusinessException.class, () -> new WeeklyLearningGoalRepository(mapper, objectMapper).findByUserId(userId));
+
+		when(mapper.selectById(userId)).thenReturn(null);
+		when(mapper.insert(any(UserPreferenceEntity.class))).thenReturn(0);
+		assertThrows(BusinessException.class, () -> new WeeklyLearningGoalRepository(mapper, objectMapper)
+				.save(userId, new WeeklyLearningGoals(1, 1)));
+		when(mapper.insert(any(UserPreferenceEntity.class))).thenThrow(new IllegalStateException("db"));
+		assertThrows(BusinessException.class, () -> new WeeklyLearningGoalRepository(mapper, objectMapper)
+				.save(userId, new WeeklyLearningGoals(1, 1)));
+		when(mapper.selectById(userId)).thenReturn(entity);
+		when(mapper.updateById(any(UserPreferenceEntity.class))).thenReturn(0);
+		entity.setPreferences("{}");
+		assertThrows(BusinessException.class, () -> new WeeklyLearningGoalRepository(mapper, objectMapper)
+				.save(userId, new WeeklyLearningGoals(1, 1)));
+	}
 }

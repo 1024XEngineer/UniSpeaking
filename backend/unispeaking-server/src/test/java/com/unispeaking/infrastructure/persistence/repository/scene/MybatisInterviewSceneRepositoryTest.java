@@ -2,6 +2,7 @@ package com.unispeaking.infrastructure.persistence.repository.scene;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -10,6 +11,7 @@ import static org.mockito.Mockito.when;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.unispeaking.domain.po.scene.InterviewSceneDefinition;
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.domain.vo.scene.InterviewDifficulty;
 import com.unispeaking.infrastructure.persistence.entity.scene.InterviewSceneEntity;
 import com.unispeaking.infrastructure.persistence.mapper.scene.InterviewSceneMapper;
@@ -112,6 +114,49 @@ class MybatisInterviewSceneRepositoryTest {
 		assertTrue(repository.findOwnedById(
 				"interview_active",
 				"not-a-uuid").isEmpty());
+	}
+
+	@Test
+	void softDeleteValidatesOwnerAndReturnsUpdateResult() {
+		InterviewSceneMapper mapper = mock(InterviewSceneMapper.class);
+		InterviewSceneRepository repository = new MybatisInterviewSceneRepository(mapper);
+		when(mapper.update(any(), any())).thenReturn(1, 0);
+
+		assertTrue(repository.softDelete(
+				"interview_active", "11111111-1111-4111-8111-111111111111"));
+		assertTrue(!repository.softDelete(
+				"interview_active", "11111111-1111-4111-8111-111111111111"));
+		assertTrue(!repository.softDelete("interview_active", "not-a-uuid"));
+	}
+
+	@Test
+	void wrapsSaveAndDeleteMapperFailures() {
+		InterviewSceneMapper mapper = mock(InterviewSceneMapper.class);
+		InterviewSceneRepository repository = new MybatisInterviewSceneRepository(mapper);
+		when(mapper.insert((InterviewSceneEntity) any()))
+				.thenThrow(new IllegalStateException("db down"));
+		BusinessException saveFailure = assertThrows(BusinessException.class,
+				() -> repository.save(definition()));
+		assertEquals("INTERVIEW_SCENE_PERSISTENCE_FAILED", saveFailure.code());
+
+		when(mapper.update(any(), any())).thenThrow(new IllegalStateException("db down"));
+		BusinessException deleteFailure = assertThrows(BusinessException.class,
+				() -> repository.softDelete(
+						"interview_active", "11111111-1111-4111-8111-111111111111"));
+		assertEquals("INTERVIEW_SCENE_PERSISTENCE_FAILED", deleteFailure.code());
+	}
+
+	@Test
+	void mapsNullableDifficultyAndReturnsEmptyWhenOwnedSceneIsMissing() {
+		InterviewSceneMapper mapper = mock(InterviewSceneMapper.class);
+		InterviewSceneRepository repository = new MybatisInterviewSceneRepository(mapper);
+		InterviewSceneEntity entity = entity();
+		entity.setDifficulty(null);
+		when(mapper.selectOne(any())).thenReturn(null);
+		assertTrue(repository.findOwnedById(
+				"interview_active", "11111111-1111-4111-8111-111111111111").isEmpty());
+		when(mapper.selectById("nullable")).thenReturn(entity);
+		assertTrue(repository.findById("nullable").orElseThrow().difficulty() == null);
 	}
 
 	private InterviewSceneDefinition definition() {
