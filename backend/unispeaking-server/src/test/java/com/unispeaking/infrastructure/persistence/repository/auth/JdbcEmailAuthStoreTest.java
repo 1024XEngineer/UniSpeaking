@@ -8,6 +8,8 @@ import java.util.UUID;
 import com.unispeaking.service.auth.EmailAuthStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabase;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
@@ -58,6 +60,21 @@ class JdbcEmailAuthStoreTest {
     }
 
     @Test
+    void doesNotConsumeAnExpiredChallengeAndReadsConsumedAt() {
+        var challengeId = UUID.randomUUID();
+        var now = Instant.parse("2026-08-06T08:00:00Z");
+        store.saveChallenge(challengeId, "person@example.com", new byte[] {1}, now, now.minusSeconds(600));
+
+        assertThat(store.consumeChallenge(challengeId, now)).isFalse();
+
+        var jdbc = new JdbcTemplate(database);
+        jdbc.update("update auth_email_challenges set consumed_at = ? where id = ?", now, challengeId);
+        var record = store.findChallenge(challengeId).orElseThrow();
+        assertThat(record.consumed()).isTrue();
+        assertThat(record.consumedAt()).isEqualTo(now);
+    }
+
+    @Test
     void usesTheUnifiedUserIdentityAndRejectsDuplicateEmailWithoutServerError() {
         var userId = UUID.randomUUID();
         var now = Instant.parse("2026-08-06T08:00:00Z");
@@ -87,6 +104,19 @@ class JdbcEmailAuthStoreTest {
                 "select email_verified_at from users where id = ?", Instant.class, userId)).isEqualTo(now);
         assertThat(new JdbcTemplate(database).queryForObject(
                 "select count(*) from user_entitlements where user_id = ?", Integer.class, userId)).isEqualTo(1);
+
+        store.ensureGovernance(store.findUserByEmail("legacy@example.com").orElseThrow(), now.plusSeconds(30));
+        assertThat(new JdbcTemplate(database).queryForObject(
+                "select email_verified_at from users where id = ?", Instant.class, userId)).isEqualTo(now);
+    }
+
+    @Test
+    void governanceRejectsAUserThatNoLongerMatchesTheStoredIdentity() {
+        var user = new EmailAuthStore.UserRecord(UUID.randomUUID(), "missing@example.com", "hash");
+
+        assertThatThrownBy(() -> store.ensureGovernance(user, Instant.parse("2026-08-06T08:00:00Z")))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessage("User identity no longer exists");
     }
 
     @Test
@@ -96,6 +126,8 @@ class JdbcEmailAuthStoreTest {
         assertThat(store.saveUser(userId, "person@example.com", "hash", null, now, now)).isTrue();
 
         assertThat(store.findUserByEmail("PERSON@EXAMPLE.COM").orElseThrow().id()).isEqualTo(userId);
+        assertThat(store.findUserById(userId).orElseThrow().email()).isEqualTo("person@example.com");
+        assertThat(store.findUserById(UUID.randomUUID())).isEmpty();
     }
 
     @Test
@@ -144,5 +176,54 @@ class JdbcEmailAuthStoreTest {
         assertThat(jdbc.queryForObject(
                 "select password_hash from users where id = ?", String.class, userId))
                 .isEqualTo("old-hash");
+    }
+
+    @Test
+    void saveUserRollsBackWhenTheEntitlementWriteFails() {
+        var userId = UUID.randomUUID();
+        var now = Instant.parse("2026-08-06T08:00:00Z");
+        var jdbc = new JdbcTemplate(database);
+        jdbc.execute("drop table user_entitlements");
+
+        assertThatThrownBy(() -> store.saveUser(userId, "person@example.com", "hash", null, now, now))
+                .isInstanceOf(DataAccessResourceFailureException.class);
+        assertThat(jdbc.queryForObject(
+                "select count(*) from users where id = ?", Integer.class, userId)).isZero();
+    }
+
+    @Test
+    void updatePasswordAndGovernanceRejectMissingUsers() {
+        var now = Instant.parse("2026-08-06T08:00:00Z");
+
+        assertThatThrownBy(() -> store.updatePassword("missing@example.com", "hash", now))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessage("Email identity no longer exists");
+    }
+
+    @Test
+    void sessionLookupMapsRevocationAndLogoutIsIdempotent() {
+        var userId = UUID.randomUUID();
+        var now = Instant.parse("2026-08-06T08:00:00Z");
+        assertThat(store.saveUser(userId, "person@example.com", "hash", null, now, now)).isTrue();
+        store.saveSession("session", userId, now, now, now.plusSeconds(600));
+
+        assertThat(store.findSession("session").orElseThrow().revokedAt()).isNull();
+        store.revokeSession("session");
+        var revoked = store.findSession("session").orElseThrow();
+        assertThat(revoked.revokedAt()).isNotNull();
+        store.revokeSession("session");
+        store.revokeSession("missing-session");
+        assertThat(store.findSession("missing-session")).isEmpty();
+    }
+
+    @Test
+    void saveUserTranslatesDuplicateIdentityAndRestoresConnectionState() {
+        var now = Instant.parse("2026-08-06T08:00:00Z");
+        var existingId = UUID.randomUUID();
+        assertThat(store.saveUser(existingId, "person@example.com", "hash", null, now, now)).isTrue();
+
+        assertThat(store.saveUser(UUID.randomUUID(), "person@example.com", "other-hash", null, now, now)).isFalse();
+        assertThat(new JdbcTemplate(database).queryForObject(
+                "select count(*) from users where username = ?", Integer.class, "person@example.com")).isOne();
     }
 }

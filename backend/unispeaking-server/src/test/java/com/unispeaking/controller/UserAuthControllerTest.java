@@ -3,11 +3,18 @@ package com.unispeaking.controller;
 import static org.hamcrest.Matchers.equalTo;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 import com.unispeaking.common.email.VerificationEmailSender;
 import com.unispeaking.common.exception.GlobalExceptionHandler;
 import com.unispeaking.infrastructure.persistence.repository.auth.InMemoryEmailAuthStore;
 import com.unispeaking.service.auth.EmailAuthService;
+import com.unispeaking.service.auth.AuthService;
+import com.unispeaking.service.auth.RefreshTokenService;
+import com.unispeaking.domain.dto.auth.AuthResponse;
+import com.unispeaking.domain.dto.auth.EmailAuthUser;
+import com.unispeaking.domain.dto.auth.EmailLoginResult;
+import com.unispeaking.domain.dto.auth.UserAccountResponse;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -15,6 +22,7 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.springframework.security.crypto.argon2.Argon2PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -22,6 +30,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -74,6 +83,9 @@ class UserAuthControllerTest {
         mvc.perform(post("/api/auth/logout").cookie(cookie))
                 .andExpect(status().isNoContent());
         mvc.perform(get("/api/auth/email/me").cookie(cookie))
+                .andExpect(status().isUnauthorized());
+
+        mvc.perform(get("/api/auth/email/me"))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -146,6 +158,84 @@ class UserAuthControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code", equalTo("VALIDATION_ERROR")))
                 .andExpect(cookie().doesNotExist("us-user-session"));
+    }
+
+    @Test
+    void logoutWithoutCookieStillExpiresTheSessionCookie() throws Exception {
+        mvc.perform(post("/api/auth/logout"))
+                .andExpect(status().isNoContent())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Set-Cookie",
+                        org.hamcrest.Matchers.containsString("us-user-session=;")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Set-Cookie",
+                        org.hamcrest.Matchers.containsString("Max-Age=0")));
+    }
+
+    @Test
+    void tokenEndpointsLoginAndRegisterIssueLearningRefreshCookie() throws Exception {
+        EmailAuthService email = mock(EmailAuthService.class);
+        AuthService learning = mock(AuthService.class);
+        RefreshTokenService refresh = mock(RefreshTokenService.class);
+        UUID userId = UUID.randomUUID();
+        var account = new UserAccountResponse(
+                userId, "person@example.com", "Person", "LEARNER", "ACTIVE", null,
+                Instant.parse("2026-08-06T08:00:00Z"));
+        var auth = new AuthResponse("Bearer", "access-token",
+                Instant.parse("2026-08-06T09:00:00Z"), account);
+        when(email.login("person@example.com", "correct-password", "human"))
+                .thenReturn(new EmailLoginResult("email-session", new EmailAuthUser(userId, "person@example.com")));
+        when(learning.login(new com.unispeaking.domain.dto.auth.LoginRequest(
+                "person@example.com", "correct-password"))).thenReturn(auth);
+        when(refresh.issue(userId)).thenReturn(new RefreshTokenService.Issued(
+                "refresh-token", Instant.parse("2026-08-07T08:00:00Z")));
+        MockMvc configured = MockMvcBuilders.standaloneSetup(
+                new UserAuthController(email, learning, true, 3600, refresh)).build();
+
+        configured.perform(post("/api/auth/email/password/login/token")
+                        .contentType("application/json")
+                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-password\",\"humanVerificationToken\":\"human\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.accessToken").value("access-token"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Set-Cookie", org.hamcrest.Matchers.containsString("us-learning-refresh=refresh-token")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Secure")));
+
+        when(email.register("person@example.com", "correct-password", userId, "123456", "Person"))
+                .thenReturn(new EmailAuthUser(userId, "person@example.com"));
+        when(learning.login(new com.unispeaking.domain.dto.auth.LoginRequest(
+                "person@example.com", "correct-password"))).thenReturn(auth);
+        configured.perform(post("/api/auth/email/register/token")
+                        .contentType("application/json")
+                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-password\",\"challengeId\":\""
+                                + userId + "\",\"code\":\"123456\",\"nickname\":\"Person\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.accessToken").value("access-token"));
+
+        when(learning.login(new com.unispeaking.domain.dto.auth.LoginRequest(
+                "person@example.com", "correct-password"))).thenReturn(null);
+        configured.perform(post("/api/auth/email/password/login/token")
+                        .contentType("application/json")
+                        .content("{\"email\":\"person@example.com\",\"password\":\"correct-password\",\"humanVerificationToken\":\"human\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Set-Cookie"));
+
+        verify(learning, org.mockito.Mockito.times(3)).login(
+                new com.unispeaking.domain.dto.auth.LoginRequest("person@example.com", "correct-password"));
+    }
+
+    @Test
+    void tokenEndpointReportsMissingLearningAuthConfiguration() throws Exception {
+        EmailAuthService email = mock(EmailAuthService.class);
+        when(email.login("person@example.com", "correct-password", "local-human-verified"))
+                .thenReturn(new EmailLoginResult("email-session",
+                        new EmailAuthUser(UUID.randomUUID(), "person@example.com")));
+        var controller = new UserAuthController(email, false, 3600);
+        assertThrows(IllegalStateException.class, () -> controller.loginToken(
+                new UserAuthController.LoginRequest(
+                        "person@example.com", "correct-password", "local-human-verified"),
+                mock(jakarta.servlet.http.HttpServletResponse.class)));
+        assertThrows(IllegalStateException.class, () -> controller.registerToken(
+                new UserAuthController.RegisterRequest(
+                        "person@example.com", "correct-password", UUID.randomUUID(), "123456", null),
+                mock(jakarta.servlet.http.HttpServletResponse.class)));
     }
 
     private UUID issueChallenge(String path) throws Exception {
