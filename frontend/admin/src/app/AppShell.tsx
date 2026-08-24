@@ -11,6 +11,7 @@ const navigation = [
   { label: '总览', to: '/', icon: 'overview', end: true },
   { label: '用户与权益', to: '/users', icon: 'users' },
   { label: '用量与计费', to: '/billing', icon: 'usage' },
+  { label: 'BUG 与优化', to: '/quality', icon: 'alerts' },
   {
     label: '用户追踪',
     to: 'https://cloud.umami.is/analytics/us/websites/3ae2dee9-d585-43a9-93f3-fcafcd14b258',
