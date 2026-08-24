@@ -25,6 +25,13 @@ export type AuthSessionState = Readonly<{
 type AuthServicePort = {
   login(input: { username: string; password: string }): Promise<AuthResponse>;
   issueEmailChallenge(input: { email: string }): Promise<EmailChallenge>;
+  issuePasswordResetChallenge(input: { email: string }): Promise<EmailChallenge>;
+  resetPassword(input: {
+    email: string;
+    password: string;
+    challengeId: string;
+    code: string;
+  }): Promise<void>;
   register(input: {
     username: string;
     password: string;
@@ -117,6 +124,19 @@ export class AuthSessionController {
 
   issueEmailChallenge(input: { email: string }) {
     return this.dependencies.authService.issueEmailChallenge(input);
+  }
+
+  issuePasswordResetChallenge(input: { email: string }) {
+    return this.dependencies.authService.issuePasswordResetChallenge(input);
+  }
+
+  resetPassword(input: {
+    email: string;
+    password: string;
+    challengeId: string;
+    code: string;
+  }) {
+    return this.dependencies.authService.resetPassword(input);
   }
 
   async login(input: { username: string; password: string }) {

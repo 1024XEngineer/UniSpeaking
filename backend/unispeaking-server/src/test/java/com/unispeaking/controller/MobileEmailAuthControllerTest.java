@@ -54,4 +54,23 @@ class MobileEmailAuthControllerTest {
 
         verify(authService).login(new LoginRequest("person@example.com", "correct-password"));
     }
+
+    @Test
+    void resetsPasswordThroughTheMobileEmailFlow() {
+        var emailAuthService = mock(EmailAuthService.class);
+        var authService = mock(AuthService.class);
+        var controller = new MobileEmailAuthController(emailAuthService, authService);
+        var challengeId = UUID.randomUUID();
+        when(emailAuthService.issueMobileChallenge("person@example.com"))
+                .thenReturn(new EmailAuthChallenge(challengeId, 600, 60));
+
+        controller.issuePasswordResetChallenge(
+                new MobileEmailAuthController.EmailRequest("person@example.com"));
+        controller.resetPassword(new MobileEmailAuthController.ResetPasswordRequest(
+                "person@example.com", "new-correct-password", challengeId, "123456"));
+
+        verify(emailAuthService).issueMobileChallenge("person@example.com");
+        verify(emailAuthService).resetPassword(
+                "person@example.com", "new-correct-password", challengeId, "123456");
+    }
 }

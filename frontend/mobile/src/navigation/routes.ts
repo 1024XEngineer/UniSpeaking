@@ -7,6 +7,7 @@ export const routes = {
     welcome: href('/welcome'),
     login: href('/login'),
     signup: href('/signup'),
+    forgotPassword: href('/forgot-password'),
   },
   onboarding: {
     level: href('/onboarding/level'),

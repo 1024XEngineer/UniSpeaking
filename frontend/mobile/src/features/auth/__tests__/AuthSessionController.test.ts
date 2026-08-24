@@ -42,6 +42,8 @@ function createDependencies(
   authService: AuthSessionDependencies['authService'] & {
     login: jest.Mock;
     issueEmailChallenge: jest.Mock;
+    issuePasswordResetChallenge: jest.Mock;
+    resetPassword: jest.Mock;
     register: jest.Mock;
     currentUser: jest.Mock;
     getPreference: jest.Mock;
@@ -62,6 +64,12 @@ function createDependencies(
         expiresInSeconds: 600,
         resendAfterSeconds: 60,
       })),
+      issuePasswordResetChallenge: jest.fn(async () => ({
+        challengeId: 'reset-challenge-1',
+        expiresInSeconds: 600,
+        resendAfterSeconds: 60,
+      })),
+      resetPassword: jest.fn(async () => undefined),
       register: jest.fn(async () => authResponse),
       currentUser: jest.fn(async () => user),
       getPreference: jest.fn(async () => preference),

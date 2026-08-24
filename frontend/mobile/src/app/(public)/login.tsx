@@ -10,6 +10,7 @@ export default function LoginRoute() {
       mode="login"
       onBack={() => router.back()}
       onSwitch={() => router.replace(routes.public.signup)}
+      onForgotPassword={() => router.push(routes.public.forgotPassword)}
     />
   );
 }

@@ -42,6 +42,13 @@ public final class MobileEmailAuthController {
             @NotBlank String password) {
     }
 
+    public record ResetPasswordRequest(
+            @NotBlank @Email String email,
+            @NotBlank @Size(min = 12, max = 200) String password,
+            @NotNull UUID challengeId,
+            @NotBlank @Pattern(regexp = "[0-9]{6}") String code) {
+    }
+
     public record ChallengeResponse(UUID challengeId, int expiresInSeconds, int resendAfterSeconds) {
     }
 
@@ -65,6 +72,19 @@ public final class MobileEmailAuthController {
         var challenge = emailAuthService.issueMobileChallenge(request.email());
         return ApiResponse.success(new ChallengeResponse(
                 challenge.challengeId(), challenge.expiresInSeconds(), challenge.resendAfterSeconds()));
+    }
+
+    @PostMapping("/password-reset/challenges")
+    public ApiResponse<ChallengeResponse> issuePasswordResetChallenge(@Valid @RequestBody EmailRequest request) {
+        var challenge = emailAuthService.issueMobileChallenge(request.email());
+        return ApiResponse.success(new ChallengeResponse(
+                challenge.challengeId(), challenge.expiresInSeconds(), challenge.resendAfterSeconds()));
+    }
+
+    @PostMapping("/password-reset")
+    public void resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        emailAuthService.resetPassword(
+                request.email(), request.password(), request.challengeId(), request.code());
     }
 
     @PostMapping("/register")
