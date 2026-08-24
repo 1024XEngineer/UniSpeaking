@@ -1,10 +1,12 @@
 package com.unispeaking.common.prompt;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.po.profile.UserProfile;
+import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.scene.SceneConfig;
 import com.unispeaking.domain.vo.scene.SceneType;
@@ -54,7 +56,7 @@ class FiveLayerPromptBuilderTest {
 	}
 
 	@Test
-	void composesCustomScenePromptWithLearningMaterials() {
+	void composesCustomScenePromptWithoutExposingLearningAnswersToTheActor() {
 		var service = new FiveLayerPromptBuilder("");
 		var profile = new UserProfile(
 				"user-1",
@@ -96,8 +98,73 @@ class FiveLayerPromptBuilderTest {
 		assertTrue(prompt.contains("The learner can handle basic communication."));
 		assertTrue(prompt.contains("Speaking speed: 1.0."));
 		assertTrue(prompt.contains("兴趣与背景：经常出差，熟悉商务会议。"));
-		assertTrue(prompt.contains("membership = 会员"));
-		assertTrue(prompt.contains("Could you tell me more about this situation?"));
+		assertFalse(prompt.contains("membership = 会员"));
+		assertFalse(prompt.contains("Could you tell me more about this situation?"));
+		assertFalse(prompt.contains("What should I do next?"));
 		assertTrue(prompt.contains("This scenario hard contract is mandatory"));
+	}
+
+	@Test
+	void keepsLearnerReferenceAnswersOutOfTheRolePlayActorPrompt() {
+		var service = new FiveLayerPromptBuilder("");
+		var profile = new UserProfile(
+				"user-1",
+				"B",
+				"Katerina",
+				"MODERATE",
+				"zh-CN",
+				"");
+		var sceneConfig = new SceneConfig(
+				SceneType.CUSTOM_SCENE,
+				ProviderType.QWEN,
+				null,
+				"Katerina",
+				true);
+		var sentences = List.of(
+				new LearningContentItem(
+						"sentence_1",
+						"I am looking for a gift for my friend.",
+						"我正在为朋友寻找礼物。",
+						""),
+				new LearningContentItem(
+						"sentence_2",
+						"She likes reading and tea.",
+						"她喜欢阅读和茶。",
+						""));
+		var definition = new CustomSceneDefinition(
+				"custom_gift",
+				"user-1",
+				"挑选生日礼物",
+				"购物",
+				"The learner visits a gift shop for a friend who loves reading and tea.",
+				"Friendly shop assistant",
+				"Customer looking for a gift",
+				"Identify a suitable gift and confirm the purchase.",
+				"Keep the interaction natural.",
+				"{}",
+				List.of(),
+				List.of(),
+				sentences);
+
+		String prompt = String.join("\n\n", service.compose(
+				profile,
+				sceneConfig,
+				SceneType.CUSTOM_SCENE,
+				"挑选生日礼物",
+				"",
+				List.of(),
+				List.of(),
+				sentences,
+				definition));
+
+		assertTrue(prompt.contains("You are only Friendly shop assistant"));
+		assertTrue(prompt.contains(
+				"In a role-play, the L5 AI role is your only conversational identity"));
+		assertTrue(prompt.contains(
+				"Never speak, decide, make requests, express needs, or take actions for Customer looking for a gift"));
+		assertTrue(prompt.contains("On the first turn"));
+		assertTrue(prompt.contains("Do not reveal, hint at, confirm, or offer learner-specific facts"));
+		assertFalse(prompt.contains("I am looking for a gift for my friend."));
+		assertFalse(prompt.contains("She likes reading and tea."));
 	}
 }

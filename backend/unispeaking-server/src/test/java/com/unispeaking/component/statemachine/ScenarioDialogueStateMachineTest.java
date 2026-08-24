@@ -61,6 +61,9 @@ class ScenarioDialogueStateMachineTest {
 		var started = start("session_1");
 		assertEquals(ScenarioDialogueStage.GREETING, started.stage());
 		assertTrue(started.controlInstruction().contains("choose a drink"));
+		assertTrue(started.controlInstruction().contains(
+				"Do not offer guessed values or answer choices"));
+		assertTrue(started.controlInstruction().contains("Ask at most one necessary question"));
 		assertFalse(started.completed());
 
 		when(eventExtractor.extract(any(), anyString(), anyList()))

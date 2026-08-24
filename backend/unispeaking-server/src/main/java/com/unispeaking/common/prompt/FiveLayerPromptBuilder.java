@@ -200,9 +200,9 @@ public class FiveLayerPromptBuilder {
 				Map.entry("scene_type", sceneType.name()),
 				Map.entry("scene_input", input),
 				Map.entry("current_preference", currentPreference),
-				Map.entry("prepared_words", formatItems(words)),
-				Map.entry("prepared_phrases", formatItems(phrases)),
-				Map.entry("prepared_sentences", formatItems(sentences)));
+				Map.entry("prepared_words", "withheld from role-play actor"),
+				Map.entry("prepared_phrases", "withheld from role-play actor"),
+				Map.entry("prepared_sentences", "withheld from role-play actor"));
 	}
 
 	private String load(String fileName) {
@@ -237,17 +237,6 @@ public class FiveLayerPromptBuilder {
 		}
 		matcher.appendTail(rendered);
 		return rendered.toString().strip();
-	}
-
-	private String formatItems(List<LearningContentItem> items) {
-		if (items == null || items.isEmpty()) {
-			return "none";
-		}
-		return items.stream()
-				.map(item -> "- " + item.englishText() + " = "
-						+ valueOrDefault(item.chineseText(), ""))
-				.reduce((left, right) -> left + "\n" + right)
-				.orElse("none");
 	}
 
 	private String valueOrDefault(String value, String fallback) {

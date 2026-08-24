@@ -48,5 +48,10 @@ Supported template variables:
 
 - L4: `{{memory_text}}`
 - L5: `{{ai_role}}`, `{{title}}`, `{{learning_goal}}`, `{{scene_type}}`,
-  `{{scene_input}}`, `{{current_preference}}`, `{{prepared_words}}`,
-  `{{prepared_phrases}}`, `{{prepared_sentences}}`
+  `{{scene_input}}`, `{{current_preference}}`, `{{background}}`,
+  `{{user_role}}`, `{{custom_instruction}}`, `{{success_factor}}`
+
+Custom-scene learning words, phrases, and reference sentences are intentionally
+kept out of the role-play actor prompt. They remain available to the learning
+and evaluation flows, but the simulated counterpart must not see learner-side
+answers or steer the conversation toward them.
