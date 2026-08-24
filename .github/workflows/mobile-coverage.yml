@@ -1,0 +1,66 @@
+name: Mobile Coverage
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - frontend/mobile/**
+      - .github/workflows/mobile-coverage.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-coverage-main
+  cancel-in-progress: true
+
+jobs:
+  mobile:
+    name: 生成并发布移动端覆盖率
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: frontend/mobile
+    steps:
+      - name: 检出 main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: 配置 Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/mobile/package-lock.json
+
+      - name: 安装锁定依赖
+        run: npm ci
+
+      - name: 运行 Jest 覆盖率门禁
+        run: npm run test:ci
+
+      - name: 上传移动端覆盖率到 Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6.0.2
+        with:
+          use_oidc: true
+          files: frontend/mobile/coverage/lcov.info
+          disable_search: true
+          fail_ci_if_error: true
+          flags: mobile
+          name: mobile-unit
+
+      - name: 保存移动端覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mobile-main-coverage
+          path: |
+            frontend/mobile/coverage/lcov.info
+            frontend/mobile/coverage/coverage-summary.json
+          if-no-files-found: warn
+          retention-days: 30

@@ -366,7 +366,7 @@ jobs:
         run: npm run build
 
   mobile:
-    name: 移动端类型与 Expo Web 构建
+    name: 移动端测试、覆盖率与 Expo Web 构建
     needs: changes
     if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-latest
@@ -392,6 +392,20 @@ jobs:
 
       - name: 检查 TypeScript
         run: npx tsc --noEmit
+
+      - name: 运行 Jest 覆盖率门禁
+        run: npm run test:ci
+
+      - name: 保存移动端覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mobile-coverage-${{ inputs.pr_number }}
+          path: |
+            frontend/mobile/coverage/lcov.info
+            frontend/mobile/coverage/coverage-summary.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: 导出 Expo Web
         env:
