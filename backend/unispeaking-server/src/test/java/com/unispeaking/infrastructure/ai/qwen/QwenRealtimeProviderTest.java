@@ -726,6 +726,10 @@ class QwenRealtimeProviderTest {
 				"IPA88",
 				startFrame.path("parameter").path("st")
 						.path("dict_type").asString());
+		assertEquals(
+				0.2,
+				startFrame.path("parameter").path("st")
+						.path("slack").asDouble());
 	}
 
 	@Test

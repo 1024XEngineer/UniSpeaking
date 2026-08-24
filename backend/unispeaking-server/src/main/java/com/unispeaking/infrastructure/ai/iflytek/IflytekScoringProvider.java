@@ -358,6 +358,7 @@ public class IflytekScoringProvider extends ScoringProvider {
 									Map.entry("phoneme_output", 1),
 									Map.entry("scale", 100),
 									Map.entry("precision", 0.1),
+									Map.entry("slack", 0.2),
 									Map.entry("output_rawtext", 1),
 									Map.entry("dict_type", "IPA88"),
 									Map.entry("dict_dialect", "en_us"),

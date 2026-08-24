@@ -70,6 +70,7 @@ import com.unispeaking.common.evaluation.validation.EnglishWordCounter;
 import com.unispeaking.common.prompt.evaluation.DialogueTurnEvaluationHistory;
 import com.unispeaking.common.prompt.evaluation.DialogueTurnEvaluationPromptInput;
 import com.unispeaking.common.evaluation.policy.UnavailableTurnEvaluationPolicy;
+import com.unispeaking.common.evaluation.policy.SentenceReadingPassPolicy;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
@@ -96,8 +97,9 @@ public class EvaluationProcessor {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(
 			EvaluationProcessor.class);
-	private static final BigDecimal SENTENCE_PASS_SCORE = new BigDecimal("80");
 	private static final int IELTS_EVALUATION_LOCK_STRIPES = 64;
+	private static final SentenceReadingPassPolicy SENTENCE_READING_PASS_POLICY =
+			new SentenceReadingPassPolicy();
 
 	private final PronunciationAssessmentClient pronunciationClient;
 	private final EvaluationLlmClient llmClient;
@@ -988,9 +990,22 @@ public class EvaluationProcessor {
 				sceneId,
 				sentence,
 				assessment);
+		SceneSentenceReadingRepository.AttemptSummary attemptSummary =
+				sceneSentenceReadingRepository.summarizeAttempts(
+						sceneId,
+						sentenceId);
+		BigDecimal bestScore = attemptSummary == null
+				|| attemptSummary.bestScore() == null
+				? assessment.overallScore()
+				: assessment.overallScore().max(attemptSummary.bestScore());
+		boolean passed = SENTENCE_READING_PASS_POLICY.passes(assessment)
+				|| (attemptSummary != null
+						&& SENTENCE_READING_PASS_POLICY.passesRepeatedBest(
+								attemptSummary.attemptCount(),
+								bestScore));
 		return new SentenceEvaluationResponse(
-				assessment.overallScore(),
-				assessment.overallScore().compareTo(SENTENCE_PASS_SCORE) >= 0,
+				passed ? bestScore : assessment.overallScore(),
+				passed,
 				mapWords(assessment.words()));
 	}
 

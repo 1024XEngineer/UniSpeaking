@@ -170,6 +170,29 @@ class SceneSentenceReadingRepositoryTest {
 		assertEquals(0, repository.countAttemptsBySceneIds(null));
 	}
 
+	@Test
+	void summarizesRepeatedAttemptsWithTheirBestScore() {
+		SentenceEvaluationMapper evaluationMapper =
+				mock(SentenceEvaluationMapper.class);
+		SentenceEvaluationEntity best = new SentenceEvaluationEntity();
+		best.setOverallScore(new BigDecimal("76.40"));
+		when(evaluationMapper.selectCount(any())).thenReturn(11L);
+		when(evaluationMapper.selectOne(any())).thenReturn(best);
+		SceneSentenceReadingRepository repository =
+				new SceneSentenceReadingRepository(
+						mock(SceneSentenceMapper.class),
+						evaluationMapper,
+						new EvaluationJsonbCodec(new ObjectMapper()));
+
+		SceneSentenceReadingRepository.AttemptSummary summary =
+				repository.summarizeAttempts(
+						"custom_scene1",
+						"sentence_1");
+
+		assertEquals(11, summary.attemptCount());
+		assertEquals(new BigDecimal("76.40"), summary.bestScore());
+	}
+
 	private PronunciationAssessmentResult assessment() {
 		PronunciationPhonemeResult phoneme =
 				new PronunciationPhonemeResult(
