@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { paths, resolveRoute, sidebarPageTarget } from "../src/controller/router.js";
 
 const route = (pathname, search = "") => resolveRoute({ pathname, search });
@@ -91,4 +92,68 @@ assert.equal(sidebarPageTarget("interview-assets", "scenes"), "interview");
 assert.equal(sidebarPageTarget("scenes", "assets"), "assets");
 assert.equal(sidebarPageTarget("assets", "scenes"), "scenes");
 
-console.log(`Route contract passed: ${cases.length + 41} assertions`);
+const appSource = await readFile(
+  new URL("../src/controller/App.jsx", import.meta.url),
+  "utf8",
+);
+const appShellSource = appSource.slice(
+  appSource.indexOf("function AppShell("),
+  appSource.indexOf("function PageHeader("),
+);
+const trainingSource = appSource.slice(
+  appSource.indexOf("function Training("),
+  appSource.indexOf("function AssetModuleMenu("),
+);
+
+assert.match(
+  appShellSource,
+  /if \(navigationGuardActive\) \{\s+setPendingPage\(targetPage\);\s+return;/,
+  "Active practice must defer sidebar navigation until confirmation",
+);
+assert.match(
+  appShellSource,
+  /onClick=\{\(\) => navigateSidebar\("profile"\)\}/,
+  "Profile navigation must use the same practice guard as sidebar items",
+);
+assert.match(
+  appShellSource,
+  /<TrainingExitConfirmation open=\{Boolean\(pendingPage\)\}/,
+  "Guarded navigation must reuse the existing training exit confirmation",
+);
+assert.match(
+  trainingSource,
+  /<TrainingExitConfirmation open=\{exitOpen\}/,
+  "The custom training close button must use the shared exit confirmation",
+);
+assert.match(
+  appSource,
+  /\(training && !result\)[\s\S]*?freeConversationActive[\s\S]*?ieltsRoute\?\.screen === "session"[\s\S]*?interviewRoute\?\.screen === "session"/,
+  "Navigation guard must cover unfinished custom, free, IELTS, and interview practice",
+);
+
+const interviewSource = await readFile(
+  new URL("../src/component/interview/InterviewModule.jsx", import.meta.url),
+  "utf8",
+);
+const stylesSource = await readFile(
+  new URL("../src/common/styles.css", import.meta.url),
+  "utf8",
+);
+
+assert.match(
+  interviewSource,
+  /className="interview-home-assets-cta" onClick=\{\(\) => onNavigate\(paths\.interview\.assets\.root\)\}/,
+  "Interview home must link directly to interview learning assets",
+);
+assert.match(
+  interviewSource,
+  /className="ielts-assets-actions interview-assets-actions"/,
+  "Interview asset header actions must have a module-specific layout hook",
+);
+assert.match(
+  stylesSource,
+  /\.interview-assets-page \.page-header \{ width: 100%;[\s\S]*?\.interview-assets-actions \{ margin-right: 0; \}/,
+  "Interview asset header and actions must align with the full content width",
+);
+
+console.log(`Route contract passed: ${cases.length + 49} assertions`);
