@@ -123,6 +123,28 @@ class RealtimePropertiesTest {
 		assertEquals("QWEN_TEMPORARY_KEY_INVALID", exception.code());
 	}
 
+	@Test
+	void mapsCredentialProviderFailuresHttpFailuresInvalidJsonAndInterruptions() {
+		var missing = new RealtimeCredentialIssuer(
+				new RecordingHttpClient(200, "{}"), new ObjectMapper(),
+				realtimeProperties("", "", ""));
+		assertEquals("QWEN_CREDENTIAL_MISSING", assertThrows(BusinessException.class,
+				() -> missing.issue(ProviderType.QWEN)).code());
+		assertEquals("REALTIME_CREDENTIAL_PROVIDER_MISSING", assertThrows(BusinessException.class,
+				() -> missing.issue(ProviderType.QINIU)).code());
+
+		var failed = new RealtimeCredentialIssuer(
+				new RecordingHttpClient(500, "{\"code\":\"bad\",\"message\":\"no\"}"),
+				new ObjectMapper(), realtimeProperties("key", "", ""));
+		assertEquals("QWEN_TEMPORARY_KEY_FAILED", assertThrows(BusinessException.class,
+				() -> failed.issue(ProviderType.QWEN)).code());
+		var invalid = new RealtimeCredentialIssuer(
+				new RecordingHttpClient(200, "not-json"), new ObjectMapper(),
+				realtimeProperties("key", "", ""));
+		assertEquals("QWEN_TEMPORARY_KEY_INVALID", assertThrows(BusinessException.class,
+				() -> invalid.issue(ProviderType.QWEN)).code());
+	}
+
 	private RealtimeProperties realtimeProperties(
 			String apiKey, String workspaceId, String model) {
 		return realtimeProperties(
