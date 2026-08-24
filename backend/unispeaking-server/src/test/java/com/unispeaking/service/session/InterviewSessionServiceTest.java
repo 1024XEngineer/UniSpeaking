@@ -440,6 +440,93 @@ class InterviewSessionServiceTest {
 		verify(reportCoordinator).submit("session-1", sceneId, userId);
 	}
 
+	@Test
+	void redispatchesProcessingReportBeforeReturningTheRefreshedReadModel() {
+		InterviewReportRecord processing = record(ReportStatus.PROCESSING);
+		InterviewReportResponse response = new InterviewReportResponse(
+				"session-1", sceneId, ReportStatus.PROCESSING, null, null);
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(interviewReportRepository.findById("session-1"))
+				.thenReturn(Optional.of(processing), Optional.of(processing));
+		when(reportCoordinator.toResponse(processing)).thenReturn(response);
+
+		assertSame(response, service.getReport(sceneId, "session-1"));
+
+		verify(reportCoordinator).redispatchIfStale("session-1", sceneId, userId);
+	}
+
+	@Test
+	void uploadsAiAudioOnlyForOwnedInterviewSessions() {
+		AbstractSceneSession session = interviewSession(SessionStatus.ACTIVE);
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(coordinator.requireOwnedSession(userId, "session-1")).thenReturn(session);
+		when(interviewRecordingStore.storeAiAudio("session-1", new byte[] {1, 2}))
+				.thenReturn("interview/session-1/ai-answer.wav");
+
+		assertEquals(
+				"interview/session-1/ai-answer.wav",
+				service.uploadAiAudio(sceneId, "session-1", new byte[] {1, 2}));
+		assertEquals(
+				InterviewErrorCode.INTERVIEW_AUDIO_INVALID,
+				assertThrows(BusinessException.class,
+						() -> service.uploadAiAudio(sceneId, "session-1", new byte[0])).code());
+	}
+
+	@Test
+	void persistsTurnAudioAndTreatsMalformedTopicResponseAsUnknown() {
+		AbstractSceneSession session = interviewSession(SessionStatus.ACTIVE);
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(coordinator.requireOwnedSession(userId, "session-1")).thenReturn(session);
+		when(sessionMessageRepository.findLearnerMessages("session-1"))
+				.thenReturn(List.of(new Message(1, "recorded transcript", null)));
+		when(interviewRecordingStore.storeTurn("session-1", 1, new byte[] {7}))
+				.thenReturn("turn-1.wav");
+		when(scenes.interviewTopics(sceneId)).thenReturn(List.of("自我介绍"));
+		when(providerRegistry.executeLlmTaskRouted(anyString(), any()))
+				.thenReturn(completed("not json"));
+		when(scenes.advanceTopicState(
+				eq(sceneId), eq("session-1"), eq(1), any(InterviewTopicEvent.class)))
+				.thenReturn(new InterviewTopicState(null, 0, 0, 1, 0, false, false, "continue"));
+
+		InterviewTurnResult result = service.submitTurn(
+				sceneId, "session-1", 1, "recorded transcript", new byte[] {7});
+
+		assertEquals(false, result.state().shouldEnd());
+		verify(sessionMessageRepository).attachLearnerAudioObjectKey(
+				"session-1", 1, "turn-1.wav");
+		ArgumentCaptor<InterviewTopicEvent> event =
+				ArgumentCaptor.forClass(InterviewTopicEvent.class);
+		verify(scenes).advanceTopicState(eq(sceneId), eq("session-1"), eq(1), event.capture());
+		assertEquals(InterviewTopicEvent.unknown(), event.getValue());
+	}
+
+	@Test
+	void endsInterviewWhenTopicStateRequestsTermination() {
+		AbstractSceneSession session = interviewSession(SessionStatus.ACTIVE);
+		when(authService.requireUserId(null)).thenReturn(userId);
+		when(coordinator.requireOwnedSession(userId, "session-1")).thenReturn(session);
+		when(sessionMessageRepository.findLearnerMessages("session-1"))
+				.thenReturn(List.of(new Message(1, "recorded transcript", null)));
+		when(scenes.interviewTopics(sceneId)).thenReturn(List.of("自我介绍"));
+		when(providerRegistry.executeLlmTaskRouted(anyString(), any()))
+				.thenThrow(new BusinessException("AI_UNAVAILABLE", "offline"));
+		when(scenes.advanceTopicState(
+				eq(sceneId), eq("session-1"), eq(1), any(InterviewTopicEvent.class)))
+				.thenReturn(new InterviewTopicState("自我介绍", 1, 1, 0, 0, true, true, "wrap up"));
+		when(interviewReportRepository.createIfAbsent("session-1", sceneId, userId)).thenReturn(true);
+		when(interviewReportRepository.findById("session-1"))
+				.thenReturn(Optional.of(record(ReportStatus.PROCESSING)));
+
+		InterviewTurnResult result = service.submitTurn(
+				sceneId, "session-1", 1, "recorded transcript", null);
+
+		assertEquals(ReportStatus.PROCESSING, result.reportStatus());
+		verify(lifecycle).terminateSceneSession(eq(userId), eq("session-1"),
+				eq(SessionStatus.COMPLETED), any());
+		verify(reportCoordinator).submit("session-1", sceneId, userId);
+		verify(coordinator).remove("session-1");
+	}
+
 	private InterviewReportRecord record(ReportStatus status) {
 		return new InterviewReportRecord(
 				"session-1",
