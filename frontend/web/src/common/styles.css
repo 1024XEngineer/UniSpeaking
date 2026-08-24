@@ -688,6 +688,7 @@ svg { display: block; }
 .sentence-score-text { letter-spacing: 0 !important; }
 .sentence-score-word { padding: 0; color: inherit; background: none; border-bottom: 3px solid transparent; }
 .sentence-score-word.is-correct { color: #248454; border-bottom-color: rgba(36,132,84,.24); }
+.sentence-score-word.is-review { color: #b87920; border-bottom-color: rgba(184,121,32,.28); }
 .sentence-score-word.is-incorrect { color: #d14d43; border-bottom-color: rgba(209,77,67,.25); }
 .sentence-reading-error { max-width: 620px; margin: 10px 0 0 !important; color: #bd4037 !important; font-size: 13px !important; line-height: 1.55; }
 .read-demo { min-height: 38px; display: inline-flex; align-items: center; gap: 7px; margin-top: 15px; color: #777773; font-size: 13px; font-weight: 650; }

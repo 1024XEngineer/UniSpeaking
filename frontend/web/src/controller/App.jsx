@@ -59,6 +59,7 @@ import {
   ChartLine,
 } from "lucide-react";
 import { learningItems, levels, plans, recommendations, sceneCategories, teachers } from "../domain/content/data.js";
+import { classifyScoredWord } from "../domain/pronunciationScore.js";
 import {
   AUTH_SESSION_EXPIRED_EVENT,
   changePassword,
@@ -2130,14 +2131,17 @@ function ScoredSentence({ sentence, words = [] }) {
     const result = resultIndex >= 0 ? words[resultIndex] : null;
     if (resultIndex >= 0) resultCursor = resultIndex + 1;
     const score = Number(result?.wordScore);
+    const scoreClass = classifyScoredWord(expectedWord, result);
     parts.push(
       <mark
         key={`${offset}-${match[0]}`}
         className={cx(
           "sentence-score-word",
-          Number.isFinite(score) && score >= 80 ? "is-correct" : "is-incorrect",
+          scoreClass,
         )}
-        title={Number.isFinite(score) ? `${score.toFixed(0)} 分` : "未正确识别"}
+        title={scoreClass === "is-review"
+          ? "弱读评分可能存在偏差"
+          : Number.isFinite(score) ? `${score.toFixed(0)} 分` : "未正确识别"}
       >
         {match[0]}
       </mark>,
@@ -2210,7 +2214,7 @@ function ReadScoreModal({ feedback, item, onClose }) {
     <Modal dismissible={false} className="read-score-modal">
       <div className="read-score-modal__score"><strong>{feedback.score}</strong><span>/100</span></div>
       <h2>本句发音评估</h2>
-      <p className="read-score-modal__lead">{feedback.passed ? "本句已达到 80 分，可以进入下一句；红色部分仍可继续练习。" : "本句未达到 80 分，请听示范后再次朗读。"}</p>
+      <p className="read-score-modal__lead">{feedback.passed ? "本句已达到练习要求，可以进入下一句；标记部分仍可继续练习。" : "本句暂未达到练习要求，请听示范后再次朗读。"}</p>
       <div className="read-score-modal__focus"><small>逐词结果</small><p><ScoredSentence sentence={item.en} words={feedback.words} /></p></div>
       <button type="button" className="read-score-modal__confirm" onClick={onClose}>知道了</button>
     </Modal>
