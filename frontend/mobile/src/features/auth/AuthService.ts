@@ -71,6 +71,25 @@ export class AuthService {
     }) as Promise<EmailChallenge>;
   }
 
+  issuePasswordResetChallenge(input: { email: string }) {
+    return this.client.request('/api/auth/mobile/email/password-reset/challenges', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }) as Promise<EmailChallenge>;
+  }
+
+  resetPassword(input: {
+    email: string;
+    password: string;
+    challengeId: string;
+    code: string;
+  }) {
+    return this.client.request('/api/auth/mobile/email/password-reset', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }) as Promise<void>;
+  }
+
   register(input: {
     username: string;
     password: string;

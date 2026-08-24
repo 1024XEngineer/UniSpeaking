@@ -30,6 +30,12 @@ function createController(state: AuthSessionState): AppModelAuthController & {
       expiresInSeconds: 600,
       resendAfterSeconds: 60,
     })),
+    issuePasswordResetChallenge: jest.fn(async () => ({
+      challengeId: 'reset-challenge-1',
+      expiresInSeconds: 600,
+      resendAfterSeconds: 60,
+    })),
+    resetPassword: jest.fn(async () => undefined),
     register: jest.fn(async () => undefined),
     updatePreference: jest.fn(async (patch: Partial<UserPreference>) => ({
       userId: 'user-1',

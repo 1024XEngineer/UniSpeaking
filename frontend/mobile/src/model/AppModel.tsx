@@ -29,6 +29,13 @@ export type AppModelAuthController = {
   bootstrap(): Promise<void>;
   login(input: { username: string; password: string }): Promise<void>;
   issueEmailChallenge(input: { email: string }): Promise<EmailChallenge>;
+  issuePasswordResetChallenge(input: { email: string }): Promise<EmailChallenge>;
+  resetPassword(input: {
+    email: string;
+    password: string;
+    challengeId: string;
+    code: string;
+  }): Promise<void>;
   register(input: {
     username: string;
     password: string;
@@ -50,6 +57,13 @@ type AppModelValue = {
   authError: string | null;
   signIn: (input: { username: string; password: string }) => Promise<void>;
   issueEmailChallenge: (input: { email: string }) => Promise<EmailChallenge>;
+  issuePasswordResetChallenge: (input: { email: string }) => Promise<EmailChallenge>;
+  resetPassword: (input: {
+    email: string;
+    password: string;
+    challengeId: string;
+    code: string;
+  }) => Promise<void>;
   signUp: (input: {
     username: string;
     password: string;
@@ -173,6 +187,17 @@ export function AppModelProvider({
     [authController],
   );
 
+  const issuePasswordResetChallenge = useCallback(
+    (input: { email: string }) => authController.issuePasswordResetChallenge(input),
+    [authController],
+  );
+
+  const resetPassword = useCallback(
+    (input: { email: string; password: string; challengeId: string; code: string }) =>
+      authController.resetPassword(input),
+    [authController],
+  );
+
   const signUp = useCallback(
     (input: { username: string; password: string; nickname: string | null; challengeId: string; code: string }) =>
       authController.register(input),
@@ -249,6 +274,8 @@ export function AppModelProvider({
       authError: authState.error,
       signIn,
       issueEmailChallenge,
+      issuePasswordResetChallenge,
+      resetPassword,
       signUp,
       completeOnboarding,
       signOut,
@@ -284,6 +311,8 @@ export function AppModelProvider({
       isModelReady,
       isAuthenticated,
       issueEmailChallenge,
+      issuePasswordResetChallenge,
+      resetPassword,
       authState.error,
       authState.status,
       authState.user,

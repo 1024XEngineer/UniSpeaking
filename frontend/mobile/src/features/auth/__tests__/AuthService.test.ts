@@ -65,6 +65,41 @@ describe('AuthService', () => {
     });
   });
 
+  it('issues a password-reset challenge and resets the password', async () => {
+    const client = createClient();
+    const service = new AuthService(client);
+
+    await service.issuePasswordResetChallenge({ email: 'learner@example.com' });
+    await service.resetPassword({
+      email: 'learner@example.com',
+      password: 'new-password123',
+      challengeId: 'challenge-1',
+      code: '123456',
+    });
+
+    expect(client.request).toHaveBeenNthCalledWith(
+      1,
+      '/api/auth/mobile/email/password-reset/challenges',
+      {
+        method: 'POST',
+        body: JSON.stringify({ email: 'learner@example.com' }),
+      },
+    );
+    expect(client.request).toHaveBeenNthCalledWith(
+      2,
+      '/api/auth/mobile/email/password-reset',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          email: 'learner@example.com',
+          password: 'new-password123',
+          challengeId: 'challenge-1',
+          code: '123456',
+        }),
+      },
+    );
+  });
+
   it('loads the current account and preference from protected endpoints', async () => {
     const client = createClient();
     const service = new AuthService(client);
