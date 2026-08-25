@@ -22,9 +22,9 @@ Redis 引入生产运行时。
 
 工作流文件本身发生变化时会强制运行全部检查。其他变更按路径执行：
 
-- 后端：编译、单元测试、打包、PostgreSQL/Redis 集成测试、85% 行覆盖率和镜像构建；
+- 后端：编译、单元测试、打包、PostgreSQL/Redis 集成测试、Codecov partial-line 口径 91% 门禁和镜像构建；
 - Web 前端：Node.js 22、`npm ci`、路由与 Realtime 事件检查、生产构建和镜像构建；
-- 移动端：Node.js 22、`npm ci`、TypeScript 检查、Jest 80% 行覆盖率门禁和 Expo Web 静态导出；
+- 移动端：Node.js 22、`npm ci`、TypeScript 检查、Jest 报告与 Codecov partial-line 口径 91% 门禁和 Expo Web 静态导出；
 - Compose、环境模板或 Nginx：配置解析或 `nginx -t`；
 - Maven/npm 依赖文件：Dependency Review，High 和 Critical 阻止合并。
 
@@ -44,7 +44,7 @@ PostgreSQL 与 Redis 集成测试：
   -Pci-integration -DskipUnitTests verify
 ```
 
-合并两类测试的 JaCoCo 数据并执行 85% 门禁：
+合并两类测试的 JaCoCo 数据并执行 Codecov partial-line 口径门禁：
 
 ```bash
 ./mvnw --batch-mode --no-transfer-progress \
@@ -52,6 +52,11 @@ PostgreSQL 与 Redis 集成测试：
   -DskipUnitTests \
   -DskipIntegrationTests \
   verify
+
+python3 ../../scripts/check-codecov-coverage.py \
+  --format jacoco \
+  --input target/site/jacoco-aggregate/jacoco.xml \
+  --minimum 91
 ```
 
 集成测试使用 Testcontainers，需要本机 Docker 可用；测试结束后容器会自动清理。
@@ -73,6 +78,10 @@ cd frontend/mobile
 npm ci
 npx tsc --noEmit
 npm run test:ci
+python3 ../../scripts/check-codecov-coverage.py \
+  --format lcov \
+  --input coverage/lcov.info \
+  --minimum 91
 EXPO_OFFLINE=1 npx expo export --platform web
 ```
 
@@ -90,7 +99,7 @@ PR 不上传后端 JAR、前端 `dist` 或 Docker 镜像。用于在任务间合
 
 根目录 README 显示 `main` 分支的后端测试状态、后端 Codecov 覆盖率和移动端 Codecov 覆盖率。覆盖率合并单元测试
 及 PostgreSQL、Redis 集成测试所执行的后端 Java 代码；它不是数据库表或 SQL 语句的
-覆盖率。Web 前端尚未建立自动化测试覆盖率，因此 README 不显示 Web 覆盖率；移动端使用独立的 Jest 行覆盖率门禁，目标为 80%。
+覆盖率。Web 前端尚未建立自动化测试覆盖率，因此 README 不显示 Web 覆盖率；移动端和后端使用独立的 `backend`、`mobile` flag，并以 `scripts/check-codecov-coverage.py` 按命中、partial、未命中三类计算 91% 本地门禁。普通 Jest/JaCoCo 行覆盖率仅作为辅助报告。
 `coverage.yml` 上传的是 JaCoCo 聚合报告
 `backend/unispeaking-server/target/site/jacoco-aggregate/jacoco.xml`，同时使用
 `backend` flag 标记报告。上传通过 GitHub OIDC 鉴权，不需要配置 `CODECOV_TOKEN`。

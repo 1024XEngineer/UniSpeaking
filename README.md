@@ -5,7 +5,7 @@
 
 移动端： [![移动端覆盖率](https://codecov.io/gh/1024XEngineer/UniSpeaking/branch/main/graph/badge.svg?flag=mobile)](https://codecov.io/gh/1024XEngineer/UniSpeaking)
 
-后端与移动端 Codecov 使用独立的 `backend`、`mobile` flag，分别统计后端 JaCoCo 合并测试和移动端 Jest 行覆盖率；README 徽章显示 main 分支最新报告，移动端目标为保持在 80% 以上。
+后端与移动端 Codecov 使用独立的 `backend`、`mobile` flag，分别统计后端 JaCoCo 合并测试和移动端 Jest 报告；覆盖率门禁按 Codecov 的 `hits / (hits + partials + misses)` 口径计算，两个 flag 均要求超过 90%。
 
 UniSpeaking 是一个面向英语口语训练的 AI 实时陪练系统。仓库包含 Spring Boot 后端、
 React Web 客户端、React Native 移动端、PostgreSQL 数据模型以及 Docker/Nginx 部署配置。
