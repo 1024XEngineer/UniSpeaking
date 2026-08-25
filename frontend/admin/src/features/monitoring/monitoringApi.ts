@@ -9,7 +9,10 @@ export interface MonitoringTrendPoint { timestamp: number; clientErrors: number;
 export interface MonitoringOverview { summary: MonitoringSummary; problems: MonitoringProblem[]; slowEndpoints: SlowEndpoint[]; recentEvents: MonitoringEvent[]; platformSummaries: PlatformSummary[]; trend: MonitoringTrendPoint[] }
 
 export async function getMonitoringOverview(): Promise<MonitoringOverview> {
-  const response = await fetch(buildAdminApiUrl('/api/admin/monitoring/overview'), { credentials: 'include' })
+  const response = await fetch(buildAdminApiUrl('/api/admin/monitoring/overview'), {
+    credentials: 'include',
+    cache: 'no-store',
+  })
   if (!response.ok) throw new Error('运行监控数据暂时无法读取')
   return response.json() as Promise<MonitoringOverview>
 }
@@ -22,8 +25,8 @@ export function grafanaUrl(path: string, params: Record<string, string> = {}) {
 
 export const grafanaDashboards = {
   overview: '/d/unispeaking-overview/01-e7b3bb-e7bb9f-e680a788',
-  client: '/d/unispeaking-web/client-quality',
-  backend: '/d/unispeaking-java/backend-api',
-  logs: '/d/unispeaking-logs/log-tracing',
-  performance: '/d/unispeaking-bugs/bug-alerts',
+  client: '/d/unispeaking-clients/02-web-mobile',
+  backend: '/d/unispeaking-backend-logs/03-e5908e-e7abaf-e4b88e-e697a5-e5bf97',
+  logs: '/d/unispeaking-backend-logs/03-e5908e-e7abaf-e4b88e-e697a5-e5bf97',
+  performance: '/d/unispeaking-performance/04-e680a7-e883bd-e4bc98-e58c96',
 }

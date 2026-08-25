@@ -111,7 +111,7 @@ export function AppShell({ administrator, logout }: AppShellProps) {
             <span className="workspace-kicker">UNISPEAKING CONTROL</span>
             <strong>用户、额度与费用</strong>
           </div>
-          <span className="environment-badge">开发环境</span>
+          <span className="environment-badge">{import.meta.env.PROD ? '生产环境' : '开发环境'}</span>
         </header>
         <main className="workspace-main">
           <Outlet />

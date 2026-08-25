@@ -95,6 +95,7 @@ services:
       args:
         DOCKER_IMAGE_REGISTRY: ${DOCKER_IMAGE_REGISTRY:-docker.m.daocloud.io}
         VITE_BACKEND_URL: ${VITE_BACKEND_URL:-/backend}
+        VITE_GRAFANA_URL: ${VITE_GRAFANA_URL:-http://218.11.5.202:3001}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     expose:
       - "80"

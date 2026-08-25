@@ -6,17 +6,22 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CopyOnWriteArrayList;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
@@ -94,9 +99,12 @@ class MonitoringAdminServiceTest {
         });
 
         HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        List<String> prometheusRequests = new CopyOnWriteArrayList<>();
         server.createContext("/api/v1/query", exchange -> respond(exchange,
+                prometheusRequests,
                 "{\"data\":{\"result\":[{\"value\":[\"0\",\"2.5\"]}]}}"));
         server.createContext("/api/v1/query_range", exchange -> respond(exchange,
+                prometheusRequests,
                 "{\"data\":{\"result\":[{\"values\":[[\"0\",\"1.0\"],[\"3600\",\"2.0\"]]}]}}"));
         server.start();
         try {
@@ -112,14 +120,26 @@ class MonitoringAdminServiceTest {
             assertEquals(3, response.platformSummaries().getFirst().errorCount());
             assertEquals(2, response.trend().size());
             assertEquals(2.0, response.trend().getLast().clientErrors());
+            assertTrue(prometheusRequests.stream().anyMatch(query -> query.contains("http_route=~\"/api/.*\"")));
+            assertTrue(prometheusRequests.stream().anyMatch(query -> query.contains("le=\"1.0\"")));
+            assertTrue(prometheusRequests.stream().anyMatch(query -> query.contains("or vector(0)")));
+
+            ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+            verify(jdbc, times(4)).query(sql.capture(), any(RowMapper.class));
+            String slowEndpointSql = sql.getAllValues().get(1);
+            assertTrue(slowEndpointSql.contains("WHERE duration_ms IS NOT NULL"));
+            assertTrue(slowEndpointSql.contains("duration_ms > 1000"));
         }
         finally {
             server.stop(0);
         }
     }
 
-    private static void respond(com.sun.net.httpserver.HttpExchange exchange, String body)
+    private static void respond(com.sun.net.httpserver.HttpExchange exchange,
+            List<String> requests, String body)
             throws IOException {
+        requests.add(URLDecoder.decode(exchange.getRequestURI().getRawQuery(),
+                java.nio.charset.StandardCharsets.UTF_8));
         byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(200, bytes.length);

@@ -10,6 +10,8 @@ import org.springframework.web.client.RestClient;
 
 @Service
 public class MonitoringAdminService {
+	private static final String API_REQUESTS = "http_route=~\"/api/.*\"";
+
     public record Summary(String backendStatus, double clientErrorRate, double api5xxRate,
             double apiP95Seconds, long activeAlerts, long affectedUsers,
             long completedOptimizations, Instant generatedAt) {}
@@ -38,9 +40,9 @@ public class MonitoringAdminService {
 
     public MonitoringResponse overview() {
         var summary = new Summary(backendStatus(),
-                queryPrometheus("100 * sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"4..|5..\"}[5m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count[5m])), 0.000001)"),
-                queryPrometheus("100 * sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count[5m])), 0.000001)"),
-                queryPrometheus("histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket[5m])))"),
+                queryPrometheus("(100 * sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + ",http_response_status_code=~\"4..|5..\"}[5m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + "}[5m])), 0.000001)) or vector(0)"),
+                queryPrometheus("(100 * sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + ",http_response_status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + "}[5m])), 0.000001)) or vector(0)"),
+                queryPrometheus("histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{" + API_REQUESTS + "}[5m]))) or vector(0)"),
                 activeAlerts(), affectedUsers(), completedOptimizations(), Instant.now());
         return new MonitoringResponse(summary, problems(), slowEndpoints(), recentEvents(),
                 platformSummaries(), trend());
@@ -65,9 +67,9 @@ public class MonitoringAdminService {
     private List<TrendPoint> trend() {
         long end = Instant.now().getEpochSecond();
         long start = end - 24 * 60 * 60;
-        var client = queryRange("sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"4..|5..\"}[5m]))", start, end);
-        var slow = queryRange("clamp_min(sum(rate(http_server_request_duration_seconds_count[5m])) - sum(rate(http_server_request_duration_seconds_bucket{le=\"1\"}[5m])), 0)", start, end);
-        var backend = queryRange("sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[5m]))", start, end);
+        var client = queryRange("sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + ",http_response_status_code=~\"4..|5..\"}[5m])) or vector(0)", start, end);
+        var slow = queryRange("clamp_min(sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + "}[5m])) - sum(rate(http_server_request_duration_seconds_bucket{" + API_REQUESTS + ",le=\"1.0\"}[5m])), 0) or vector(0)", start, end);
+        var backend = queryRange("sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + ",http_response_status_code=~\"5..\"}[5m])) or vector(0)", start, end);
         int size = Math.min(client.size(), Math.min(slow.size(), backend.size()));
         var result = new java.util.ArrayList<TrendPoint>(size);
         for (int i = 0; i < size; i++) {
@@ -135,9 +137,9 @@ public class MonitoringAdminService {
         return jdbc.query("""
                 SELECT COALESCE(api_method, ''), COALESCE(api_path, route, ''), COUNT(*),
                        AVG(duration_ms) / 1000.0, percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) / 1000.0,
-                       MAX(duration_ms) / 1000.0, COUNT(*) FILTER (WHERE duration_ms > 5000)
+                       MAX(duration_ms) / 1000.0, COUNT(*) FILTER (WHERE duration_ms > 1000)
                 FROM quality_issue_events
-                WHERE duration_ms IS NOT NULL AND duration_ms > 1000
+                WHERE duration_ms IS NOT NULL
                   AND occurred_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
                 GROUP BY 1, 2 ORDER BY percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) DESC LIMIT 5
                 """, (rs, n) -> new SlowEndpoint(rs.getString(1), rs.getString(2), rs.getLong(3),
