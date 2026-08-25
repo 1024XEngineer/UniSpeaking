@@ -100,7 +100,7 @@ const interviewPalette = {
   subtle: '#7895B1',
 } as const;
 
-function IeltsSession({
+export function IeltsSession({
   examiner,
   part,
   ieltsId,
@@ -235,13 +235,13 @@ function IeltsSession({
 }
 
 
-function formatSessionDuration(seconds: number) {
+export function formatSessionDuration(seconds: number) {
   const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
   const remainingSeconds = (seconds % 60).toString().padStart(2, '0');
   return `${minutes}:${remainingSeconds}`;
 }
 
-function compactPerformanceSummary(value: string | null | undefined) {
+export function compactPerformanceSummary(value: string | null | undefined) {
   const text = value?.trim();
   if (!text) return '已评分';
   const firstPhrase = text.split(/[。！？；,.!?;]/)[0]?.trim() || text;
@@ -250,7 +250,7 @@ function compactPerformanceSummary(value: string | null | undefined) {
 
 type Part2Phase = 'INTRODUCTION' | 'PREPARATION' | 'STARTING' | 'LONG_TURN' | 'FINISHING';
 
-function IeltsPart2Session({
+export function IeltsPart2Session({
   examiner,
   cueCard,
   ieltsId,

@@ -59,7 +59,7 @@ describe('AssetsScreen backend binding', () => {
 
   it('shows a recoverable backend list failure', async () => {
     const service = {
-      listRecords: jest.fn(async () => {
+      listRecords: jest.fn(async (): Promise<SceneLearningRecord[]> => {
         throw new Error('资产服务暂时不可用');
       }),
       getRecord: jest.fn(async () => detailRecord),
@@ -77,6 +77,20 @@ describe('AssetsScreen backend binding', () => {
       expect(screen.getByText('资产服务暂时不可用')).toBeTruthy(),
     );
     expect(screen.getByText('重新加载')).toBeTruthy();
+    service.listRecords.mockResolvedValueOnce([]);
+    await fireEvent.press(screen.getByText('重新加载'));
+    await waitFor(() => expect(screen.getByText('暂无场景学习资产')).toBeTruthy());
+  });
+
+  it('paginates records in both directions and uses the optional interview fallback', async () => {
+    const records = Array.from({ length: 9 }, (_, index) => ({ ...summaryRecord, id: `scene-${index}`, title: `场景 ${index + 1}` }));
+    const service = { listRecords: jest.fn(async () => records), getRecord: jest.fn(), deleteRecord: jest.fn() };
+    const screen = await render(<AssetsScreen assetService={service} onOpenRecord={jest.fn()} onOpenIelts={jest.fn()} />);
+    await waitFor(() => expect(screen.getByText('1 / 2')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('下一页'));
+    await waitFor(() => expect(screen.getByText('场景 9')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('上一页'));
+    await waitFor(() => expect(screen.getByText('场景 1')).toBeTruthy());
   });
 
   it('filters records by category before paginating and can return to all records', async () => {
@@ -155,6 +169,20 @@ describe('SceneAssetDetailLoader', () => {
     expect(ttsPlayer.stop).toHaveBeenCalled();
   });
 
+  it('shows conversation feedback and a non-Error TTS failure', async () => {
+    const record = { ...detailRecord, conversation: [{
+      id: 'm1', role: 'user' as const, speaker: '你', text: 'I want bag.',
+      feedback: { suggestedExpression: 'I would like to check a bag.', feedbackSummary: '表达更自然。' },
+    }] };
+    const ttsPlayer = { play: jest.fn(async () => { throw 'offline'; }), stop: jest.fn() };
+    const screen = await render(<SceneAssetDetail record={record} onBack={jest.fn()} onPractice={jest.fn()} onDelete={jest.fn()} ttsPlayer={ttsPlayer} />);
+    await fireEvent.press(screen.getByLabelText('播放 baggage'));
+    await waitFor(() => expect(screen.getByText('发音播放失败')).toBeTruthy());
+    await fireEvent.press(screen.getByText('最近对话与评价'));
+    expect(screen.getByText('I would like to check a bag.')).toBeTruthy();
+    expect(screen.getByText('表达更自然。')).toBeTruthy();
+  });
+
   it('waits for backend deletion before dismissing the confirmation', async () => {
     let resolveDelete: () => void = () => undefined;
     const deletePromise = new Promise<void>((resolve) => {
@@ -225,5 +253,17 @@ describe('SceneAssetDetailLoader', () => {
 
     await waitFor(() => expect(onDelete).toHaveBeenCalledTimes(1));
     expect(service.deleteRecord).toHaveBeenCalledWith('scene/airport');
+  });
+
+  it('retries loader failures including the generic fallback', async () => {
+    const service = {
+      listRecords: jest.fn(async () => []),
+      getRecord: jest.fn().mockRejectedValueOnce('offline').mockResolvedValueOnce(detailRecord),
+      deleteRecord: jest.fn(),
+    };
+    const screen = await render(<SceneAssetDetailLoader assetService={service} sceneId="scene/airport" onBack={jest.fn()} onPractice={jest.fn()} onDelete={jest.fn()} />);
+    await waitFor(() => expect(screen.getByText('学习资产详情加载失败')).toBeTruthy());
+    await fireEvent.press(screen.getByText('重新加载'));
+    await waitFor(() => expect(screen.getByText('baggage')).toBeTruthy());
   });
 });

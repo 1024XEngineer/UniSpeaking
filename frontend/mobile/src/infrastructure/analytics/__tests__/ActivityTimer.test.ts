@@ -18,4 +18,22 @@ describe('createActivityTimer', () => {
 
     expect(timer.stop()).toBe(12);
   });
+
+  it('guards duplicate lifecycle calls while hidden and paused', () => {
+    let current = 0;
+    const timer = createActivityTimer(() => current);
+    expect(timer.pause()).toBe(0);
+    timer.resume();
+    timer.setVisible(false);
+    timer.setVisible(false);
+    timer.start();
+    timer.start();
+    timer.resume();
+    current = 5_000;
+    expect(timer.pause()).toBe(0);
+    expect(timer.pause()).toBe(0);
+    timer.resume();
+    timer.setVisible(true);
+    expect(timer.stop()).toBe(0);
+  });
 });

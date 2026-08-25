@@ -320,4 +320,118 @@ describe('SceneTrainingController', () => {
       expect.objectContaining({ stage: 'learn', currentItem: word }),
     );
   });
+
+  it('publishes every update and supports listener removal', async () => {
+    const service = createService();
+    const controller = new SceneTrainingController(service);
+    const listener = jest.fn();
+    const unsubscribe = controller.subscribe(listener);
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ status: 'idle' }));
+    await controller.start(scene);
+    const count = listener.mock.calls.length;
+    unsubscribe();
+    await controller.next();
+    expect(listener).toHaveBeenCalledTimes(count);
+  });
+
+  it('starts directly in reading and rejects an unexpected backend stage', async () => {
+    const service = createService();
+    const controller = new SceneTrainingController(service);
+    await controller.start(scene, 'read');
+    expect(controller.getSnapshot()).toEqual(expect.objectContaining({
+      status: 'ready', stage: 'read', currentItem: sentence, unlockedStage: 1,
+    }));
+
+    const invalid = createService();
+    invalid.advanceStage
+      .mockResolvedValueOnce({ sceneId: 'scene-1', stage: 'PHRASE_LEARNING', completed: false })
+      .mockResolvedValueOnce({ sceneId: 'scene-1', stage: 'PHRASE_LEARNING', completed: false });
+    const failed = new SceneTrainingController(invalid);
+    await expect(failed.start(scene, 'read')).rejects.toThrow('后端未进入句子学习阶段');
+    expect(failed.getSnapshot()).toEqual(expect.objectContaining({
+      status: 'error', error: '后端未进入句子学习阶段',
+    }));
+  });
+
+  it('rejects empty content and normalizes non-Error failures', async () => {
+    const empty = createService();
+    empty.getContent.mockResolvedValueOnce([]);
+    const first = new SceneTrainingController(empty);
+    await expect(first.start(scene)).rejects.toThrow('当前训练阶段没有可用内容');
+
+    const nonError = createService();
+    nonError.createFlow.mockRejectedValueOnce('offline');
+    const second = new SceneTrainingController(nonError);
+    await expect(second.start(scene)).rejects.toBe('offline');
+    expect(second.getSnapshot()).toEqual(expect.objectContaining({
+      status: 'error', error: '场景训练请求失败',
+    }));
+  });
+
+  it('guards navigation before start, in speak mode, and at locked boundaries', async () => {
+    const controller = new SceneTrainingController(createService());
+    await expect(controller.next()).rejects.toThrow('场景训练尚未开始');
+    await expect(controller.selectStage('read')).rejects.toThrow('场景训练尚未开始');
+    await expect(controller.scoreReading('file.wav')).rejects.toThrow('场景训练尚未开始');
+    expect(controller.previous()).toBe(false);
+
+    await controller.start(scene);
+    expect(controller.previous()).toBe(false);
+    await expect(controller.selectStage('learn')).resolves.toBe(true);
+    await expect(controller.selectStage('speak')).resolves.toBe(false);
+
+    await controller.start(scene, 'speak');
+    await expect(controller.next()).resolves.toBe(false);
+    await expect(controller.selectStage('speak')).resolves.toBe(true);
+    await expect(controller.selectStage('learn')).resolves.toBe(true);
+    await expect(controller.selectStage('speak')).resolves.toBe(true);
+  });
+
+  it('blocks actions while scoring and keeps dialogue locked after a failed reading', async () => {
+    const service = createService();
+    let resolveScore!: (result: SentenceEvaluation) => void;
+    service.evaluateSentence.mockImplementationOnce(() => new Promise((resolve) => { resolveScore = resolve; }));
+    const controller = new SceneTrainingController(service);
+    await controller.start(scene, 'read');
+    const scoring = controller.scoreReading('sentence.wav');
+    await expect(controller.next()).resolves.toBe(false);
+    await expect(controller.selectStage('learn')).resolves.toBe(false);
+    resolveScore({ overallScore: 40, passed: false, words: [] });
+    await scoring;
+    await expect(controller.next()).resolves.toBe(false);
+  });
+
+  it('surfaces scoring and dialogue transition failures', async () => {
+    const scoringService = createService();
+    scoringService.evaluateSentence.mockRejectedValueOnce(new Error('score failed'));
+    const scoring = new SceneTrainingController(scoringService);
+    await scoring.start(scene, 'read');
+    await expect(scoring.scoreReading('sentence.wav')).rejects.toThrow('score failed');
+    expect(scoring.getSnapshot()).toEqual(expect.objectContaining({ status: 'error', error: 'score failed' }));
+
+    const dialogueService = createService();
+    dialogueService.advanceStage.mockImplementation(async (_sceneId, stage) => ({
+      sceneId: 'scene-1',
+      stage: stage === 'SENTENCE_LEARNING' ? 'SENTENCE_LEARNING' : stage === 'WORD_LEARNING' ? 'PHRASE_LEARNING' : 'SENTENCE_LEARNING',
+      completed: false,
+    } as any));
+    const dialogue = new SceneTrainingController(dialogueService);
+    await dialogue.start(scene, 'read');
+    await dialogue.scoreReading('sentence.wav');
+    await expect(dialogue.next()).rejects.toThrow('后端未进入场景对话阶段');
+  });
+
+  it('rejects unexpected learning transitions and empty selected-stage content', async () => {
+    const transitionService = createService();
+    transitionService.advanceStage.mockResolvedValueOnce({ sceneId: 'scene-1', stage: 'WORD_LEARNING', completed: false });
+    const transition = new SceneTrainingController(transitionService);
+    await transition.start(scene);
+    await expect(transition.next()).rejects.toThrow('后端未进入预期训练阶段：PHRASE_LEARNING');
+
+    const emptyService = createService();
+    const selected = new SceneTrainingController(emptyService);
+    await selected.start(scene, 'speak');
+    emptyService.getContent.mockResolvedValueOnce([]);
+    await expect(selected.selectStage('read')).rejects.toThrow('当前训练阶段没有可用内容');
+  });
 });

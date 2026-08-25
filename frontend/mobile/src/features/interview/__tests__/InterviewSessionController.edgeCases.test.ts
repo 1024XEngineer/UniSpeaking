@@ -27,9 +27,10 @@ function fixture() {
     end: jest.fn(async () => ({ sessionId: 'session-1', reportStatus: 'PROCESSING' })),
   };
   const sessionSocket = { connect: jest.fn(async () => undefined), bindProviderSession: jest.fn(async () => undefined), persistMessage: jest.fn(async () => undefined), close: jest.fn() };
+  const dependencies = { recorder, transport, sessionApi, sessionSocket, createEventId: () => 'event-1' } as any;
   return {
-    controller: new InterviewSessionController({ recorder, transport, sessionApi, sessionSocket, createEventId: () => 'event-1' } as any, { sceneId: 'scene', voice: 'voice', model: 'model' }),
-    recorder, transport, sessionApi, sessionSocket,
+    controller: new InterviewSessionController(dependencies, { sceneId: 'scene', voice: 'voice', model: 'model' }),
+    recorder, transport, sessionApi, sessionSocket, dependencies,
   };
 }
 
@@ -85,5 +86,153 @@ describe('InterviewSessionController edge cases', () => {
     expect(test.recorder.close).toHaveBeenCalledTimes(1);
     expect(test.transport.close).toHaveBeenCalledTimes(1);
     expect(test.controller.getSnapshot()).toEqual(expect.objectContaining({ state: 'error', error: expect.any(Error) }));
+  });
+
+  it('publishes snapshots, supports unsubscribe, toggles mute and reuses an active session', async () => {
+    const test = fixture();
+    const listener = jest.fn();
+    const unsubscribe = test.controller.subscribe(listener);
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ state: 'idle', status: 'idle' }));
+
+    await test.controller.start();
+    await provider(test, { type: 'session.created' });
+    await provider(test, { type: 'session.updated' });
+    test.controller.setMuted(true);
+    test.controller.setMuted(false);
+    await expect(test.controller.start()).resolves.toEqual({ sessionId: 'session-1' });
+    unsubscribe();
+    const count = listener.mock.calls.length;
+    test.controller.setMuted(true);
+
+    expect(listener).toHaveBeenCalled();
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ userMuted: true }));
+    expect(listener).toHaveBeenCalledTimes(count);
+    expect(test.sessionApi.startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores malformed, unknown and blank provider messages and configures a session once', async () => {
+    const test = fixture();
+    test.sessionApi.startSession.mockResolvedValueOnce({
+      sessionId: 'session-1', answerSdp: 'answer', voiceId: '', systemPrompt: 'prompt',
+    });
+    await test.controller.handleProviderMessage('{broken');
+    await provider(test, { type: 'unknown.event' });
+    await test.controller.start();
+    await provider(test, { type: 'session.created' });
+    await provider(test, { type: 'session.created', session: { id: 'provider-late' } });
+    await provider(test, { type: 'session.updated' });
+    await provider(test, { type: 'session.updated' });
+    await provider(test, { type: 'response.text.done', text: '   ' });
+    await provider(test, { type: 'conversation.item.input_audio_transcription.completed', transcript: '   ' });
+
+    const updates = test.transport.sendProviderEvent.mock.calls.filter(([event]: any[]) => event.type === 'session.update');
+    const openings = test.transport.sendProviderEvent.mock.calls.filter(([event]: any[]) => event.type === 'response.create');
+    expect(updates).toHaveLength(1);
+    expect(updates[0][0].session.voice).toBe('voice');
+    expect(openings).toHaveLength(1);
+    expect(test.sessionSocket.bindProviderSession).not.toHaveBeenCalled();
+  });
+
+  it('queues the next backend instruction behind an active provider response', async () => {
+    const test = fixture();
+    test.sessionApi.submitTurn.mockResolvedValueOnce({
+      state: {
+        shouldEnd: false,
+        completedTopicCount: 1,
+        coveredTopicCount: 2,
+        currentTopic: 'next',
+        controlInstruction: 'Ask the next question',
+      },
+      reportStatus: 'PENDING',
+    } as any);
+    await test.controller.start();
+    await provider(test, { type: 'session.created' });
+    await provider(test, { type: 'session.updated' });
+    await provider(test, { type: 'response.created' });
+    await provider(test, { type: 'response.audio.delta', delta: 'AQI=' });
+    await provider(test, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      transcript: 'This is a complete answer.',
+    });
+
+    expect(test.recorder.appendAssistantAudio).toHaveBeenCalledWith('AQI=');
+    expect(test.transport.sendProviderEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'response.cancel' }));
+    await provider(test, { type: 'response.done', response: { status: 'cancelled' } });
+    expect(test.transport.sendProviderEvent).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'response.create',
+      response: expect.objectContaining({ instructions: 'Ask the next question' }),
+    }));
+  });
+
+  it('ends safely from idle, returns null when already ended, then resets for a new start', async () => {
+    const test = fixture();
+    await expect(test.controller.end()).resolves.toBeNull();
+    expect(test.controller.getSnapshot().state).toBe('ended');
+    await expect(test.controller.end()).resolves.toBeNull();
+    await expect(test.controller.start()).resolves.toEqual({ sessionId: 'session-1' });
+    expect(test.recorder.start).toHaveBeenCalledTimes(1);
+    expect(test.controller.getSnapshot()).toEqual(expect.objectContaining({
+      state: 'starting', error: null, turnNo: 0, transcripts: [],
+    }));
+  });
+
+  it('preserves a startup error when backend cleanup also fails', async () => {
+    const test = fixture();
+    test.sessionSocket.connect.mockRejectedValueOnce('socket failed');
+    test.sessionApi.end.mockRejectedValueOnce(new Error('cleanup failed'));
+
+    await expect(test.controller.start()).rejects.toThrow('socket failed');
+    expect(test.sessionApi.end).toHaveBeenCalledWith('session-1');
+    expect(test.controller.getSnapshot()).toEqual(expect.objectContaining({
+      state: 'error', error: expect.objectContaining({ message: 'socket failed' }),
+    }));
+  });
+
+  it('keeps provider failures visible when backend end fails and allows explicit cleanup', async () => {
+    const test = fixture();
+    test.sessionApi.end
+      .mockRejectedValueOnce(new Error('end failed'))
+      .mockResolvedValueOnce({ sessionId: 'session-1', reportStatus: 'PROCESSING' });
+    await test.controller.start();
+    test.transport.emit({ type: 'provider.message', data: JSON.stringify({ type: 'error', message: 'provider failed' }) });
+    for (let attempt = 0; attempt < 20 && test.controller.getSnapshot().state !== 'error'; attempt += 1) {
+      await Promise.resolve();
+    }
+
+    expect(test.controller.getSnapshot()).toEqual(expect.objectContaining({
+      state: 'error', error: expect.objectContaining({ message: 'provider failed' }),
+    }));
+    await test.controller.end();
+    expect(test.controller.getSnapshot().state).toBe('ended');
+  });
+
+  it('covers direct provider guards, duplicate work, and successful failure cleanup', async () => {
+    const test = fixture();
+    await test.controller.start();
+    const internal = test.controller as any;
+    internal.responseAwaitingInterviewState = true;
+    await internal.applyEvent({ type: 'assistant.response.started' });
+    expect(test.transport.sendProviderEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'response.cancel' }));
+    internal.closingRequested = true;
+    await internal.applyEvent({ type: 'user.speech.started' });
+    await internal.applyEvent({ type: 'unknown.event' });
+
+    const operation = jest.fn(async () => undefined);
+    await internal.processTranscriptOnce(0, { itemId: 'duplicate' }, operation);
+    await internal.processTranscriptOnce(0, { itemId: 'duplicate' }, operation);
+    expect(operation).toHaveBeenCalledTimes(1);
+
+    internal.state = 'starting';
+    internal.backend = { sessionId: 'session-1' };
+    await internal.handleStartFailure('startup failed');
+    expect(test.sessionApi.end).toHaveBeenCalledWith('session-1');
+    expect(test.controller.getSnapshot()).toEqual(expect.objectContaining({
+      state: 'error', reportStatus: 'PROCESSING', error: expect.objectContaining({ message: 'startup failed' }),
+    }));
+
+    internal.state = 'active';
+    internal.endRequested = false;
+    await internal.handleFailure('transport failed');
+    expect(test.controller.getSnapshot().state).toBe('ended');
   });
 });

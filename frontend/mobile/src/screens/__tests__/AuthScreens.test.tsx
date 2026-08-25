@@ -1,4 +1,5 @@
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { AccessibilityInfo } from 'react-native';
 
 import type { AuthSessionState } from '@/features/auth/AuthSessionController';
 import type { AppModelAuthController } from '@/model/AppModel';
@@ -8,11 +9,12 @@ jest.mock('@/components/TeacherSwipeStack', () => ({
   TeacherSwipeStack: () => null,
 }));
 
-import { AuthFormScreen, PasswordResetScreen } from '../AuthScreens';
+import { AnimatedSloganLine, AuthFormScreen, PasswordResetScreen } from '../AuthScreens';
 
 function createController(state: AuthSessionState): AppModelAuthController & {
   login: jest.Mock;
   register: jest.Mock;
+  issueEmailChallenge: jest.Mock;
   issuePasswordResetChallenge: jest.Mock;
   resetPassword: jest.Mock;
 } {
@@ -54,6 +56,15 @@ function createController(state: AuthSessionState): AppModelAuthController & {
 }
 
 describe('AuthFormScreen backend binding', () => {
+  it('renders reduced-motion slogan characters without starting animations', async () => {
+    jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(true);
+    const view = await render(<AnimatedSloganLine text="Speak" delay={0} />);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(view.getByLabelText('Speak')).toBeTruthy();
+    view.unmount();
+  });
+
   it('submits the entered login credentials', async () => {
     const controller = createController({
       status: 'anonymous',
@@ -183,6 +194,8 @@ describe('AuthFormScreen backend binding', () => {
       challengeId: 'challenge-1',
       code: '123456',
     }));
+    await fireEvent.press(screen.getByRole('button', { name: '返回' }));
+    expect(screen.getByPlaceholderText('怎么称呼你')).toBeTruthy();
   });
 
   it('does not send an email code when the passwords do not match', async () => {
@@ -242,5 +255,84 @@ describe('AuthFormScreen backend binding', () => {
     );
 
     expect(screen.getByText('邮箱或密码错误')).toBeTruthy();
+  });
+
+  it('shows a login failure returned by the backend', async () => {
+    const login = createController({ status: 'anonymous', user: null, preference: null, error: null });
+    login.login.mockRejectedValueOnce(new Error('登录暂不可用'));
+    const loginView = await render(<AppModelProvider authController={login}><AuthFormScreen mode="login" onBack={jest.fn()} onSwitch={jest.fn()} /></AppModelProvider>);
+    await fireEvent.changeText(loginView.getByPlaceholderText('name@example.com'), 'learner@example.com');
+    await fireEvent.changeText(loginView.getByPlaceholderText('请输入密码'), 'password123456');
+    await fireEvent.press(loginView.getByRole('button', { name: '登录' }));
+    await waitFor(() => expect(loginView.getByText('登录暂不可用')).toBeTruthy());
+  });
+
+  it('validates every password-reset field and reports backend failures', async () => {
+    const controller = createController({ status: 'anonymous', user: null, preference: null, error: null });
+    const view = await render(<AppModelProvider authController={controller}><PasswordResetScreen onBack={jest.fn()} onComplete={jest.fn()} /></AppModelProvider>);
+    await fireEvent(view.getByPlaceholderText('name@example.com'), 'submitEditing');
+    expect(view.getByText('请输入有效的邮箱地址')).toBeTruthy();
+    controller.issuePasswordResetChallenge.mockRejectedValueOnce(new Error('重置服务失败'));
+    await fireEvent.changeText(view.getByPlaceholderText('name@example.com'), 'learner@example.com');
+    await fireEvent.press(view.getByRole('button', { name: '发送重置验证码' }));
+    await waitFor(() => expect(view.getByRole('alert')).toBeTruthy());
+    controller.issuePasswordResetChallenge.mockResolvedValueOnce({ challengeId: 'reset', expiresInSeconds: 600, resendAfterSeconds: 0 });
+    await fireEvent.press(view.getByRole('button', { name: '发送重置验证码' }));
+    await waitFor(() => expect(view.getByText('设置新密码')).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: '确认重置' }));
+    expect(view.getByText('请输入 6 位邮箱验证码')).toBeTruthy();
+    await fireEvent.changeText(view.getByPlaceholderText('000000'), '123456');
+    await fireEvent.changeText(view.getByPlaceholderText('至少 12 位字符'), 'short');
+    await fireEvent.press(view.getByRole('button', { name: '确认重置' }));
+    expect(view.getByText('密码至少需要 12 位字符')).toBeTruthy();
+    await fireEvent.changeText(view.getByPlaceholderText('至少 12 位字符'), 'new-password123');
+    await fireEvent.changeText(view.getByPlaceholderText('再次输入新密码'), 'different-pass');
+    await fireEvent.press(view.getByRole('button', { name: '确认重置' }));
+    expect(view.getByText('两次输入的密码不一致')).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: '显示新密码' }));
+    await fireEvent.press(view.getByRole('button', { name: '显示确认新密码' }));
+    controller.resetPassword.mockRejectedValueOnce(new Error('更新失败'));
+    await fireEvent.changeText(view.getByPlaceholderText('再次输入新密码'), 'new-password123');
+    await fireEvent.press(view.getByRole('button', { name: '确认重置' }));
+    await waitFor(() => expect(view.getByRole('alert')).toBeTruthy());
+  });
+
+  it('handles signup challenge and registration failures through keyboard and resend actions', async () => {
+    jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValueOnce(true);
+    const controller = createController({ status: 'anonymous', user: null, preference: null, error: null });
+    controller.issueEmailChallenge
+      .mockRejectedValueOnce('challenge unavailable')
+      .mockResolvedValue({ challengeId: 'retry-challenge', expiresInSeconds: 600, resendAfterSeconds: 0 });
+    controller.register.mockRejectedValueOnce('registration unavailable');
+    const view = await render(<AppModelProvider authController={controller}><AuthFormScreen mode="signup" onBack={jest.fn()} onSwitch={jest.fn()} /></AppModelProvider>);
+    await fireEvent.changeText(view.getByPlaceholderText('怎么称呼你'), 'Sunny');
+    await fireEvent.changeText(view.getByPlaceholderText('name@example.com'), 'learner@example.com');
+    await fireEvent.changeText(view.getByPlaceholderText('至少 12 位字符'), 'password123456');
+    await fireEvent.changeText(view.getByPlaceholderText('再次输入密码'), 'password123456');
+    await fireEvent(view.getByPlaceholderText('至少 12 位字符'), 'submitEditing');
+    await waitFor(() => expect(view.getByRole('alert')).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: '发送邮箱验证码' }));
+    await waitFor(() => expect(view.getByText('查看你的邮箱')).toBeTruthy());
+    await fireEvent(view.getByPlaceholderText('000000'), 'submitEditing');
+    expect(view.getByText('请输入 6 位邮箱验证码')).toBeTruthy();
+    await fireEvent.press(view.getByText('重新发送验证码'));
+    await fireEvent.changeText(view.getByPlaceholderText('000000'), '123456');
+    await fireEvent(view.getByPlaceholderText('000000'), 'submitEditing');
+    await waitFor(() => expect(view.getByText('请求失败，请稍后重试')).toBeTruthy());
+    view.unmount();
+  });
+
+  it('returns from password entry to the reset email step', async () => {
+    const controller = createController({ status: 'anonymous', user: null, preference: null, error: null });
+    controller.issuePasswordResetChallenge.mockResolvedValueOnce({ challengeId: 'reset', expiresInSeconds: 600, resendAfterSeconds: 0 });
+    const onBack = jest.fn();
+    const view = await render(<AppModelProvider authController={controller}><PasswordResetScreen onBack={onBack} onComplete={jest.fn()} /></AppModelProvider>);
+    await fireEvent.changeText(view.getByPlaceholderText('name@example.com'), 'learner@example.com');
+    await fireEvent.press(view.getByText('发送重置验证码'));
+    await waitFor(() => expect(view.getByText('设置新密码')).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: '返回' }));
+    expect(view.getByText('找回账号')).toBeTruthy();
+    expect(onBack).not.toHaveBeenCalled();
+    view.unmount();
   });
 });

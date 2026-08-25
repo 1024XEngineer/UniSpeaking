@@ -29,7 +29,21 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
+function textResponse(body: string, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => 'text/plain' },
+    json: jest.fn(),
+    text: jest.fn(async () => body),
+  } as unknown as Response;
+}
+
 describe('ApiClient', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('adds the bearer token and unwraps a successful API envelope', async () => {
     const tokenStore = createTokenStore('jwt-token');
     const fetchImpl = jest.fn<Promise<Response>, [string, RequestInit?]>(
@@ -151,5 +165,111 @@ describe('ApiClient', () => {
     await jest.runAllTimersAsync();
     await expectation;
     jest.useRealTimers();
+  });
+
+  it('supports array and Headers inputs, JSON bodies, relative paths and authorization skipping', async () => {
+    const fetchImpl = jest.fn<Promise<Response>, [string, RequestInit?]>(
+      async () => jsonResponse({ success: true, data: 'ok' }),
+    );
+    const tokenCoordinator = {
+      getAccessToken: jest.fn(async () => 'secret'),
+      refreshAccessToken: jest.fn(),
+      clear: jest.fn(),
+    };
+    const client = new ApiClient({
+      baseUrl: 'https://api.test///',
+      tokenStore: createTokenStore('unused'),
+      tokenCoordinator: tokenCoordinator as any,
+      fetchImpl,
+    });
+    await client.request('items', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'item' }),
+      headers: [['X-Skip-Authorization', 'true'], ['X-Trace', 'trace-1']],
+    });
+    expect(fetchImpl).toHaveBeenCalledWith('https://api.test/items', expect.objectContaining({
+      headers: { 'Content-Type': 'application/json', 'X-Trace': 'trace-1' },
+    }));
+    expect(tokenCoordinator.getAccessToken).not.toHaveBeenCalled();
+
+    await client.request('/headers', { headers: new Headers({ Accept: 'application/json' }) });
+    expect(fetchImpl.mock.calls[1][1]?.headers).toMatchObject({
+      accept: 'application/json', Authorization: 'Bearer secret',
+    });
+  });
+
+  it('refreshes once after a protected 401 and retries with the new token', async () => {
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ success: false }, 401))
+      .mockResolvedValueOnce(jsonResponse({ success: true, data: { retried: true } }));
+    const tokenCoordinator = {
+      getAccessToken: jest.fn(async () => 'expired'),
+      refreshAccessToken: jest.fn(async () => 'fresh'),
+      clear: jest.fn(async () => undefined),
+    };
+    const client = new ApiClient({
+      baseUrl: 'https://api.test', tokenStore: createTokenStore(null), tokenCoordinator: tokenCoordinator as any, fetchImpl,
+    });
+    await expect(client.request('/api/items')).resolves.toEqual({ retried: true });
+    expect(fetchImpl.mock.calls[1][1]?.headers).toMatchObject({ Authorization: 'Bearer fresh' });
+  });
+
+  it('does not retry auth endpoints or when refresh returns no token', async () => {
+    const tokenCoordinator = {
+      getAccessToken: jest.fn(async () => 'expired'),
+      refreshAccessToken: jest.fn(async () => null),
+      clear: jest.fn(async () => undefined),
+    };
+    const fetchImpl = jest.fn(async () => jsonResponse({ success: false }, 401));
+    const client = new ApiClient({
+      baseUrl: 'https://api.test', tokenStore: createTokenStore(null), tokenCoordinator: tokenCoordinator as any, fetchImpl,
+    });
+    await expect(client.request('/api/auth/login')).rejects.toThrow('请求失败（401）');
+    expect(tokenCoordinator.refreshAccessToken).not.toHaveBeenCalled();
+    await expect(client.request('/api/items')).rejects.toThrow('请求失败（401）');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns successful text and reports generic non-envelope failures', async () => {
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(textResponse('plain success'))
+      .mockResolvedValueOnce(textResponse('bad gateway', 502));
+    const client = new ApiClient({
+      baseUrl: 'https://api.test', tokenStore: createTokenStore(null), fetchImpl,
+    });
+    await expect(client.request('/plain')).resolves.toBe('plain success');
+    await expect(client.request('/failure')).rejects.toEqual(expect.objectContaining({
+      message: '请求失败（502）', status: 502, code: undefined,
+    }));
+  });
+
+  it('uses an envelope code when no message exists', async () => {
+    const client = new ApiClient({
+      baseUrl: 'https://api.test',
+      tokenStore: createTokenStore(null),
+      fetchImpl: jest.fn(async () => jsonResponse({ success: false, code: 'ONLY_CODE' }, 409)),
+    });
+    await expect(client.request('/conflict')).rejects.toEqual(expect.objectContaining({
+      name: 'ApiError', message: 'ONLY_CODE', status: 409, code: 'ONLY_CODE',
+    }));
+  });
+
+  it('treats an externally aborted request as a network error and removes its listener', async () => {
+    const external = new AbortController();
+    const remove = jest.spyOn(external.signal, 'removeEventListener');
+    const fetchImpl = jest.fn(async (_url: string, init?: RequestInit) => {
+      external.abort();
+      throw new Error(init?.signal?.aborted ? 'externally aborted' : 'not aborted');
+    });
+    const client = new ApiClient({
+      baseUrl: 'https://api.test', tokenStore: createTokenStore(null), fetchImpl,
+    });
+    await expect(client.request('/abort', { signal: external.signal })).rejects.toThrow('externally aborted');
+    expect(mobileTelemetry.recordApiRequest).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: 'network_error', message: 'externally aborted',
+    }));
+    expect(remove).toHaveBeenCalled();
   });
 });

@@ -35,4 +35,44 @@ describe('summarizeRtcStats', () => {
       network_type: 'wifi',
     });
   });
+
+  it('falls back to nominated candidate pairs and handles empty or invalid stats', () => {
+    const report = {
+      forEach(callback: (item: Record<string, unknown>) => void) {
+        [
+          { type: 'candidate-pair', selected: false, nominated: true, state: 'succeeded', localCandidateId: 'local', remoteCandidateId: 'remote' },
+          { id: 'local', type: 'local-candidate', candidateType: 'host' },
+          { id: 'remote', type: 'remote-candidate', candidateType: 'relay' },
+          { type: 'inbound-rtp', mediaType: 'audio', packetsReceived: 'bad', packetsLost: 2, jitter: -1 },
+        ].forEach(callback);
+      },
+    };
+
+    const result = summarizeRtcStats(report, { packetsReceived: 20, packetsLost: 20 });
+    expect(result.attributes).toMatchObject({
+      rtt_ms: 0,
+      jitter_ms: 0,
+      packets_received: 0,
+      packets_lost: 2,
+      packet_loss_pct: 0,
+      local_candidate_type: 'host',
+      remote_candidate_type: 'relay',
+      turn_used: true,
+    });
+    expect(result.totals).toEqual({ packetsReceived: 0, packetsLost: 2 });
+  });
+
+  it('returns safe defaults when report is absent or has no selected pair', () => {
+    expect(summarizeRtcStats(null)).toEqual(expect.objectContaining({
+      attributes: expect.objectContaining({
+        packets_received: 0,
+        packets_lost: 0,
+        packet_loss_pct: 0,
+        local_candidate_type: 'unknown',
+        remote_candidate_type: 'unknown',
+        turn_used: false,
+      }),
+      totals: { packetsReceived: 0, packetsLost: 0 },
+    }));
+  });
 });

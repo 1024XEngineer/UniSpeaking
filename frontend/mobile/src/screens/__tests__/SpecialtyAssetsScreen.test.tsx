@@ -1,12 +1,23 @@
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import { useRecordingPlayback } from '@/features/ielts/useRecordingPlayback';
-
-import { IeltsAssetReport, InterviewAssetReport } from '../SpecialtyAssetsScreen';
 
 jest.mock('@/features/ielts/useRecordingPlayback', () => ({
   useRecordingPlayback: jest.fn(),
 }));
+
+const mockGetReport = jest.fn();
+const mockDownloadRecording = jest.fn();
+const mockAudioPlayer = { play: jest.fn(), pause: jest.fn(), remove: jest.fn() };
+
+jest.mock('@/features/interview/InterviewAssetService', () => ({
+  InterviewAssetService: jest.fn(() => ({ getReport: mockGetReport })),
+  InterviewRecordingClient: jest.fn(() => ({ download: mockDownloadRecording })),
+}));
+
+jest.mock('expo-audio', () => ({ createAudioPlayer: jest.fn(() => mockAudioPlayer) }));
+
+import { IeltsAssetReport, InterviewAssetRemoteReport, InterviewAssetReport } from '../SpecialtyAssetsScreen';
 
 const mockedPlayback = jest.mocked(useRecordingPlayback);
 
@@ -19,6 +30,9 @@ describe('specialty asset reports', () => {
       toggle: jest.fn(),
       stop: jest.fn(),
     });
+    mockGetReport.mockReset();
+    mockDownloadRecording.mockReset();
+    Object.values(mockAudioPlayer).forEach((mock) => mock.mockReset());
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -82,6 +96,95 @@ describe('specialty asset reports', () => {
     expect(screen.getByText('结构清晰但需量化结果。')).toBeTruthy();
     expect(screen.getByText('能力 6')).toBeTruthy();
     expect(screen.getByText('快速复练')).toBeTruthy();
+    screen.unmount();
+  });
+
+  it('renders a completed remote report and controls downloaded audio', async () => {
+    mockGetReport.mockResolvedValue({ status: 'COMPLETED', report: {
+      overallScore: 81.6, summary: '结构清晰。', dimensions: [
+        { dimension: 'FLUENCY', score: 82.4, evaluation: '表达顺畅', advice: '增加量化结果' },
+        { dimension: 'CUSTOM', score: null, evaluation: null, advice: null },
+        { dimension: 'GRAMMAR_CONTROL', score: 75, evaluation: '', advice: null },
+      ],
+    } });
+    const recordingAsset = { uri: 'file:///interview.wav', remove: jest.fn() };
+    mockDownloadRecording.mockResolvedValue(recordingAsset);
+    const onBack = jest.fn();
+    const onPractice = jest.fn();
+    const asset = {
+      sceneId: 'scene-1', jobTitle: '产品经理', difficulty: 'HARD', practiceCount: 3,
+      latestOverallScore: 82, latestPracticedAt: '2026-08-24T10:00:00Z', createdAt: '2026-08-01T10:00:00Z',
+      latestSessionId: 'session-1', latestReportStatus: 'COMPLETED',
+    } as never;
+    const screen = await render(<InterviewAssetRemoteReport asset={asset} onBack={onBack} onPractice={onPractice} />);
+
+    await waitFor(() => expect(screen.getByText('结构清晰。')).toBeTruthy());
+    expect(screen.getByText('CUSTOM')).toBeTruthy();
+    expect(screen.getByText('暂无法评分')).toBeTruthy();
+    expect(screen.getByText('暂无评估说明。')).toBeTruthy();
+    await fireEvent.press(screen.getByText('播放上一次完整录音'));
+    await waitFor(() => expect(mockAudioPlayer.play).toHaveBeenCalledTimes(1));
+    await fireEvent.press(screen.getByText('暂停上一次完整录音'));
+    expect(mockAudioPlayer.pause).toHaveBeenCalledTimes(1);
+    await fireEvent.press(screen.getByText('播放上一次完整录音'));
+    await waitFor(() => expect(screen.getByText('暂停上一次完整录音')).toBeTruthy());
+    expect(mockAudioPlayer.play).toHaveBeenCalledTimes(2);
+    await fireEvent.press(screen.getByText('复练本岗位'));
+    expect(onPractice).toHaveBeenCalled();
+    await fireEvent.press(screen.getByRole('button', { name: '返回' }));
+    expect(onBack).toHaveBeenCalled();
+    screen.unmount();
+  });
+
+  it('shows a missing remote report state without a session', async () => {
+    const withoutSession = {
+      sceneId: 'scene-empty', jobTitle: '', difficulty: 'EASY', practiceCount: 0,
+      latestOverallScore: null, latestPracticedAt: null, createdAt: '2026-08-01T10:00:00Z',
+      latestSessionId: null, latestReportStatus: null,
+    } as never;
+    const empty = await render(<InterviewAssetRemoteReport asset={withoutSession} onBack={jest.fn()} onPractice={jest.fn()} />);
+    expect(empty.getByText('未命名岗位')).toBeTruthy();
+    expect(empty.getByText('尚未完成面试')).toBeTruthy();
+    expect(empty.getByText('播放上一次完整录音')).toBeDisabled();
+    empty.unmount();
+  });
+
+  it('shows a failed remote report status', async () => {
+    const asset = {
+      sceneId: 'scene-2', jobTitle: '', difficulty: 'EASY', practiceCount: 0,
+      latestOverallScore: null, latestPracticedAt: null, createdAt: '2026-08-01T10:00:00Z',
+      latestSessionId: 'session-2', latestReportStatus: 'FAILED',
+    } as never;
+    mockGetReport.mockResolvedValueOnce({ status: 'FAILED', failureReason: '有效音频不足' });
+    const failed = await render(<InterviewAssetRemoteReport asset={asset} onBack={jest.fn()} onPractice={jest.fn()} />);
+    await waitFor(() => expect(failed.getByText('有效音频不足')).toBeTruthy());
+    failed.unmount();
+  });
+
+  it('shows a processing remote report status', async () => {
+    const asset = {
+      sceneId: 'scene-2', jobTitle: '', difficulty: 'EASY', practiceCount: 0,
+      latestOverallScore: null, latestPracticedAt: null, createdAt: '2026-08-01T10:00:00Z',
+      latestSessionId: 'session-2', latestReportStatus: 'PROCESSING',
+    } as never;
+    mockGetReport.mockResolvedValueOnce({ status: 'PROCESSING' });
+    const processing = await render(<InterviewAssetRemoteReport asset={asset} onBack={jest.fn()} onPractice={jest.fn()} />);
+    await waitFor(() => expect(processing.getByText('报告生成中，请稍后刷新。')).toBeTruthy());
+    processing.unmount();
+  });
+
+  it('shows report and recording failures including non-Error fallbacks', async () => {
+    const asset = {
+      sceneId: 'scene-3', jobTitle: '工程师', difficulty: null, practiceCount: 1,
+      latestOverallScore: null, latestPracticedAt: null, createdAt: '2026-08-01',
+      latestSessionId: 'session-3', latestReportStatus: 'PROCESSING',
+    } as never;
+    mockGetReport.mockRejectedValueOnce('report failed');
+    mockDownloadRecording.mockRejectedValueOnce('audio failed');
+    const screen = await render(<InterviewAssetRemoteReport asset={asset} onBack={jest.fn()} onPractice={jest.fn()} />);
+    await waitFor(() => expect(screen.getByText('报告读取失败')).toBeTruthy());
+    await fireEvent.press(screen.getByText('播放上一次完整录音'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('完整录音播放失败'));
     screen.unmount();
   });
 });

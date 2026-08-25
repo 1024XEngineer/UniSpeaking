@@ -31,11 +31,11 @@ function createInterviewAssetService() {
   }));
 }
 
-function assetDate(value: string | null | undefined) {
+export function assetDate(value: string | null | undefined) {
   return value ? value.slice(0, 10) : '待练习';
 }
 
-function difficultyLabel(value: string | null | undefined) {
+export function difficultyLabel(value: string | null | undefined) {
   return value === 'EASY' ? '简单' : value === 'HARD' ? '困难' : '标准';
 }
 
@@ -120,7 +120,7 @@ function themedCard(palette: AssetPalette) {
   return { borderColor: palette.border, backgroundColor: palette.paper, shadowColor: palette.accent };
 }
 
-function buildIeltsWeeklyTraining(records: readonly IeltsLearningRecord[]) {
+export function buildIeltsWeeklyTraining(records: readonly IeltsLearningRecord[]) {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const values = Array.from({ length: 7 }, () => 0);

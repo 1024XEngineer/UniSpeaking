@@ -81,19 +81,21 @@ function previewText(value: string, fallback: string, maxLength: number) {
   return chineseCharacterPattern.test(source) ? source.slice(0, maxLength) : fallback;
 }
 
-function StageProgressRail({
+export function StageProgressRail({
   stage,
   unlockedStage,
   onSelect,
   onCollapsedChange,
+  initialCollapsed = false,
 }: {
   stage: TrainingStage;
   unlockedStage: number;
   onSelect: (stage: TrainingStage) => void;
   onCollapsedChange?: (collapsed: boolean) => void;
+  initialCollapsed?: boolean;
 }) {
   const [railWidth, setRailWidth] = useState(0);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [collapseProgress] = useState(() => new Animated.Value(0));
   const activeIndex = stages.findIndex((item) => item.key === stage);
 

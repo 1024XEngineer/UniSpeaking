@@ -147,6 +147,29 @@ function NicknameProbe() {
   return <Text testID="nickname">{model.nickname}</Text>;
 }
 
+function CollectionProbe() {
+  const model = useAppModel();
+  return <View>
+    <Text testID="collection-counts">{`${model.sceneRecords.length}/${model.ieltsRecords.length}/${model.interviewRecords.length}/${model.membership}`}</Text>
+    <Pressable accessibilityLabel="mutate-collections" onPress={() => {
+      model.addSceneRecord({ id: 'scene-new' } as any);
+      model.addSceneRecord({ id: 'scene-new' } as any);
+      model.addIeltsRecord({ id: 'ielts-new' } as any);
+      model.addIeltsRecord({ id: 'ielts-new' } as any);
+      model.addInterviewRecord({ id: 'interview-new' } as any);
+      model.addInterviewRecord({ id: 'interview-new' } as any);
+      model.removeSceneRecord('scene-new');
+      model.setMembership('专业版');
+    }} />
+    <Pressable accessibilityLabel="set-invalid-level" onPress={() => model.setLevel('missing-level')} />
+    <Pressable accessibilityLabel="save-invalid-settings" onPress={() => {
+      void model.completeOnboarding();
+      void model.saveLevel('missing-level');
+      void model.saveConversationSettings({ speed: '自然', level: 'missing-level', teacher: teachers[0] });
+    }} />
+  </View>;
+}
+
 describe('AppModelProvider authentication binding', () => {
   it('starts without a default nickname for an anonymous session', async () => {
     const controller = createController({
@@ -296,5 +319,17 @@ describe('AppModelProvider authentication binding', () => {
       }),
     );
     expect(controller.updatePreference).toHaveBeenCalledTimes(1);
+  });
+
+  it('deduplicates local records, removes scenes, and applies invalid-level fallbacks', async () => {
+    const controller = createController(authenticatedState);
+    const screen = await render(<AppModelProvider authController={controller}><CollectionProbe /></AppModelProvider>);
+    await fireEvent.press(screen.getByLabelText('mutate-collections'));
+    await waitFor(() => expect(screen.getByTestId('collection-counts').props.children).toMatch(/\/1\/专业版$/));
+    await fireEvent.press(screen.getByLabelText('set-invalid-level'));
+    await fireEvent.press(screen.getByLabelText('save-invalid-settings'));
+    await waitFor(() => expect(controller.updatePreference).toHaveBeenCalledTimes(3));
+    expect(controller.updatePreference).toHaveBeenCalledWith(expect.objectContaining({ cefrLevel: 'A' }));
+    screen.unmount();
   });
 });

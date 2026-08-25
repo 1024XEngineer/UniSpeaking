@@ -85,6 +85,51 @@ async function flushMicrotasks() {
 }
 
 describe('RealtimeSessionController', () => {
+  it('ignores malformed provider payloads and classifies transport failures', async () => {
+    const dependencies = createDependencies();
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'free_chat', voice: 'Harvey', model: 'qwen3.5-omni-flash-realtime', speechSpeed: 'NATURAL',
+    });
+
+    await controller.handleProviderMessage('{not-json');
+    expect(controller.getSnapshot().error).toBeNull();
+    dependencies.transport.emit({ type: 'ice.failed', message: 'ICE failed' });
+    await flushMicrotasks();
+    expect(controller.getSnapshot().error).toEqual(expect.objectContaining({ code: 'ICE_FAILED', message: 'ICE failed' }));
+    dependencies.transport.emit({ type: 'datachannel.failed' });
+    await flushMicrotasks();
+    expect(controller.getSnapshot().error).toEqual(expect.objectContaining({ code: 'DATA_CHANNEL_FAILED' }));
+  });
+
+  it('handles assistant deltas, provider cancellation races, and ordinary provider errors', async () => {
+    const dependencies = createDependencies();
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'scene', sceneId: 'scene-1', voice: 'Harvey', model: 'qwen3.5-omni-flash-realtime', speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    await controller.handleProviderMessage(JSON.stringify({ type: 'session.updated' }));
+    await controller.handleProviderMessage(JSON.stringify({ type: 'response.audio_transcript.delta', delta: 'hello' }));
+    expect(controller.getSnapshot().assistantTranscript).toBe('hello');
+    await controller.handleProviderMessage(JSON.stringify({
+      type: 'error', error: { message: 'response already has an active response' },
+    }));
+    await controller.handleProviderMessage(JSON.stringify({
+      type: 'error', error: { message: 'provider exploded' },
+    }));
+    expect(controller.getSnapshot().error).toEqual(expect.objectContaining({ code: 'PROVIDER_ERROR' }));
+  });
+
+  it('ends an idle session and does not duplicate cleanup', async () => {
+    const dependencies = createDependencies();
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'free_chat', voice: 'Harvey', model: 'qwen3.5-omni-flash-realtime', speechSpeed: 'NATURAL',
+    });
+    await controller.end();
+    await controller.end();
+    expect(dependencies.transport.close).toHaveBeenCalledTimes(1);
+    expect(dependencies.sessionSocket.close).toHaveBeenCalledTimes(1);
+  });
+
   it('exchanges SDP through Java and waits for provider configuration before listening', async () => {
     const dependencies = createDependencies();
     const controller = new RealtimeSessionController(dependencies, {
@@ -2032,5 +2077,332 @@ describe('RealtimeSessionController', () => {
         ieltsStateRestored: true,
       }),
     );
+  });
+
+  it('publishes initial snapshots, supports unsubscribe, and generates default ids/timestamps', async () => {
+    const dependencies = createDependencies();
+    delete dependencies.createEventId;
+    delete dependencies.now;
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'free_chat', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    const listener = jest.fn();
+    const unsubscribe = controller.subscribe(listener);
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ state: 'idle' }));
+    await controller.start();
+    await controller.handleProviderMessage(JSON.stringify({ type: 'session.created' }));
+    expect(dependencies.transport.sendProviderEvent).toHaveBeenCalledWith(expect.objectContaining({
+      event_id: expect.stringMatching(/^event_/),
+    }));
+    unsubscribe();
+    const count = listener.mock.calls.length;
+    controller.setMuted(true);
+    expect(listener).toHaveBeenCalledTimes(count);
+  });
+
+  it('classifies missing backend SDP/prompt and optional transport session binding', async () => {
+    for (const backend of [
+      { sessionId: 'session-1', answerSdp: '', voiceId: 'voice', systemPrompt: 'prompt' },
+      { sessionId: 'session-1', answerSdp: 'answer', voiceId: 'voice', systemPrompt: '' },
+    ]) {
+      const dependencies = createDependencies();
+      dependencies.transport.bindSession = jest.fn();
+      dependencies.sessionApi.start.mockResolvedValueOnce(backend as any);
+      const controller = new RealtimeSessionController(dependencies, {
+        mode: 'free_chat', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+      });
+      await expect(controller.start()).rejects.toThrow(/后端没有返回/);
+      expect(controller.getSnapshot().error).toEqual(expect.objectContaining({ code: 'SDP_EXCHANGE_FAILED' }));
+    }
+
+    const dependencies = createDependencies();
+    dependencies.transport.bindSession = jest.fn();
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'free_chat', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    expect(dependencies.transport.bindSession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('guards Part 2 transitions and completes the Part 2 response signal', async () => {
+    const invalid = new RealtimeSessionController(createDependencies(), {
+      mode: 'ielts', ieltsId: 'ielts-1', ieltsPart: 'PART_1', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    await expect(invalid.transitionPart2('ANSWER_COMPLETE')).rejects.toThrow('当前会话不是 IELTS Part 2');
+
+    const dependencies = createDependencies();
+    dependencies.ieltsDialogue = {
+      advanceState: jest.fn(),
+      evaluateTurn: jest.fn(),
+      advancePart2State: jest.fn(),
+      getDialogueState: jest.fn(),
+      getPart2State: jest.fn(async () => ({
+        sceneId: 'ielts-1', sessionId: 'session-1', phase: 'FINISHED', completed: true,
+        controlInstruction: 'Part 2 is complete.',
+      })),
+    };
+    dependencies.sessionApi.start.mockResolvedValue({
+      sessionId: 'session-1', answerSdp: 'answer', voiceId: 'Harvey', systemPrompt: 'prompt', currentStage: 'PART_2',
+    });
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'ielts', ieltsId: 'ielts-1', ieltsPart: 'PART_2', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    await controller.handleProviderMessage(JSON.stringify({ type: 'response.done', response: { status: 'completed' } }));
+    expect(controller.getSnapshot()).toEqual(expect.objectContaining({
+      ieltsDialogueCompleted: true, ieltsPart2CompletionReady: true,
+    }));
+  });
+
+  it('forces Part 3 timeout once and attaches a late transcript to that turn', async () => {
+    const dependencies = createDependencies();
+    const state = {
+      sceneId: 'ielts-1', sessionId: 'session-1', part: 'PART_3' as const,
+      openingCompleted: true, answeredQuestions: 1, totalQuestions: 4, completed: false,
+      controlInstruction: 'Move to the next question.',
+    };
+    const ieltsDialogue = {
+      advanceState: jest.fn(async () => state),
+      evaluateTurn: jest.fn(async () => ({ score: 80 })),
+      advancePart2State: jest.fn(),
+      getDialogueState: jest.fn(async () => ({ ...state, answeredQuestions: 0 })),
+      getPart2State: jest.fn(),
+    };
+    dependencies.ieltsDialogue = ieltsDialogue;
+    dependencies.sessionApi.start.mockResolvedValue({
+      sessionId: 'session-1', answerSdp: 'answer', voiceId: 'Harvey', systemPrompt: 'prompt', currentStage: 'PART_3',
+    });
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'ielts', ieltsId: 'ielts-1', ieltsPart: 'PART_3', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    await expect(controller.forcePart3Timeout()).resolves.toEqual(state);
+    expect(ieltsDialogue.advanceState).toHaveBeenCalledWith('session-1', 1, true);
+    await controller.handleProviderMessage(JSON.stringify({
+      type: 'conversation.item.input_audio_transcription.completed', item_id: 'late-turn', transcript: 'My late answer.',
+    }));
+    await controller.waitForTurnEvaluations();
+    expect(ieltsDialogue.evaluateTurn).toHaveBeenCalledWith('session-1', 1, 'My late answer.', null);
+
+    ieltsDialogue.advanceState.mockResolvedValueOnce({ ...state, completed: true });
+    await controller.forcePart3Timeout();
+    await expect(controller.forcePart3Timeout()).resolves.toBeNull();
+  });
+
+  it('tolerates IELTS restore/state/evaluation failures and audio capture failures', async () => {
+    const dependencies = createDependencies();
+    dependencies.turnAudioCapture = {
+      start: jest.fn(async () => { throw new Error('capture unavailable'); }),
+      stop: jest.fn(() => true),
+      take: jest.fn(async () => { throw new Error('take failed'); }),
+      release: jest.fn(async () => undefined),
+    };
+    const ieltsDialogue = {
+      advanceState: jest.fn(async () => { throw new Error('advance failed'); }),
+      evaluateTurn: jest.fn(async () => { throw new Error('evaluate failed'); }),
+      advancePart2State: jest.fn(),
+      getDialogueState: jest.fn(async () => { throw new Error('restore failed'); }),
+      getPart2State: jest.fn(),
+    };
+    dependencies.ieltsDialogue = ieltsDialogue;
+    dependencies.sessionApi.start.mockResolvedValue({
+      sessionId: 'session-1', answerSdp: 'answer', voiceId: 'Harvey', systemPrompt: 'prompt', currentStage: 'PART_1',
+    });
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'ielts', ieltsId: 'ielts-1', ieltsPart: 'PART_1', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    await expect(controller.restoreIeltsState()).resolves.toBeNull();
+    await controller.handleProviderMessage(JSON.stringify({ type: 'session.updated' }));
+    await controller.handleProviderMessage(JSON.stringify({ type: 'response.done', response: { status: 'completed' } }));
+    await controller.handleProviderMessage(JSON.stringify({
+      type: 'conversation.item.input_audio_transcription.completed', transcript: 'A complete answer.',
+    }));
+    await controller.waitForTurnEvaluations();
+    expect(controller.getSnapshot().error).toBeNull();
+  });
+
+  it('covers restoration guards, completed restoration, and provider transport forwarding', async () => {
+    const freeDependencies = createDependencies();
+    const freeController = new RealtimeSessionController(freeDependencies, {
+      mode: 'free_chat', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    await expect(freeController.restoreIeltsState()).resolves.toBeNull();
+    freeDependencies.transport.emit({
+      type: 'provider.message',
+      data: JSON.stringify({ type: 'session.updated' }),
+    });
+    await flushMicrotasks();
+    freeDependencies.transport.emit({ type: 'peer.failed' } as unknown as RealtimeTransportEvent);
+    await flushMicrotasks();
+    expect(freeController.getSnapshot().error).toEqual(expect.objectContaining({
+      code: 'PEER_CONNECTION_FAILED',
+      message: '实时连接失败',
+    }));
+
+    const dependencies = createDependencies();
+    dependencies.ieltsDialogue = {
+      advanceState: jest.fn(), evaluateTurn: jest.fn(), advancePart2State: jest.fn(),
+      getPart2State: jest.fn(),
+      getDialogueState: jest.fn(async () => ({
+        sceneId: 'ielts-1', sessionId: 'session-1', part: 'PART_3' as const,
+        openingCompleted: true, answeredQuestions: 3, totalQuestions: 3,
+        completed: true, controlInstruction: 'Finish now.',
+      })),
+    };
+    dependencies.sessionApi.start.mockResolvedValue({
+      sessionId: 'session-1', answerSdp: 'answer', voiceId: 'Harvey',
+      systemPrompt: 'prompt', currentStage: 'PART_3',
+    });
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'ielts', ieltsId: 'ielts-1', ieltsPart: 'PART_3', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    expect(controller.getSnapshot()).toEqual(expect.objectContaining({
+      ieltsDialogueCompleted: true, ieltsStateRestored: true,
+    }));
+    await expect(controller.restoreIeltsState()).resolves.toBeNull();
+  });
+
+  it('covers transcript de-duplication and persistence retry paths', async () => {
+    const dependencies = createDependencies();
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'free_chat', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    const internal = controller as any;
+
+    internal.captureTranscript(0, '   ');
+    internal.captureTranscript(0, 'local answer');
+    internal.captureTranscript(0, 'local answer');
+    internal.captureTranscript(1, 'first', 'same-id');
+    internal.captureTranscript(1, 'updated', 'same-id');
+    expect(controller.getSnapshot().transcriptHistory).toEqual([
+      expect.objectContaining({ content: 'local answer' }),
+      expect.objectContaining({ content: 'updated' }),
+    ]);
+
+    await internal.persistTranscript(0, 'once', 'provider-id');
+    await internal.persistTranscript(0, 'ignored', 'provider-id');
+    expect(dependencies.sessionSocket.persistMessage).toHaveBeenCalledTimes(1);
+    dependencies.sessionSocket.persistMessage.mockRejectedValueOnce(new Error('socket failed'));
+    await expect(internal.persistTranscript(1, 'retry', 'retry-id')).rejects.toThrow('socket failed');
+    dependencies.sessionSocket.persistMessage.mockResolvedValueOnce(undefined);
+    await internal.persistTranscript(1, 'retry', 'retry-id');
+    dependencies.sessionSocket.persistMessage.mockRejectedValueOnce(new Error('anonymous failed'));
+    await expect(internal.persistTranscript(1, 'anonymous')).rejects.toThrow('anonymous failed');
+  });
+
+  it('covers audio capture guards, IELTS release branches, and response dispatch failures', async () => {
+    const dependencies = createDependencies();
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'free_chat', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    const internal = controller as any;
+    await expect(internal.beginTurnAudioCapture()).resolves.toBeUndefined();
+    await expect(internal.takeTurnAudioUri()).resolves.toBeNull();
+    await expect(internal.coordinateIeltsTurn('answer')).rejects.toThrow('IELTS 对话服务尚未配置');
+    expect(internal.flushPendingResponse()).toBe(false);
+
+    dependencies.transport.sendProviderEvent.mockImplementationOnce(() => {
+      throw new Error('send failed');
+    });
+    expect(() => internal.dispatchResponseRequest({
+      sessionUpdate: { type: 'session.update' },
+      responseCreate: { type: 'response.create' },
+    })).toThrow('send failed');
+    expect(internal.responseInFlight).toBe(false);
+    dependencies.transport.sendProviderEvent.mockImplementation(() => undefined);
+    internal.dispatchResponseRequest({
+      sessionUpdate: { type: 'session.update' },
+      responseCreate: { type: 'response.create' },
+    });
+    expect(dependencies.transport.sendProviderEvent).toHaveBeenCalledWith({ type: 'session.update' });
+
+    internal.ieltsActivePart = 'PART_2';
+    internal.ieltsDialogueCompleted = false;
+    internal.handleIeltsAssistantResponseCompleted();
+    expect(controller.getSnapshot().ieltsInputReadyTick).toBe(1);
+    internal.ieltsActivePart = null;
+    internal.releaseIeltsInput();
+    internal.applyRestoredInstruction('instruction');
+  });
+
+  it('covers scene configuration guards and timer cleanup paths', async () => {
+    jest.useFakeTimers();
+    const dependencies = createDependencies();
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'scene', sceneId: 'scene-1', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    const internal = controller as any;
+    expect(() => internal.coordinateSceneTurn('answer')).toThrow('场景对话服务尚未配置');
+
+    internal.scenePendingTranscript = { text: 'well, um', itemId: 'pending' };
+    internal.scheduleSceneContinuation();
+    internal.sceneCompletionPending = true;
+    jest.runOnlyPendingTimers();
+    await flushMicrotasks();
+    internal.clearSceneContinuationTimer();
+
+    internal.sceneTurnWithoutCapture = true;
+    internal.sceneCompletionPending = false;
+    internal.scheduleSceneAfterAudioDrain();
+    internal.sceneTurnWithoutCapture = false;
+    internal.sceneCompletionPending = true;
+    internal.scheduleSceneAfterAudioDrain();
+    internal.clearSceneAudioDrain();
+
+    internal.machine.state = 'ready';
+    internal.responseInFlight = true;
+    await internal.enableSceneInputAfterRecordingStarts();
+    jest.useRealTimers();
+  });
+
+  it('covers remaining reset, provider retry, capture, and scene observation failures', async () => {
+    const resetDependencies = createDependencies();
+    const resetController = new RealtimeSessionController(resetDependencies, {
+      mode: 'free_chat', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    (resetController as any).machine.state = 'error';
+    await resetController.start();
+    expect(resetController.getSnapshot().state).toBe('connecting');
+
+    const dependencies = createDependencies();
+    dependencies.turnAudioCapture = {
+      start: jest.fn(async () => { throw new Error('capture failed'); }),
+      stop: jest.fn(() => true), take: jest.fn(async () => null), release: jest.fn(async () => undefined),
+    };
+    dependencies.sceneDialogue = {
+      evaluateTurn: jest.fn(async () => { throw new Error('evaluation failed'); }),
+      advanceState: jest.fn(async () => { throw new Error('state failed'); }),
+      complete: jest.fn(),
+    };
+    const controller = new RealtimeSessionController(dependencies, {
+      mode: 'scene', sceneId: 'scene-1', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    await controller.start();
+    const internal = controller as any;
+    internal.inputEnabled = false;
+    await internal.applyProviderEvent({ type: 'user.speech.started' });
+    await internal.applyProviderEvent({ type: 'user.speech.stopped' });
+    await internal.applyProviderEvent({ type: 'user.transcript.delta', text: 'ignored' });
+    await internal.applyProviderEvent({ type: 'user.transcript.preview', text: 'ignored' });
+
+    internal.currentResponseRequest = { responseCreate: { type: 'response.create' } };
+    internal.pendingResponseRequest = null;
+    await internal.applyProviderEvent({ type: 'provider.error', message: 'conversation already has an active response' });
+    expect(internal.pendingResponseRequest).not.toBeNull();
+
+    internal.inputEnabled = true;
+    await internal.beginTurnAudioCapture();
+    internal.coordinateSceneTurn('observe this turn');
+    await flushMicrotasks();
+    expect(controller.getSnapshot().error).toBeNull();
+
+    dependencies.sessionSocket.persistMessage.mockRejectedValueOnce(new Error('persist failed'));
+    const freeController = new RealtimeSessionController(dependencies, {
+      mode: 'free_chat', voice: 'Harvey', model: 'model', speechSpeed: 'NATURAL',
+    });
+    await expect((freeController as any).handleCompletedUserTranscript({ text: 'hello' }))
+      .rejects.toThrow('persist failed');
   });
 });

@@ -24,7 +24,7 @@ import { authErrorMessage } from '@/features/auth/AuthSessionController';
 import { useAppModel } from '@/model/AppModel';
 import { colors, levels } from '@/theme/tokens';
 
-function AnimatedSloganLine({ text, delay }: { text: string; delay: number }) {
+export function AnimatedSloganLine({ text, delay }: { text: string; delay: number }) {
   const characters = Array.from(text);
   const [progress] = useState(() => characters.map(() => new Animated.Value(0)));
 
