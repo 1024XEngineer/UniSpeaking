@@ -22,7 +22,7 @@ type SessionSocketAck = {
 };
 
 type PendingAck = {
-  operation: 'message' | 'end' | 'bind';
+  operation: 'message' | 'end' | 'bind' | 'activate';
   resolve: (ack: SessionSocketAck) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -127,6 +127,10 @@ export class SessionMessageSocket {
     });
   }
 
+  activate() {
+    return this.sendFrame('activate', null);
+  }
+
   end(stopTime: string) {
     return this.sendFrame('end', null, stopTime);
   }
@@ -149,7 +153,7 @@ export class SessionMessageSocket {
   }
 
   private async sendFrame(
-    type: 'message' | 'end' | 'bind',
+    type: 'message' | 'end' | 'bind' | 'activate',
     message: { owner: 0 | 1; content: string; audio: null } | null,
     stopTime: string | null = null,
     providerSessionId: string | null = null,

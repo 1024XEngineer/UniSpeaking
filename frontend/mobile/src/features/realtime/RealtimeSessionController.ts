@@ -73,6 +73,7 @@ export type RealtimeSessionDependencies = {
   };
   sessionSocket: {
     connect(sessionId: string): Promise<void>;
+    activate?(): Promise<unknown>;
     persistMessage(message: SessionMessage): Promise<void>;
     end(stopTime: string): Promise<unknown>;
     close(): void;
@@ -271,6 +272,7 @@ export class RealtimeSessionController {
   private transcriptHistory: RealtimeTranscriptEntry[] = [];
   private transcriptSequence = 0;
   private providerConfigured = false;
+  private sessionUpdateRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private initialResponseRequested = false;
   private responseInFlight = false;
   private currentResponseRequest: PendingResponseRequest | null = null;
@@ -389,6 +391,8 @@ export class RealtimeSessionController {
 
       failureCode = 'DATA_CHANNEL_FAILED';
       await this.dependencies.transport.waitForDataChannel();
+      await this.dependencies.sessionSocket.activate?.();
+      this.sendInitialSessionUpdate();
       if (this.options.mode === 'ielts') {
         await this.restoreIeltsState();
       }
@@ -576,6 +580,7 @@ export class RealtimeSessionController {
         : event.type === 'datachannel.failed'
           ? 'DATA_CHANNEL_FAILED'
           : 'PEER_CONNECTION_FAILED';
+    this.clearSessionUpdateRetry();
     this.inputEnabled = false;
     this.applyAudioEnabled();
     void this.releaseTurnAudioCapture();
@@ -593,18 +598,12 @@ export class RealtimeSessionController {
   private async applyProviderEvent(event: RealtimeDomainEvent) {
     switch (event.type) {
       case 'session.created':
-        if (!this.providerConfigured && this.backendSession) {
-          this.dependencies.transport.sendProviderEvent(
-            buildSessionUpdate(
-              this.createEventId(),
-              this.backendSession,
-              this.options,
-            ),
-          );
-          this.providerConfigured = true;
-        }
+        // session.created may arrive before or after the local data channel opens.
+        // Configuration is initiated on channel open so a delayed/lost event cannot
+        // leave the native client permanently stuck in `connecting`.
         return;
       case 'session.updated':
+        this.clearSessionUpdateRetry();
         if (this.machine.state === 'connecting') {
           this.transition({ type: 'CHANNEL_OPEN' });
         }
@@ -765,6 +764,37 @@ export class RealtimeSessionController {
     }
   }
 
+  private sendInitialSessionUpdate() {
+    if (!this.backendSession) return;
+    this.dependencies.transport.sendProviderEvent(
+      buildSessionUpdate(
+        this.createEventId(),
+        this.backendSession,
+        this.options,
+      ),
+    );
+    this.providerConfigured = true;
+    this.clearSessionUpdateRetry();
+    this.sessionUpdateRetryTimer = setTimeout(() => {
+      this.sessionUpdateRetryTimer = null;
+      if (this.machine.state !== 'connecting' || !this.backendSession) return;
+      this.dependencies.transport.sendProviderEvent(
+        buildSessionUpdate(
+          this.createEventId(),
+          this.backendSession,
+          this.options,
+        ),
+      );
+    }, 2_000);
+    (this.sessionUpdateRetryTimer as unknown as { unref?: () => void }).unref?.();
+  }
+
+  private clearSessionUpdateRetry() {
+    if (!this.sessionUpdateRetryTimer) return;
+    clearTimeout(this.sessionUpdateRetryTimer);
+    this.sessionUpdateRetryTimer = null;
+  }
+
   private async persistTranscript(
     owner: 0 | 1,
     content: string,
@@ -809,6 +839,7 @@ export class RealtimeSessionController {
   }
 
   private async performEnd() {
+    this.clearSessionUpdateRetry();
     this.clearSceneAudioDrain();
     this.clearSceneContinuationTimer();
     this.scenePendingTranscript = null;
@@ -1337,6 +1368,7 @@ export class RealtimeSessionController {
   }
 
   private resetSessionValues() {
+    this.clearSessionUpdateRetry();
     this.clearSceneAudioDrain();
     this.clearSceneContinuationTimer();
     this.backendSession = null;

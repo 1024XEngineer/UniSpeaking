@@ -21,6 +21,7 @@ function createDependencies(): RealtimeSessionDependencies & {
   };
   sessionSocket: RealtimeSessionDependencies['sessionSocket'] & {
     connect: jest.Mock;
+    activate: jest.Mock;
     persistMessage: jest.Mock;
     end: jest.Mock;
     close: jest.Mock;
@@ -57,6 +58,7 @@ function createDependencies(): RealtimeSessionDependencies & {
     },
     sessionSocket: {
       connect: jest.fn(async () => undefined),
+      activate: jest.fn(async () => undefined),
       persistMessage: jest.fn(async () => undefined),
       end: jest.fn(async () => undefined),
       close: jest.fn(),
@@ -152,9 +154,18 @@ describe('RealtimeSessionController', () => {
     });
     expect(dependencies.transport.applyAnswer).toHaveBeenCalledWith('answer-sdp');
     expect(dependencies.sessionSocket.connect).toHaveBeenCalledWith('session-1');
+    expect(dependencies.sessionSocket.activate).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot().state).toBe('connecting');
+    expect(dependencies.transport.sendProviderEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'session.update' }),
+    );
 
     await controller.handleProviderMessage(JSON.stringify({ type: 'session.created' }));
+    expect(
+      dependencies.transport.sendProviderEvent.mock.calls.filter(
+        ([event]) => event.type === 'session.update',
+      ),
+    ).toHaveLength(1);
     expect(dependencies.transport.sendProviderEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'session.update',
