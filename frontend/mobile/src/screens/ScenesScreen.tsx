@@ -340,15 +340,20 @@ export function SceneCallStage({
     trainingAnalytics,
   );
 
+  const deliverCompletion = useCallback((completion: DialogueCompletion) => {
+    if (deliveredCompletion.current) return;
+    deliveredCompletion.current = completion;
+    onComplete(completion);
+  }, [onComplete]);
+
   useEffect(() => {
     if (
       session.completion &&
       session.completion !== deliveredCompletion.current
     ) {
-      deliveredCompletion.current = session.completion;
-      onComplete(session.completion);
+      deliverCompletion(session.completion);
     }
-  }, [onComplete, session.completion]);
+  }, [deliverCompletion, session.completion]);
 
   const translate = useCallback(
     (text: string) => translationApi.translateScene(scene.sceneId, text),
@@ -367,7 +372,35 @@ export function SceneCallStage({
           if (autoEnding.current) return;
           autoEnding.current = true;
           setEvaluationPending(true);
-          void session.end().catch(() => {
+          const hasUserSpeech = Boolean(
+            session.userTranscript.trim()
+              || session.transcriptHistory.some(
+                (entry) => entry.owner === 1 && entry.content.trim(),
+              ),
+          );
+          void session.end().then((result) => {
+            if (!hasUserSpeech && !deliveredCompletion.current) {
+              deliverCompletion({
+                sceneId: scene.sceneId,
+                sessionId: session.sessionId ?? '',
+                stopTime: new Date().toISOString(),
+              });
+            } else if (
+              result
+              && typeof result === 'object'
+              && 'sessionId' in result
+            ) {
+              deliverCompletion(result as DialogueCompletion);
+            }
+          }).catch(() => {
+            if (!hasUserSpeech) {
+              deliverCompletion({
+                sceneId: scene.sceneId,
+                sessionId: session.sessionId ?? '',
+                stopTime: new Date().toISOString(),
+              });
+              return;
+            }
             autoEnding.current = false;
             setEvaluationPending(false);
           });
@@ -893,12 +926,14 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
           )}
           <View style={styles.completionActions}>
             <Pressable accessibilityRole="button" onPress={finishTraining} style={[styles.completionActionButton, styles.completionBackButton]}>
-              <Text style={styles.completionBackText}>返回场景广场</Text>
+              <Text style={styles.completionBackText}>{completionScoreAvailable ? '返回场景广场' : '知道了'}</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" onPress={viewTrainingDetails} style={[styles.completionActionButton, styles.completionDetailsButton]}>
-              <Text style={styles.completionDetailsText}>查看详情</Text>
-              <AppIcon name="arrow-right" size={18} color={colors.white} />
-            </Pressable>
+            {completionScoreAvailable ? (
+              <Pressable accessibilityRole="button" onPress={viewTrainingDetails} style={[styles.completionActionButton, styles.completionDetailsButton]}>
+                <Text style={styles.completionDetailsText}>查看详情</Text>
+                <AppIcon name="arrow-right" size={18} color={colors.white} />
+              </Pressable>
+            ) : null}
           </View>
         </View>
       </View>
