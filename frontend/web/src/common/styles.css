@@ -3873,3 +3873,40 @@ button.ielts-training-cta:not(:disabled) svg { color: #fff !important; }
   .interview-assets-layout > article > header { align-items: flex-start; flex-direction: column; gap: 14px; }
   .interview-assets-report { grid-template-columns: 1fr; }
 }
+
+/* Mobile authentication only */
+@media (max-width: 760px) {
+  #root { min-height: 100dvh; }
+
+  .auth-layout {
+    min-height: 100vh;
+    min-height: 100dvh;
+    grid-template-columns: 1fr;
+  }
+  .auth-layout__aside {
+    min-height: 72px;
+    padding: 16px 20px;
+    justify-content: center;
+  }
+  .auth-layout__aside > div:not(.brand),
+  .auth-layout__aside > p { display: none; }
+  .auth-layout__aside .brand { gap: 9px; }
+  .auth-layout__aside .brand__mark { width: 38px; height: 38px; border-radius: 10px; }
+  .auth-layout__aside .brand__wordmark { width: 128px; }
+  .auth-panel {
+    width: min(100%, 520px);
+    margin: 0 auto;
+    padding: 34px 20px calc(42px + env(safe-area-inset-bottom, 0px));
+  }
+  .back-link { min-height: 44px; margin-bottom: 32px; }
+  .auth-panel__heading h1,
+  .verify-panel h1 { font-size: 36px; }
+  .auth-panel form { margin-top: 30px; gap: 18px; }
+  .auth-panel input { min-height: 52px; font-size: 16px; }
+  .auth-help { align-items: flex-start; flex-direction: column; }
+  .verify-panel { padding-top: 48px; }
+}
+
+@media (max-width: 380px) {
+  .auth-panel { padding-inline: 16px; }
+}
