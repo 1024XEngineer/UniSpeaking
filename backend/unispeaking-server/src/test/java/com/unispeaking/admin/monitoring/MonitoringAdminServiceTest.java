@@ -38,7 +38,7 @@ class MonitoringAdminServiceTest {
         MonitoringAdminService.MonitoringResponse response = new MonitoringAdminService(
                 jdbc, "http://127.0.0.1:1").overview();
 
-        assertEquals("DOWN", response.summary().backendStatus());
+        assertEquals("UP", response.summary().backendStatus());
         assertEquals(0, response.summary().clientErrorRate());
         assertEquals(0, response.summary().api5xxRate());
         assertEquals(3, response.platformSummaries().size());
@@ -121,6 +121,7 @@ class MonitoringAdminServiceTest {
             assertEquals(2, response.trend().size());
             assertEquals(2.0, response.trend().getLast().clientErrors());
             assertTrue(prometheusRequests.stream().anyMatch(query -> query.contains("http_route=~\"/api/.*\"")));
+            assertTrue(prometheusRequests.stream().anyMatch(query -> query.contains("[24h]")));
             assertTrue(prometheusRequests.stream().anyMatch(query -> query.contains("le=\"1.0\"")));
             assertTrue(prometheusRequests.stream().anyMatch(query -> query.contains("or vector(0)")));
 

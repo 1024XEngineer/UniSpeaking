@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getMonitoringOverview, grafanaDashboards, grafanaUrl } from './monitoringApi'
+import { formatDuration } from './monitoringFormat'
 
 describe('monitoringApi', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -31,5 +32,13 @@ describe('monitoringApi', () => {
       .toContain('/d/unispeaking-backend-logs/03-e5908e-e7abaf-e4b88e-e697a5-e5bf97?')
     expect(grafanaUrl(grafanaDashboards.logs, { 'var-platform': 'mobile' }))
       .toContain('var-platform=mobile')
+  })
+
+  it('keeps sub-second endpoint timings visible in milliseconds', () => {
+    expect(formatDuration(0)).toBe('0 ms')
+    expect(formatDuration(0.0035)).toBe('3.5 ms')
+    expect(formatDuration(0.7241)).toBe('724.1 ms')
+    expect(formatDuration(15.032)).toBe('15.03 s')
+    expect(formatDuration(60.2058)).toBe('60.21 s')
   })
 })

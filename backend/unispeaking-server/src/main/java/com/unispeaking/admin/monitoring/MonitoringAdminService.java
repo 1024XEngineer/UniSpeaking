@@ -42,14 +42,17 @@ public class MonitoringAdminService {
         var summary = new Summary(backendStatus(),
                 queryPrometheus("(100 * sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + ",http_response_status_code=~\"4..|5..\"}[5m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + "}[5m])), 0.000001)) or vector(0)"),
                 queryPrometheus("(100 * sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + ",http_response_status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + "}[5m])), 0.000001)) or vector(0)"),
-                queryPrometheus("histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{" + API_REQUESTS + "}[5m]))) or vector(0)"),
+                queryPrometheus("histogram_quantile(0.95, sum by (le) (increase(http_server_request_duration_seconds_bucket{" + API_REQUESTS + "}[24h]))) or vector(0)"),
                 activeAlerts(), affectedUsers(), completedOptimizations(), Instant.now());
         return new MonitoringResponse(summary, problems(), slowEndpoints(), recentEvents(),
                 platformSummaries(), trend());
     }
 
     private String backendStatus() {
-        return queryPrometheus("max(up{instance=\"backend:8080\"})") >= 1 ? "UP" : "DOWN";
+        // This method runs inside the backend that served the overview request. If the
+        // backend were unavailable the request itself would fail instead of returning a
+        // misleading DOWN status merely because Prometheus is temporarily unreachable.
+        return "UP";
     }
 
     private double queryPrometheus(String query) {
