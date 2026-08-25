@@ -47,6 +47,9 @@ dist/
 *.local
 !deploy/env/.env.example
 
+### Local CD verification ###
+.local-cd-verify/
+
 ### Runtime logs ###
 logs/
 data/
