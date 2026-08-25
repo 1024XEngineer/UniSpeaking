@@ -78,4 +78,30 @@ describe('createTurnAudioCapture', () => {
     expect(recorder.stop).toHaveBeenCalledTimes(1);
     expect(recorder.cancel).not.toHaveBeenCalled();
   });
+
+  it('guards duplicate lifecycle operations and lets take stop an active capture', async () => {
+    let finishStart!: () => void;
+    const recorder = {
+      start: jest.fn()
+        .mockImplementationOnce(() => new Promise<void>((resolve) => { finishStart = resolve; }))
+        .mockResolvedValue(undefined),
+      stop: jest.fn(async () => 'file:///direct.wav'),
+      cancel: jest.fn(async () => undefined),
+    };
+    const capture = createTurnAudioCapture(recorder);
+    expect(capture.stop()).toBe(false);
+    const starting = capture.start();
+    const duplicate = capture.start();
+    finishStart();
+    await Promise.all([starting, duplicate]);
+    await capture.start();
+    await expect(capture.take()).resolves.toBe('file:///direct.wav');
+    await capture.release();
+    await expect(capture.take()).resolves.toBeNull();
+
+    await capture.start();
+    capture.stop();
+    await capture.start();
+    await capture.release();
+  });
 });

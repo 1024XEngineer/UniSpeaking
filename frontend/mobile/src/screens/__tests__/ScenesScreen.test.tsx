@@ -1,4 +1,5 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { Alert, BackHandler, Platform } from 'react-native';
 
 import type { GeneratedScene, SceneFlowStage } from '@/features/scenes/SceneService';
 import { SceneTrainingController } from '@/features/scenes/SceneTrainingController';
@@ -12,6 +13,14 @@ const mockTranslateScene = jest.fn();
 
 jest.mock('@/features/conversation/TranscriptTranslationApi', () => ({
   createTranscriptTranslationApi: () => ({ translateScene: mockTranslateScene }),
+}));
+
+jest.mock('@siteed/audio-studio', () => ({
+  AudioStudioModule: {
+    requestPermissionsAsync: jest.fn(async () => ({ granted: true })),
+    startRecording: jest.fn(async () => undefined),
+    stopRecording: jest.fn(async () => null),
+  },
 }));
 
 jest.mock('react-native-reanimated', () => {
@@ -95,12 +104,31 @@ const scene: GeneratedScene = {
 import {
   sceneMetricsForReport,
   SceneCallStage,
+  StageProgressRail,
   ScenesHome,
   ScenesScreen,
   Training,
 } from '../ScenesScreen';
 
 describe('scene completion report mapping', () => {
+  it('lays out, collapses, expands, and selects the available training rail stages', async () => {
+    const onSelect = jest.fn();
+    const onCollapsedChange = jest.fn();
+    const screen = await render(
+      <StageProgressRail stage="read" unlockedStage={2} initialCollapsed onSelect={onSelect} onCollapsedChange={onCollapsedChange} />,
+    );
+    const rail = screen.getAllByLabelText(/训练进度/).find((node) => typeof node.props.onResponderRelease === 'function')!;
+    fireEvent(rail, 'layout', { nativeEvent: { layout: { width: 320 } } });
+    await waitFor(() => expect(screen.getByLabelText('展开训练进度')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('展开训练进度'));
+    const tabs = screen.getAllByRole('tab');
+    await fireEvent.press(tabs[0]);
+    await fireEvent.press(tabs[2]);
+    expect(onSelect).toHaveBeenCalledWith('learn');
+    expect(onSelect).toHaveBeenCalledWith('speak');
+    expect(onCollapsedChange).toHaveBeenCalledWith(true);
+  });
+
   it('uses the five dimensions returned by the Java backend', () => {
     expect(
       sceneMetricsForReport({
@@ -141,6 +169,10 @@ describe('scene completion report mapping', () => {
 });
 
 describe('ScenesHome backend generation binding', () => {
+  beforeEach(() => {
+    mockTranslateScene.mockReset();
+  });
+
   it('opens IELTS and interview through the parent tab routes', async () => {
     const onOpenIelts = jest.fn();
     const onOpenInterview = jest.fn();
@@ -164,6 +196,28 @@ describe('ScenesHome backend generation binding', () => {
     expect(onOpenIelts).toHaveBeenCalledTimes(1);
     await fireEvent.press(screen.getByLabelText('进入英文面试'));
     expect(onOpenInterview).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses internal specialty routes and Android back navigation when parent routes are absent', async () => {
+    const originalOs = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
+    const handlers: Array<(event: any) => boolean | null | undefined> = [];
+    const backSpy = jest.spyOn(BackHandler, 'addEventListener').mockImplementation((_, handler) => {
+      handlers.push(handler);
+      return { remove: jest.fn() } as any;
+    });
+    const screen = await render(<ScenesScreen />);
+    await fireEvent.press(screen.getByLabelText('进入雅思口语'));
+    await waitFor(() => expect(screen.getByText('下一步')).toBeTruthy());
+    expect(handlers.at(-1)?.({})).toBe(true);
+    await waitFor(() => expect(screen.getByText('IELTS SPEAKING')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('进入英文面试'));
+    await waitFor(() => expect(screen.getByText('填写岗位 JD')).toBeTruthy());
+    expect(handlers.at(-1)?.({})).toBe(true);
+    await waitFor(() => expect(screen.getByText('IELTS SPEAKING')).toBeTruthy());
+    screen.unmount();
+    backSpy.mockRestore();
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
   });
 
   it('shows the generated backend preview and opens that exact scene', async () => {
@@ -197,6 +251,27 @@ describe('ScenesHome backend generation binding', () => {
     await fireEvent.press(screen.getByText('开始练习'));
     expect(onStartScene).toHaveBeenCalledTimes(1);
     expect(onOpen).toHaveBeenCalledWith({ name: 'training', scene });
+  });
+
+  it('closes a generated preview through the Android hardware back button', async () => {
+    const originalOs = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
+    let handler: ((event: any) => boolean | null | undefined) | undefined;
+    const remove = jest.fn();
+    const backSpy = jest.spyOn(BackHandler, 'addEventListener').mockImplementation((_event, callback) => {
+      handler = callback;
+      return { remove } as any;
+    });
+    const screen = await render(<ScenesHome onOpen={jest.fn()} sceneService={{ generate: jest.fn(async () => scene) }} />);
+    await fireEvent.changeText(screen.getByLabelText('描述想练习的场景'), '机场托运');
+    await fireEvent.press(screen.getByLabelText('生成练习场景'));
+    await waitFor(() => expect(screen.getByText('机场行李托运')).toBeTruthy());
+    await act(async () => { expect(handler?.({})).toBe(true); });
+    await waitFor(() => expect(screen.getByLabelText('生成练习场景')).toBeTruthy());
+    expect(remove).toHaveBeenCalled();
+    screen.unmount();
+    backSpy.mockRestore();
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
   });
 
   it('does not show untranslated English in the preview', async () => {
@@ -280,9 +355,104 @@ describe('ScenesHome backend generation binding', () => {
     await act(async () => resolveScene(scene));
     await waitFor(() => expect(screen.getByText('机场行李托运')).toBeTruthy());
   });
+
+  it('loads backend daily picks and tolerates an invalid refresh date', async () => {
+    const dailyPicksApi = {
+      getDailyPicks: jest.fn(async () => ({
+        date: '2026-08-24',
+        timezone: 'Asia/Shanghai',
+        picks: [{
+          id: 'doctor',
+          title: '预约医生',
+          category: 'health' as const,
+          goal: '描述症状',
+          duration: '6 分钟',
+          level: 'B1',
+          position: 1,
+          sceneInput: '预约医生并描述症状',
+        }],
+        nextRefreshAt: 'not-a-date',
+      })),
+    };
+    const screen = await render(
+      <ScenesHome
+        onOpen={jest.fn()}
+        dailyPicksApi={dailyPicksApi}
+        sceneService={{ generate: jest.fn(async () => scene) }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText('预约医生')).toBeTruthy());
+    expect(screen.getByLabelText('描述想练习的场景')).toBeTruthy();
+  });
+
+  it('refreshes daily picks at a valid backend refresh time and clears the timer', async () => {
+    jest.useFakeTimers();
+    const dailyPicksApi = { getDailyPicks: jest.fn(async () => ({
+      date: '2026-08-24', timezone: 'Asia/Shanghai', picks: [],
+      nextRefreshAt: new Date(Date.now() + 2_000).toISOString(),
+    })) };
+    const screen = await render(<ScenesHome onOpen={jest.fn()} dailyPicksApi={dailyPicksApi} sceneService={{ generate: jest.fn() }} />);
+    await waitFor(() => expect(dailyPicksApi.getDailyPicks).toHaveBeenCalledTimes(1));
+    await act(async () => { await jest.advanceTimersByTimeAsync(3_100); });
+    await waitFor(() => expect(dailyPicksApi.getDailyPicks).toHaveBeenCalledTimes(2));
+    screen.unmount();
+    jest.useRealTimers();
+  });
+
+  it('falls back to bounded source text when preview translation fails and supports both close actions', async () => {
+    mockTranslateScene.mockRejectedValue(new Error('translate failed'));
+    const englishScene = {
+      ...scene,
+      title: 'A very long coffee shop ordering scenario title',
+      background: 'Order a coffee and customize every detail of the drink with the barista.',
+      aiRole: 'Professional coffee shop barista',
+      userRole: 'Customer ordering a customized drink',
+      learningGoal: 'Practice ordering, clarifying sizes, and confirming every detail.',
+    };
+    const sceneService = { generate: jest.fn(async () => englishScene) };
+    const screen = await render(<ScenesHome onOpen={jest.fn()} sceneService={sceneService} />);
+    const generate = async () => {
+      await fireEvent.changeText(screen.getByLabelText('描述想练习的场景'), '咖啡店点单');
+      await fireEvent.press(screen.getByLabelText('生成练习场景'));
+      await waitFor(() => expect(screen.getByText(/^A very long coffee/)).toBeTruthy());
+    };
+
+    await generate();
+    await fireEvent.press(screen.getByText('返回修改'));
+    await waitFor(() => expect(screen.queryByText(/^A very long coffee/)).toBeNull());
+    await generate();
+    await fireEvent.press(screen.getByLabelText('关闭场景确认'));
+    await waitFor(() => expect(screen.queryByText(/^A very long coffee/)).toBeNull());
+  });
+
+  it('shows the generic generation message for non-Error failures', async () => {
+    const screen = await render(
+      <ScenesHome
+        onOpen={jest.fn()}
+        sceneService={{ generate: jest.fn(async () => { throw 'failed'; }) }}
+      />,
+    );
+    await fireEvent.changeText(screen.getByLabelText('描述想练习的场景'), '机场');
+    await fireEvent.press(screen.getByLabelText('生成练习场景'));
+    await waitFor(() => expect(screen.getByText('场景生成失败，请重试')).toBeTruthy());
+  });
 });
 
 describe('Training backend content binding', () => {
+  it('constructs and releases the default scene audio adapters', async () => {
+    const service = {
+      createFlow: jest.fn(async () => ({ sceneId: scene.sceneId, stage: 'WORD_LEARNING' as const, completed: false })),
+      getContent: jest.fn(async () => scene.wordList),
+      advanceStage: jest.fn(), evaluateSentence: jest.fn(),
+    };
+    const screen = await render(
+      <Training scene={scene} trainingController={new SceneTrainingController(service)} onBack={jest.fn()} onFinish={jest.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByText('baggage')).toBeTruthy());
+    screen.unmount();
+  });
+
   it('fully releases reading audio before entering the realtime speak stage', async () => {
     const lifecycle: string[] = [];
     const service = {
@@ -402,12 +572,23 @@ describe('Training backend content binding', () => {
     );
     await fireEvent.press(screen.getByText('进入词组'));
     await waitFor(() => expect(screen.getByText('check in')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('上一个表达'));
+    await waitFor(() => expect(screen.getByText('baggage')).toBeTruthy());
+    await fireEvent.press(screen.getByText('进入词组'));
     await fireEvent.press(screen.getByText('进入朗读'));
     await waitFor(() =>
       expect(screen.getByText('I would like to check in this bag.')).toBeTruthy(),
     );
+    const readContent = screen.getByLabelText('朗读内容');
+    const readInner = readContent.props.children;
+    await act(async () => {
+      fireEvent(readContent.parent!, 'layout', { nativeEvent: { layout: { height: 260 } } });
+      fireEvent(readInner, 'layout', { nativeEvent: { layout: { height: 200 } } });
+      fireEvent(readInner, 'layout', { nativeEvent: { layout: { height: 400 } } });
+    });
     await fireEvent.press(screen.getByLabelText('开始朗读'));
     await waitFor(() => expect(wavRecorder.start).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByLabelText('结束朗读')).toBeTruthy());
     await fireEvent.press(screen.getByLabelText('结束朗读'));
     await waitFor(() => expect(screen.getByText('朗读通过')).toBeTruthy());
     expect(service.evaluateSentence).toHaveBeenCalledWith(
@@ -423,15 +604,122 @@ describe('Training backend content binding', () => {
     );
     expect(screen.getByText('进入模拟')).toBeTruthy();
     expect(screen.getByText('点击麦克风开始朗读')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('上一句'));
+    await waitFor(() => expect(screen.getByText('I would like to check in this bag.')).toBeTruthy());
 
     jest.useFakeTimers();
-    await fireEvent.press(screen.getByLabelText('开始朗读'));
+    await fireEvent.press(screen.getByLabelText('重新朗读'));
     await act(async () => {
       jest.advanceTimersByTime(30_000);
       await Promise.resolve();
     });
-    expect(wavRecorder.stop).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(wavRecorder.stop).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText('本句发音评估')).toBeTruthy());
     jest.useRealTimers();
+    screen.unmount();
+  });
+
+  it('runs the local read/speak fallback, renders the radar, and exposes completion actions', async () => {
+    const onBack = jest.fn();
+    const onFinish = jest.fn();
+    const onViewDetails = jest.fn();
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const screen = await render(
+      <Training
+        initialStage="read"
+        onBack={onBack}
+        onFinish={onFinish}
+        onViewDetails={onViewDetails}
+      />,
+    );
+
+    await fireEvent.press(screen.getByLabelText('退出训练'));
+    expect(alert).toHaveBeenCalled();
+    const buttons = alert.mock.calls[0][2] ?? [];
+    buttons[1]?.onPress?.();
+    expect(onBack).toHaveBeenCalled();
+
+    await fireEvent.press(screen.getByLabelText('开始朗读'));
+    await waitFor(() => expect(screen.getByText('正在听你朗读')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('结束朗读'));
+    await waitFor(() => expect(screen.getByText('本句发音评估')).toBeTruthy());
+    await fireEvent.press(screen.getByText('知道了'));
+    await fireEvent.press(screen.getByText('进入模拟'));
+    await waitFor(() => expect(screen.getByLabelText('结束当前会话')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('结束当前会话'));
+
+    await waitFor(() => expect(screen.getByText('模拟完成')).toBeTruthy());
+    expect(screen.getByLabelText(/五维评分/)).toBeTruthy();
+    await fireEvent.press(screen.getByText('查看详情'));
+    await waitFor(() => expect(onViewDetails).toHaveBeenCalled());
+    await fireEvent.press(screen.getByLabelText('结束当前会话'));
+    await waitFor(() => expect(screen.getByText('模拟完成')).toBeTruthy());
+    await fireEvent.press(screen.getByText('返回场景广场'));
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    alert.mockRestore();
+  });
+
+  it('navigates the local word/phrase fallback in both directions and toggles demo state', async () => {
+    const screen = await render(<Training onBack={jest.fn()} onFinish={jest.fn()} />);
+    expect(screen.getByText('recommend')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('播放发音'));
+    expect(screen.getByText('recommend')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('播放发音'));
+    await fireEvent.press(screen.getByText('进入词组'));
+    expect(screen.getByText('feel like trying something different')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('上一个表达'));
+    expect(screen.getByText('recommend')).toBeTruthy();
+    await fireEvent.press(screen.getByText('进入词组'));
+    await fireEvent.press(screen.getByText('下一个'));
+    expect(screen.getByText('with oat milk')).toBeTruthy();
+    await fireEvent.press(screen.getByText('进入朗读'));
+    expect(screen.getByText('Could you recommend something less sweet?')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('返回学习阶段'));
+    expect(screen.getByText('with oat milk')).toBeTruthy();
+    screen.unmount();
+  });
+
+  it('uses onFinish for both local completion actions when no detail route exists', async () => {
+    const onFinish = jest.fn();
+    const first = await render(<Training initialStage="speak" onBack={jest.fn()} onFinish={onFinish} />);
+    await fireEvent.press(first.getByLabelText('结束当前会话'));
+    await waitFor(() => expect(first.getByText('模拟完成')).toBeTruthy());
+    await fireEvent.press(first.getByText('查看详情'));
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    first.unmount();
+  });
+
+  it('surfaces demo, recorder, and scoring failures without leaving reading', async () => {
+    const service = {
+      createFlow: jest.fn(async () => ({ sceneId: scene.sceneId, stage: 'WORD_LEARNING' as const, completed: false })),
+      getContent: jest.fn(async () => scene.sentenceList.slice(0, 1)),
+      advanceStage: jest.fn(async (_sceneId: string, stage: SceneFlowStage) => ({
+        sceneId: scene.sceneId,
+        stage: stage === 'WORD_LEARNING' ? 'PHRASE_LEARNING' as const : 'SENTENCE_LEARNING' as const,
+        completed: false,
+      })),
+      evaluateSentence: jest.fn(async () => { throw new Error('评分失败'); }),
+    };
+    const controller = new SceneTrainingController(service);
+    const wavRecorder = {
+      start: jest.fn().mockRejectedValueOnce(new Error('麦克风忙碌')).mockResolvedValue(undefined),
+      stop: jest.fn(async () => 'file:///sentence.wav'),
+      cancel: jest.fn(async () => undefined),
+    };
+    const ttsPlayer = { play: jest.fn(async () => { throw '播放失败'; }), stop: jest.fn() };
+    const screen = await render(
+      <Training scene={scene} initialStage="read" trainingController={controller} wavRecorder={wavRecorder} ttsPlayer={ttsPlayer} onBack={jest.fn()} onFinish={jest.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByLabelText('开始朗读')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('听标准示范'));
+    await waitFor(() => expect(screen.getByText('标准发音播放失败')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('开始朗读'));
+    await waitFor(() => expect(screen.getByText('麦克风忙碌')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('开始朗读'));
+    await waitFor(() => expect(screen.getByLabelText('结束朗读')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('结束朗读'));
+    await waitFor(() => expect(screen.getAllByText('评分失败').length).toBeGreaterThan(0));
+    screen.unmount();
   });
 });
 
@@ -511,5 +799,47 @@ describe('SceneCallStage realtime binding', () => {
     );
     await fireEvent.press(screen.getByLabelText('结束当前会话'));
     await waitFor(() => expect(onComplete).toHaveBeenCalledWith(completion));
+  });
+
+  it('toggles mute and clears the evaluation overlay when ending fails', async () => {
+    let listener: ((value: RealtimeSessionSnapshot) => void) | null = null;
+    let rejectEnd!: (error: Error) => void;
+    const snapshot: RealtimeSessionSnapshot = {
+      state: 'ready',
+      muted: false,
+      sessionId: 'session-1',
+      userTranscript: 'I need to check this bag.',
+      assistantTranscript: 'May I see your passport?',
+      transcriptHistory: [],
+      error: null,
+    };
+    const controller: FreeChatControllerPort = {
+      getSnapshot: () => snapshot,
+      subscribe: jest.fn((next) => {
+        listener = next;
+        next(snapshot);
+        return () => { listener = null; };
+      }),
+      start: jest.fn(async () => undefined),
+      setMuted: jest.fn(),
+      interrupt: jest.fn(),
+      end: jest.fn(() => new Promise((_, reject) => { rejectEnd = reject; })),
+    };
+    const screen = await render(
+      <SceneCallStage
+        scene={scene}
+        progressCollapsed
+        createController={() => controller}
+        onComplete={jest.fn()}
+      />,
+    );
+
+    await fireEvent.press(screen.getByLabelText('关闭麦克风'));
+    expect(controller.setMuted).toHaveBeenCalledWith(true);
+    await fireEvent.press(screen.getByLabelText('结束当前会话'));
+    expect(screen.getByText('正在整理本次对话与五项能力表现…')).toBeTruthy();
+    await act(async () => rejectEnd(new Error('end failed')));
+    await waitFor(() => expect(screen.queryByText('正在整理本次对话与五项能力表现…')).toBeNull());
+    expect(listener).not.toBeNull();
   });
 });

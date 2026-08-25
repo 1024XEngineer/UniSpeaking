@@ -31,6 +31,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
+import java.lang.reflect.Method;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
@@ -272,6 +273,27 @@ class AliyunTtsProviderTest {
 				null, new ObjectMapper(), "key", URI.create(
 						"https://workspace.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"),
 				"model", "voice", "wav", 24_000, Duration.ofSeconds(1), 128));
+	}
+
+	@Test
+	void mapsEveryAudioContentTypeAndBusinessCause() throws Exception {
+		assertEquals("audio/mpeg", invokeStatic("contentType", new Class<?>[] {String.class}, "mp3"));
+		assertEquals("audio/wav", invokeStatic("contentType", new Class<?>[] {String.class}, "wav"));
+		assertEquals("audio/L16", invokeStatic("contentType", new Class<?>[] {String.class}, "pcm"));
+		assertEquals("audio/opus", invokeStatic("contentType", new Class<?>[] {String.class}, "opus"));
+		assertEquals("application/octet-stream",
+				invokeStatic("contentType", new Class<?>[] {String.class}, "unknown"));
+		BusinessException business = new BusinessException("CODE", "message");
+		assertEquals(business, invokeStatic("businessCause", new Class<?>[] {Throwable.class},
+				new RuntimeException(new RuntimeException(business))));
+		assertEquals(null, invokeStatic("businessCause", new Class<?>[] {Throwable.class},
+				new RuntimeException("plain")));
+	}
+
+	private Object invokeStatic(String name, Class<?>[] types, Object... args) throws Exception {
+		Method method = AliyunTtsProvider.class.getDeclaredMethod(name, types);
+		method.setAccessible(true);
+		return method.invoke(null, args);
 	}
 
 	private void assertAudioResponseError(String response, String expectedCode) {

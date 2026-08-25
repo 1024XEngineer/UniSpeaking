@@ -272,6 +272,87 @@ class SessionLifecycleManagerCoverageTest {
 				() -> lifecycle.requireOwnerId(" ")).code());
 	}
 
+	@Test
+	void coversActivationWithoutQuotaAndIdempotentActivation() {
+		CustomSceneSession session = customSession("session-activation");
+		sessions.save(session);
+		SessionLifecycleManager noPolicy = new SessionLifecycleManager(
+				sessions, messages, practices);
+
+		SessionLifecycleManager.SessionActivation first = noPolicy.activateSession(
+				ownerId.toString(), session.getId());
+		SessionLifecycleManager.SessionActivation second = noPolicy.activateSession(
+				ownerId.toString(), session.getId());
+
+		assertEquals(SessionStatus.ACTIVE, session.getStatus());
+		assertEquals(first, second);
+		verifyNoInteractions(entitlement);
+	}
+
+	@Test
+	void handlesQuotaSettlementAndCancelsAnEarlierDeadlineTask() {
+		CustomSceneSession session = customSession("session-quota-cancel");
+		sessions.save(session);
+		TaskScheduler scheduler = mock(TaskScheduler.class);
+		ScheduledFuture<?> first = mock(ScheduledFuture.class);
+		ScheduledFuture<?> second = mock(ScheduledFuture.class);
+		Instant deadline = Instant.now().plusSeconds(30);
+		when(entitlement.reserveRemaining(eq(ownerId.toString()), any(Instant.class)))
+				.thenAnswer(invocation -> new QuotaReservation(
+						LocalDate.now(), 30, invocation.getArgument(1), deadline));
+		doReturn(first, second).when(scheduler).schedule(any(Runnable.class), (Instant) eq(deadline));
+		SessionLifecycleManager managed = new SessionLifecycleManager(
+				sessions, messages, practices, entitlement, null, scheduler);
+
+		managed.activateSession(ownerId.toString(), session.getId());
+		managed.activateSession(ownerId.toString(), session.getId());
+		managed.terminateSceneSession(ownerId.toString(), session.getId(),
+				SessionStatus.FAILED, Instant.now());
+
+		verify(first).cancel(false);
+		verify(second, never()).cancel(false);
+		verify(entitlement).settleReservation(
+				eq(ownerId.toString()), eq(session.getQuotaDate()), eq(30d),
+				eq(session.getQuotaStartedAt()), any(Instant.class));
+	}
+
+	@Test
+	void cleansUpWhenQuotaActivationFailsAndValidatesProviderBindingInput() {
+		CustomSceneSession session = customSession("session-activation-failure");
+		sessions.save(session);
+		when(entitlement.reserveRemaining(eq(ownerId.toString()), any(Instant.class)))
+				.thenThrow(new IllegalStateException("quota unavailable"));
+		SessionLifecycleManager managed = new SessionLifecycleManager(
+				sessions, messages, practices, entitlement);
+
+		assertThrows(IllegalStateException.class,
+				() -> managed.activateSession(ownerId.toString(), session.getId()));
+		assertEquals(SessionStatus.FAILED, session.getStatus());
+		assertEquals("PROVIDER_SESSION_ID_REQUIRED", assertThrows(
+				BusinessException.class,
+				() -> managed.bindProviderSession(ownerId.toString(), session.getId(), " ")).code());
+		assertEquals("PROVIDER_SESSION_ID_INVALID", assertThrows(
+				BusinessException.class,
+				() -> managed.bindProviderSession(ownerId.toString(), session.getId(), "x".repeat(129))).code());
+	}
+
+	@Test
+	void coversOwnerAndSessionValidationAndAssistantMessagePath() {
+		CustomSceneSession session = customSession("session-validation");
+		sessions.save(session);
+		lifecycle.addMessage(ownerId.toString(), session.getId(), new Message(0, "question", null));
+		assertEquals(com.unispeaking.domain.vo.session.SpeakerType.ASSISTANT,
+				session.getMessages().getFirst().speaker());
+		assertEquals("AUTHENTICATION_REQUIRED", assertThrows(BusinessException.class,
+				() -> lifecycle.requireSceneType(" ", session.getId())).code());
+		assertThrows(
+				com.unispeaking.common.exception.SessionNotFoundException.class,
+				() -> lifecycle.requireSceneType(ownerId.toString(), " "));
+		assertEquals("SESSION_ACCESS_DENIED", assertThrows(BusinessException.class,
+				() -> lifecycle.addMessage(UUID.randomUUID().toString(), session.getId(),
+						new Message(1, "blocked", null))).code());
+	}
+
 	private CustomSceneSession customSession(String sessionId) {
 		CustomSceneSession session = new CustomSceneSession(sessionId, ownerId.toString());
 		session.setSceneId("scene-1");

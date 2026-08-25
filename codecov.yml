@@ -8,3 +8,20 @@ flags:
     paths:
       - frontend/mobile/src/**
     carryforward: true
+
+coverage:
+  status:
+    project:
+      default: off
+      backend:
+        target: 90%
+        threshold: 0%
+        flags:
+          - backend
+      mobile:
+        target: 90%
+        threshold: 0%
+        flags:
+          - mobile
+    patch:
+      default: off

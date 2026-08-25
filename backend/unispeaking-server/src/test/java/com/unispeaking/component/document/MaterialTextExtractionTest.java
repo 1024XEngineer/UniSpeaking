@@ -225,6 +225,56 @@ class MaterialTextExtractionTest {
 		assertSame(DocumentErrorCode.TEXT_EMPTY, exception.errorCode());
 	}
 
+	@Test
+	void validatesDependenciesNullInputAndTextLengthBounds() {
+		assertThrows(NullPointerException.class,
+				() -> new MaterialTextExtraction(null, documentTextExtractor));
+		assertThrows(NullPointerException.class,
+				() -> new MaterialTextExtraction(ocrProvider, null));
+		assertThrows(BusinessException.class, () -> extraction.extract(null));
+		String oversized = "x".repeat(20_001);
+		assertThrows(BusinessException.class,
+				() -> extraction.extract(textInput(oversized, null, null, null)));
+		assertThrows(BusinessException.class,
+				() -> extraction.extract(textInput("JD", oversized, null, null)));
+	}
+
+	@Test
+	void treatsEmptyImageAndResumeFileContentAsAbsent() {
+		var result = extraction.extract(new InterviewMaterialPreparationInput(
+				null, new InterviewResumeFile("resume.pdf", PDF_MIME_TYPE, new byte[0]),
+				"JD", new OcrImage(new byte[0])));
+
+		assertEquals("JD", result.jobDescriptionText());
+		assertTrue(result.resumeAbsent());
+	}
+
+	@Test
+	void rejectsNullAndBlankOcrResults() {
+		when(ocrProvider.available()).thenReturn(true);
+		when(ocrProvider.recognizeText(any())).thenReturn(null, " ");
+		var input = new InterviewMaterialPreparationInput(
+				null, null, null, new OcrImage(new byte[] {1}));
+
+		assertThrows(BusinessException.class, () -> extraction.extract(input));
+		assertThrows(BusinessException.class, () -> extraction.extract(input));
+	}
+
+	@Test
+	void detectsLegacyDocCaseAndEveryImageExtensionOrParameterizedMime() {
+		assertUnsupported(new InterviewResumeFile(" RESUME.DOC ", null, new byte[] {1}));
+		assertUnsupported(new InterviewResumeFile(null, "IMAGE/PNG; charset=binary", new byte[] {1}));
+		for (String extension : new String[] {"jpg", "jpeg", "gif", "bmp", "webp"}) {
+			assertUnsupported(new InterviewResumeFile("resume." + extension, null, new byte[] {1}));
+		}
+	}
+
+	private void assertUnsupported(InterviewResumeFile file) {
+		BusinessException exception = assertThrows(BusinessException.class,
+				() -> extraction.extract(textInput("JD", null, file, null)));
+		assertEquals(DocumentErrorCode.FORMAT_UNSUPPORTED.code(), exception.code());
+	}
+
 	private static InterviewMaterialPreparationInput textInput(
 			String jobDescriptionText,
 			String resumeText,

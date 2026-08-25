@@ -29,6 +29,7 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import java.util.List;
+import java.util.UUID;
 import java.time.OffsetDateTime;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -199,6 +200,71 @@ class MybatisSceneRepositoryTest {
 				repository.countAllByUserId(
 						"11111111-1111-4111-8111-111111111111"));
 		assertEquals(0, repository.countAllByUserId("invalid-user-id"));
+	}
+
+	@Test
+	void loadsGeneratedSceneAndAllLearningContent() {
+		SceneMapper sceneMapper = mock(SceneMapper.class);
+		SceneWordMapper wordMapper = mock(SceneWordMapper.class);
+		ScenePhraseMapper phraseMapper = mock(ScenePhraseMapper.class);
+		SceneSentenceMapper sentenceMapper = mock(SceneSentenceMapper.class);
+		SceneEntity scene = new SceneEntity();
+		scene.setId("scene-1");
+		scene.setUserId(UUID.randomUUID());
+		scene.setTitle("Travel");
+		scene.setLabel("travel");
+		scene.setBackground("airport");
+		scene.setAiRole("agent");
+		scene.setUserRole("traveler");
+		scene.setLearningGoal("check in");
+		scene.setCustomInstruction("be polite");
+		scene.setSuccessFactor("{}");
+		when(sceneMapper.selectById("scene-1")).thenReturn(scene);
+		SceneWordEntity word = new SceneWordEntity();
+		word.setWordId("w1"); word.setWord("ticket"); word.setTranslation("票"); word.setPhonetic("/t/");
+		ScenePhraseEntity phrase = new ScenePhraseEntity();
+		phrase.setPhraseId("p1"); phrase.setPhrase("check in"); phrase.setTranslation("入住"); phrase.setPhonetic("/c/");
+		SceneSentenceEntity sentence = new SceneSentenceEntity();
+		sentence.setSentenceId("s1"); sentence.setSentence("I need help"); sentence.setTranslation("我需要帮助");
+		when(wordMapper.selectList(any())).thenReturn(List.of(word));
+		when(phraseMapper.selectList(any())).thenReturn(List.of(phrase));
+		when(sentenceMapper.selectList(any())).thenReturn(List.of(sentence));
+
+		var repository = new MybatisSceneRepository(
+				sceneMapper, wordMapper, phraseMapper, sentenceMapper, mock(CustomScenePersistence.class));
+
+		var generated = repository.findGeneratedById("scene-1").orElseThrow();
+		assertEquals("scene-1", generated.sceneId());
+		assertEquals("ticket", generated.wordList().get(0).englishText());
+		assertEquals("check in", generated.phraseList().get(0).englishText());
+		assertEquals("I need help", generated.sentenceList().get(0).englishText());
+
+		var definition = repository.findCustomDefinitionById("scene-1").orElseThrow();
+		assertEquals("Travel", definition.title());
+		assertEquals("airport", definition.background());
+		assertEquals("agent", definition.aiRole());
+		assertEquals("traveler", definition.userRole());
+		assertEquals("check in", definition.phraseList().get(0).englishText());
+	}
+
+	@Test
+	void mapsOwnedAssetsAndHandlesSoftDeleteFailure() {
+		SceneMapper sceneMapper = mock(SceneMapper.class);
+		SceneEntity scene = new SceneEntity();
+		scene.setId("scene-1");
+		scene.setUserId(UUID.fromString("11111111-1111-4111-8111-111111111111"));
+		scene.setTitle("Travel");
+		scene.setCreatedAt(OffsetDateTime.parse("2026-01-01T00:00:00Z"));
+		scene.setUpdatedAt(OffsetDateTime.parse("2026-01-02T00:00:00Z"));
+		when(sceneMapper.selectList(any())).thenReturn(List.of(scene));
+		when(sceneMapper.update(any(), any())).thenReturn(0);
+		var repository = repository(sceneMapper);
+
+		var assets = repository.findAssetsByUserId("11111111-1111-4111-8111-111111111111");
+		assertEquals(1, assets.size());
+		assertEquals("Travel", assets.get(0).definition().title());
+		assertEquals(OffsetDateTime.parse("2026-01-02T00:00:00Z"), assets.get(0).updatedAt());
+		assertFalse(repository.softDelete("scene-1", "11111111-1111-4111-8111-111111111111"));
 	}
 
 	private Fixture fixture() {

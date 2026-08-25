@@ -374,28 +374,6 @@
 									<outputDirectory>${project.reporting.outputDirectory}/jacoco-aggregate</outputDirectory>
 								</configuration>
 							</execution>
-							<execution>
-								<id>check-aggregate-coverage</id>
-								<phase>verify</phase>
-								<goals>
-									<goal>check</goal>
-								</goals>
-								<configuration>
-									<dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
-									<rules>
-										<rule>
-											<element>BUNDLE</element>
-											<limits>
-												<limit>
-														<counter>LINE</counter>
-														<value>COVEREDRATIO</value>
-														<minimum>0.85</minimum>
-												</limit>
-											</limits>
-										</rule>
-									</rules>
-								</configuration>
-							</execution>
 						</executions>
 					</plugin>
 				</plugins>

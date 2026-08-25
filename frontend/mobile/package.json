@@ -86,12 +86,7 @@
       "text-summary",
       "json-summary",
       "lcov"
-    ],
-    "coverageThreshold": {
-      "global": {
-        "lines": 80
-      }
-    }
+    ]
   },
   "private": true
 }

@@ -278,6 +278,47 @@ class EvaluationJsonbCodecTest {
 						true));
 	}
 
+	@Test
+	void rejectsEveryRemainingStrictScalarAndSpanShape() {
+		String valid = codec.encodeReadingDetails(readingDetails());
+		String[] invalid = {
+				"null",
+				valid.replace("\"is_prominent\":null,", ""),
+				valid.replace("\"start_position\":0,", ""),
+				valid.replace("\"end_position\":1", "\"end_position\":null"),
+				valid.replace("\"start_position\":0", "\"start_position\":\"0\""),
+				valid.replace("\"end_position\":1", "\"end_position\":1.5"),
+				valid.replace("\"start_position\":0", "\"start_position\":999999999999"),
+				valid.replace("\"end_position\":1", "\"end_position\":999999999999"),
+				valid.replaceFirst("\"index\":0", "\"index\":null"),
+				valid.replaceFirst("\"index\":0", "\"index\":\"0\""),
+				valid.replaceFirst("\"index\":0", "\"index\":999999999999"),
+				valid.replace("\"text\":\"good\"", "\"text\":null"),
+				valid.replace("\"text\":\"good\"", "\"text\":7"),
+				valid.replace("\"overall_score\":90", "\"overall_score\":null"),
+				valid.replace("\"overall_score\":90", "\"overall_score\":101")
+		};
+		for (String json : invalid) {
+			assertPersistenceFailure(json, true);
+		}
+		assertPersistenceFailure("{\"words\":null}", false);
+	}
+
+	@Test
+	void acceptsUnmatchedReadingSpanAndWrapsBindingFailures() {
+		String valid = codec.encodeReadingDetails(readingDetails());
+		String unmatched = valid
+				.replace("\"start_position\":0", "\"start_position\":-1")
+				.replace("\"end_position\":1", "\"end_position\":-1");
+		assertEquals(-1, codec.decodeReadingDetails(unmatched)
+				.words().getFirst().phonemes().getFirst().startPosition());
+
+		assertPersistenceFailure(valid.replace("\"ending_tone\":\"FALL\"",
+				"\"ending_tone\":\"NOT_A_TONE\""), true);
+		assertPersistenceFailure(valid.replace("\"read_status\":\"NORMAL\"",
+				"\"read_status\":\"NOT_A_STATUS\""), true);
+	}
+
 	private void assertPersistenceFailure(
 			String json,
 			boolean reading) {

@@ -172,4 +172,35 @@ describe('useInterviewReport', () => {
     jest.runOnlyPendingTimers();
     expect(api.getReport).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps null sessions idle and guards refresh and retry actions', async () => {
+    const api = { getReport: jest.fn(), retryReport: jest.fn() };
+    const screen = await render(<Probe api={api} sessionId={null} />);
+    expect(screen.getByTestId('state').props.children).toBe('IDLE');
+    await fireEvent.press(screen.getByTestId('refresh'));
+    await fireEvent.press(screen.getByTestId('retry'));
+    expect(api.getReport).not.toHaveBeenCalled();
+    expect(api.retryReport).not.toHaveBeenCalled();
+    screen.unmount();
+  });
+
+  it('ignores stale failures and retry completion after unmount', async () => {
+    let rejectFirst!: (error: unknown) => void;
+    let resolveRetry!: (value: InterviewReportResponse) => void;
+    const first = new Promise<InterviewReportResponse>((_resolve, reject) => { rejectFirst = reject; });
+    void first.catch(() => undefined);
+    const api = {
+      getReport: jest.fn().mockReturnValueOnce(first).mockResolvedValueOnce(failed),
+      retryReport: jest.fn(() => new Promise<InterviewReportResponse>((resolve) => { resolveRetry = resolve; })),
+    };
+    const screen = await render(<Probe api={api} sessionId="session-1" />);
+    await screen.rerender(<Probe api={api} sessionId="session-2" />);
+    await waitFor(() => expect(screen.getByTestId('state').props.children).toBe('FAILED'));
+    rejectFirst(new Error('stale'));
+    await act(async () => { await Promise.resolve(); });
+    await fireEvent.press(screen.getByTestId('retry'));
+    await screen.unmount();
+    resolveRetry(completed);
+    await act(async () => { await Promise.resolve(); });
+  });
 });

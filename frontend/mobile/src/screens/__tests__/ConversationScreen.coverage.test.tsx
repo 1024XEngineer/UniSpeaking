@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
 const mockSession = {
   elapsed: 12,
@@ -6,12 +6,12 @@ const mockSession = {
   statusLabel: '可以开始说了',
   state: 'ready',
   error: null,
-  sessionId: 'session-1',
+  sessionId: 'session-1' as string | null,
   userTranscript: 'Hello',
   assistantTranscript: 'How can I help?',
   transcriptHistory: [],
   toggleMuted: jest.fn(),
-  end: jest.fn(async () => undefined),
+  end: jest.fn<Promise<void>, []>(async () => undefined),
 };
 const mockTranslate = jest.fn();
 const mockSaveSettings = jest.fn(async () => undefined);
@@ -23,7 +23,8 @@ jest.mock('react-native-reanimated', () => {
     Easing: { cubic: jest.fn(), ease: jest.fn(), linear: jest.fn(), inOut: (value: unknown) => value, out: (value: unknown) => value },
     interpolate: (_value: number, _input: number[], output: number[]) => output[0], runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
     useAnimatedStyle: (factory: () => unknown) => factory(), useSharedValue: (value: unknown) => ({ value }),
-    withDelay: (_delay: number, value: unknown) => value, withRepeat: (value: unknown) => value, withTiming: (value: unknown) => value,
+    withDelay: (_delay: number, value: unknown) => value, withRepeat: (value: unknown) => value,
+    withTiming: (value: unknown, _config?: unknown, callback?: (finished: boolean) => void) => { callback?.(true); return value; },
   };
 });
 
@@ -63,6 +64,24 @@ describe('ConversationScreen coverage', () => {
     screen.unmount();
   });
 
+  it('expands and collapses an existing translation and uses internal timer and mute state', async () => {
+    jest.useFakeTimers();
+    const screen = await render(
+      <CallExperience onEnd={jest.fn()} transcriptEnglish="Would you like tea?" transcriptChinese="想喝茶吗？" />,
+    );
+    await fireEvent.press(screen.getByLabelText('翻译'));
+    expect(screen.getByText('想喝茶吗？')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('收起翻译'));
+    expect(screen.queryByText('想喝茶吗？')).toBeNull();
+    await fireEvent.press(screen.getByLabelText('关闭麦克风'));
+    expect(screen.getByLabelText('打开麦克风')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('打开麦克风'));
+    await act(async () => { await jest.advanceTimersByTimeAsync(1_000); });
+    await waitFor(() => expect(screen.getByText('00:01')).toBeTruthy());
+    screen.unmount();
+    jest.useRealTimers();
+  });
+
   it('binds CallScreen mute, translation, and end actions to the realtime session', async () => {
     const onEnd = jest.fn();
     mockTranslate.mockResolvedValue('你好');
@@ -72,6 +91,14 @@ describe('ConversationScreen coverage', () => {
     await fireEvent.press(screen.getByLabelText('结束当前会话'));
     await waitFor(() => expect(mockSession.end).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1));
+    screen.unmount();
+  });
+
+  it('reports translation before a backend session is connected', async () => {
+    mockSession.sessionId = null;
+    const screen = await render(<CallScreen onEnd={jest.fn()} />);
+    await fireEvent.press(screen.getByLabelText('翻译'));
+    await waitFor(() => expect(screen.getByText('会话尚未连接，暂时无法翻译')).toBeTruthy());
     screen.unmount();
   });
 
@@ -85,5 +112,30 @@ describe('ConversationScreen coverage', () => {
     await fireEvent.press(screen.getByText('保存设置'));
     await waitFor(() => expect(mockSaveSettings).toHaveBeenCalledWith(expect.objectContaining({ speed: '慢一些' })));
     screen.unmount();
+  });
+
+  it('runs the internal call transition, immersive callback, and settings error branches', async () => {
+    let finishEnd!: () => void;
+    mockSession.end.mockReturnValueOnce(new Promise<void>((resolve) => { finishEnd = resolve; }));
+    const immersive = jest.fn();
+    const screen = await render(<ConversationScreen onImmersiveChange={immersive} />);
+    const settings = screen.getByLabelText('对话设置');
+    fireEvent(settings, 'pressIn');
+    fireEvent(settings, 'hoverIn');
+    fireEvent(settings, 'pressOut');
+    fireEvent(settings, 'hoverOut');
+    await fireEvent.press(settings);
+    mockSaveSettings.mockRejectedValueOnce('offline');
+    await fireEvent.press(screen.getByText('保存设置'));
+    await waitFor(() => expect(mockSaveSettings).toHaveBeenCalled());
+    await fireEvent.press(screen.getByText('取消'));
+    await fireEvent.press(screen.getByText('开始对话'));
+    await waitFor(() => expect(screen.getByLabelText('结束当前会话')).toBeTruthy());
+    expect(immersive).toHaveBeenCalledWith(true);
+    await fireEvent.press(screen.getByLabelText('结束当前会话'));
+    expect(mockSession.end).toHaveBeenCalled();
+    await act(async () => { finishEnd(); await Promise.resolve(); });
+    screen.unmount();
+    expect(immersive).toHaveBeenCalledWith(false);
   });
 });

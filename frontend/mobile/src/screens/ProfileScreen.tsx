@@ -163,18 +163,20 @@ function ProfileMenuItem({
   );
 }
 
-function ProfileEditModal({
+export function ProfileEditModal({
   avatarUrl,
   fallbackAvatar,
   nickname,
   onClose,
   onSave,
+  loadImagePicker = () => import('expo-image-picker'),
 }: {
   avatarUrl: string | null;
   fallbackAvatar: ImageSourcePropType;
   nickname: string;
   onClose: () => void;
   onSave: (nickname: string, avatar: ProfileAvatar | null) => Promise<void>;
+  loadImagePicker?: () => Promise<typeof import('expo-image-picker')>;
 }) {
   const [draft, setDraft] = useState(nickname);
   const [avatar, setAvatar] = useState<ProfileAvatar | null>(null);
@@ -184,7 +186,7 @@ function ProfileEditModal({
   const selectAvatar = async () => {
     let imagePicker: typeof import('expo-image-picker');
     try {
-      imagePicker = await import('expo-image-picker');
+      imagePicker = await loadImagePicker();
     } catch {
       setError('当前客户端不支持选择照片，请更新 Expo Go 或使用最新开发构建');
       return;
@@ -1682,10 +1684,12 @@ export function ProfileHome({
   activeRoute = 'overview',
   onOpen,
   onLogout,
+  loadImagePicker,
 }: {
   activeRoute?: ProfileRoute;
   onOpen: (route: ProfileRoute) => void;
   onLogout?: () => void | Promise<void>;
+  loadImagePicker?: () => Promise<typeof import('expo-image-picker')>;
 }) {
   const api = useProfileApi();
   const { nickname, setNickname, email, teacher } = useAppModel();
@@ -1814,6 +1818,7 @@ export function ProfileHome({
           avatarUrl={account?.avatarUrl ?? null}
           fallbackAvatar={teacher.image}
           nickname={account?.nickname ?? nickname}
+          loadImagePicker={loadImagePicker}
           onClose={() => setEditOpen(false)}
           onSave={saveProfile}
         />

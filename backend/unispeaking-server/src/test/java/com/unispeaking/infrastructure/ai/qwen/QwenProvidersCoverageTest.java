@@ -8,8 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.infrastructure.ai.aliyun.AliyunTtsProvider;
+import com.unispeaking.infrastructure.ai.deepseek.DeepSeekLlmProvider;
+import com.unispeaking.infrastructure.ai.doubao.DoubaoAsrProvider;
+import com.unispeaking.infrastructure.ai.minimax.MiniMaxTtsProvider;
 import com.unispeaking.provider.MeteredProviderException;
 import com.unispeaking.provider.LlmResponseFormat;
 import java.io.IOException;
@@ -29,8 +34,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
@@ -91,6 +100,10 @@ class QwenProvidersCoverageTest {
 				new RecordingHttpClient(new QueuedResponse(200,
 						"{\"choices\":[{\"message\":{\"content\":\" \"}}]}")), "key")
 				.executeLlmTask("prompt", null));
+		assertCode("QWEN_LLM_RESPONSE_TOO_LARGE", () -> new QwenLlmProvider(
+				new RecordingHttpClient(new QueuedResponse(200, "x".repeat(129))),
+				new ObjectMapper(), "key", QWEN_ENDPOINT, "model", Duration.ofSeconds(1), 128)
+				.executeLlmTask("prompt", null));
 	}
 
 	@Test
@@ -149,6 +162,9 @@ class QwenProvidersCoverageTest {
 		assertCode("QWEN_ASR_RESULT_EMPTY", () -> asr(
 				new RecordingHttpClient(new QueuedResponse(200,
 						"{\"choices\":[{\"message\":{\"content\":\"\"}}]}")), "key", 128, 128)
+				.convertAudioToText(new byte[] {1}, null));
+		assertCode("QWEN_ASR_RESPONSE_TOO_LARGE", () -> asr(
+				new RecordingHttpClient(new QueuedResponse(200, "x".repeat(129))), "key", 128, 128)
 				.convertAudioToText(new byte[] {1}, null));
 	}
 
@@ -217,6 +233,15 @@ class QwenProvidersCoverageTest {
 						.generateSpeechAudioMeasured("hello", null));
 		assertEquals("QWEN_TTS_AUDIO_DOWNLOAD_FAILED", metered.code());
 		assertEquals("tts-id", metered.providerRequestId());
+
+		assertCode("QWEN_TTS_RESPONSE_TOO_LARGE", () -> tts(
+				new RecordingHttpClient(new QueuedResponse(200, "x".repeat(129))), "key", 128, 128)
+				.generateSpeechAudio("hello", null));
+		RecordingHttpClient oversizedAudio = new RecordingHttpClient(
+				new QueuedResponse(200, "{\"output\":{\"audio\":{\"url\":\"" + url + "\"}}}"),
+				new QueuedResponse(200, new byte[129]));
+		assertCode("QWEN_TTS_AUDIO_TOO_LARGE", () -> tts(oversizedAudio, "key", 1_024, 128)
+				.generateSpeechAudio("hello", null));
 	}
 
 	@Test
@@ -239,6 +264,167 @@ class QwenProvidersCoverageTest {
 				.generateSpeechAudio("hello", null));
 		assertTrue(Thread.currentThread().isInterrupted());
 		Thread.interrupted();
+	}
+
+	@Test
+	void limitedBodySubscribersHandleDuplicateSubscriptionsErrorsAndLateChunks() throws Exception {
+		for (Class<?> owner : List.of(
+				QwenLlmProvider.class, QwenAsrProvider.class, QwenTtsProvider.class,
+				AliyunTtsProvider.class, DoubaoAsrProvider.class,
+				MiniMaxTtsProvider.class, DeepSeekLlmProvider.class)) {
+			HttpResponse.BodySubscriber<byte[]> normal = newLimitedSubscriber(owner, 16);
+			Flow.Subscription first = mock(Flow.Subscription.class);
+			Flow.Subscription duplicate = mock(Flow.Subscription.class);
+			normal.onSubscribe(first);
+			normal.onSubscribe(duplicate);
+			verify(first).request(1);
+			verify(duplicate).cancel();
+			normal.onNext(List.of(ByteBuffer.wrap(new byte[] {1, 2})));
+			normal.onComplete();
+			assertArrayEquals(new byte[] {1, 2}, normal.getBody().toCompletableFuture().join());
+
+			HttpResponse.BodySubscriber<byte[]> failed = newLimitedSubscriber(owner, 16);
+			failed.onSubscribe(mock(Flow.Subscription.class));
+			failed.onError(new IOException("body failed"));
+			failed.onNext(List.of(ByteBuffer.wrap(new byte[] {3})));
+			assertThrows(CompletionException.class, () -> failed.getBody().toCompletableFuture().join());
+		}
+	}
+
+	@Test
+	void qwenAsrSupportsEveryMediaTypeAndRejectsUnknownFormats() throws Exception {
+		QwenAsrProvider provider = asr(new RecordingHttpClient(), "key", 128, 128);
+		Map<String, String> expected = Map.of(
+				"wav", "audio/wav", "mp3", "audio/mpeg", "aac", "audio/aac",
+				"m4a", "audio/mp4", "flac", "audio/flac", "ogg", "audio/ogg",
+				"opus", "audio/ogg");
+		for (var entry : expected.entrySet()) {
+			assertEquals(entry.getValue(), invoke(provider, "mediaType",
+					new Class<?>[] {String.class}, " " + entry.getKey().toUpperCase() + " "));
+		}
+		assertCode("UNSUPPORTED_TRANSCRIPTION_AUDIO_FORMAT",
+				() -> invoke(provider, "mediaType", new Class<?>[] {String.class}, (Object) null));
+		assertCode("UNSUPPORTED_TRANSCRIPTION_AUDIO_FORMAT",
+				() -> invoke(provider, "mediaType", new Class<?>[] {String.class}, "aiff"));
+	}
+
+	@Test
+	void qwenLlmAndAsrRejectEveryUntrustedEndpointComponent() {
+		URI[] invalid = {
+				null,
+				URI.create("/compatible-mode/v1/chat/completions"),
+				URI.create("http://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"),
+				URI.create("https://evil.example/compatible-mode/v1/chat/completions"),
+				URI.create("https://user@workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"),
+				URI.create("https://workspace.cn-beijing.maas.aliyuncs.com:443/compatible-mode/v1/chat/completions"),
+				URI.create("https://workspace.cn-beijing.maas.aliyuncs.com/wrong"),
+				URI.create("https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions?q=1"),
+				URI.create("https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions#f")
+		};
+		for (URI endpoint : invalid) {
+			assertCode("QWEN_LLM_ENDPOINT_INVALID", () -> new QwenLlmProvider(
+					new RecordingHttpClient(), new ObjectMapper(), "key", endpoint, null,
+					Duration.ofSeconds(1), 0).executeLlmTask("prompt", null));
+			assertCode("QWEN_ASR_ENDPOINT_INVALID", () -> asr(
+					new RecordingHttpClient(), "key", 0, 0, endpoint)
+					.convertAudioToText(new byte[] {1}, null));
+		}
+	}
+
+	@Test
+	void qwenTtsRejectsEveryEndpointAndAudioUrlComponent() {
+		String trustedPath = "/api/v1/services/aigc/multimodal-generation/generation";
+		URI[] invalidEndpoints = {
+				URI.create("/api/v1"),
+				URI.create("http://dashscope.aliyuncs.com" + trustedPath),
+				URI.create("https://evil.example" + trustedPath),
+				URI.create("https://user@dashscope.aliyuncs.com" + trustedPath),
+				URI.create("https://dashscope.aliyuncs.com:443" + trustedPath),
+				URI.create("https://dashscope.aliyuncs.com/wrong"),
+				URI.create("https://dashscope.aliyuncs.com" + trustedPath + "?q=1"),
+				URI.create("https://dashscope.aliyuncs.com" + trustedPath + "#f")
+		};
+		for (URI endpoint : invalidEndpoints) {
+			assertCode("QWEN_TTS_ENDPOINT_INVALID", () -> tts(
+					new RecordingHttpClient(), "key", 0, 0, endpoint)
+					.generateSpeechAudio("hello", null));
+		}
+
+		String[] invalidAudioUrls = {
+				"/audio.wav", "ftp://bucket.aliyuncs.com/audio.wav",
+				"https://evil.example/audio.wav", "https://user@bucket.aliyuncs.com/audio.wav",
+				"https://bucket.aliyuncs.com:443/audio.wav", "not a uri"
+		};
+		for (String url : invalidAudioUrls) {
+			RecordingHttpClient client = new RecordingHttpClient(new QueuedResponse(
+					200, "{\"output\":{\"audio\":{\"url\":\"" + url + "\"}}}"));
+			assertThrows(BusinessException.class,
+					() -> tts(client, "key", 128, 128).generateSpeechAudio("hello", null));
+		}
+	}
+
+	@Test
+	void qwenTtsValidatesEveryWavSignatureByteAndVoiceFallback() throws Exception {
+		QwenTtsProvider provider = tts(new RecordingHttpClient(), "key", 128, 128);
+		assertEquals("Aiden", invoke(provider, "resolveVoice", new Class<?>[] {String.class}, (Object) null));
+		assertEquals("Aiden", invoke(provider, "resolveVoice", new Class<?>[] {String.class}, " "));
+		assertEquals("Aiden", invoke(provider, "resolveVoice", new Class<?>[] {String.class}, "unknown"));
+		assertEquals("Ryan", invoke(provider, "resolveVoice", new Class<?>[] {String.class}, "Raymond"));
+
+		assertCode("QWEN_TTS_AUDIO_INVALID",
+				() -> invoke(provider, "requireWav", new Class<?>[] {byte[].class}, (Object) null));
+		assertCode("QWEN_TTS_AUDIO_INVALID",
+				() -> invoke(provider, "requireWav", new Class<?>[] {byte[].class}, new byte[11]));
+		for (int index : new int[] {0, 1, 2, 3, 8, 9, 10, 11}) {
+			byte[] corrupt = WAV.clone();
+			corrupt[index] = 'X';
+			assertCode("QWEN_TTS_AUDIO_INVALID",
+					() -> invoke(provider, "requireWav", new Class<?>[] {byte[].class}, corrupt));
+		}
+		invoke(provider, "requireWav", new Class<?>[] {byte[].class}, WAV);
+	}
+
+	@Test
+	void providerConstructorsRejectNullBlankAndNonPositiveDependencies() {
+		assertThrows(IllegalArgumentException.class, () -> new QwenLlmProvider(
+				null, new ObjectMapper(), "key", QWEN_ENDPOINT, null, Duration.ofSeconds(1), 1));
+		assertThrows(IllegalArgumentException.class, () -> new QwenLlmProvider(
+				new RecordingHttpClient(), null, "key", QWEN_ENDPOINT, null, Duration.ofSeconds(1), 1));
+		for (Duration duration : new Duration[] {null, Duration.ZERO, Duration.ofSeconds(-1)}) {
+			assertThrows(IllegalArgumentException.class, () -> new QwenLlmProvider(
+					new RecordingHttpClient(), new ObjectMapper(), "key", QWEN_ENDPOINT, null, duration, 1));
+		}
+		assertThrows(IllegalArgumentException.class, () -> new QwenAsrProvider(
+				new RecordingHttpClient(), new ObjectMapper(), "key", QWEN_ENDPOINT, " ",
+				Duration.ofSeconds(1), 1, 1));
+		assertThrows(IllegalArgumentException.class, () -> new QwenTtsProvider(
+				new RecordingHttpClient(), new ObjectMapper(), "key", TTS_ENDPOINT, "model", " ",
+				"English", Duration.ofSeconds(1), 1, 1));
+		assertThrows(IllegalArgumentException.class, () -> new QwenTtsProvider(
+				new RecordingHttpClient(), new ObjectMapper(), "key", TTS_ENDPOINT, "model", "voice",
+				" ", Duration.ofSeconds(1), 1, 1));
+	}
+
+	private static Object invoke(Object target, String name, Class<?>[] parameterTypes, Object... args)
+			throws Exception {
+		Method method = target.getClass().getDeclaredMethod(name, parameterTypes);
+		method.setAccessible(true);
+		try {
+			return method.invoke(target, args);
+		}
+		catch (InvocationTargetException exception) {
+			if (exception.getCause() instanceof Exception cause) throw cause;
+			throw exception;
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private static HttpResponse.BodySubscriber<byte[]> newLimitedSubscriber(Class<?> owner, int limit)
+			throws Exception {
+		Class<?> type = Class.forName(owner.getName() + "$LimitedBodySubscriber");
+		Constructor<?> constructor = type.getDeclaredConstructor(int.class, String.class, String.class);
+		constructor.setAccessible(true);
+		return (HttpResponse.BodySubscriber<byte[]>) constructor.newInstance(limit, "TOO_LARGE", "too large");
 	}
 
 	private static QwenLlmProvider llm(HttpClient client, String key) {

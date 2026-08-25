@@ -248,13 +248,24 @@ class IflytekScoringProviderTest {
 		assertEquals(FINAL_RESPONSE, paced.evaluatePronunciation(
 				"hello", wav(16_000, 4_000), null));
 
-		List<byte[]> invalidWavs = List.of(
+		List<byte[]> invalidWavs = new ArrayList<>(List.of(
 				wavWithChunk("fmt ", 8, 16),
 				wavWithChunk("data", -1, 16),
 				wavWithChunk("data", 3, 16),
 				truncatedUnknownChunk(),
 				truncatedRiff(),
-				wavWithFormat(2, 16_000, 16, 2));
+				declaredRiffTooSmall(),
+				wavWithoutData(),
+				wavWithChunk("data", 0, 16),
+				wavWithFormat(2, 16_000, 16, 1),
+				wavWithFormat(1, 16_000, 16, 2),
+				wavWithFormat(1, 8_000, 16, 1),
+				wavWithFormat(1, 16_000, 8, 1)));
+		for (int signatureIndex : new int[] {0, 1, 2, 3, 8, 9, 10, 11}) {
+			byte[] corrupt = wav(16_000, 2);
+			corrupt[signatureIndex] = 'X';
+			invalidWavs.add(corrupt);
+		}
 		for (int index = 0; index < invalidWavs.size(); index++) {
 			byte[] invalid = invalidWavs.get(index);
 			BusinessException exception = assertThrows(
@@ -278,9 +289,14 @@ class IflytekScoringProviderTest {
 				() -> endpointProvider.evaluatePronunciation("hello", wav(16_000, 2), null)).code());
 
 		for (URI endpoint : List.of(
+				URI.create("/v1/private/s8e098720"),
 				URI.create("http://cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720"),
+				URI.create("wss://evil.example/v1/private/s8e098720"),
+				URI.create("wss://user@cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720"),
 				URI.create("wss://cn-east-1.ws-api.xf-yun.com:443/v1/private/s8e098720"),
-				URI.create("wss://cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720?x=1"))) {
+				URI.create("wss://cn-east-1.ws-api.xf-yun.com/wrong"),
+				URI.create("wss://cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720?x=1"),
+				URI.create("wss://cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720#f"))) {
 			BusinessException exception = assertThrows(
 				BusinessException.class,
 				() -> new IflytekScoringProvider(
@@ -290,6 +306,39 @@ class IflytekScoringProviderTest {
 						.evaluatePronunciation("hello", wav(16_000, 2), null));
 			assertEquals("IFLYTEK_SUNTONE_ENDPOINT_INVALID", exception.code());
 		}
+	}
+
+	@Test
+	void validatesEachCredentialAndConstructorBoundaryIndependently() {
+		for (String[] credentials : List.of(
+				new String[] {"", "key", "secret"},
+				new String[] {"app", "", "secret"},
+				new String[] {"app", "key", ""})) {
+			IflytekScoringProvider provider = new IflytekScoringProvider(
+					new ObjectMapper(), new RecordingConnector(FINAL_RESPONSE),
+					credentials[0], credentials[1], credentials[2], OFFICIAL_ENDPOINT,
+					"en", "sent", Duration.ofSeconds(1), 0, Duration.ZERO);
+			assertEquals("IFLYTEK_SUNTONE_CREDENTIAL_MISSING", assertThrows(
+					BusinessException.class,
+					() -> provider.evaluatePronunciation("hello", wav(16_000, 2), null)).code());
+		}
+		assertThrows(IllegalArgumentException.class, () -> new IflytekScoringProvider(
+				new ObjectMapper(), new RecordingConnector(FINAL_RESPONSE), "app", "key", "secret",
+				OFFICIAL_ENDPOINT, " ", "sent", Duration.ofSeconds(1), 1, Duration.ZERO));
+		assertThrows(IllegalArgumentException.class, () -> new IflytekScoringProvider(
+				new ObjectMapper(), new RecordingConnector(FINAL_RESPONSE), "app", "key", "secret",
+				OFFICIAL_ENDPOINT, "en", " ", Duration.ofSeconds(1), 1, Duration.ZERO));
+		for (Duration timeout : new Duration[] {null, Duration.ZERO, Duration.ofSeconds(-1)}) {
+			assertThrows(RuntimeException.class, () -> new IflytekScoringProvider(
+					new ObjectMapper(), new RecordingConnector(FINAL_RESPONSE), "app", "key", "secret",
+					OFFICIAL_ENDPOINT, "en", "sent", timeout, 1, Duration.ZERO));
+		}
+		assertThrows(NullPointerException.class, () -> new IflytekScoringProvider(
+				new ObjectMapper(), new RecordingConnector(FINAL_RESPONSE), "app", "key", "secret",
+				OFFICIAL_ENDPOINT, "en", "sent", Duration.ofSeconds(1), 1, null));
+		assertThrows(IllegalArgumentException.class, () -> new IflytekScoringProvider(
+				new ObjectMapper(), new RecordingConnector(FINAL_RESPONSE), "app", "key", "secret",
+				OFFICIAL_ENDPOINT, "en", "sent", Duration.ofSeconds(1), 1, Duration.ofMillis(-1)));
 	}
 
 	private IflytekScoringProvider provider(RecordingConnector connector) {
@@ -350,6 +399,18 @@ class IflytekScoringProviderTest {
 	private static byte[] truncatedRiff() {
 		byte[] value = wav(16_000, 2);
 		ByteBuffer.wrap(value).order(ByteOrder.LITTLE_ENDIAN).putInt(0, value.length + 100);
+		return value;
+	}
+
+	private static byte[] declaredRiffTooSmall() {
+		byte[] value = wav(16_000, 2);
+		ByteBuffer.wrap(value).order(ByteOrder.LITTLE_ENDIAN).putInt(4, 3);
+		return value;
+	}
+
+	private static byte[] wavWithoutData() {
+		byte[] value = wav(16_000, 2);
+		System.arraycopy("JUNK".getBytes(StandardCharsets.US_ASCII), 0, value, 36, 4);
 		return value;
 	}
 

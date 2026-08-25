@@ -85,6 +85,37 @@ class TurnSpeechScoreCalculatorTest {
 						List.of(phoneme(score("80"), 4, 4)))));
 	}
 
+	@Test
+	void skipsNullWordsPhonemeListsAndPhonemeValues() {
+		PronunciationWordResult withoutPhonemes = new PronunciationWordResult(
+				0, "skip", WordReadStatus.NORMAL, score("1"), score("1"), null, null);
+		PronunciationWordResult mixed = new PronunciationWordResult(
+				1, "test", WordReadStatus.NORMAL, score("1"), score("1"), null,
+				List.of(
+						new PronunciationPhonemeResult(0, "x", "x", null, 0, 1),
+						phoneme(score("60"), 0, 2)));
+		PronunciationAssessmentResult input = new PronunciationAssessmentResult(
+				score("1"), score("50"), null, score("1"), score("1"), score("50"),
+				EndingTone.FALL, java.util.Arrays.asList(null, withoutPhonemes, mixed));
+
+		TurnSpeechScoreCalculation result = TurnSpeechScoreCalculator.calculate(input);
+
+		assertEquals(score("60.00000000"), result.phonemeAverage());
+		assertEquals(score("51.9"), result.audioNaturalnessScore());
+	}
+
+	@Test
+	void rejectsNullWordListAndNullRequiredFluency() {
+		PronunciationAssessmentResult noWords = new PronunciationAssessmentResult(
+				score("1"), score("1"), score("1"), score("1"), score("1"), score("1"),
+				EndingTone.FALL, null);
+		PronunciationAssessmentResult noFluency = assessment(
+				null, score("70"), List.of(phoneme(score("80"), 0, 10)));
+
+		assertIncomplete(noWords);
+		assertIncomplete(noFluency);
+	}
+
 	private void assertIncomplete(PronunciationAssessmentResult assessment) {
 		EvaluationException exception = assertThrows(
 				EvaluationException.class,

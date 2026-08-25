@@ -35,4 +35,26 @@ class ScenarioSuccessFactorParserTest {
 		assertEquals(10, factor.maximumUserTurns());
 		assertEquals("完成药店咨询", factor.requiredOutcomes().get("outcome_1"));
 	}
+
+	@Test
+	void defaultsNonPositiveTurnsAndMissingOrBlankOutcomes() {
+		var factor = parser.parse("""
+				{"minimum_user_turns":0,"maximum_user_turns":-1,
+				"required_outcomes":[" ",null," useful goal "]}
+				""", "fallback");
+		assertEquals(3, factor.minimumUserTurns());
+		assertEquals(10, factor.maximumUserTurns());
+		assertEquals("useful goal", factor.requiredOutcomes().get("outcome_1"));
+
+		var missing = parser.parse("{\"required_outcomes\":{}}", " fallback goal ");
+		assertEquals("fallback goal", missing.requiredOutcomes().get("outcome_1"));
+	}
+
+	@Test
+	void malformedOrNullDocumentsUseDefaultGoalForNullAndBlankFallbacks() {
+		assertEquals("完成当前对话目标",
+				parser.parse("null", null).requiredOutcomes().get("outcome_1"));
+		assertEquals("完成当前对话目标",
+				parser.parse("bad-json", " ").requiredOutcomes().get("outcome_1"));
+	}
 }

@@ -36,6 +36,48 @@ class InterviewTopicStateMachineTest {
 	}
 
 	@Test
+	void validatesStartTurnAndMissingStateAndDefaultsDifficulty() {
+		assertThrows(BusinessException.class,
+				() -> stateMachine.start(null, topics("one"), null));
+		assertThrows(BusinessException.class,
+				() -> stateMachine.start(" ", topics("one"), null));
+		assertThrows(BusinessException.class,
+				() -> stateMachine.start("session", null, null));
+		assertThrows(BusinessException.class,
+				() -> stateMachine.start("session", List.of(), null));
+		stateMachine.start("session", topics("one"), null);
+		assertThrows(BusinessException.class,
+				() -> stateMachine.advance("session", 0, null));
+		assertThrows(BusinessException.class,
+				() -> stateMachine.advance("missing", 1, null));
+		assertNull(stateMachine.current("missing"));
+	}
+
+	@Test
+	void nullEventCountsUnknownAndRepeatedCompletionIsIdempotent() {
+		stateMachine.start("session", topics("Tell me about yourself", "project"), null);
+		assertEquals(1, stateMachine.advance("session", 1, null).unknownStreak());
+		stateMachine.advance("session", 2,
+				new InterviewTopicEvent("  TELL ME ABOUT YOURSELF  ", true));
+		InterviewTopicState repeated = stateMachine.advance("session", 3,
+				new InterviewTopicEvent("tell me about yourself", true));
+		assertEquals(1, repeated.completedTopicCount());
+		assertTrue(repeated.controlInstruction().contains("Move on to the NEXT topic"));
+	}
+
+	@Test
+	void recognizesEveryMandatoryTopicPhrase() {
+		for (String topic : List.of(
+				"self-intro", "self intro", "introduce yourself", "about yourself",
+				"tell me about yourself", "自我介绍", "experience", "project", "经历", "项目", "经验")) {
+			stateMachine.start("session-" + topic, topics(topic), InterviewDifficulty.EASY);
+			InterviewTopicState state = stateMachine.advance(
+					"session-" + topic, 1, new InterviewTopicEvent(topic, true));
+			assertEquals(1, state.completedTopicCount());
+		}
+	}
+
+	@Test
 	void advanceIdentifiesTopicAndTracksCompletionAndFollowUps() {
 		stateMachine.start(
 				"session-1",

@@ -2,6 +2,7 @@ package com.unispeaking.common.prompt;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.unispeaking.domain.vo.scene.IeltsContent;
 import com.unispeaking.domain.vo.scene.IeltsContentQuestion;
@@ -100,6 +101,36 @@ class IeltsExaminerPromptBuilderTest {
 		assertTrue(prompt.contains("Never generate a follow-up"));
 		assertFalse(prompt.contains("PREPARATION_COMPLETE"));
 		assertFalse(prompt.contains("{{"));
+	}
+
+	@Test
+	void rejectsNullPartNullContentAndEmptyActiveQuestions() {
+		IeltsContent empty = new IeltsContent(List.of(), List.of(), List.of());
+		assertThrows(IllegalArgumentException.class,
+				() -> builder.build(null, "topic", empty));
+		assertThrows(IllegalArgumentException.class,
+				() -> builder.build(IeltsPart.PART_1, "topic", null));
+		for (IeltsPart part : IeltsPart.values()) {
+			assertThrows(IllegalArgumentException.class,
+					() -> builder.build(part, "topic", empty));
+		}
+	}
+
+	@Test
+	void defaultsBlankTitleAndExaminerAndHandlesCueCardWithoutPoints() {
+		String defaults = builder.build(
+				IeltsPart.PART_1, " ",
+				new IeltsContent(List.of(question("Question?")), List.of(), List.of()),
+				null);
+		String prompt = builder.build(
+				IeltsPart.PART_2, " ",
+				new IeltsContent(List.of(), List.of(question("  Describe a place.  ")), List.of()),
+				null);
+
+		assertTrue(defaults.contains("My name is Daniel"));
+		assertTrue(defaults.contains("this topic"));
+		assertTrue(prompt.contains("Topic:\nDescribe a place."));
+		assertFalse(prompt.contains("You should say:"));
 	}
 
 	private IeltsContentQuestion question(String text) {

@@ -97,4 +97,101 @@ describe('AnalyticsClient', () => {
 
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it('normalizes invalid identities and uses dependency fallbacks', () => {
+    const fetch = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>(
+      async () => { throw new Error('offline'); },
+    );
+    const client = new AnalyticsClient(
+      { enabled: true, endpoint: '/events', websiteId: 'site', hostname: 'host' },
+      { fetch },
+    );
+    client.setDistinctId('');
+    client.trackPageView();
+    client.setDistinctId('x'.repeat(51));
+    client.trackLearningAsset({}, 'REPORT');
+    client.setDistinctId(undefined);
+
+    expect(payload({ init: fetch.mock.calls[0][1] }).id).toBeUndefined();
+    expect(payload({ init: fetch.mock.calls[0][1] })).toMatchObject({
+      language: 'zh-CN', screen: 'mobile', url: '/',
+    });
+    expect(fetch.mock.calls[0][1]?.headers).toMatchObject({
+      'User-Agent': 'UniSpeaking-Mobile/1.0',
+    });
+  });
+
+  it('filters invalid contexts and unsafe event values', () => {
+    const { client, calls } = createClient();
+    client.trackModeSelection({ pageCode: 'missing-mode' });
+    client.trackModeSelection({ mode: 'INVALID' as any, pageCode: 'invalid' });
+    client.trackLearningAsset({ mode: 'SCENE', pageCode: 'x'.repeat(81) }, '');
+
+    expect(calls).toHaveLength(1);
+    expect(payload(calls[0])).toMatchObject({
+      name: 'learning_asset_view',
+      data: { mode: 'SCENE' },
+    });
+  });
+
+  it('records failed and abandoned training while guarding duplicate terminal actions', () => {
+    let current = 0;
+    const calls: { init?: RequestInit }[] = [];
+    const client = new AnalyticsClient(
+      { enabled: true, endpoint: '/events', websiteId: 'site', hostname: 'host' },
+      {
+        fetch: jest.fn(async (_input, init) => {
+          calls.push({ init });
+          return new Response(null, { status: 200 });
+        }),
+        now: () => current,
+      },
+    );
+
+    const invalid = client.training();
+    invalid.attempt();
+    invalid.started();
+    invalid.fail();
+    invalid.complete();
+    invalid.abandon();
+
+    const failed = client.training({ mode: 'INTERVIEW', pageCode: 'interview' });
+    failed.fail('PROVIDER_ERROR');
+    failed.fail();
+    failed.started();
+
+    const abandoned = client.training({ mode: 'IELTS', pageCode: 'ielts' });
+    abandoned.attempt();
+    abandoned.started();
+    abandoned.started();
+    current = 3_600;
+    client.setAppVisible(false);
+    client.setAppVisible(true);
+    abandoned.abandon();
+    abandoned.complete();
+    abandoned.abandon();
+
+    expect(calls.map(payload).map((item) => item.name)).toEqual([
+      'training_start_failed',
+      'training_start_attempt',
+      'training_started',
+      'training_abandoned',
+    ]);
+    expect(payload(calls[3]).data).toMatchObject({
+      reason: 'USER_EXIT', effective_duration_seconds: 4,
+    });
+  });
+
+  it('does not fail or abandon after a training timer has started', () => {
+    const { client, calls } = createClient();
+    const tracker = client.training({ mode: 'SCENE' });
+    tracker.started();
+    tracker.fail('LATE_FAILURE');
+    tracker.attempt();
+    tracker.complete();
+    tracker.complete();
+    expect(calls.map(payload).map((item) => item.name)).toEqual([
+      'training_started', 'training_start_attempt', 'training_completed',
+    ]);
+  });
 });

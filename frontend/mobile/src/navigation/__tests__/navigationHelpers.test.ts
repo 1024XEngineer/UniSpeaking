@@ -8,6 +8,13 @@ describe('navigation helpers', () => {
     expect(routes.scenes.training('scene-1', 'speak')).toBe('/scenes/scene-1/training?stage=speak');
     expect(routes.scenes.training('scene-1')).toBe('/scenes/scene-1/training');
     expect(routes.specialty.interviewPractice('scene-1', 'PM')).toEqual({ pathname: '/interview', params: { sceneId: 'scene-1', jobTitle: 'PM', practice: '1' } });
+    expect(routes.scenes.intro('scene-1')).toBe('/scenes/scene-1/intro');
+    expect(routes.specialty.interviewPractice('scene-1')).toEqual({ pathname: '/interview', params: { sceneId: 'scene-1', jobTitle: '', practice: '1' } });
+    expect(routes.learning.sceneDetail('scene-1')).toBe('/learning/scenes/scene-1');
+    expect(routes.learning.ielts.record('record-1')).toBe('/ielts/assets/record-1');
+    expect(routes.learning.interview.record('record-1')).toBe('/interview/assets/record-1');
+    expect(routes.profile.helpCategory('a b')).toBe('/profile/help/a%20b');
+    expect(routes.profile.helpArticle('a/b')).toBe('/profile/help/article/a%2Fb');
   });
 
   it('persists only supported specialty values and tolerates storage failures', async () => {

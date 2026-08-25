@@ -111,6 +111,25 @@ describe('AuthService', () => {
     expect(client.request).toHaveBeenNthCalledWith(2, '/api/user-preferences');
   });
 
+  it('refreshes and revokes refresh tokens without authorization headers', async () => {
+    const client = createClient();
+    const service = new AuthService(client);
+
+    await service.refresh('refresh-token');
+    await service.revoke('refresh-token');
+
+    expect(client.request).toHaveBeenNthCalledWith(1, '/api/auth/mobile/token/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken: 'refresh-token' }),
+      headers: { 'X-Skip-Authorization': 'true' },
+    });
+    expect(client.request).toHaveBeenNthCalledWith(2, '/api/auth/mobile/token/revoke', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken: 'refresh-token' }),
+      headers: { 'X-Skip-Authorization': 'true' },
+    });
+  });
+
   it('updates only the supplied preference fields', async () => {
     const client = createClient();
     const service = new AuthService(client);

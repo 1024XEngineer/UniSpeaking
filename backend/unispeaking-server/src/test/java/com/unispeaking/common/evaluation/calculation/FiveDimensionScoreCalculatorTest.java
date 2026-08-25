@@ -2,6 +2,7 @@ package com.unispeaking.common.evaluation.calculation;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.unispeaking.common.evaluation.model.ConversationLanguageAssessment;
 import com.unispeaking.common.evaluation.model.EndingTone;
@@ -9,11 +10,35 @@ import com.unispeaking.common.evaluation.model.PronunciationAssessmentResult;
 import com.unispeaking.common.evaluation.model.PronunciationPhonemeResult;
 import com.unispeaking.common.evaluation.model.PronunciationWordResult;
 import com.unispeaking.common.evaluation.model.WordReadStatus;
+import com.unispeaking.common.exception.evaluation.EvaluationException;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class FiveDimensionScoreCalculatorTest {
+
+	@Test
+	void rejectsEveryInvalidConversationScoreInput() {
+		ConversationLanguageAssessment language = language(score("50"), score("50"), score("50"));
+		TurnScoreContribution valid = turn(score("50"), score("50"), score("50"), 10, 1);
+
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(null, language));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(), language));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(java.util.Arrays.asList((TurnScoreContribution) null), language));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(turn(null, score("50"), score("50"), 10, 1)), language));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(turn(score("-1"), score("50"), score("50"), 10, 1)), language));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(turn(score("101"), score("50"), score("50"), 10, 1)), language));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(turn(score("50"), null, score("50"), 10, 1)), language));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(turn(score("50"), score("50"), null, 10, 1)), language));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(turn(score("50"), score("50"), score("50"), 0, 1)), language));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(turn(score("50"), score("50"), score("50"), 10, 0)), language));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(valid), null));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(valid), language(null, score("50"), score("50"))));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(valid), language(score("50"), null, score("50"))));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(valid), language(score("50"), score("50"), null)));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(valid), language(score("-1"), score("50"), score("50"))));
+		assertThrows(EvaluationException.class, () -> ConversationScoreCalculator.calculate(List.of(valid), language(score("50"), score("101"), score("50"))));
+	}
 
 	@Test
 	void calculatesDocumentExampleWithDurationWeights() {
@@ -153,5 +178,13 @@ class FiveDimensionScoreCalculatorTest {
 
 	private BigDecimal score(String value) {
 		return new BigDecimal(value);
+	}
+
+	private TurnScoreContribution turn(BigDecimal accuracy, BigDecimal fluency, BigDecimal naturalness, int duration, int phonemes) {
+		return new TurnScoreContribution(accuracy, fluency, naturalness, duration, phonemes);
+	}
+
+	private ConversationLanguageAssessment language(BigDecimal grammar, BigDecimal vocabulary, BigDecimal naturalness) {
+		return new ConversationLanguageAssessment(grammar, vocabulary, naturalness, "summary", List.of(), List.of());
 	}
 }

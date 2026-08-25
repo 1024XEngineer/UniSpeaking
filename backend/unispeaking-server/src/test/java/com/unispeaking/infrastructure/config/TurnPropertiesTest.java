@@ -3,6 +3,7 @@ package com.unispeaking.infrastructure.config;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Duration;
@@ -58,6 +59,56 @@ class TurnPropertiesTest {
 				Duration.ofMinutes(5),
 				10,
 				Set.of()).validate());
+	}
+
+	@Test
+	void normalizesNullableAndBlankCollections() {
+		TurnProperties nullable = new TurnProperties(false, null, null, null, 0, null);
+		TurnProperties filtered = new TurnProperties(
+				false, List.of(" ", " turn:host:443?transport=udp "), " secret ", null, 0,
+				Set.of(" ", " user-1 "));
+
+		assertEquals(List.of(), nullable.urls());
+		assertEquals(Set.of(), nullable.relayTestUserIds());
+		assertEquals("", nullable.sharedSecret());
+		assertEquals(List.of("turn:host:443?transport=udp"), filtered.urls());
+		assertEquals(Set.of("user-1"), filtered.relayTestUserIds());
+		assertEquals("secret", filtered.sharedSecret());
+		assertTrue(filtered.canForceRelay(" user-1 "));
+		assertFalse(filtered.canForceRelay(null));
+	}
+
+	@Test
+	void rejectsBothRolloutBoundsEvenWhenDisabled() {
+		assertThrows(IllegalStateException.class,
+				() -> new TurnProperties(false, null, null, null, -1, null).validate());
+		assertThrows(IllegalStateException.class,
+				() -> new TurnProperties(false, null, null, null, 101, null).validate());
+	}
+
+	@Test
+	void rejectsEveryEnabledConfigurationBoundary() {
+		String secret = "01234567890123456789012345678901";
+		assertThrows(IllegalStateException.class, () -> new TurnProperties(
+				true, List.of("turn:host:443?transport=udp"), secret,
+				Duration.ofSeconds(59), 0, Set.of()).validate());
+		assertThrows(IllegalStateException.class, () -> new TurnProperties(
+				true, List.of("turn:host:443?transport=udp"), secret,
+				Duration.ofMinutes(61), 0, Set.of()).validate());
+		assertThrows(IllegalStateException.class, () -> new TurnProperties(
+				true, List.of(), secret, Duration.ofMinutes(1), 0, Set.of()).validate());
+		assertThrows(IllegalStateException.class, () -> new TurnProperties(
+				true, List.of("turns:host:443?transport=udp"), secret,
+				Duration.ofHours(1), 0, Set.of()).validate());
+		assertThrows(IllegalStateException.class, () -> new TurnProperties(
+				true, List.of("turn:host:443?transport=tcp"), secret,
+				Duration.ofHours(1), 0, Set.of()).validate());
+		assertThrows(IllegalStateException.class, () -> new TurnProperties(
+				true, List.of("turn:host:443?transport=udp"), "short",
+				Duration.ofHours(1), 0, Set.of()).validate());
+		assertDoesNotThrow(() -> new TurnProperties(
+				true, List.of("TURN:host:443?TRANSPORT=UDP"), secret,
+				Duration.ofHours(1), 100, Set.of()).validate());
 	}
 
 	static TurnProperties enabledProperties(int rolloutPercentage) {

@@ -1,11 +1,13 @@
 package com.unispeaking.common.evaluation.parser;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.unispeaking.common.exception.evaluation.EvaluationException;
 import com.unispeaking.domain.vo.scene.IeltsPart;
 import java.math.BigDecimal;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
@@ -56,6 +58,92 @@ class IeltsTextAssessmentParserTest {
 
 		assertEquals(new BigDecimal("7.0"), result.fluencyCoherenceBand());
 		assertEquals(new BigDecimal("6.0"), result.lexicalResourceBand());
+	}
+
+	@Test
+	void rejectsMismatchedPartInBothDiagnosticAndFinalModes() {
+		assertInvalid(() -> parser.parse(partJson(), IeltsPart.PART_2));
+		assertInvalid(() -> parser.parse(
+				partJson().replace("DIAGNOSTIC", "FINAL"), null));
+	}
+
+	@Test
+	void buildsFallbackReasonsWithEveryOptionalSectionShape() {
+		String json = minimalJson(
+				"{\"band\":7,\"strengths\":[\" clear \"],\"issues\":[\"repeat\"],\"evidence\":[\"example\"]}",
+				"{\"band\":6,\"strengths\":null,\"issues\":[\"basic\"]}",
+				"{\"band\":5,\"reason_zh\":\" \",\"issues\":[]}",
+				"null");
+
+		var result = parser.parse(json, IeltsPart.PART_1);
+
+		assertTrue(result.fluencyCoherenceReason().contains("clear；但repeat"));
+		assertTrue(result.fluencyCoherenceReason().contains("example"));
+		assertTrue(result.lexicalResourceReason().contains("basic"));
+		assertTrue(result.grammaticalRangeAccuracyReason().startsWith("语法多样性"));
+		assertEquals(List.of("clear"), result.strengths());
+		assertEquals(List.of("repeat", "basic"), result.improvements());
+	}
+
+	@Test
+	void rejectsEveryBandRepresentationOutsideTheContract() {
+		for (String band : List.of("null", "true", "\"bad\"", "-1", "10")) {
+			String criterion = "{\"band\":" + band + ",\"reason_zh\":\"reason\"}";
+			assertInvalid(() -> parser.parse(
+					minimalJson(criterion, validCriterion(), validCriterion(), "[]"),
+					IeltsPart.PART_1));
+		}
+	}
+
+	@Test
+	void rejectsMalformedObjectsArraysAndPriorityItems() {
+		assertInvalid(() -> parser.parse(minimalJson(
+				"null", validCriterion(), validCriterion(), "[]"), IeltsPart.PART_1));
+		assertInvalid(() -> parser.parse(minimalJson(
+				"[]", validCriterion(), validCriterion(), "[]"), IeltsPart.PART_1));
+		assertInvalid(() -> parser.parse(minimalJson(
+				"{\"band\":7,\"reason_zh\":\"reason\",\"strengths\":{}}",
+				validCriterion(), validCriterion(), "[]"), IeltsPart.PART_1));
+		assertInvalid(() -> parser.parse(minimalJson(
+				"{\"band\":7,\"reason_zh\":\"reason\",\"strengths\":[1]}",
+				validCriterion(), validCriterion(), "[]"), IeltsPart.PART_1));
+		assertInvalid(() -> parser.parse(minimalJson(
+				"{\"band\":7,\"reason_zh\":\"reason\",\"strengths\":[\" \"]}",
+				validCriterion(), validCriterion(), "[]"), IeltsPart.PART_1));
+		assertEquals(List.of(), parser.parse(minimalJson(
+				validCriterion(), validCriterion(), validCriterion(), "{}"),
+				IeltsPart.PART_1).improvements());
+		assertInvalid(() -> parser.parse(minimalJson(
+				validCriterion(), validCriterion(), validCriterion(), "[1]"), IeltsPart.PART_1));
+		assertInvalid(() -> parser.parse(minimalJson(
+				validCriterion(), validCriterion(), validCriterion(), "[{}]"), IeltsPart.PART_1));
+	}
+
+	@Test
+	void rejectsMissingWrongAndBlankRequiredText() {
+		assertInvalid(() -> parser.parse(partJson().replace(
+				"\"summary_zh\":\"表达基本连贯。\"", "\"summary_zh\":null"), IeltsPart.PART_1));
+		assertInvalid(() -> parser.parse(partJson().replace(
+				"\"confidence\":\"HIGH\"", "\"confidence\":7"), IeltsPart.PART_1));
+		assertInvalid(() -> parser.parse(partJson().replace(
+				"\"confidence\":\"HIGH\"", "\"confidence\":\" \""), IeltsPart.PART_1));
+	}
+
+	private void assertInvalid(org.junit.jupiter.api.function.Executable action) {
+		assertThrows(EvaluationException.class, action);
+	}
+
+	private String validCriterion() {
+		return "{\"band\":7,\"reason_zh\":\"reason\"}";
+	}
+
+	private String minimalJson(String fc, String lr, String grammar, String priority) {
+		return "{\"part\":\"PART_1\",\"assessment_type\":\"DIAGNOSTIC\","
+				+ "\"fluency_coherence\":" + fc + ","
+				+ "\"lexical_resource\":" + lr + ","
+				+ "\"grammatical_range_accuracy\":" + grammar + ","
+				+ "\"priority_improvements\":" + priority + ","
+				+ "\"summary_zh\":\"summary\",\"confidence\":\"HIGH\"}";
 	}
 
 	private String partJson() {

@@ -268,7 +268,7 @@ jobs:
           retention-days: 1
 
   coverage:
-    name: 合并覆盖率并检查 85% 门槛
+    name: 合并覆盖率并检查 Codecov 口径 90% 门槛
     needs:
       - changes
       - backend
@@ -319,6 +319,14 @@ jobs:
             -DskipUnitTests \
             -DskipIntegrationTests \
             verify 2>&1 | tee ci-logs/backend-coverage.log
+
+      - name: 检查后端 Codecov 口径覆盖率
+        working-directory: backend/unispeaking-server
+        run: |
+          python3 ../../scripts/check-codecov-coverage.py \
+            --format jacoco \
+            --input target/site/jacoco-aggregate/jacoco.xml \
+            --minimum 90
 
       - name: 保存合并覆盖率报告
         if: always()
@@ -395,6 +403,13 @@ jobs:
 
       - name: 运行 Jest 覆盖率门禁
         run: npm run test:ci
+
+      - name: 检查移动端 Codecov 口径覆盖率
+        run: |
+          python3 ../../scripts/check-codecov-coverage.py \
+            --format lcov \
+            --input coverage/lcov.info \
+            --minimum 90
 
       - name: 保存移动端覆盖率报告
         if: always()

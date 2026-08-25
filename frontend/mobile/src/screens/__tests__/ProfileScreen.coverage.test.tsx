@@ -153,6 +153,20 @@ describe('ProfileScreen exported pages', () => {
     view.unmount();
   });
 
+  it('uploads a selected profile avatar through the profile home save flow', async () => {
+    const view = await render(
+      <ProfileHome onOpen={jest.fn()} onLogout={jest.fn()} loadImagePicker={async () => mockImagePicker as any} />,
+    );
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('编辑用户名和头像'));
+    await fireEvent.press(view.getByText('选择新头像'));
+    await fireEvent.press(view.getByText('保存修改'));
+    await waitFor(() => expect(mockApi.uploadAvatar).toHaveBeenCalledWith(expect.objectContaining({
+      uri: 'file:///avatar.png', mimeType: 'image/png', fileName: 'avatar.png', fileSize: 512,
+    })));
+    expect(mockApi.updateNickname).not.toHaveBeenCalled();
+  });
+
 
   it('loads overview data, changes the calendar month, and exposes achievement retry failures', async () => {
     const view = await render(<Overview onBack={jest.fn()} />);
@@ -185,6 +199,24 @@ describe('ProfileScreen exported pages', () => {
     await waitFor(() => expect(view.getByText('调整每周目标')).toBeTruthy());
     fireEvent.press(view.getByText('保存目标'));
     await waitFor(() => expect(mockApi.updateWeeklyGoals).toHaveBeenCalledWith({ durationTargetMinutes: 120, trainingCountTarget: 5 }));
+  });
+
+  it('covers invalid weekly goal values and persistence failure', async () => {
+    const view = await render(<Insights onBack={jest.fn()} />);
+    await waitFor(() => expect(view.getByText('本周训练类型占比')).toBeTruthy());
+    await fireEvent.press(view.getByText('调整目标'));
+    const inputs = view.getAllByDisplayValue(/^(120|5)$/);
+    await fireEvent.changeText(inputs[0], '0');
+    await fireEvent.press(view.getByText('保存目标'));
+    expect(view.getByText('时长目标需在 1 到 1260 分钟之间')).toBeTruthy();
+    await fireEvent.changeText(inputs[0], '120');
+    await fireEvent.changeText(inputs[1], '71');
+    await fireEvent.press(view.getByText('保存目标'));
+    expect(view.getByText('训练次数需在 1 到 70 次之间')).toBeTruthy();
+    await fireEvent.changeText(inputs[1], '5');
+    mockApi.updateWeeklyGoals.mockRejectedValueOnce(new Error('目标保存失败'));
+    await fireEvent.press(view.getByText('保存目标'));
+    await waitFor(() => expect(view.getByText('目标保存失败')).toBeTruthy());
   });
 
   it('renders insights empty states and retries a failed request', async () => {
@@ -235,6 +267,27 @@ describe('ProfileScreen exported pages', () => {
     await waitFor(() => expect(logout).toHaveBeenCalled());
   });
 
+  it('covers password mismatch, API failure, and successful password change', async () => {
+    const logout = jest.fn().mockResolvedValue(undefined);
+    const view = await render(<AccountSettings onBack={jest.fn()} onLogout={logout} />);
+    await fireEvent.press(view.getByText('登录密码'));
+    await fireEvent.changeText(view.getAllByDisplayValue('')[0], 'current');
+    const passwordInputs = view.getAllByDisplayValue('');
+    await fireEvent.changeText(passwordInputs[0], 'abcdef');
+    await fireEvent.changeText(passwordInputs[1], 'abcdeg');
+    await fireEvent.press(view.getByText('确认修改'));
+    expect(view.getByText('两次输入的新密码不一致')).toBeTruthy();
+
+    await fireEvent.changeText(passwordInputs[1], 'abcdef');
+    mockApi.changePassword.mockRejectedValueOnce(new Error('密码服务失败'));
+    await fireEvent.press(view.getByText('确认修改'));
+    await waitFor(() => expect(view.getByText('密码服务失败')).toBeTruthy());
+
+    mockApi.changePassword.mockResolvedValueOnce({ reauthenticationRequired: true });
+    await fireEvent.press(view.getByText('确认修改'));
+    await waitFor(() => expect(logout).toHaveBeenCalled());
+  });
+
   it('loads an article and renders its refreshed timestamp and body', async () => {
     mockApi.getHelpArticle.mockReset();
     mockApi.getHelpArticle.mockResolvedValue({ id: 'password', categoryId: 'account', title: '如何修改密码', summary: '在账号设置中修改。', updatedAt: '2026-08-10' });
@@ -259,6 +312,5 @@ describe('ProfileScreen exported pages', () => {
     expect(openArticle).toHaveBeenCalledWith('password');
 
   });
-
 
 });
