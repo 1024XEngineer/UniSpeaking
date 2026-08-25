@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.random.RandomGenerator;
 import java.util.stream.Collectors;
@@ -29,11 +30,11 @@ public class DailyPickService {
 
 	@Autowired
 	public DailyPickService(DailyPickCatalog catalog) {
-		this(catalog, Clock.system(RECOMMENDATION_ZONE), RandomGenerator.getDefault());
+		this(catalog, Clock.system(RECOMMENDATION_ZONE), new Random());
 	}
 
 	DailyPickService(DailyPickCatalog catalog, Clock clock) {
-		this(catalog, clock, RandomGenerator.getDefault());
+		this(catalog, clock, new Random());
 	}
 
 	DailyPickService(DailyPickCatalog catalog, Clock clock, RandomGenerator random) {
