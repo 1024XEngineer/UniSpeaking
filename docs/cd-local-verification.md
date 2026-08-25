@@ -4,7 +4,7 @@
 
 ## 1. Fork Actions
 
-在个人 Fork 的 Actions 页面手动运行 `CD Verify (Fork)`，输入要验证的 40 位 commit SHA。Workflow 会将三个镜像推送到：
+将验证分支推送到个人 Fork 后，`CD Verify (Fork)` 会自动运行；也可以在 Workflow 出现在 Actions 页面后手动运行并输入要验证的 40 位 commit SHA。Workflow 会将三个镜像推送到：
 
 ```text
 ghcr.io/<个人账号>/unispeaking-backend:sha-<SHA>
