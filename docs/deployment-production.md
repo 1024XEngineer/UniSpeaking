@@ -1,12 +1,14 @@
 # UniSpeaking production deployment
 
+> This document describes the legacy/manual source-build procedure. New production releases must use [`docs/deployment-cd.md`](deployment-cd.md): GitHub Actions builds private GHCR images and the server only pulls and runs a pinned SHA. Do not use `git pull` or `up -d --build` for CD releases.
+
 This runbook targets the single-server Docker deployment for `unispeaking.qnsdk.com`.
 It assumes Ubuntu 24.04, Docker Compose, PostgreSQL 17, and public TCP ports
 80 and 443 mapped to the server.
 
 ## Prepare the server
 
-Clone the merged `main` branch into `/opt/unispeaking`, then create the runtime
+For the legacy/manual procedure only, clone the merged `main` branch into `/opt/unispeaking`, then create the runtime
 directories and install the certificate files:
 
 ```bash
@@ -328,14 +330,7 @@ backup. Never use `docker compose down -v` on the production database.
 
 ## Later releases
 
-Pull a reviewed commit from `main`, then rebuild the application:
-
-```bash
-cd /opt/unispeaking
-git pull --ff-only origin main
-docker compose --env-file deploy/env/.env \
-  -f deploy/docker-compose.prod.yml up -d --build
-```
+For the CD-managed production environment, use `docs/deployment-cd.md`. The commands below are retained only for legacy/manual environments and must not be used against the CD-managed server. The CD-managed release path uses a reviewed commit SHA, GHCR `pull`, and the fixed server entry point. Do not run `git pull` or `up -d --build` on a CD-managed production server.
 
 New Flyway migrations run automatically during backend startup. Never edit a
 migration that has already run in production, and never reinitialize an
