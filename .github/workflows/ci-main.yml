@@ -1,0 +1,48 @@
+name: Main CI
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Commit SHA to validate; leave empty for the current main HEAD
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-main-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: 主分支核心检查
+    uses: ./.github/workflows/ci-core.yml
+    with:
+      pr_number: main-${{ github.run_id }}
+      base_sha: ${{ github.event.before || github.sha }}
+      head_sha: ${{ inputs.commit_sha || github.sha }}
+      merge_sha: ${{ inputs.commit_sha || github.sha }}
+      force_all: true
+
+  required:
+    name: CI / required
+    if: always()
+    needs: core
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: 汇总主分支检查
+        env:
+          CORE_RESULT: ${{ needs.core.result }}
+        run: |
+          set -euo pipefail
+          [[ "$CORE_RESULT" == success ]] || {
+            echo "Main CI 核心检查未通过：$CORE_RESULT" >&2
+            exit 1
+          }
