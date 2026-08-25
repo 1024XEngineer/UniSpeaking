@@ -9,6 +9,31 @@ import {
 
 const API_BASE = (import.meta.env?.VITE_BACKEND_URL || "").replace(/\/$/, "");
 export const AUTH_SESSION_EXPIRED_EVENT = "unispeaking:auth-session-expired";
+const ASYNC_TASK_POLL_INTERVAL_MS = 1_000;
+const ASYNC_TASK_TIMEOUT_MS = 180_000;
+
+function wait(milliseconds) {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
+}
+
+async function waitForAsyncTask(initialTask, loadTask, taskName) {
+  let task = initialTask;
+  const deadline = Date.now() + ASYNC_TASK_TIMEOUT_MS;
+  while (task?.status === "PROCESSING") {
+    if (Date.now() >= deadline) {
+      throw new Error(`${taskName}等待超时，请稍后重试`);
+    }
+    await wait(ASYNC_TASK_POLL_INTERVAL_MS);
+    task = await loadTask();
+  }
+  if (task?.status === "FAILED") {
+    throw new Error(task.failureReason || `${taskName}失败，请稍后重试`);
+  }
+  if (task?.status !== "COMPLETED" || !task.result) {
+    throw new Error(`${taskName}任务状态异常`);
+  }
+  return task.result;
+}
 
 async function unwrap(response) {
   const contentType = response.headers.get("content-type") || "";
@@ -298,10 +323,16 @@ export function updateUserPreference(preference) {
 }
 
 export async function generateCustomScene(sceneInput, userPreference = null) {
-  const scene = await request("/api/custom-scenes/generate", {
+  const task = await request("/api/custom-scenes/generate", {
     method: "POST",
     body: JSON.stringify({ sceneInput, userPreference }),
   });
+  if (!task?.taskId) throw new Error("场景生成响应缺少 taskId");
+  const scene = await waitForAsyncTask(
+    task,
+    () => request(`/api/custom-scenes/generation-tasks/${encodeURIComponent(task.taskId)}`),
+    "场景生成",
+  );
   if (!scene || typeof scene !== "object" || !scene.sceneId) {
     throw new Error("场景生成响应缺少 sceneId");
   }
@@ -395,10 +426,13 @@ export function advanceIeltsPart2State(
   );
 }
 
-export function generateIeltsEvaluation(ieltsId, sessionId) {
-  return request(
-    `/api/ielts/${encodeURIComponent(ieltsId)}/sessions/${encodeURIComponent(sessionId)}/evaluation`,
-    { method: "POST" },
+export async function generateIeltsEvaluation(ieltsId, sessionId) {
+  const path = `/api/ielts/${encodeURIComponent(ieltsId)}/sessions/${encodeURIComponent(sessionId)}/evaluation`;
+  const task = await request(path, { method: "POST" });
+  return waitForAsyncTask(
+    task,
+    () => request(path),
+    "IELTS 评分",
   );
 }
 

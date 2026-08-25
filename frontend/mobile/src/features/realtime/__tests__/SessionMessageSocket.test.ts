@@ -110,6 +110,36 @@ describe('SessionMessageSocket', () => {
     await expect(pending).resolves.toBeUndefined();
   });
 
+  it('activates a connected backend session', async () => {
+    const nativeSocket = new FakeWebSocket();
+    const socket = new SessionMessageSocket({
+      baseUrl: 'http://127.0.0.1:8080',
+      tokenStore: { get: async () => 'jwt-token' },
+      webSocketFactory: () => nativeSocket,
+    });
+    const connecting = socket.connect('session-1');
+    await Promise.resolve();
+    nativeSocket.open();
+    await connecting;
+
+    const pending = socket.activate();
+    expect(JSON.parse(nativeSocket.sent[0])).toEqual({
+      type: 'activate',
+      sessionId: 'session-1',
+      message: null,
+      stopTime: null,
+      providerSessionId: null,
+    });
+    nativeSocket.message({
+      type: 'session.activate.accepted',
+      success: true,
+      sessionId: 'session-1',
+    });
+    await expect(pending).resolves.toEqual(
+      expect.objectContaining({ type: 'session.activate.accepted' }),
+    );
+  });
+
   it('sends the stop timestamp and rejects a backend failure ACK', async () => {
     const nativeSocket = new FakeWebSocket();
     const socket = new SessionMessageSocket({

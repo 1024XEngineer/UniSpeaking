@@ -1,10 +1,12 @@
 package com.unispeaking.controller;
 
 import com.unispeaking.component.recording.RecordingStore;
+import com.unispeaking.component.evaluation.IeltsEvaluationCoordinator;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -15,6 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.unispeaking.domain.dto.scene.IeltsGenerationRequest;
+import com.unispeaking.domain.dto.evaluation.IeltsEvaluationTaskResponse;
 import com.unispeaking.domain.dto.scene.IeltsGenerationResponse;
 import com.unispeaking.domain.dto.scene.IeltsSettingsResponse;
 import com.unispeaking.domain.dto.scene.IeltsCategoryResponse;
@@ -37,6 +40,7 @@ import com.unispeaking.domain.vo.scene.IeltsTopicType;
 import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.domain.vo.scene.SceneType;
 import com.unispeaking.domain.vo.session.SessionStatus;
+import com.unispeaking.domain.vo.task.AsyncTaskStatus;
 import com.unispeaking.service.evaluation.IeltsEvaluationService;
 import com.unispeaking.service.scene.IeltsSceneFlowService;
 import com.unispeaking.service.scene.IeltsSceneService;
@@ -54,6 +58,34 @@ import org.springframework.mock.web.MockMultipartFile;
 class IELTSSceneControllerTest {
 
 	@Test
+	void evaluationEndpointSubmitsAndReadsAsyncTask() throws Exception {
+		IeltsEvaluationCoordinator coordinator = mock(IeltsEvaluationCoordinator.class);
+		IeltsEvaluationTaskResponse task = new IeltsEvaluationTaskResponse(
+				"ielts_1",
+				"session_1",
+				AsyncTaskStatus.PROCESSING,
+				null,
+				null);
+		when(coordinator.submit(anyString(), anyString())).thenReturn(task);
+		when(coordinator.get(anyString(), anyString())).thenReturn(task);
+		MockMvc mvc = MockMvcBuilders.standaloneSetup(
+				new IELTSSceneController(
+						mock(IeltsSceneService.class),
+						mock(IeltsSceneFlowService.class),
+						mock(IeltsEvaluationService.class),
+						mock(IeltsSessionService.class),
+						mock(RecordingStore.class),
+						coordinator)).build();
+
+		mvc.perform(post("/api/ielts/ielts_1/sessions/session_1/evaluation"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.status").value("PROCESSING"));
+		mvc.perform(get("/api/ielts/ielts_1/sessions/session_1/evaluation"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.sessionId").value("session_1"));
+	}
+
+	@Test
 	void recordingEndpointIsExposedByIeltsController() throws Exception {
 		RecordingStore recordingStore = mock(RecordingStore.class);
 		when(recordingStore.loadOwned("session_1", "turn-1.wav"))
@@ -64,7 +96,8 @@ class IELTSSceneControllerTest {
 						mock(IeltsSceneFlowService.class),
 						mock(IeltsEvaluationService.class),
 						mock(IeltsSessionService.class),
-						recordingStore)).build();
+							recordingStore,
+							mock(IeltsEvaluationCoordinator.class))).build();
 
 		mvc.perform(get("/api/ielts/recordings/session_1/turn-1.wav"))
 				.andExpect(status().isOk())
@@ -96,7 +129,8 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationService.class),
 						sessionService,
-						mock(RecordingStore.class))).build();
+							mock(RecordingStore.class),
+							mock(IeltsEvaluationCoordinator.class))).build();
 
 		mvc.perform(post("/api/ielts/ielts_2/sessions/session_2/part2/state")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -133,7 +167,8 @@ class IELTSSceneControllerTest {
 						flowService,
 						evaluationService,
 						mock(IeltsSessionService.class),
-						mock(RecordingStore.class))).build();
+							mock(RecordingStore.class),
+							mock(IeltsEvaluationCoordinator.class))).build();
 
 		mvc.perform(get("/api/ielts/settings"))
 				.andExpect(status().isOk())
@@ -184,7 +219,8 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationService.class),
 						mock(IeltsSessionService.class),
-						mock(RecordingStore.class))).build();
+							mock(RecordingStore.class),
+							mock(IeltsEvaluationCoordinator.class))).build();
 
 		mvc.perform(get("/api/ielts/topics")
 						.param("part", "PART_1")
@@ -232,7 +268,8 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationService.class),
 						mock(IeltsSessionService.class),
-						mock(RecordingStore.class))).build();
+							mock(RecordingStore.class),
+							mock(IeltsEvaluationCoordinator.class))).build();
 
 		mvc.perform(post("/api/ielts/generate")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -266,7 +303,8 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationService.class),
 						mock(IeltsSessionService.class),
-						mock(RecordingStore.class))).build();
+							mock(RecordingStore.class),
+							mock(IeltsEvaluationCoordinator.class))).build();
 
 		mvc.perform(post("/api/ielts/flows")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -319,7 +357,8 @@ class IELTSSceneControllerTest {
 						flowService,
 						mock(IeltsEvaluationService.class),
 						sessionService,
-						mock(RecordingStore.class))).build();
+							mock(RecordingStore.class),
+							mock(IeltsEvaluationCoordinator.class))).build();
 
 		mvc.perform(post("/api/ielts/ielts_123/sessions")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -357,7 +396,8 @@ class IELTSSceneControllerTest {
 		when(evaluationService.getLatestEstimatedScore()).thenReturn(new BigDecimal("7.0"));
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(new IELTSSceneController(
 				sceneService, mock(IeltsSceneFlowService.class), evaluationService,
-				mock(IeltsSessionService.class), mock(RecordingStore.class))).build();
+				mock(IeltsSessionService.class), mock(RecordingStore.class),
+				mock(IeltsEvaluationCoordinator.class))).build();
 
 		mvc.perform(put("/api/ielts/settings")
 					.contentType(MediaType.APPLICATION_JSON)
@@ -385,7 +425,8 @@ class IELTSSceneControllerTest {
 					"ielts_1", "session_1", IeltsPart.PART_1, true, 3, 3, true, "Completed"));
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(new IELTSSceneController(
 				sceneService, flowService, mock(IeltsEvaluationService.class),
-				mock(IeltsSessionService.class), mock(RecordingStore.class))).build();
+				mock(IeltsSessionService.class), mock(RecordingStore.class),
+				mock(IeltsEvaluationCoordinator.class))).build();
 
 		mvc.perform(get("/api/ielts/ielts_1/sessions/session_1/state"))
 				.andExpect(status().isOk()).andExpect(jsonPath("$.data.answeredQuestions").value(2));
@@ -408,7 +449,8 @@ class IELTSSceneControllerTest {
 		when(evaluationService.getHistory()).thenReturn(List.of());
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(new IELTSSceneController(
 				mock(IeltsSceneService.class), mock(IeltsSceneFlowService.class), evaluationService,
-				mock(IeltsSessionService.class), mock(RecordingStore.class))).build();
+				mock(IeltsSessionService.class), mock(RecordingStore.class),
+				mock(IeltsEvaluationCoordinator.class))).build();
 
 		mvc.perform(multipart("/api/ielts/ielts_1/sessions/session_1/turns/2/evaluation")
 					.param("transcript", "answer"))
@@ -422,18 +464,24 @@ class IELTSSceneControllerTest {
 	}
 
 	@Test
-	void generatesEvaluationForSession() throws Exception {
-		IeltsEvaluationService evaluationService = mock(IeltsEvaluationService.class);
-		when(evaluationService.generateEvaluation("ielts_1", "session_1"))
-				.thenReturn(new com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult(
-					IeltsPart.PART_1, "MOCK_FINAL", new BigDecimal("7.0"), null, null, null, null,
-					"Summary", List.of("Strength"), List.of("Improve")));
+	void submitsEvaluationForSession() throws Exception {
+		IeltsEvaluationCoordinator coordinator = mock(IeltsEvaluationCoordinator.class);
+		when(coordinator.submit("ielts_1", "session_1")).thenReturn(
+				new IeltsEvaluationTaskResponse(
+						"ielts_1",
+						"session_1",
+						AsyncTaskStatus.PROCESSING,
+						null,
+						null));
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(new IELTSSceneController(
-				mock(IeltsSceneService.class), mock(IeltsSceneFlowService.class), evaluationService,
-				mock(IeltsSessionService.class), mock(RecordingStore.class))).build();
+				mock(IeltsSceneService.class), mock(IeltsSceneFlowService.class),
+				mock(IeltsEvaluationService.class),
+				mock(IeltsSessionService.class), mock(RecordingStore.class),
+				coordinator)).build();
 		mvc.perform(post("/api/ielts/ielts_1/sessions/session_1/evaluation"))
-				.andExpect(status().isOk()).andExpect(jsonPath("$.data.assessmentType").value("MOCK_FINAL"));
-		verify(evaluationService).generateEvaluation("ielts_1", "session_1");
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.status").value("PROCESSING"));
+		verify(coordinator).submit("ielts_1", "session_1");
 	}
 
 	@Test
@@ -441,7 +489,7 @@ class IELTSSceneControllerTest {
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(new IELTSSceneController(
 				mock(IeltsSceneService.class), mock(IeltsSceneFlowService.class),
 				mock(IeltsEvaluationService.class), mock(IeltsSessionService.class),
-				mock(RecordingStore.class))).build();
+				mock(RecordingStore.class), mock(IeltsEvaluationCoordinator.class))).build();
 		mvc.perform(post("/api/ielts/ielts_1/sessions/session_1/part2/state")
 					.contentType(MediaType.APPLICATION_JSON).content("{}"))
 				.andExpect(status().isBadRequest());

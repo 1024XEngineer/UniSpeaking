@@ -58,12 +58,22 @@ public class CustomSceneService {
 	public CustomSceneGenerationResponse generate(
 			CustomSceneRequest request) {
 		String userId = authService.requireUserId(request.userId());
+		return generateForUser(
+				request,
+				userId,
+				SceneIdGenerator.generate(SceneType.CUSTOM_SCENE));
+	}
+
+	public CustomSceneGenerationResponse generateForUser(
+			CustomSceneRequest request,
+			String userId,
+			String sceneId) {
 		SceneConfig config = sceneRepository.findByType(SceneType.CUSTOM_SCENE)
 				.orElseThrow(() -> new SceneNotFoundException(
 						SceneType.CUSTOM_SCENE.name()));
 		UserProfile profile = profileService.getProfile(userId);
 		SceneGenerationResponse generated = generateCustomScene(
-				SceneIdGenerator.generate(SceneType.CUSTOM_SCENE),
+				sceneId,
 				userId,
 				request.sceneInput() == null ? "" : request.sceneInput().trim(),
 				request.userPreference(),

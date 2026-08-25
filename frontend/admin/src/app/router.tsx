@@ -6,6 +6,7 @@ import { BillingPage } from '../features/billing/BillingPage'
 import { UsersPage } from '../features/governance/UsersPage'
 import { SystemManagementPage } from '../features/system/SystemManagementPage'
 import { QualityPage } from '../features/quality/QualityPage'
+import { MonitoringPage } from '../features/monitoring/MonitoringPage'
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginRoute /> },
@@ -18,7 +19,7 @@ export const router = createBrowserRouter([
         { path: 'users', element: <UsersPage /> },
         { path: 'billing', element: <BillingPage /> },
         { path: 'quality', element: <QualityPage /> },
-        { path: 'monitoring', element: <Navigate to="/billing" replace /> },
+        { path: 'monitoring', element: <MonitoringPage /> },
         { path: 'reconciliation', element: <Navigate to="/billing" replace /> },
         { path: 'system', element: <SystemManagementPage /> },
       ],

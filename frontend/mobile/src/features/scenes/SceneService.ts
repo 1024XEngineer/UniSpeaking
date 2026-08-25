@@ -1,4 +1,5 @@
 import type { ApiRequestOptions } from '@/infrastructure/http/ApiClient';
+import { waitForAsyncTask } from '@/infrastructure/http/waitForAsyncTask';
 import { File } from 'expo-file-system';
 
 import type { SceneLabel } from '@/data/sceneCategories';
@@ -83,11 +84,23 @@ export class SceneService {
   constructor(private readonly client: ApiRequester) {}
 
   async generate(sceneInput: string, userPreference: string | null = null) {
-    const scene = await this.client.request('/api/custom-scenes/generate', {
+    const task = await this.client.request('/api/custom-scenes/generate', {
       method: 'POST',
       body: JSON.stringify({ sceneInput: sceneInput.trim(), userPreference }),
       timeoutMs: 60_000,
     });
+    if (!task || typeof task !== 'object' || !('taskId' in task) ||
+        typeof task.taskId !== 'string' || !task.taskId.trim()) {
+      throw new Error('场景生成响应缺少 taskId');
+    }
+    const taskId = task.taskId;
+    const scene = await waitForAsyncTask<GeneratedScene>(
+      task,
+      () => this.client.request(
+        `/api/custom-scenes/generation-tasks/${encodeURIComponent(taskId)}`,
+      ),
+      '场景生成',
+    );
     if (!isGeneratedScene(scene)) {
       throw new Error('场景生成内容不完整，请重新生成');
     }

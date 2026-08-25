@@ -48,7 +48,10 @@ const generatedScene = {
 
 describe('SceneService', () => {
   it('generates and validates all three learning content groups', async () => {
-    const client = createClient([generatedScene]);
+    const client = createClient([
+      { taskId: 'task/1', status: 'PROCESSING' },
+      { taskId: 'task/1', status: 'COMPLETED', result: generatedScene },
+    ]);
     const service = new SceneService(client);
 
     await expect(
@@ -62,10 +65,17 @@ describe('SceneService', () => {
       }),
       timeoutMs: 60_000,
     });
+    expect(client.request).toHaveBeenCalledWith(
+      '/api/custom-scenes/generation-tasks/task%2F1',
+    );
   });
 
   it('rejects an incomplete generated scene before the UI starts training', async () => {
-    const client = createClient([{ ...generatedScene, sentenceList: [] }]);
+    const client = createClient([{
+      taskId: 'task-1',
+      status: 'COMPLETED',
+      result: { ...generatedScene, sentenceList: [] },
+    }]);
     const service = new SceneService(client);
 
     await expect(service.generate('Coffee')).rejects.toThrow(

@@ -3,6 +3,7 @@ import type { ApiRequestOptions } from '@/infrastructure/http/ApiClient';
 import { IeltsService } from '../IeltsService';
 
 describe('IeltsService', () => {
+	beforeEach(() => jest.useRealTimers());
   it('loads topics from the backend ielts endpoint', async () => {
     const client = {
       request: jest.fn(async (_path: string, _options?: ApiRequestOptions) => ({
@@ -50,4 +51,34 @@ describe('IeltsService', () => {
     expect(client.request).toHaveBeenCalledWith('/api/ielts/generate', expect.objectContaining({ method: 'POST' }));
     expect(client.request).toHaveBeenCalledWith('/api/ielts/flows', expect.objectContaining({ method: 'POST' }));
   });
+
+	it('polls evaluation status and returns only the completed result', async () => {
+		jest.useFakeTimers();
+		const result = { assessmentType: 'DIAGNOSTIC', summary: 'Good work' };
+		const client = {
+			request: jest.fn()
+				.mockResolvedValueOnce({ status: 'PROCESSING' })
+				.mockResolvedValueOnce({ status: 'COMPLETED', result }),
+		};
+		const service = new IeltsService(client);
+		const evaluation = service.generateEvaluation('ielts/1', 'session/1');
+
+		await jest.advanceTimersByTimeAsync(1_000);
+
+		await expect(evaluation).resolves.toEqual(result);
+		expect(client.request).toHaveBeenLastCalledWith(
+			'/api/ielts/ielts%2F1/sessions/session%2F1/evaluation',
+		);
+	});
+
+	it('surfaces an asynchronous evaluation failure reason', async () => {
+		const service = new IeltsService({
+			request: jest.fn(async () => ({
+				status: 'FAILED',
+				failureReason: '评分材料不足',
+			})),
+		});
+
+		await expect(service.generateEvaluation('i', 's')).rejects.toThrow('评分材料不足');
+	});
 });

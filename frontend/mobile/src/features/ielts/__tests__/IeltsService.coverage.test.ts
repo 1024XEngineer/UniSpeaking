@@ -4,7 +4,10 @@ jest.mock('@/features/scenes/SceneService', () => ({ createWavUploadFile: (uri: 
 
 describe('IeltsService request contracts', () => {
   it('builds settings, topic, session and evaluation requests', async () => {
-    const request = jest.fn().mockResolvedValue({});
+    const request = jest.fn(async (path: string, options?: { method?: string }) =>
+      path.endsWith('/evaluation') && options?.method === 'POST'
+        ? { status: 'COMPLETED', result: { assessmentType: 'DIAGNOSTIC' } }
+        : {});
     const service = new IeltsService({ request });
     await service.getSettings();
     await service.updateSettings({ targetScore: 7, examinerId: 'james' });

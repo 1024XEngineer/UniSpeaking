@@ -41,6 +41,16 @@ class DailyPickServiceTest {
 	}
 
 	@Test
+	void productionConstructorUsesAJrePortableRandomGenerator() {
+		var response = new DailyPickService(catalog).getDailyPicks();
+
+		assertEquals(3, response.picks().size());
+		assertEquals(3, new HashSet<>(response.picks().stream()
+				.map(pick -> pick.category())
+				.toList()).size());
+	}
+
+	@Test
 	void excludesTheCurrentBatchWhenRefreshing() {
 		Clock clock = Clock.fixed(Instant.parse("2026-08-24T09:30:00Z"), ZoneOffset.UTC);
 		DailyPickService service = new DailyPickService(catalog, clock, new Random(11));

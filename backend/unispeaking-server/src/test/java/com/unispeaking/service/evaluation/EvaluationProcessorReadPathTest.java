@@ -13,6 +13,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.timeout;
 
 import com.unispeaking.common.evaluation.model.EndingTone;
 import com.unispeaking.common.evaluation.model.IeltsTextAssessment;
@@ -846,7 +847,7 @@ class EvaluationProcessorReadPathTest {
 								"I would like to explain this topic in several detailed sentences.")));
 
 		assertEquals(EvaluationErrorCode.SESSION_NOT_FOUND, exception.errorCode());
-		verify(pronunciationClient).evaluate(any(), any());
+			verify(pronunciationClient, never()).evaluate(any(), any());
 	}
 
 	@Test
@@ -1065,7 +1066,7 @@ class EvaluationProcessorReadPathTest {
 
 		assertEquals("本轮评分暂不可用，已保留对话内容", result.feedbackSummary());
 		verify(turnRepository).upsert(any(CustomTurnEvaluation.class));
-		verify(llmClient, never()).assessTurn(any());
+			verify(llmClient, timeout(1000)).assessTurn(any());
 	}
 
 	@Test

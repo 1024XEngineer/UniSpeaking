@@ -1,6 +1,7 @@
 package com.unispeaking.service.evaluation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.AdditionalMatchers.aryEq;
 import static org.mockito.ArgumentMatchers.eq;
@@ -62,6 +63,10 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -243,13 +248,22 @@ class IeltsEvaluationServiceTest {
 		byte[] audio = canonicalWav();
 		PronunciationAssessmentClient pronunciationClient =
 				mock(PronunciationAssessmentClient.class);
+		CountDownLatch providerCallsStarted = new CountDownLatch(2);
 		when(pronunciationClient.evaluate(
 				eq("I would like to describe a memorable journey from last year."),
 				aryEq(audio)))
-				.thenReturn(pronunciationAssessment());
+				.thenAnswer(invocation -> {
+					providerCallsStarted.countDown();
+					assertTrue(providerCallsStarted.await(2, TimeUnit.SECONDS));
+					return pronunciationAssessment();
+				});
 		EvaluationLlmClient llmClient = mock(EvaluationLlmClient.class);
-		when(llmClient.assessTurn(any())).thenThrow(new EvaluationException(
-				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID));
+		when(llmClient.assessTurn(any())).thenAnswer(invocation -> {
+			providerCallsStarted.countDown();
+			assertTrue(providerCallsStarted.await(2, TimeUnit.SECONDS));
+			throw new EvaluationException(
+					EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		});
 		ActiveSessionRegistry activeSessions = mock(ActiveSessionRegistry.class);
 		CustomSceneSession session = new CustomSceneSession(
 				sessionId,
@@ -299,13 +313,21 @@ class IeltsEvaluationServiceTest {
 				new com.unispeaking.infrastructure.config.ObjectStorageProperties(),
 				recordingStore);
 
-		var result = processor.evaluateIeltsTurn(
-				ieltsId,
-				new DialogueTurnEvaluationCommand(
-						sessionId,
-						1,
-						audio,
-						"I would like to describe a memorable journey from last year."));
+		ExecutorService turnExecutor = Executors.newFixedThreadPool(2);
+		processor.configureTurnEvaluationExecutor(turnExecutor);
+		com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationResult result;
+		try {
+			result = processor.evaluateIeltsTurn(
+					ieltsId,
+					new DialogueTurnEvaluationCommand(
+							sessionId,
+							1,
+							audio,
+							"I would like to describe a memorable journey from last year."));
+		}
+		finally {
+			turnExecutor.shutdownNow();
+		}
 
 		assertEquals(new BigDecimal("88"), result.pronunciationScore());
 		assertEquals("本轮发音评分已完成，语言反馈暂不可用。", result.feedbackSummary());

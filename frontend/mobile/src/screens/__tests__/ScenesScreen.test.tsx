@@ -166,6 +166,10 @@ describe('scene completion report mapping', () => {
       }),
     ).toEqual([]);
   });
+
+  it('does not invent default scores when the dialogue has no report', () => {
+    expect(sceneMetricsForReport()).toEqual([]);
+  });
 });
 
 describe('ScenesHome backend generation binding', () => {
@@ -649,13 +653,16 @@ describe('Training backend content binding', () => {
     await fireEvent.press(screen.getByLabelText('结束当前会话'));
 
     await waitFor(() => expect(screen.getByText('模拟完成')).toBeTruthy());
-    expect(screen.getByLabelText(/五维评分/)).toBeTruthy();
-    await fireEvent.press(screen.getByText('查看详情'));
-    await waitFor(() => expect(onViewDetails).toHaveBeenCalled());
+    expect(screen.getByText('有效语音不足')).toBeTruthy();
+    expect(screen.queryByText('86')).toBeNull();
+    expect(screen.queryByText('查看详情')).toBeNull();
+    await fireEvent.press(screen.getByText('知道了'));
+    expect(onFinish).toHaveBeenCalledTimes(1);
     await fireEvent.press(screen.getByLabelText('结束当前会话'));
     await waitFor(() => expect(screen.getByText('模拟完成')).toBeTruthy());
-    await fireEvent.press(screen.getByText('返回场景广场'));
-    expect(onFinish).toHaveBeenCalledTimes(1);
+    await fireEvent.press(screen.getByText('知道了'));
+    expect(onFinish).toHaveBeenCalledTimes(2);
+    expect(onViewDetails).not.toHaveBeenCalled();
     alert.mockRestore();
   });
 
@@ -679,12 +686,12 @@ describe('Training backend content binding', () => {
     screen.unmount();
   });
 
-  it('uses onFinish for both local completion actions when no detail route exists', async () => {
+  it('uses onFinish for an unavailable local completion', async () => {
     const onFinish = jest.fn();
     const first = await render(<Training initialStage="speak" onBack={jest.fn()} onFinish={onFinish} />);
     await fireEvent.press(first.getByLabelText('结束当前会话'));
     await waitFor(() => expect(first.getByText('模拟完成')).toBeTruthy());
-    await fireEvent.press(first.getByText('查看详情'));
+    await fireEvent.press(first.getByText('知道了'));
     expect(onFinish).toHaveBeenCalledTimes(1);
     first.unmount();
   });
@@ -841,5 +848,45 @@ describe('SceneCallStage realtime binding', () => {
     await act(async () => rejectEnd(new Error('end failed')));
     await waitFor(() => expect(screen.queryByText('正在整理本次对话与五项能力表现…')).toBeNull());
     expect(listener).not.toBeNull();
+  });
+
+  it('returns an unavailable completion when a silent scene session cannot be scored', async () => {
+    const snapshot: RealtimeSessionSnapshot = {
+      state: 'ready',
+      muted: false,
+      sessionId: 'session-silent',
+      userTranscript: '',
+      assistantTranscript: 'Hello, how can I help?',
+      transcriptHistory: [],
+      error: null,
+    };
+    const controller: FreeChatControllerPort = {
+      getSnapshot: () => snapshot,
+      subscribe: jest.fn((next) => {
+        next(snapshot);
+        return () => undefined;
+      }),
+      start: jest.fn(async () => undefined),
+      setMuted: jest.fn(),
+      interrupt: jest.fn(),
+      end: jest.fn(async () => { throw new Error('有效用户轮次不足'); }),
+    };
+    const onComplete = jest.fn();
+    const screen = await render(
+      <SceneCallStage
+        scene={scene}
+        progressCollapsed={false}
+        createController={() => controller}
+        onComplete={onComplete}
+      />,
+    );
+
+    await fireEvent.press(screen.getByLabelText('结束当前会话'));
+    await waitFor(() => expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sceneId: scene.sceneId,
+        sessionId: 'session-silent',
+      }),
+    ));
   });
 });

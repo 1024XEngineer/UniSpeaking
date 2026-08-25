@@ -48,6 +48,7 @@ public class AiProviderRegistry {
 
 	public static final String QWEN_REALTIME_FLASH = "qwen3.5-omni-flash-realtime";
 	public static final String QINIU_REALTIME_PLUS = "qwen3.5-omni-plus-realtime";
+	public static final String QWEN_LLM_FLASH = "qwen3.5-flash";
 	public static final String QWEN_LLM_PLUS = "qwen3.5-plus";
 	public static final String DEEPSEEK_CHAT = "deepseek-v4-flash";
 	public static final String QINIU_MAAS_DEEPSEEK_FLASH = "deepseek/deepseek-v4-flash";

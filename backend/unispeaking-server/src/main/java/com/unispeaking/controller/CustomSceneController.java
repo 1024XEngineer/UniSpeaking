@@ -16,7 +16,7 @@ import com.unispeaking.domain.dto.session.CompleteCustomSceneDialogueResponse;
 import com.unispeaking.domain.dto.session.EndCustomSessionCommand;
 import com.unispeaking.domain.dto.scene.CompleteSceneFlowRequest;
 import com.unispeaking.domain.dto.scene.CreateSceneFlowRequest;
-import com.unispeaking.domain.dto.scene.CustomSceneGenerationResponse;
+import com.unispeaking.domain.dto.scene.CustomSceneGenerationTaskResponse;
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.dto.scene.SceneFlowResponse;
 import com.unispeaking.domain.dto.session.ScenarioDialogueStateResponse;
@@ -27,6 +27,7 @@ import com.unispeaking.domain.dto.scene.TranslateTextRequest;
 import com.unispeaking.domain.dto.scene.TranslateTextResponse;
 import com.unispeaking.domain.vo.scene.SceneFlowStage;
 import com.unispeaking.service.asset.LearningAssetService;
+import com.unispeaking.component.scene.CustomSceneGenerationCoordinator;
 import com.unispeaking.service.evaluation.CustomEvaluationService;
 import com.unispeaking.service.scene.CustomSceneFlowService;
 import com.unispeaking.service.scene.CustomSceneService;
@@ -34,6 +35,7 @@ import com.unispeaking.service.session.CustomSessionService;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -57,24 +59,33 @@ public class CustomSceneController {
 	private final CustomEvaluationService evaluationService;
 	private final CustomSessionService customSessionService;
 	private final LearningAssetService learningAssetService;
+	private final CustomSceneGenerationCoordinator generationCoordinator;
 
 	public CustomSceneController(
 			CustomSceneService customSceneService,
 			CustomSceneFlowService sceneFlowService,
 			CustomEvaluationService evaluationService,
 			CustomSessionService customSessionService,
-			LearningAssetService learningAssetService) {
+			LearningAssetService learningAssetService,
+			CustomSceneGenerationCoordinator generationCoordinator) {
 		this.customSceneService = customSceneService;
 		this.sceneFlowService = sceneFlowService;
 		this.evaluationService = evaluationService;
 		this.customSessionService = customSessionService;
 		this.learningAssetService = learningAssetService;
+		this.generationCoordinator = generationCoordinator;
 	}
 
 	@PostMapping("/generate")
-	public ApiResponse<CustomSceneGenerationResponse> generate(
+	public ApiResponse<CustomSceneGenerationTaskResponse> generate(
 			@Valid @RequestBody CustomSceneRequest request) {
-		return ApiResponse.success(customSceneService.generate(request));
+		return ApiResponse.success(generationCoordinator.submit(request));
+	}
+
+	@GetMapping("/generation-tasks/{taskId}")
+	public ApiResponse<CustomSceneGenerationTaskResponse> getGenerationTask(
+			@PathVariable UUID taskId) {
+		return ApiResponse.success(generationCoordinator.get(taskId));
 	}
 
 	@PostMapping("/flows")

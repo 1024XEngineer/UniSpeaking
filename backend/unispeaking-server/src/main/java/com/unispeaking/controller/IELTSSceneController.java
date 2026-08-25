@@ -18,12 +18,13 @@ import com.unispeaking.domain.dto.session.IeltsPart2StateRequest;
 import com.unispeaking.domain.dto.session.IeltsPart2StateResponse;
 import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationCommand;
 import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationResult;
-import com.unispeaking.domain.dto.evaluation.IeltsEvaluationResult;
+import com.unispeaking.domain.dto.evaluation.IeltsEvaluationTaskResponse;
 import com.unispeaking.domain.dto.evaluation.IeltsEvaluationHistoryItem;
 import com.unispeaking.domain.vo.scene.IeltsPart;
 import com.unispeaking.service.scene.IeltsSceneService;
 import com.unispeaking.service.scene.IeltsSceneFlowService;
 import com.unispeaking.service.evaluation.IeltsEvaluationService;
+import com.unispeaking.component.evaluation.IeltsEvaluationCoordinator;
 import com.unispeaking.service.session.IeltsSessionService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -55,19 +56,22 @@ public class IELTSSceneController {
 	private final IeltsEvaluationService evaluationService;
 	private final IeltsSessionService ieltsSessionService;
 	private final RecordingStore recordingStore;
+	private final IeltsEvaluationCoordinator evaluationCoordinator;
 
 	public IELTSSceneController(
 			IeltsSceneService ieltsSceneService,
 			IeltsSceneFlowService sceneFlowService,
 			IeltsEvaluationService evaluationService,
-			IeltsSessionService ieltsSessionService,
-			@org.springframework.beans.factory.annotation.Qualifier("ieltsRecordingStore")
-			RecordingStore recordingStore) {
+				IeltsSessionService ieltsSessionService,
+				@org.springframework.beans.factory.annotation.Qualifier("ieltsRecordingStore")
+				RecordingStore recordingStore,
+				IeltsEvaluationCoordinator evaluationCoordinator) {
 		this.ieltsSceneService = ieltsSceneService;
 		this.sceneFlowService = sceneFlowService;
 		this.evaluationService = evaluationService;
 		this.ieltsSessionService = ieltsSessionService;
 		this.recordingStore = recordingStore;
+		this.evaluationCoordinator = evaluationCoordinator;
 	}
 
 	@GetMapping(value = "/recordings/{sessionId}/{fileName:.+}", produces = "audio/wav")
@@ -212,11 +216,17 @@ public class IELTSSceneController {
 	}
 
 	@PostMapping("/{ieltsId}/sessions/{sessionId}/evaluation")
-	public ApiResponse<IeltsEvaluationResult> generateEvaluation(
+	public ApiResponse<IeltsEvaluationTaskResponse> generateEvaluation(
 			@PathVariable String ieltsId,
 			@PathVariable String sessionId) {
-		return ApiResponse.success(
-				evaluationService.generateEvaluation(ieltsId, sessionId));
+		return ApiResponse.success(evaluationCoordinator.submit(ieltsId, sessionId));
+	}
+
+	@GetMapping("/{ieltsId}/sessions/{sessionId}/evaluation")
+	public ApiResponse<IeltsEvaluationTaskResponse> getEvaluationTask(
+			@PathVariable String ieltsId,
+			@PathVariable String sessionId) {
+		return ApiResponse.success(evaluationCoordinator.get(ieltsId, sessionId));
 	}
 
 	@GetMapping("/evaluations")

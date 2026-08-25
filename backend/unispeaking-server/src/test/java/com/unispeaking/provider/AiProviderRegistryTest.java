@@ -145,6 +145,31 @@ class AiProviderRegistryTest {
 	}
 
 	@Test
+	void registersSeparateQwenFlashAndPlusAdapters() {
+		StubQwenLlmProvider flash = new StubQwenLlmProvider(
+				AiProviderRegistry.QWEN_LLM_FLASH);
+		StubQwenLlmProvider plus = new StubQwenLlmProvider(
+				AiProviderRegistry.QWEN_LLM_PLUS);
+		AiProviderRegistry registry = registry(
+				List.of(plus, flash),
+				Map.of(
+						AiCapability.LLM,
+						List.of(AiProviderRegistry.QWEN_LLM_PLUS)));
+
+		assertSame(flash, registry.getLlmProvider(AiProviderRegistry.QWEN_LLM_FLASH));
+		assertSame(plus, registry.getLlmProvider(AiProviderRegistry.QWEN_LLM_PLUS));
+		assertEquals(
+				"qwen",
+				registry.executeLlmTask(
+						AiProviderRegistry.QWEN_LLM_FLASH,
+						"hello",
+						null,
+						LlmResponseFormat.JSON_OBJECT));
+		assertEquals(1, flash.calls);
+		assertEquals(0, plus.calls);
+	}
+
+	@Test
 	void failsOverFromQiniuQwenToAlibabaQwen() {
 		FailingQiniuMaasLlmProvider primary = new FailingQiniuMaasLlmProvider(
 				AiProviderRegistry.QINIU_MAAS_QWEN_PLUS);
@@ -1094,7 +1119,11 @@ class AiProviderRegistryTest {
 		private String token;
 
 		private StubQwenLlmProvider() {
-			super("qwen", Set.of(AiProviderRegistry.QWEN_LLM_PLUS));
+			this(AiProviderRegistry.QWEN_LLM_PLUS);
+		}
+
+		private StubQwenLlmProvider(String modelId) {
+			super("qwen", Set.of(modelId));
 		}
 
 		@Override
