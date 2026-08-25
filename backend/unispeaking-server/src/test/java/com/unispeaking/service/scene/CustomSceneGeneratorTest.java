@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -14,9 +15,10 @@ import static org.mockito.Mockito.when;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.common.exception.BusinessException;
+import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.provider.AiProviderRegistry;
+import com.unispeaking.provider.LlmResponseFormat;
 import com.unispeaking.component.scene.CustomSceneGenerator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -35,8 +37,12 @@ class CustomSceneGeneratorTest {
 	@Test
 	void generatesCompactLearningContentAndMachineReadableSuccessFactor() {
 		AiProviderRegistry registry = mock(AiProviderRegistry.class);
-		when(registry.executeLlmTask(anyString(), isNull()))
-				.thenReturn(validResponse(5));
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_FLASH),
+				anyString(),
+				isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenReturn(validResponse(4));
 		var service = new CustomSceneGenerator(registry, objectMapper);
 		UserProfile profile = new UserProfile(
 				"user-1",
@@ -54,9 +60,9 @@ class CustomSceneGeneratorTest {
 				"希望练习礼貌表达",
 				profile);
 
-		assertEquals(5, scene.wordList().size());
+		assertEquals(4, scene.wordList().size());
 		assertEquals("住宿", scene.label());
-		assertEquals(5, scene.phraseList().size());
+		assertEquals(4, scene.phraseList().size());
 		assertEquals(3, scene.sentenceList().size());
 		assertTrue(scene.wordList().stream()
 				.allMatch(item -> item.contentId().startsWith("word_")));
@@ -71,19 +77,32 @@ class CustomSceneGeneratorTest {
 		assertEquals(
 				"ALL_REQUIRED_OUTCOMES",
 				successFactor.path("completion_rule").asString());
+		assertEquals(
+				"达到最少轮次且所有必要目标均已完成，或达到最大轮次",
+				successFactor.path("stop_when").asString());
+		assertEquals(
+				"确认结果后，以当前角色自然结束对话。",
+				successFactor.path("closing_instruction").asString());
 
 		ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
-		verify(registry).executeLlmTask(prompt.capture(), isNull());
+		verify(registry).executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_FLASH),
+				prompt.capture(),
+				isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT));
+		verify(registry, never()).executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_PLUS),
+				anyString(),
+				isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT));
 		assertTrue(prompt.getValue().contains("酒店办理入住"));
-		assertTrue(prompt.getValue().contains("MODERATE"));
+		assertTrue(prompt.getValue().contains("zh-CN"));
 		assertTrue(prompt.getValue().contains("learning_goal"));
 		assertTrue(prompt.getValue().contains("餐饮, 购物, 出行, 住宿"));
 		assertTrue(prompt.getValue().contains(
 				"Never require an optional purchase, facility question"));
 		assertTrue(prompt.getValue().contains(
 				"either acceptance or refusal resolves"));
-		assertTrue(prompt.getValue().contains(
-				"must not request teaching feedback"));
 		assertTrue(prompt.getValue().contains(
 				"reusable lexical chunk or collocation of 2 to 6 English"));
 		assertTrue(prompt.getValue().contains(
@@ -92,14 +111,27 @@ class CustomSceneGeneratorTest {
 				"background must contain only facts observable to both roles"));
 		assertTrue(prompt.getValue().contains(
 				"Do not place learner-side answers, preferences, budget, or desired choices in background"));
+		assertTrue(prompt.getValue().contains("exactly 4 distinct, scene-specific words"));
+		assertTrue(!prompt.getValue().contains("estimated_minutes"));
+		assertTrue(!prompt.getValue().contains("closing_instruction"));
 	}
 
 	@Test
 	void retriesWhenFirstResponseHasTooFewWords() {
 		AiProviderRegistry registry = mock(AiProviderRegistry.class);
 		String rejectedResponse = validResponse(3);
-		when(registry.executeLlmTask(anyString(), isNull()))
-				.thenReturn(rejectedResponse, validResponse(5));
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_FLASH),
+				anyString(),
+				isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenReturn(rejectedResponse);
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_PLUS),
+				anyString(),
+				isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenReturn(validResponse(4));
 		var service = new CustomSceneGenerator(registry, objectMapper);
 		Logger logger = (Logger) LoggerFactory.getLogger(CustomSceneGenerator.class);
 		ListAppender<ILoggingEvent> appender = new ListAppender<>();
@@ -119,12 +151,22 @@ class CustomSceneGeneratorTest {
 			logger.detachAppender(appender);
 		}
 
-		assertEquals(5, scene.wordList().size());
-		verify(registry, times(2)).executeLlmTask(anyString(), isNull());
+		assertEquals(4, scene.wordList().size());
+		verify(registry).executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_FLASH),
+				anyString(),
+				isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT));
+		verify(registry).executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_PLUS),
+				anyString(),
+				isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT));
 		String logs = appender.list.stream()
 				.map(ILoggingEvent::getFormattedMessage)
 				.collect(java.util.stream.Collectors.joining("\n"));
-		assertTrue(logs.contains("response rejected sceneId=custom_retry attempt=1"));
+		assertTrue(logs.contains(
+				"response rejected sceneId=custom_retry model=qwen3.5-flash attempt=1"));
 		assertTrue(logs.contains("llmMs="));
 		assertTrue(logs.contains("parseMs="));
 		assertTrue(logs.contains("responseChars=" + rejectedResponse.length()));
@@ -132,10 +174,65 @@ class CustomSceneGeneratorTest {
 	}
 
 	@Test
+	void fallsBackToPlusWhenFlashProviderFails() {
+		AiProviderRegistry registry = mock(AiProviderRegistry.class);
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_FLASH), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenThrow(new BusinessException("QWEN_LLM_IO_ERROR", "unavailable"));
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_PLUS), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenReturn(validResponse(4));
+
+		var scene = new CustomSceneGenerator(registry, objectMapper).generate(
+				"custom_provider_fallback",
+				"user-1",
+				"酒店办理入住",
+				null,
+				new UserProfile("user-1", "B", "Katerina", "zh-CN", ""));
+
+		assertEquals("住宿", scene.label());
+		verify(registry).executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_PLUS), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT));
+	}
+
+	@Test
+	void propagatesPlusFailureAfterFlashFailure() {
+		AiProviderRegistry registry = mock(AiProviderRegistry.class);
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_FLASH), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenThrow(new BusinessException("QWEN_LLM_IO_ERROR", "flash unavailable"));
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_PLUS), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenThrow(new BusinessException("QWEN_LLM_REQUEST_FAILED", "plus unavailable"));
+
+		BusinessException failure = assertThrows(
+				BusinessException.class,
+				() -> new CustomSceneGenerator(registry, objectMapper).generate(
+						"custom_both_failed",
+						"user-1",
+						"酒店办理入住",
+						null,
+						new UserProfile("user-1", "B", "Katerina", "zh-CN", "")));
+
+		assertEquals("QWEN_LLM_REQUEST_FAILED", failure.code());
+	}
+
+	@Test
 	void retriesWhenModelReturnsLabelOutsideAllowList() {
 		AiProviderRegistry registry = mock(AiProviderRegistry.class);
-		when(registry.executeLlmTask(anyString(), isNull()))
-				.thenReturn(validResponse(5).replace("住宿", "旅游"), validResponse(5));
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_FLASH), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenReturn(validResponse(4).replace("住宿", "旅游"));
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_PLUS), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenReturn(validResponse(4));
 		var service = new CustomSceneGenerator(registry, objectMapper);
 
 		var scene = service.generate(
@@ -146,21 +243,26 @@ class CustomSceneGeneratorTest {
 				new UserProfile("user-1", "B", "Katerina", "zh-CN", ""));
 
 		assertEquals("住宿", scene.label());
-		verify(registry, times(2)).executeLlmTask(anyString(), isNull());
+		verify(registry).executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_PLUS), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT));
 	}
 
 	@Test
 	void retriesWhenPhraseListContainsCompleteSentences() {
 		AiProviderRegistry registry = mock(AiProviderRegistry.class);
-		when(registry.executeLlmTask(anyString(), isNull()))
-				.thenReturn(
-						validResponse(5, List.of(
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_FLASH), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenReturn(validResponse(4, List.of(
 								"There is a hole in it",
 								"I would like to return this",
 								"Can I get my money back?",
-								"It was bought yesterday",
-								"Do you have the receipt?")),
-						validResponse(5));
+								"It was bought yesterday")));
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_PLUS), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenReturn(validResponse(4));
 		var service = new CustomSceneGenerator(registry, objectMapper);
 
 		var scene = service.generate(
@@ -171,19 +273,22 @@ class CustomSceneGeneratorTest {
 				new UserProfile("user-1", "B", "Katerina", "zh-CN", ""));
 
 		assertEquals("check in", scene.phraseList().getFirst().englishText());
-		verify(registry, times(2)).executeLlmTask(anyString(), isNull());
+		verify(registry).executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_PLUS), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT));
 	}
 
 	@Test
 	void acceptsReusableLexicalChunksAsPhrases() {
 		AiProviderRegistry registry = mock(AiProviderRegistry.class);
-		when(registry.executeLlmTask(anyString(), isNull()))
-				.thenReturn(validResponse(5, List.of(
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_FLASH), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenReturn(validResponse(4, List.of(
 						"money back",
 						"return this item",
 						"proof of purchase",
-						"ask for a refund",
-						"damaged product")));
+						"ask for a refund")));
 		var service = new CustomSceneGenerator(registry, objectMapper);
 
 		var scene = service.generate(
@@ -194,21 +299,28 @@ class CustomSceneGeneratorTest {
 				new UserProfile("user-1", "B", "Katerina", "zh-CN", ""));
 
 		assertEquals("return this item", scene.phraseList().get(1).englishText());
-		verify(registry).executeLlmTask(anyString(), isNull());
+		verify(registry).executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_FLASH),
+				anyString(),
+				isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT));
 	}
 
 	@Test
 	void retriesWhenPhraseStartsWithNominalSubjectClause() {
 		AiProviderRegistry registry = mock(AiProviderRegistry.class);
-		when(registry.executeLlmTask(anyString(), isNull()))
-				.thenReturn(
-						validResponse(5, List.of(
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_FLASH), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenReturn(validResponse(4, List.of(
 								"The item is defective",
 								"return this item",
 								"proof of purchase",
-								"ask for a refund",
-								"damaged product")),
-						validResponse(5));
+								"ask for a refund")));
+		when(registry.executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_PLUS), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT)))
+				.thenReturn(validResponse(4));
 		var service = new CustomSceneGenerator(registry, objectMapper);
 
 		var scene = service.generate(
@@ -219,13 +331,16 @@ class CustomSceneGeneratorTest {
 				new UserProfile("user-1", "B", "Katerina", "zh-CN", ""));
 
 		assertEquals("check in", scene.phraseList().getFirst().englishText());
-		verify(registry, times(2)).executeLlmTask(anyString(), isNull());
+		verify(registry).executeLlmTask(
+				eq(AiProviderRegistry.QWEN_LLM_PLUS), anyString(), isNull(),
+				eq(LlmResponseFormat.JSON_OBJECT));
 	}
 
 	@Test
 	void acceptsJsonFenceAndNormalizesOptionalInstruction() {
 		AiProviderRegistry registry = mock(AiProviderRegistry.class);
-		when(registry.executeLlmTask(anyString(), isNull()))
+		when(registry.executeLlmTask(
+				anyString(), anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT)))
 				.thenReturn("```json\n" + validResponse(5) + "\n```");
 		var service = new CustomSceneGenerator(registry, objectMapper);
 
@@ -234,7 +349,8 @@ class CustomSceneGeneratorTest {
 				new UserProfile("user-1", "B", "Katerina", "zh-CN", ""));
 
 		assertEquals("保持礼貌，每次回复不超过三句话。", scene.customInstruction());
-		verify(registry).executeLlmTask(anyString(), isNull());
+		verify(registry).executeLlmTask(
+				anyString(), anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT));
 	}
 
 	@Test
@@ -248,7 +364,8 @@ class CustomSceneGeneratorTest {
 							new UserProfile("user-1", "B", "Katerina", "zh-CN", "")));
 			assertEquals("INVALID_SCENE_INPUT", exception.code());
 		}
-		verify(registry, never()).executeLlmTask(anyString(), isNull());
+		verify(registry, never()).executeLlmTask(
+				anyString(), anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT));
 	}
 
 	@Test
@@ -263,7 +380,8 @@ class CustomSceneGeneratorTest {
 		for (int index = 0; index < invalid.length; index++) {
 			final int caseIndex = index;
 			AiProviderRegistry registry = mock(AiProviderRegistry.class);
-			when(registry.executeLlmTask(anyString(), isNull()))
+			when(registry.executeLlmTask(
+					anyString(), anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT)))
 					.thenReturn(invalid[index], invalid[index]);
 			var service = new CustomSceneGenerator(registry, objectMapper);
 
@@ -271,21 +389,23 @@ class CustomSceneGeneratorTest {
 					() -> service.generate("custom_json_" + caseIndex, "user-1", "酒店办理入住", null,
 							new UserProfile("user-1", "B", "Katerina", "zh-CN", "")));
 			assertEquals("CUSTOM_SCENE_LLM_RESPONSE_INVALID", exception.code());
-			verify(registry, times(2)).executeLlmTask(anyString(), isNull());
+			verify(registry, times(2)).executeLlmTask(
+					anyString(), anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT));
 		}
 	}
 
 	@Test
-	void retriesWhenSuccessFactorHasInvalidBoundsTypesDuplicatesOrMissingFields() {
+	void retriesWhenSuccessFactorHasInvalidOutcomeCountDuplicatesOrTypes() {
 		String base = validResponse(5);
 		String[] invalid = {
-				base.replace("\"estimated_minutes\":6", "\"estimated_minutes\":2"),
-				base.replace("\"minimum_user_turns\":5", "\"minimum_user_turns\":7"),
-				base.replace("\"maximum_user_turns\":10", "\"maximum_user_turns\":9"),
-				base.replace("\"completion_rule\":\"ALL_REQUIRED_OUTCOMES\"", "\"completion_rule\":\"ANY\""),
 				base.replace("\"required_outcomes\":[\"说明预订姓名\",\"确认房型和入住时间\",\"询问早餐和退房时间\"]",
 						"\"required_outcomes\":[\"说明预订姓名\",\"说明预订姓名\",\"询问早餐和退房时间\"]"),
-				base.replace("\"closing_instruction\":\"总结房间信息并祝用户入住愉快\"", "\"closing_instruction\":null")
+				base.replace("\"required_outcomes\":[\"说明预订姓名\",\"确认房型和入住时间\",\"询问早餐和退房时间\"]",
+						"\"required_outcomes\":[\"说明预订姓名\",\"确认房型和入住时间\"]"),
+				base.replace("\"required_outcomes\":[\"说明预订姓名\",\"确认房型和入住时间\",\"询问早餐和退房时间\"]",
+						"\"required_outcomes\":[\"说明预订姓名\",\"确认房型和入住时间\",\"询问早餐和退房时间\",\"确认押金\"]"),
+				base.replace("\"required_outcomes\":[\"说明预订姓名\",\"确认房型和入住时间\",\"询问早餐和退房时间\"]",
+						"\"required_outcomes\":null")
 		};
 		assertAllRejected(invalid);
 	}
@@ -322,37 +442,43 @@ class CustomSceneGeneratorTest {
 	@Test
 	void propagatesProviderFailuresAndReturnsLastInvalidResponseAfterTwoAttempts() {
 		AiProviderRegistry registry = mock(AiProviderRegistry.class);
-		when(registry.executeLlmTask(anyString(), isNull()))
+		when(registry.executeLlmTask(
+				anyString(), anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT)))
 				.thenThrow(new IllegalStateException("provider unavailable"));
 		var service = new CustomSceneGenerator(registry, objectMapper);
 		assertThrows(IllegalStateException.class,
 				() -> service.generate("custom_provider", "user-1", "酒店办理入住", null,
 						new UserProfile("user-1", "B", "Katerina", "zh-CN", "")));
-		verify(registry).executeLlmTask(anyString(), isNull());
+		verify(registry).executeLlmTask(
+				anyString(), anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT));
 
 		AiProviderRegistry invalidRegistry = mock(AiProviderRegistry.class);
-		when(invalidRegistry.executeLlmTask(anyString(), isNull()))
+		when(invalidRegistry.executeLlmTask(
+				anyString(), anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT)))
 				.thenReturn("{}", "{}");
 		var invalidService = new CustomSceneGenerator(invalidRegistry, objectMapper);
 		BusinessException exception = assertThrows(BusinessException.class,
 				() -> invalidService.generate("custom_invalid_final", "user-1", "酒店办理入住", null,
 						new UserProfile("user-1", "B", "Katerina", "zh-CN", "")));
 		assertEquals("CUSTOM_SCENE_LLM_RESPONSE_INVALID", exception.code());
-		verify(invalidRegistry, times(2)).executeLlmTask(anyString(), isNull());
+		verify(invalidRegistry, times(2)).executeLlmTask(
+				anyString(), anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT));
 	}
 
 	private void assertAllRejected(String[] responses) {
 		for (int index = 0; index < responses.length; index++) {
 			final int caseIndex = index;
 			AiProviderRegistry registry = mock(AiProviderRegistry.class);
-			when(registry.executeLlmTask(anyString(), isNull()))
+			when(registry.executeLlmTask(
+					anyString(), anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT)))
 					.thenReturn(responses[index], responses[index]);
 			var service = new CustomSceneGenerator(registry, objectMapper);
 			BusinessException exception = assertThrows(BusinessException.class,
 					() -> service.generate("custom_rejected_" + caseIndex, "user-1", "酒店办理入住", null,
 							new UserProfile("user-1", "B", "Katerina", "zh-CN", "")));
 			assertEquals("CUSTOM_SCENE_LLM_RESPONSE_INVALID", exception.code());
-			verify(registry, times(2)).executeLlmTask(anyString(), isNull());
+			verify(registry, times(2)).executeLlmTask(
+					anyString(), anyString(), isNull(), eq(LlmResponseFormat.JSON_OBJECT));
 		}
 	}
 
@@ -361,8 +487,7 @@ class CustomSceneGeneratorTest {
 				"check in",
 				"single room",
 				"book a room",
-				"show my passport",
-				"confirm the reservation"));
+				"show my passport"));
 	}
 
 	private String validResponse(int wordCount, List<String> phrases) {
@@ -375,16 +500,10 @@ class CustomSceneGeneratorTest {
 		root.put("learning_goal", "确认预订、提供证件并获取房间信息");
 		root.put("custom_instruction", "保持礼貌，每次回复不超过三句话。");
 		root.put("success_factor", Map.of(
-				"estimated_minutes", 6,
-				"minimum_user_turns", 5,
-				"maximum_user_turns", 10,
 				"required_outcomes", List.of(
 						"说明预订姓名",
 						"确认房型和入住时间",
-						"询问早餐和退房时间"),
-				"completion_rule", "ALL_REQUIRED_OUTCOMES",
-				"stop_when", "达到最少轮次且三个目标都有明确回答",
-				"closing_instruction", "总结房间信息并祝用户入住愉快"));
+						"询问早餐和退房时间")));
 
 		List<Map<String, String>> words = new ArrayList<>();
 		List<String> availableWords = List.of(

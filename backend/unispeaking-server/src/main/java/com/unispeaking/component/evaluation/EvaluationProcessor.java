@@ -81,9 +81,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -119,8 +127,10 @@ public class EvaluationProcessor {
 	private final ObjectStorageProvider objectStorage;
 	private final ObjectStorageProperties objectStorageProperties;
 	private final RecordingStore ieltsRecordingStore;
-	private final Object[] ieltsEvaluationLocks =
-			new Object[IELTS_EVALUATION_LOCK_STRIPES];
+	private final ConcurrentHashMap<String, EvaluationLock> ieltsEvaluationLocks =
+			new ConcurrentHashMap<>();
+	private Executor ieltsPartEvaluationExecutor = Runnable::run;
+	private Executor turnEvaluationExecutor = Runnable::run;
 
 	public EvaluationProcessor(
 			PronunciationAssessmentClient pronunciationClient,
@@ -193,9 +203,18 @@ public class EvaluationProcessor {
 		this.ieltsRecordingStore = Objects.requireNonNull(
 				ieltsRecordingStore,
 				"ieltsRecordingStore must not be null");
-		for (int index = 0; index < ieltsEvaluationLocks.length; index++) {
-			ieltsEvaluationLocks[index] = new Object();
-		}
+	}
+
+	@Autowired
+	public void configureIeltsPartEvaluationExecutor(
+			@Qualifier("ieltsPartEvaluationExecutor") Executor executor) {
+		this.ieltsPartEvaluationExecutor = Objects.requireNonNull(executor);
+	}
+
+	@Autowired
+	public void configureTurnEvaluationExecutor(
+			@Qualifier("turnEvaluationExecutor") Executor executor) {
+		this.turnEvaluationExecutor = Objects.requireNonNull(executor);
 	}
 
 	public SpeechEvaluationResult evaluateSpeech(
@@ -221,31 +240,37 @@ public class EvaluationProcessor {
 	public IeltsEvaluationResult generateIeltsEvaluation(
 			String ieltsId,
 			String sessionId) {
-		IeltsPracticeRecord practice = requireOwnedIeltsPractice(ieltsId);
-		Object evaluationLock = ieltsEvaluationLocks[Math.floorMod(
-				ieltsId.hashCode(),
-				ieltsEvaluationLocks.length)];
-		synchronized (evaluationLock) {
-			return generateIeltsEvaluationLocked(practice, sessionId);
+		return generateIeltsEvaluationForUser(
+				ieltsId,
+				sessionId,
+				authService.requireUserId(null));
+	}
+
+	public IeltsEvaluationResult generateIeltsEvaluationForUser(
+			String ieltsId,
+			String sessionId,
+			String userId) {
+		IeltsPracticeRecord practice = requireOwnedIeltsPractice(ieltsId, userId);
+		List<PracticeSessionRecord> sessions = completedIeltsSessions(ieltsId);
+		int sessionIndex = sessionIndex(sessions, sessionId);
+		if (sessionIndex < 0
+				|| !sessions.get(sessionIndex).userId().toString().equals(userId)) {
+			throw new EvaluationException(EvaluationErrorCode.SESSION_NOT_FOUND);
 		}
+		boolean finalTask = practice.mode() == IeltsMode.MOCK_TEST
+				&& sessionIndex >= 2;
+		String lockKey = finalTask ? "FINAL:" + ieltsId : "PART:" + sessionId;
+		return withEvaluationLock(
+				lockKey,
+				() -> generateIeltsEvaluationLocked(practice, sessionId));
 	}
 
 	private IeltsEvaluationResult generateIeltsEvaluationLocked(
 			IeltsPracticeRecord practice,
 			String sessionId) {
 		String ieltsId = practice.ieltsId();
-		List<PracticeSessionRecord> sessions =
-				practiceSessionRepository.findBySceneId(ieltsId).stream()
-						.filter(item -> item.sceneType() == SceneType.IELTS_SCENE)
-						.filter(item -> item.status() == SessionStatus.COMPLETED)
-						.toList();
-		int sessionIndex = -1;
-		for (int index = 0; index < sessions.size(); index++) {
-			if (sessions.get(index).sessionId().equals(sessionId)) {
-				sessionIndex = index;
-				break;
-			}
-		}
+		List<PracticeSessionRecord> sessions = completedIeltsSessions(ieltsId);
+		int sessionIndex = sessionIndex(sessions, sessionId);
 		if (sessionIndex < 0) {
 			throw new EvaluationException(EvaluationErrorCode.SESSION_NOT_FOUND);
 		}
@@ -261,19 +286,22 @@ public class EvaluationProcessor {
 								.map(this::toHistoryPartEvaluation)
 								.toList());
 			}
-			List<IeltsPartEvaluation> partEvaluations = new ArrayList<>();
+			List<CompletableFuture<IeltsPartEvaluation>> partFutures = new ArrayList<>();
 			for (int index = 0; index < Math.min(3, sessions.size()); index++) {
-				partEvaluations.add(resolvePartEvaluation(
-						practice,
-						sessions.get(index),
-						partByIndex(index)));
+				PracticeSessionRecord partSession = sessions.get(index);
+				IeltsPart part = partByIndex(index);
+				partFutures.add(submitPartEvaluation(
+						() -> resolvePartEvaluation(practice, partSession, part)));
 			}
-				IeltsEvaluationResult finalResult = evaluateCompleteIeltsTest(
-						sessions,
-						partEvaluations);
-				ieltsEvaluationRepository.saveFinal(ieltsId, finalResult);
-				ieltsPracticeRepository.incrementCompletedCount(practice.userId());
-				return finalResult;
+			List<IeltsPartEvaluation> partEvaluations = partFutures.stream()
+					.map(this::awaitTask)
+					.toList();
+			IeltsEvaluationResult finalResult = evaluateCompleteIeltsTest(
+					sessions,
+					partEvaluations);
+			ieltsEvaluationRepository.saveFinal(ieltsId, finalResult);
+			ieltsPracticeRepository.incrementCompletedCount(practice.userId());
+			return finalResult;
 		}
 		var cachedPart = ieltsEvaluationRepository.findPart(sessionId);
 		if (cachedPart.isPresent()
@@ -669,12 +697,14 @@ public class EvaluationProcessor {
 			IeltsPracticeRecord practice,
 			PracticeSessionRecord session,
 			IeltsPart part) {
-		var cached = ieltsEvaluationRepository.findPart(session.sessionId());
-		if (cached.isPresent()
-				&& "COMPLETED".equals(cached.get().getEvaluationStatus())) {
-			return toHistoryPartEvaluation(cached.get());
-		}
-		return evaluatePartSafely(practice, session, part);
+		return withEvaluationLock("PART:" + session.sessionId(), () -> {
+			var cached = ieltsEvaluationRepository.findPart(session.sessionId());
+			if (cached.isPresent()
+					&& "COMPLETED".equals(cached.get().getEvaluationStatus())) {
+				return toHistoryPartEvaluation(cached.get());
+			}
+			return evaluatePartSafely(practice, session, part);
+		});
 	}
 
 	private IeltsPartEvaluation toPartEvaluation(
@@ -752,11 +782,11 @@ public class EvaluationProcessor {
 					"该 Part 的后台评分暂不可用。",
 					List.of(),
 					List.of(),
-					recommendedExpressions(turns),
-					null,
-					null,
-					null,
-					null);
+						recommendedExpressions(turns),
+						null,
+						null,
+						null,
+						null);
 		}
 	}
 
@@ -1170,6 +1200,80 @@ public class EvaluationProcessor {
 		throw new EvaluationException(EvaluationErrorCode.RESULT_NOT_FOUND);
 	}
 
+	private List<PracticeSessionRecord> completedIeltsSessions(String ieltsId) {
+		return practiceSessionRepository.findBySceneId(ieltsId).stream()
+				.filter(item -> item.sceneType() == SceneType.IELTS_SCENE)
+				.filter(item -> item.status() == SessionStatus.COMPLETED)
+				.toList();
+	}
+
+	private int sessionIndex(
+			List<PracticeSessionRecord> sessions,
+			String sessionId) {
+		for (int index = 0; index < sessions.size(); index++) {
+			if (sessions.get(index).sessionId().equals(sessionId)) return index;
+		}
+		return -1;
+	}
+
+	private <T> CompletableFuture<T> submitPartEvaluation(Supplier<T> task) {
+		try {
+			return CompletableFuture.supplyAsync(task, ieltsPartEvaluationExecutor);
+		}
+		catch (RejectedExecutionException exception) {
+			LOGGER.warn("IELTS part evaluation executor saturated; using task thread");
+			return CompletableFuture.completedFuture(task.get());
+		}
+	}
+
+	private <T> CompletableFuture<T> submitTurnTask(Supplier<T> task) {
+		try {
+			return CompletableFuture.supplyAsync(task, turnEvaluationExecutor);
+		}
+		catch (RejectedExecutionException exception) {
+			return CompletableFuture.failedFuture(new EvaluationException(
+					EvaluationErrorCode.PROVIDER_CALL_FAILED,
+					null,
+					exception));
+		}
+	}
+
+	private <T> T awaitTask(CompletableFuture<T> future) {
+		try {
+			return future.join();
+		}
+		catch (CompletionException exception) {
+			Throwable cause = exception.getCause();
+			if (cause instanceof RuntimeException runtimeException) {
+				throw runtimeException;
+			}
+			throw new EvaluationException(
+					EvaluationErrorCode.PROVIDER_CALL_FAILED,
+					null,
+					cause);
+		}
+	}
+
+	private <T> T withEvaluationLock(String key, Supplier<T> task) {
+		EvaluationLock entry = ieltsEvaluationLocks.compute(key, (ignored, current) -> {
+			EvaluationLock resolved = current == null ? new EvaluationLock() : current;
+			resolved.references++;
+			return resolved;
+		});
+		entry.lock.lock();
+		try {
+			return task.get();
+		}
+		finally {
+			entry.lock.unlock();
+			ieltsEvaluationLocks.computeIfPresent(key, (ignored, current) -> {
+				if (current != entry) return current;
+				entry.references--;
+				return entry.references == 0 ? null : entry;
+			});
+		}
+	}
+
 	private DialogueTurnEvaluationResult evaluateCustomSceneTurn(
 			AbstractSceneSession session,
 			DialogueTurnEvaluationCommand command) {
@@ -1192,7 +1296,7 @@ public class EvaluationProcessor {
 		if (command.audio() == null || command.audio().length == 0) {
 			DialogueTurnEvaluationResult result =
 					UnavailableTurnEvaluationPolicy.createResult(
-						command.turnNo(), command.transcript());
+							command.turnNo(), command.transcript());
 			turnEvaluationRepository.upsert(toCustomTurn(
 					session, result, List.of()));
 			LOGGER.info(
@@ -1203,13 +1307,26 @@ public class EvaluationProcessor {
 		}
 
 		PcmWavValidator.validate(command.audio());
-		PronunciationAssessmentResult assessment = AiInvocationContexts.call(
-				AiInvocationContext.create(session.getUserId(), session.getId(), "dialogue_turn_pronunciation"),
-				() -> pronunciationClient.evaluate(command.transcript(), command.audio()));
+		DialogueTurnEvaluationPromptInput prompt = buildCustomTurnPrompt(session, command);
+		CompletableFuture<PronunciationAssessmentResult> pronunciationFuture =
+				submitTurnTask(() -> AiInvocationContexts.call(
+						AiInvocationContext.create(
+								session.getUserId(),
+								session.getId(),
+								"dialogue_turn_pronunciation"),
+						() -> pronunciationClient.evaluate(
+								command.transcript(),
+								command.audio())));
+		CompletableFuture<TurnLanguageFeedback> feedbackFuture =
+				submitTurnTask(() -> AiInvocationContexts.call(
+						AiInvocationContext.create(
+								session.getUserId(),
+								session.getId(),
+								"dialogue_turn_feedback"),
+						() -> llmClient.assessTurn(prompt)));
+		PronunciationAssessmentResult assessment = awaitTask(pronunciationFuture);
 		TurnSpeechScoreCalculator.calculate(assessment);
-		TurnLanguageFeedback feedback = AiInvocationContexts.call(
-				AiInvocationContext.create(session.getUserId(), session.getId(), "dialogue_turn_feedback"),
-				() -> llmClient.assessTurn(buildCustomTurnPrompt(session, command)));
+		TurnLanguageFeedback feedback = awaitTask(feedbackFuture);
 		DialogueTurnEvaluationResult result = new DialogueTurnEvaluationResult(
 				command.turnNo(),
 				command.transcript(),
@@ -1251,7 +1368,7 @@ public class EvaluationProcessor {
 		if (command.audio() == null || command.audio().length == 0) {
 			DialogueTurnEvaluationResult result =
 					UnavailableTurnEvaluationPolicy.createResult(
-						command.turnNo(), command.transcript());
+							command.turnNo(), command.transcript());
 			turnEvaluationRepository.upsert(toCustomTurn(
 					session, result, List.of()));
 			LOGGER.info(
@@ -1262,23 +1379,31 @@ public class EvaluationProcessor {
 		}
 
 		PcmWavValidator.validate(command.audio());
-		PronunciationAssessmentResult assessment = AiInvocationContexts.call(
-				AiInvocationContext.create(session.getUserId(), session.getId(), "ielts_turn_pronunciation"),
-				() -> pronunciationClient.evaluate(command.transcript(), command.audio()));
+		DialogueTurnEvaluationPromptInput prompt = buildIeltsTurnPrompt(session, command);
+		CompletableFuture<PronunciationAssessmentResult> pronunciationFuture =
+				submitTurnTask(() -> AiInvocationContexts.call(
+						AiInvocationContext.create(
+								session.getUserId(),
+								session.getId(),
+								"ielts_turn_pronunciation"),
+						() -> pronunciationClient.evaluate(
+								command.transcript(),
+								command.audio())));
+		CompletableFuture<TurnLanguageFeedback> feedbackFuture =
+				submitTurnTask(() -> AiInvocationContexts.call(
+						AiInvocationContext.create(
+								session.getUserId(),
+								session.getId(),
+								"ielts_turn_feedback"),
+						() -> llmClient.assessTurn(prompt)));
+		PronunciationAssessmentResult assessment = awaitTask(pronunciationFuture);
 		TurnSpeechScoreCalculator.calculate(assessment);
-		DialogueTurnEvaluationPromptInput prompt = buildIeltsTurnPrompt(
-				session,
-				command);
 		TurnLanguageFeedback feedback;
 		try {
-			feedback = AiInvocationContexts.call(
-					AiInvocationContext.create(session.getUserId(), session.getId(), "ielts_turn_feedback"),
-					() -> llmClient.assessTurn(prompt));
+			feedback = awaitTask(feedbackFuture);
 		}
 		catch (EvaluationException exception) {
-			if (!isProviderFeedbackFailure(exception)) {
-				throw exception;
-			}
+			if (!isProviderFeedbackFailure(exception)) throw exception;
 			LOGGER.warn(
 					"IELTS language feedback unavailable; preserving pronunciation "
 							+ "sessionId={} turnNo={} code={}",
@@ -1392,7 +1517,14 @@ public class EvaluationProcessor {
 	}
 
 	private IeltsPracticeRecord requireOwnedIeltsPractice(String ieltsId) {
-		String userId = authService.requireUserId(null);
+		return requireOwnedIeltsPractice(
+				ieltsId,
+				authService.requireUserId(null));
+	}
+
+	private IeltsPracticeRecord requireOwnedIeltsPractice(
+			String ieltsId,
+			String userId) {
 		IeltsPracticeRecord practice = ieltsPracticeRepository
 				.findPractice(ieltsId)
 				.orElseThrow(() -> new EvaluationException(
@@ -1401,6 +1533,11 @@ public class EvaluationProcessor {
 			throw new EvaluationException(EvaluationErrorCode.SESSION_NOT_FOUND);
 		}
 		return practice;
+	}
+
+	private static final class EvaluationLock {
+		private final ReentrantLock lock = new ReentrantLock();
+		private int references;
 	}
 
 	private IeltsPart activeIeltsPart(

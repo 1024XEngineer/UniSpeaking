@@ -5,6 +5,7 @@ import com.unispeaking.domain.po.profile.UserProfile;
 import com.unispeaking.domain.po.scene.CustomSceneDefinition;
 import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.provider.AiProviderRegistry;
+import com.unispeaking.provider.LlmResponseFormat;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -34,7 +35,6 @@ public class CustomSceneGenerator {
 	private static final int MAX_PHRASES = 6;
 	private static final int MIN_SENTENCES = 3;
 	private static final int MAX_SENTENCES = 4;
-	private static final int MAX_GENERATION_ATTEMPTS = 2;
 	private static final int MIN_PHRASE_WORDS = 2;
 	private static final int MAX_PHRASE_WORDS = 6;
 	private static final Pattern SENTENCE_ENDING = Pattern.compile("[.!?]+$");
@@ -92,14 +92,23 @@ public class CustomSceneGenerator {
 		String normalizedInput = requiredInput(sceneInput);
 		String prompt = buildPrompt(normalizedInput, currentPreference, profile);
 		BusinessException lastFailure = null;
-		for (int attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+		List<String> models = List.of(
+				AiProviderRegistry.QWEN_LLM_FLASH,
+				AiProviderRegistry.QWEN_LLM_PLUS);
+		for (int index = 0; index < models.size(); index++) {
+			int attempt = index + 1;
+			String modelId = models.get(index);
 			String attemptPrompt = attempt == 1
 					? prompt
-					: prompt + "\n\nYour previous response did not satisfy the JSON contract. "
+					: prompt + "\n\nA prior generation attempt did not satisfy the JSON contract. "
 							+ "Return a corrected JSON object only.";
 			try {
 				long llmStartedAt = System.nanoTime();
-				String content = providerRegistry.executeLlmTask(attemptPrompt, null);
+				String content = providerRegistry.executeLlmTask(
+						modelId,
+						attemptPrompt,
+						null,
+						LlmResponseFormat.JSON_OBJECT);
 				long llmMillis = elapsedMillis(llmStartedAt);
 				long parseStartedAt = System.nanoTime();
 				CustomSceneDefinition definition;
@@ -109,28 +118,37 @@ public class CustomSceneGenerator {
 				catch (BusinessException exception) {
 					if ("CUSTOM_SCENE_LLM_RESPONSE_INVALID".equals(exception.code())) {
 						LOGGER.warn(
-								"custom scene LLM response rejected sceneId={} attempt={} llmMs={} parseMs={} responseChars={}",
+								"custom scene LLM response rejected sceneId={} model={} attempt={} llmMs={} parseMs={} responseChars={}",
 								sceneId,
+								modelId,
 								attempt,
 								llmMillis,
 								elapsedMillis(parseStartedAt),
-								content.length());
+								content == null ? 0 : content.length());
 					}
 					throw exception;
 				}
 				LOGGER.info(
-						"custom scene LLM completed sceneId={} attempt={} llmMs={} parseMs={}",
+						"custom scene LLM completed sceneId={} model={} attempt={} llmMs={} parseMs={}",
 						sceneId,
+						modelId,
 						attempt,
 						llmMillis,
 						elapsedMillis(parseStartedAt));
 				return definition;
 			}
 			catch (BusinessException exception) {
-				if (!"CUSTOM_SCENE_LLM_RESPONSE_INVALID".equals(exception.code())) {
-					throw exception;
-				}
 				lastFailure = exception;
+				if (index + 1 < models.size()) {
+					LOGGER.warn(
+							"custom scene LLM falling back sceneId={} failedModel={} nextModel={} code={}",
+							sceneId,
+							modelId,
+							models.get(index + 1),
+							exception.code());
+					continue;
+				}
+				throw exception;
 			}
 		}
 		throw lastFailure == null ? invalidResponse() : lastFailure;
@@ -142,8 +160,6 @@ public class CustomSceneGenerator {
 			UserProfile profile) {
 		Map<String, Object> learner = new LinkedHashMap<>();
 		learner.put("cefr_level", safe(profile.level()));
-		learner.put("preferred_voice", safe(profile.voiceId()));
-		learner.put("preferred_ai_speech_speed", safe(profile.aiSpeechSpeed()));
 		learner.put("native_language", safe(profile.nativeLanguage()));
 		learner.put("memory_text", safe(profile.memoryText()));
 		learner.put("preferences", safe(profile.preferencesJson()));
@@ -180,17 +196,11 @@ public class CustomSceneGenerator {
 				  "learning_goal": "observable speaking goal",
 				  "custom_instruction": "role-play constraints and coaching boundaries",
 				  "success_factor": {
-				    "estimated_minutes": 6,
-				    "minimum_user_turns": 5,
-				    "maximum_user_turns": 10,
 				    "required_outcomes": [
 				      "observable outcome 1",
 				      "observable outcome 2",
 				      "observable outcome 3"
-				    ],
-				    "completion_rule": "ALL_REQUIRED_OUTCOMES",
-				    "stop_when": "clear machine-readable completion description",
-				    "closing_instruction": "how AI should close after completion"
+				    ]
 				  },
 				  "words": [
 				    {"word": "English word", "phonetic": "/phonetic/", "translation": "中文释义"}
@@ -206,8 +216,11 @@ public class CustomSceneGenerator {
 				Choose exactly one label from these ten Chinese values: 餐饮, 购物, 出行, 住宿,
 				健康, 职场, 社交, 学习, 服务, 其他. Do not return a synonym, an English label,
 				multiple labels, or any value outside this list.
-				Generate about 5 distinct, scene-specific words, about 5 distinct phrases,
-				and about 3 practical reference sentences. Every reference sentence must reuse
+				Generate exactly 4 distinct, scene-specific words, exactly 4 distinct phrases,
+				and exactly 3 practical reference sentences. Keep every string concise: title and
+				roles at most 12 Chinese characters, background at most 35 Chinese characters,
+				learning_goal at most 24 Chinese characters, and each instruction or outcome at
+				most 40 Chinese characters. Every reference sentence must reuse
 				at least one exact word or phrase from the generated words and phrases.
 				Each phrase must be a reusable lexical chunk or collocation of 2 to 6 English
 				words, not a complete clause or sentence. A phrase must not contain an explicit
@@ -217,20 +230,13 @@ public class CustomSceneGenerator {
 				Invalid phrase examples include "There is a hole in it", "I would like to return
 				this", "Can I get my money back?", and "Do you have the receipt?"; put complete
 				sentences like these only in sentences.
-				Required outcomes must contain 3 to 8 observable learner actions.
+				Required outcomes must contain exactly 3 observable learner actions.
 				Only make actions required when they are necessary to complete the core
 				real-world interaction. Never require an optional purchase, facility question,
 				add-on, preference, or topic. If practicing an optional choice matters, define
 				the outcome as responding to the offer so either acceptance or refusal resolves
 				it. The role-play must accept changed requests and explicit refusals without
 				repeating or pressuring the learner.
-				closing_instruction must describe one natural in-role farewell of at most two
-				short sentences. It must not request teaching feedback, praise the learner's
-				performance, recap completed steps, or summarize the conversation.
-				minimum_user_turns must be between 3 and 6.
-				maximum_user_turns must be exactly 10.
-				estimated_minutes must be an integer from 3 to 10. This practice is
-				turn-based and must not be designed as a ten-to-fifteen-minute session.
 				""".formatted(jsonString(sceneInput), jsonValue(learner));
 	}
 
@@ -297,16 +303,9 @@ public class CustomSceneGenerator {
 		if (!node.isObject()) {
 			throw invalidResponse();
 		}
-		int estimatedMinutes = requiredInteger(node, "estimated_minutes", 3, 10);
-		int minimumTurns = requiredInteger(node, "minimum_user_turns", 3, 6);
-		int maximumTurns = requiredInteger(node, "maximum_user_turns", 10, 10);
-		if (maximumTurns <= minimumTurns) {
-			throw invalidResponse();
-		}
 		JsonNode outcomesNode = node.path("required_outcomes");
 		if (!outcomesNode.isArray()
-				|| outcomesNode.size() < 3
-				|| outcomesNode.size() > 8) {
+				|| outcomesNode.size() != 3) {
 			throw invalidResponse();
 		}
 		List<String> outcomes = new ArrayList<>();
@@ -318,20 +317,18 @@ public class CustomSceneGenerator {
 			}
 			outcomes.add(value);
 		}
-		String completionRule = requiredText(node, "completion_rule", 64);
-		if (!"ALL_REQUIRED_OUTCOMES".equals(completionRule)) {
-			throw invalidResponse();
-		}
 		Map<String, Object> normalized = new LinkedHashMap<>();
-		normalized.put("estimated_minutes", estimatedMinutes);
-		normalized.put("minimum_user_turns", minimumTurns);
-		normalized.put("maximum_user_turns", maximumTurns);
+		normalized.put("estimated_minutes", 6);
+		normalized.put("minimum_user_turns", 5);
+		normalized.put("maximum_user_turns", 10);
 		normalized.put("required_outcomes", outcomes);
-		normalized.put("completion_rule", completionRule);
-		normalized.put("stop_when", requiredText(node, "stop_when", 1000));
+		normalized.put("completion_rule", "ALL_REQUIRED_OUTCOMES");
+		normalized.put(
+				"stop_when",
+				"达到最少轮次且所有必要目标均已完成，或达到最大轮次");
 		normalized.put(
 				"closing_instruction",
-				requiredText(node, "closing_instruction", 1000));
+				"确认结果后，以当前角色自然结束对话。");
 		return jsonValue(normalized);
 	}
 
@@ -424,22 +421,6 @@ public class CustomSceneGenerator {
 						.map(LearningContentItem::englishText)
 						.map(value -> value.toLowerCase(Locale.ROOT))
 						.anyMatch(normalizedSentence::contains);
-	}
-
-	private int requiredInteger(
-			JsonNode node,
-			String field,
-			int minimum,
-			int maximum) {
-		JsonNode value = node.path(field);
-		if (!value.isIntegralNumber()) {
-			throw invalidResponse();
-		}
-		int number = value.intValue();
-		if (number < minimum || number > maximum) {
-			throw invalidResponse();
-		}
-		return number;
 	}
 
 	private String requiredText(JsonNode node, String field, int maximumLength) {

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.unispeaking.domain.dto.scene.CompleteSceneFlowRequest;
 import com.unispeaking.domain.dto.scene.CreateSceneFlowRequest;
+import com.unispeaking.component.scene.CustomSceneGenerationCoordinator;
 import com.unispeaking.domain.dto.scene.SceneFlowResponse;
 import com.unispeaking.domain.dto.session.AdvanceScenarioDialogueTurnRequest;
 import com.unispeaking.domain.dto.scene.AdvanceSceneStageRequest;
@@ -116,6 +117,7 @@ class CustomSceneControllerFlowTest {
 				flow,
 				mock(CustomEvaluationService.class),
 				mock(CustomSessionService.class),
-				mock(LearningAssetService.class));
+					mock(LearningAssetService.class),
+					mock(CustomSceneGenerationCoordinator.class));
 	}
 }

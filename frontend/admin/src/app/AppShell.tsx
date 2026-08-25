@@ -18,6 +18,7 @@ const navigation = [
     icon: 'tracking',
     external: true,
   },
+  { label: '运行监控', to: '/monitoring', icon: 'pulse' },
   { label: '系统管理', to: '/system', icon: 'settings' },
 ] as const
 

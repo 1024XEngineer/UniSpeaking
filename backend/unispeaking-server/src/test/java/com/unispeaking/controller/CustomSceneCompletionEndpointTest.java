@@ -2,6 +2,7 @@ package com.unispeaking.controller;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -18,6 +19,9 @@ import com.unispeaking.domain.dto.evaluation.DialogueReportResult;
 import com.unispeaking.domain.dto.evaluation.DialogueTurnEvaluationCommand;
 import com.unispeaking.domain.dto.scene.CustomSceneRequest;
 import com.unispeaking.domain.dto.scene.TranslateTextResponse;
+import com.unispeaking.component.scene.CustomSceneGenerationCoordinator;
+import com.unispeaking.domain.dto.scene.CustomSceneGenerationTaskResponse;
+import com.unispeaking.domain.vo.task.AsyncTaskStatus;
 import com.unispeaking.domain.dto.session.CompleteCustomSceneDialogueResponse;
 import com.unispeaking.domain.dto.session.EndCustomSessionCommand;
 import com.unispeaking.domain.dto.session.StartCustomSceneDialogueRequest;
@@ -30,6 +34,7 @@ import com.unispeaking.service.scene.CustomSceneService;
 import com.unispeaking.service.session.CustomSessionService;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
@@ -39,6 +44,35 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class CustomSceneCompletionEndpointTest {
 
 	@Test
+	void generateEndpointReturnsAsyncTask() throws Exception {
+		CustomSceneGenerationCoordinator generationCoordinator =
+				mock(CustomSceneGenerationCoordinator.class);
+		UUID taskId = UUID.randomUUID();
+		when(generationCoordinator.submit(any())).thenReturn(
+				new CustomSceneGenerationTaskResponse(
+						taskId,
+						"custom_2001",
+						AsyncTaskStatus.PROCESSING,
+						null,
+						null));
+		CustomSceneController controller = new CustomSceneController(
+				mock(CustomSceneService.class),
+				mock(CustomSceneFlowService.class),
+				mock(CustomEvaluationService.class),
+				mock(CustomSessionService.class),
+				mock(LearningAssetService.class),
+				generationCoordinator);
+		MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+		mvc.perform(post("/api/custom-scenes/generate")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"sceneInput\":\"Airport check-in\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.taskId").value(taskId.toString()))
+				.andExpect(jsonPath("$.data.status").value("PROCESSING"));
+	}
+
+	@Test
 	void deletesLearningAssetThroughItsAssetEndpoint() throws Exception {
 		LearningAssetService assets = mock(LearningAssetService.class);
 		CustomSceneController controller = new CustomSceneController(
@@ -46,7 +80,8 @@ class CustomSceneCompletionEndpointTest {
 				mock(CustomSceneFlowService.class),
 				mock(CustomEvaluationService.class),
 				mock(CustomSessionService.class),
-				assets);
+					assets,
+					mock(CustomSceneGenerationCoordinator.class));
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
 		mvc.perform(delete("/api/custom-scenes/custom_2001/assets"))
@@ -86,7 +121,8 @@ class CustomSceneCompletionEndpointTest {
 				mock(CustomSceneFlowService.class),
 				mock(CustomEvaluationService.class),
 				customSessionService,
-				mock(LearningAssetService.class));
+					mock(LearningAssetService.class),
+					mock(CustomSceneGenerationCoordinator.class));
 		MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
 		mvc.perform(post(
@@ -205,9 +241,15 @@ class CustomSceneCompletionEndpointTest {
 		CustomEvaluationService evaluation = mock(CustomEvaluationService.class);
 		CustomSessionService sessions = mock(CustomSessionService.class);
 		LearningAssetService assets = mock(LearningAssetService.class);
-		CustomSceneController controller = controller(
-				scenes, mock(CustomSceneFlowService.class), evaluation,
-				sessions, assets);
+		CustomSceneGenerationCoordinator generation =
+				mock(CustomSceneGenerationCoordinator.class);
+		CustomSceneController controller = new CustomSceneController(
+				scenes,
+				mock(CustomSceneFlowService.class),
+				evaluation,
+				sessions,
+				assets,
+				generation);
 		CustomSceneRequest request = new CustomSceneRequest(
 				"user_1", "preference", "a cafe", null,
 				ProviderType.QWEN, "model", "voice", true);
@@ -218,7 +260,7 @@ class CustomSceneCompletionEndpointTest {
 		controller.listLearningAssets();
 		controller.getLearningAsset("custom_2001");
 
-		verify(scenes).generate(request);
+		verify(generation).submit(request);
 		verify(sessions).endSession(new EndCustomSessionCommand(
 				"custom_2001", "session_1", null));
 		verify(assets).getReport("custom_2001", "session_1");
@@ -289,6 +331,12 @@ class CustomSceneCompletionEndpointTest {
 			CustomEvaluationService evaluation,
 			CustomSessionService sessions,
 			LearningAssetService assets) {
-		return new CustomSceneController(scenes, flow, evaluation, sessions, assets);
+		return new CustomSceneController(
+				scenes,
+				flow,
+				evaluation,
+				sessions,
+				assets,
+				mock(CustomSceneGenerationCoordinator.class));
 	}
 }

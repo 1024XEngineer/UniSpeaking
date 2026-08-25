@@ -164,6 +164,33 @@ class IeltsEvaluationRepositoryTest {
 		assertEquals(EvaluationErrorCode.PERSISTENCE_FAILED, failure.errorCode());
 	}
 
+	@Test
+	void createsPendingRowsBeforeBackgroundEvaluationStarts() {
+		IeltsEvaluationMapper mapper = mock(IeltsEvaluationMapper.class);
+		IeltsPartEvaluationMapper partMapper = mock(
+				IeltsPartEvaluationMapper.class);
+		when(partMapper.selectById("ielts_part_session-1")).thenReturn(null);
+		when(partMapper.insert(any(IeltsPartEvaluationEntity.class))).thenReturn(1);
+		when(mapper.selectById("ielts_mock_ielts-1")).thenReturn(null);
+		when(mapper.insert(any(IeltsEvaluationEntity.class))).thenReturn(1);
+		IeltsEvaluationRepository repository =
+				new IeltsEvaluationRepository(mapper, partMapper);
+
+		repository.ensurePartPending("ielts-1", "session-1", IeltsPart.PART_1);
+		repository.ensureFinalPending("ielts-1");
+
+		ArgumentCaptor<IeltsPartEvaluationEntity> part =
+				ArgumentCaptor.forClass(IeltsPartEvaluationEntity.class);
+		ArgumentCaptor<IeltsEvaluationEntity> complete =
+				ArgumentCaptor.forClass(IeltsEvaluationEntity.class);
+		verify(partMapper).insert(part.capture());
+		verify(mapper).insert(complete.capture());
+		assertEquals("PENDING", part.getValue().getEvaluationStatus());
+		assertEquals("session-1", part.getValue().getSessionId());
+		assertEquals("PENDING", complete.getValue().getEvaluationStatus());
+		assertEquals("ielts-1", complete.getValue().getIeltsId());
+	}
+
 	private IeltsEvaluationResult result() {
 		return new IeltsEvaluationResult(
 				IeltsPart.PART_1,

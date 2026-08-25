@@ -17,6 +17,7 @@ import com.unispeaking.infrastructure.ai.doubao.DoubaoAsrProvider;
 import com.unispeaking.infrastructure.ai.minimax.MiniMaxTtsProvider;
 import com.unispeaking.provider.MeteredProviderException;
 import com.unispeaking.provider.LlmResponseFormat;
+import com.unispeaking.provider.AiProviderRegistry;
 import java.io.IOException;
 import java.net.Authenticator;
 import java.net.CookieHandler;
@@ -55,6 +56,17 @@ class QwenProvidersCoverageTest {
 	private static final byte[] WAV = new byte[] {
 			'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E'
 	};
+
+	@Test
+	void flashProviderRegistersTheDedicatedFlashModel() {
+		QwenFlashLlmProvider provider = new QwenFlashLlmProvider(
+				new ObjectMapper(), "key", "workspace", "cn-beijing", 1, 1, 1024);
+
+		assertEquals("qwen", provider.providerId());
+		assertEquals(AiProviderRegistry.QWEN_LLM_FLASH,
+				provider.supportedModels().stream().findFirst().orElseThrow());
+		assertTrue(provider.supports(AiProviderRegistry.QWEN_LLM_FLASH));
+	}
 
 	@Test
 	void qwenLlmSendsTextAndJsonFormatAndMeasuresProviderUsage() {
