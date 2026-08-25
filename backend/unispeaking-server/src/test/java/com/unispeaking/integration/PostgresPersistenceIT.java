@@ -228,7 +228,7 @@ class PostgresPersistenceIT {
 						""",
 						String.class));
 		assertEquals(8, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_providers", Integer.class));
-		assertEquals(12, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_models", Integer.class));
+		assertEquals(13, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_models", Integer.class));
 		assertEquals(9, jdbcTemplate.queryForObject(
 				"SELECT COUNT(*) FROM ai_models WHERE route_priority IS NOT NULL", Integer.class));
 		assertEquals(2, jdbcTemplate.queryForObject(
