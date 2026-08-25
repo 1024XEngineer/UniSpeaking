@@ -56,4 +56,16 @@ class UnavailableTurnEvaluationPolicyTest {
 						BigDecimal.ZERO,
 						UnavailableTurnEvaluationPolicy.FEEDBACK_SUMMARY)));
 	}
+
+	@Test
+	void nullScoresObjectIsAvailableAndEveryIndividualNonZeroDimensionIsScorable() {
+		assertFalse(UnavailableTurnEvaluationPolicy.isUnavailable(null));
+		for (int index = 0; index < 6; index++) {
+			BigDecimal[] values = new BigDecimal[6];
+			values[index] = BigDecimal.ONE;
+			assertFalse(UnavailableTurnEvaluationPolicy.isUnavailable(
+					new UnavailableTurnEvaluationPolicy.CustomScores(
+							values[0], values[1], values[2], values[3], values[4], values[5], "feedback")));
+		}
+	}
 }

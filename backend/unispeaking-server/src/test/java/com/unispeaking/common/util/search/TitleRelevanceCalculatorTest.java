@@ -2,6 +2,7 @@ package com.unispeaking.common.util.search;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import org.junit.jupiter.api.Test;
 
@@ -34,5 +35,18 @@ class TitleRelevanceCalculatorTest {
 		assertTrue(calculator.isKeywordMatch(
 				"Home & Accommodation",
 				"HOME accommodation"));
+	}
+
+	@Test
+	void handlesNullEmptyNonContainingAndUnicodeGramInputs() {
+		assertEquals(0, calculator.score(null, "word"));
+		assertEquals(0, calculator.score("word", null));
+		assertEquals(0, calculator.score("!!!", "word"));
+		assertEquals(0, calculator.score("word", "!!!"));
+		assertFalse(calculator.isKeywordMatch(null, "word"));
+		assertFalse(calculator.isKeywordMatch("word", null));
+		assertFalse(calculator.isKeywordMatch("alpha", "beta"));
+		assertTrue(calculator.score("英语学习计划", "英语学习方法") > 0);
+		assertEquals(0, calculator.score("a", "b"));
 	}
 }

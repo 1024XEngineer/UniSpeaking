@@ -62,4 +62,28 @@ class IeltsPart2StateMachineTest {
 		assertTrue(completed.completed());
 		assertEquals("FINISHED", completed.phase());
 	}
+
+	@Test
+	void validatesEventAndStateIdentityAndSupportsRemoval() {
+		stateMachine.start("scene", "session");
+		assertEquals("PREPARATION", stateMachine.get("scene", "session").phase());
+		assertThrows(BusinessException.class,
+				() -> stateMachine.advance("scene", "session", null));
+		assertThrows(BusinessException.class,
+				() -> stateMachine.get("wrong", "session"));
+		stateMachine.remove("session");
+		assertThrows(BusinessException.class,
+				() -> stateMachine.get("scene", "session"));
+	}
+
+	@Test
+	void duplicatePreparationAndEventsAfterFinishAreIdempotent() {
+		stateMachine.start("scene", "session");
+		stateMachine.advance("scene", "session", IeltsPart2Event.PREPARATION_COMPLETE);
+		assertEquals("LONG_TURN", stateMachine.advance(
+				"scene", "session", IeltsPart2Event.PREPARATION_COMPLETE).phase());
+		stateMachine.advance("scene", "session", IeltsPart2Event.ANSWER_COMPLETE);
+		assertEquals("FINISHED", stateMachine.advance(
+				"scene", "session", IeltsPart2Event.PREPARATION_COMPLETE).phase());
+	}
 }

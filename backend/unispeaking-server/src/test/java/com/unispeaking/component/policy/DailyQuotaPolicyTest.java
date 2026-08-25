@@ -72,6 +72,16 @@ class DailyQuotaPolicyTest {
 	}
 
 	@Test
+	void rejectsMissingUserIdVariants() {
+		for (String userId : new String[] {null, "", "   "}) {
+			BusinessException exception = assertThrows(
+					BusinessException.class,
+					() -> policy.assertWithinQuota(userId, SceneType.INTERVIEW_SCENE, 5));
+			assertEquals("AUTHENTICATION_REQUIRED", exception.code());
+		}
+	}
+
+	@Test
 	void rejectsNullSceneType() {
 		BusinessException exception = assertThrows(
 				BusinessException.class,
@@ -108,5 +118,42 @@ class DailyQuotaPolicyTest {
 				() -> governedPolicy.assertWithinQuota(userId.toString(), SceneType.INTERVIEW_SCENE, 5));
 
 		assertEquals("USER_ENTITLEMENT_SUSPENDED", exception.code());
+	}
+
+	@Test
+	void rejectsExhaustedGovernanceEntitlement() {
+		JdbcTemplate jdbc = governanceJdbc("quota-governance-exhausted");
+		jdbc.update("insert into user_entitlements values (?, current_date, 600, 600, 'active', current_timestamp)", userId);
+		var governedPolicy = new DailyQuotaPolicy(repository, jdbc);
+
+		BusinessException exception = assertThrows(BusinessException.class,
+				() -> governedPolicy.assertWithinQuota(userId.toString(), SceneType.INTERVIEW_SCENE, 5));
+
+		assertEquals("USER_QUOTA_EXHAUSTED", exception.code());
+	}
+
+	@Test
+	void activeOrMissingGovernanceRowsUsePracticeQuota() {
+		JdbcTemplate jdbc = governanceJdbc("quota-governance-active");
+		jdbc.update("insert into user_entitlements values (?, current_date, 600, 599, 'active', current_timestamp)", userId);
+		UUID legacyUser = UUID.randomUUID();
+		when(repository.countCompletedOnDate(eq(userId), eq(SceneType.INTERVIEW_SCENE), any(LocalDate.class)))
+				.thenReturn(0L);
+		when(repository.countCompletedOnDate(eq(legacyUser), eq(SceneType.INTERVIEW_SCENE), any(LocalDate.class)))
+				.thenReturn(0L);
+		var governedPolicy = new DailyQuotaPolicy(repository, jdbc);
+
+		assertDoesNotThrow(() -> governedPolicy.assertWithinQuota(
+				userId.toString(), SceneType.INTERVIEW_SCENE, 5));
+		assertDoesNotThrow(() -> governedPolicy.assertWithinQuota(
+				legacyUser.toString(), SceneType.INTERVIEW_SCENE, 5));
+	}
+
+	private JdbcTemplate governanceJdbc(String databaseName) {
+		JdbcDataSource dataSource = new JdbcDataSource();
+		dataSource.setURL("jdbc:h2:mem:" + databaseName + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
+		JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+		jdbc.execute("create table user_entitlements (user_id uuid, quota_date date, quota_seconds numeric(12,3), used_seconds numeric(12,3), status varchar(32), updated_at timestamp with time zone)");
+		return jdbc;
 	}
 }

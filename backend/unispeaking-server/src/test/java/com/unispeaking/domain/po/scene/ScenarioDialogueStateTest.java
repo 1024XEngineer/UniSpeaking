@@ -7,6 +7,7 @@ import com.unispeaking.domain.vo.scene.ScenarioDialogueCompletionReason;
 import com.unispeaking.domain.vo.scene.ScenarioDialogueEventType;
 import com.unispeaking.domain.vo.scene.ScenarioDialogueStage;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import org.junit.jupiter.api.Test;
 
 class ScenarioDialogueStateTest {
@@ -109,6 +110,35 @@ class ScenarioDialogueStateTest {
 		assertEquals(
 				ScenarioDialogueCompletionReason.GOAL_ACHIEVED,
 				state.getCompletionReason());
+	}
+
+	@Test
+	void coversInvalidTurnsOutcomeFilteringRevisionWarningsAndNonCompletedClosing() {
+		ScenarioDialogueState state = state(2, 5);
+		state.apply(0, ScenarioDialogueEvent.none());
+		state.beginClosing();
+		state.apply(1, null);
+		assertEquals(1, state.getEffectiveUserTurns());
+		Map<String, String> outcomes = new LinkedHashMap<>();
+		outcomes.put("unknown", "value");
+		outcomes.put("outcome_1", null);
+		outcomes.put("outcome_2", " ");
+		state.apply(2, new ScenarioDialogueEvent(ScenarioDialogueEventType.OUTCOME_UPDATE, outcomes, 0.5));
+		assertEquals(Map.of(), state.getSatisfiedOutcomes());
+		state.apply(3, update("outcome_1", " latte "));
+		state.apply(4, update("outcome_1", "latte"));
+		assertEquals(0, state.getRevision());
+		state.apply(5, update("outcome_1", "tea"));
+		assertEquals(1, state.getRevision());
+		state.recordExtractionFailure(null);
+		assertEquals("场景状态提取失败，本轮仅计入有效轮次", state.getLastWarning());
+		state.recordExtractionFailure(" ");
+		state.recordExtractionFailure(" warning ");
+		assertEquals("warning", state.getLastWarning());
+		assertEquals("session_1", state.getSessionId());
+		assertEquals("custom_1", state.getSceneId());
+		assertEquals(3, state.getSuccessFactor().requiredOutcomes().size());
+		assertEquals(5, state.getProcessedTurns().size());
 	}
 
 	private ScenarioDialogueState state(int minimum, int maximum) {

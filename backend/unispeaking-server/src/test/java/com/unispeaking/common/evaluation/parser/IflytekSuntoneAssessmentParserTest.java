@@ -304,6 +304,122 @@ class IflytekSuntoneAssessmentParserTest {
 						""")));
 	}
 
+	@Test
+	void rejectsEveryEnvelopeAndWordShapeThatCannotBeScored() {
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE,
+				() -> parser.parse("{\"header\":{\"code\":0,\"status\":2}}"));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse("{\"header\":{\"code\":0,\"status\":2},\"payload\":[]}"));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE,
+				() -> parser.parse(encodedEnvelope("{\"result\":{\"status\":2}}")));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelopeWithText("7")));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE,
+				() -> parser.parse(encodedEnvelope("{\"result\":{\"words\":null}}")));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope("{\"result\":{\"words\":[1]}}")));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE,
+				() -> parser.parse(encodedEnvelope("{\"result\":{\"words\":[{\"scores\":{},\"phonemes\":[]}]}}")));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope("""
+						{"result":{"overall":80,"rhythm":80,"integrity":80,
+						"pronunciation":80,"fluency":80,"words":[{"word":"x",
+						"scores":{"overall":80,"pronunciation":80},"phonemes":[
+						{"phoneme":"x","pronunciation":80,"span":{"start":-1,"end":0}}
+						]}]}}
+						""")));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope("""
+						{"result":{"overall":80,"rhythm":80,"integrity":80,
+						"pronunciation":80,"fluency":80,"words":[{"word":"x",
+						"scores":{"overall":80,"pronunciation":80},"phonemes":[
+						{"phoneme":"x","pronunciation":80,"span":[],
+						"phone":7}]}]}}
+						""")));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope("""
+						{"result":{"overall":80,"rhythm":80,"integrity":80,
+						"pronunciation":80,"fluency":80,"words":[{"word":"x",
+						"scores":{"overall":80,"pronunciation":80},"phonemes":[
+						{"phoneme":"x","pronunciation":80,"span":{"start":0,"end":1}}],
+						"readType":"0"}]}}
+						""")));
+	}
+
+	@Test
+	void coversRemainingNullTypeRangeAndToneBranches() {
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID, () -> parser.parse(null));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID, () -> parser.parse(" \t"));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE,
+				() -> parser.parse("{\"header\":{\"code\":0,\"status\":2},\"payload\":{\"result\":{\"status\":2,\"text\":null}}}"));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse("{\"header\":{\"code\":0,\"status\":2},\"payload\":{\"result\":{\"status\":2,\"text\":7}}}"));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE,
+				() -> parser.parse(encodedEnvelope(validDecoded()).replace(
+						"\"status\":2,\"text\"", "\"status\":1,\"text\"")));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"words\":[", "\"words\":[null,"))));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"phonemes\":[", "\"phonemes\":[null,"))));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"phonemes\":[", "\"phonemes\":[1,"))));
+
+		for (String span : new String[] {
+				"{\"start\":-1,\"end\":1}",
+				"{\"start\":0,\"end\":-1}"
+		}) {
+			assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+					() -> parser.parse(encodedEnvelope(validDecoded().replace(
+							"{\"start\":0,\"end\":1}", span))));
+		}
+
+		for (String tone : new String[] {"level", "unknown", "", "unexpected"}) {
+			PronunciationAssessmentResult result = parser.parse(encodedEnvelope(
+					validDecoded().replace("\"rear_tone\":null", "\"rear_tone\":\"" + tone + "\"")));
+			assertEquals(
+					"level".equals(tone) ? EndingTone.LEVEL : EndingTone.UNKNOWN,
+					result.endingTone());
+		}
+	}
+
+	@Test
+	void rejectsRemainingRequiredAndOptionalScalarShapes() {
+		PronunciationAssessmentResult nonNumericCharType = parser.parse(encodedEnvelope(
+				validDecoded().replace("\"charType\":0", "\"charType\":\"word\"")));
+		assertEquals(1, nonNumericCharType.words().size());
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"readType\":null", "\"readType\":999999999999"))));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"prominence\":null", "\"prominence\":1.5"))));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"overall\":80", "\"overall\":null"))));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"overall\":80", "\"overall\":\"80\""))));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"overall\":80", "\"overall\":101"))));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"word\":\"x\"", "\"word\":null"))));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"word\":\"x\"", "\"word\":7"))));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"word\":\"x\"", "\"word\":\" \""))));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"start\":0", "\"start\":null"))));
+		assertCode(EvaluationErrorCode.PROVIDER_RESPONSE_INVALID,
+				() -> parser.parse(encodedEnvelope(validDecoded().replace("\"start\":0", "\"start\":1.5"))));
+	}
+
+	private String validDecoded() {
+		return """
+				{"status":2,"result":{"overall":80,"rhythm":80,"integrity":80,
+				"pronunciation":80,"fluency":80,"tone":null,"rear_tone":null,
+				"words":[{"charType":0,"word":"x","readType":null,
+				"scores":{"overall":80,"pronunciation":80,"prominence":null},
+				"phonemes":[{"phoneme":"x","phone":null,"pronunciation":80,
+				"span":{"start":0,"end":1}}]}]}}
+				""";
+	}
+
 	private void assertCode(
 				EvaluationErrorCode expected,
 				org.junit.jupiter.api.function.Executable action) {

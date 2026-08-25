@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.unispeaking.common.exception.evaluation.EvaluationErrorCode;
 import com.unispeaking.common.exception.evaluation.EvaluationException;
 import java.math.BigDecimal;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
@@ -160,6 +161,33 @@ class ConversationLanguageAssessmentParserTest {
 				"\"assessment_status\":\"ok\",\"assessment_status\":\"ok\""),
 				EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
 		assertError(validJson() + " trailing", EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+	}
+
+	@Test
+	void validatesConstructorDataQualityNotesAndAllOptionalFeedbackShapes() {
+		assertThrows(NullPointerException.class,
+				() -> new ConversationLanguageAssessmentParser(null));
+		assertEquals(3, parser.parse(validJson().replace(
+				"\"data_quality_notes\":[]", "\"data_quality_notes\":[\"数据质量良好\"]"))
+				.strengths().size());
+		for (String notes : List.of("[1]", "[\" \"]", "[\"English only\"]")) {
+			assertError(validJson().replace("\"data_quality_notes\":[]",
+					"\"data_quality_notes\":" + notes),
+					EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
+		}
+		assertError(validJson().replace(
+				"\"correction\":\"went yesterday\"", "\"correction\":null,\"suggestion\":null"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+		assertError(validJson().replace(
+				"\"evidence\":\"I went\"", "\"evidence\":null"),
+				EvaluationErrorCode.PROVIDER_RESPONSE_INCOMPLETE);
+		String fourImprovements = validJson().replace(
+				"\"improvements\":[{\"evidence\":\"go yesterday\",\"correction\":\"went yesterday\",\"reason\":\"使用过去式\"}]",
+				"\"improvements\":[{\"evidence\":\"a\",\"suggestion\":\"b\",\"reason\":\"改进表达\"},"
+						+ "{\"evidence\":\"c\",\"suggestion\":\"d\",\"reason\":\"改进表达\"},"
+						+ "{\"evidence\":\"e\",\"suggestion\":\"f\",\"reason\":\"改进表达\"},"
+						+ "{\"evidence\":\"g\",\"suggestion\":\"h\",\"reason\":\"改进表达\"}]");
+		assertError(fourImprovements, EvaluationErrorCode.PROVIDER_RESPONSE_INVALID);
 	}
 
 	private void assertError(String document, EvaluationErrorCode expected) {

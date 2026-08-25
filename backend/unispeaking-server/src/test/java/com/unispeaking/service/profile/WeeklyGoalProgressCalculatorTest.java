@@ -130,6 +130,65 @@ class WeeklyGoalProgressCalculatorTest {
 				progress.trainingTypeDurations().getFirst().type());
 	}
 
+	@Test
+	void handlesNullAndEmptyRecordsWithZeroTargets() {
+		var nullProgress = calculator.calculate(
+				null, new WeeklyLearningGoals(0, 0), NOW, ZONE_ID);
+		var emptyProgress = calculator.calculate(
+				List.of(), new WeeklyLearningGoals(0, 0), NOW, ZONE_ID);
+
+		assertEquals(0, nullProgress.completedDurationSeconds());
+		assertEquals(0.0, nullProgress.durationProgress());
+		assertEquals(0.0, nullProgress.countProgress());
+		assertTrue(nullProgress.durationAchieved());
+		assertTrue(nullProgress.countAchieved());
+		assertEquals(List.of(), emptyProgress.trainingTypeDurations());
+	}
+
+	@Test
+	void filtersEveryIneligibleSessionShape() {
+		List<PracticeSessionRecord> records = List.of(
+				raw(SceneType.FREE_CHAT, SessionStatus.FAILED,
+						Instant.parse("2026-08-04T01:00:00Z"), Instant.parse("2026-08-04T01:10:00Z")),
+				raw(SceneType.INTERVIEW_SCENE, SessionStatus.COMPLETED,
+						Instant.parse("2026-08-04T01:00:00Z"), Instant.parse("2026-08-04T01:10:00Z")),
+				raw(null, SessionStatus.COMPLETED,
+						Instant.parse("2026-08-04T01:00:00Z"), Instant.parse("2026-08-04T01:10:00Z")),
+				raw(SceneType.FREE_CHAT, SessionStatus.COMPLETED,
+						null, Instant.parse("2026-08-04T01:10:00Z")),
+				raw(SceneType.FREE_CHAT, SessionStatus.COMPLETED,
+						Instant.parse("2026-08-04T01:00:00Z"), null),
+				raw(SceneType.FREE_CHAT, SessionStatus.COMPLETED,
+						Instant.parse("2026-08-04T01:10:00Z"), Instant.parse("2026-08-04T01:00:00Z")),
+				raw(SceneType.FREE_CHAT, SessionStatus.COMPLETED,
+						Instant.parse("2026-08-04T01:00:00Z"), Instant.parse("2026-08-04T01:00:29Z")));
+
+		var progress = calculator.calculate(records, WeeklyLearningGoals.defaults(), NOW, ZONE_ID);
+
+		assertEquals(0, progress.completedDurationSeconds());
+		assertEquals(0, progress.completedTrainingCount());
+	}
+
+	@Test
+	void excludesSessionsOutsideWeekAndClipsFutureDurationAtNow() {
+		var progress = calculator.calculate(
+				List.of(
+						record(SceneType.FREE_CHAT, SessionStatus.COMPLETED,
+								"2026-08-02T14:00:00Z", "2026-08-02T15:00:00Z"),
+						record(SceneType.FREE_CHAT, SessionStatus.COMPLETED,
+								"2026-08-05T03:59:00Z", "2026-08-05T04:01:00Z"),
+						record(SceneType.IELTS_SCENE, SessionStatus.COMPLETED,
+								"2026-08-05T03:58:30Z", "2026-08-05T03:59:00Z"),
+						record(SceneType.CUSTOM_SCENE, SessionStatus.COMPLETED,
+								"2026-08-09T16:00:00Z", "2026-08-09T16:01:00Z")),
+				new WeeklyLearningGoals(1, 1), NOW, ZONE_ID);
+
+		assertEquals(90, progress.completedDurationSeconds());
+		assertEquals(1, progress.completedTrainingCount());
+		assertEquals(100.0, progress.durationProgress());
+		assertEquals(100.0, progress.countProgress());
+	}
+
 	private PracticeSessionRecord record(
 			SceneType type,
 			SessionStatus status,
@@ -143,5 +202,20 @@ class WeeklyGoalProgressCalculatorTest {
 				status,
 				Instant.parse(startedAt),
 				Instant.parse(endedAt));
+	}
+
+	private PracticeSessionRecord raw(
+			SceneType type,
+			SessionStatus status,
+			Instant startedAt,
+			Instant endedAt) {
+		return new PracticeSessionRecord(
+				UUID.randomUUID().toString(),
+				UUID.randomUUID(),
+				"scene",
+				type,
+				status,
+				startedAt,
+				endedAt);
 	}
 }

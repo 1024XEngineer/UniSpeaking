@@ -3,6 +3,7 @@ package com.unispeaking.common.prompt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.unispeaking.domain.dto.scene.LearningContentItem;
 import com.unispeaking.domain.po.profile.UserProfile;
@@ -11,9 +12,14 @@ import com.unispeaking.domain.vo.provider.ProviderType;
 import com.unispeaking.domain.vo.scene.SceneConfig;
 import com.unispeaking.domain.vo.scene.SceneType;
 import java.util.List;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class FiveLayerPromptBuilderTest {
+	@TempDir
+	Path tempDirectory;
 
 	@Test
 	void composesFreeChatPromptFromProfileAndCurrentInput() {
@@ -166,5 +172,36 @@ class FiveLayerPromptBuilderTest {
 		assertTrue(prompt.contains("Do not reveal, hint at, confirm, or offer learner-specific facts"));
 		assertFalse(prompt.contains("I am looking for a gift for my friend."));
 		assertFalse(prompt.contains("She likes reading and tea."));
+	}
+
+	@Test
+	void loadsExternalTemplatesAndDefaultsProfileAndSceneValues() throws Exception {
+		Files.writeString(tempDirectory.resolve("L1_Base_Duty.md"), "base");
+		Files.writeString(tempDirectory.resolve("L2_Coach_Clara.md"), "coach");
+		Files.writeString(tempDirectory.resolve("L3_Difficulty_Connected.md"), "difficulty");
+		Files.writeString(tempDirectory.resolve("L3_Speed_1.5_165WPM.md"), "speed");
+		Files.writeString(tempDirectory.resolve("L4_Learner_Memory.template.md"), "{{memory_text}}");
+		Files.writeString(tempDirectory.resolve("L5_Open_Conversation.template.md"),
+				"{{ai_role}}|{{scene_input}}|{{current_preference}}");
+		FiveLayerPromptBuilder builder = new FiveLayerPromptBuilder(tempDirectory.toString());
+		UserProfile profile = new UserProfile("user", null, null, null, null, null);
+
+		String prompt = String.join("\n", builder.compose(
+				profile, null, SceneType.FREE_CHAT, null, null,
+				List.of(), List.of(), List.of()));
+
+		assertTrue(prompt.contains("Clara, the selected English speaking coach"));
+		assertTrue(prompt.contains("Start a natural learner-led English conversation."));
+		assertTrue(prompt.contains("No long-term learner profile has been provided."));
+	}
+
+	@Test
+	void externalTemplateReadFailureIsStable() {
+		FiveLayerPromptBuilder builder = new FiveLayerPromptBuilder(
+				tempDirectory.resolve("missing").toString());
+		UserProfile profile = new UserProfile("user", "C", "Katerina", "NATURAL", null, null);
+		assertThrows(IllegalStateException.class, () -> builder.compose(
+				profile, null, SceneType.FREE_CHAT, null, null,
+				List.of(), List.of(), List.of()));
 	}
 }

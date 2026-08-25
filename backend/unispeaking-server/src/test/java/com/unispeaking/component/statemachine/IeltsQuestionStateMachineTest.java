@@ -3,7 +3,9 @@ package com.unispeaking.component.statemachine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.unispeaking.common.exception.BusinessException;
 import com.unispeaking.domain.vo.scene.IeltsContentQuestion;
 import com.unispeaking.domain.vo.scene.IeltsPart;
 import java.util.List;
@@ -70,6 +72,34 @@ class IeltsQuestionStateMachineTest {
 		assertEquals(1, next.answeredQuestions());
 		assertTrue(next.controlInstruction().contains(
 				"Let's move on to the next question. Two?"));
+	}
+
+	@Test
+	void rejectsEmptyQuestionsInvalidTurnsAndMissingOrMismatchedState() {
+		assertThrows(BusinessException.class,
+				() -> stateMachine.start("scene", "session", IeltsPart.PART_1, null));
+		assertThrows(BusinessException.class,
+				() -> stateMachine.start("scene", "session", IeltsPart.PART_1, List.of()));
+		stateMachine.start("scene", "session", IeltsPart.PART_1, questions("one"));
+		assertThrows(BusinessException.class,
+				() -> stateMachine.advance("scene", "session", 0));
+		assertThrows(BusinessException.class,
+				() -> stateMachine.get("wrong", "session"));
+		stateMachine.remove("session");
+		assertThrows(BusinessException.class,
+				() -> stateMachine.get("scene", "session"));
+	}
+
+	@Test
+	void partTwoEscapesExactQuestionAndUsesPartTwoClosing() {
+		var started = stateMachine.start(
+				"scene", "session", IeltsPart.PART_2, questions("Use \\\\ and \"quotes\"?"));
+		assertTrue(started.openingCompleted());
+		assertTrue(started.controlInstruction().contains("\\\\\\\\ and \\\"quotes\\\""));
+
+		var completed = stateMachine.advance("scene", "session", 1, true);
+		assertTrue(completed.completed());
+		assertTrue(completed.controlInstruction().contains("end of Part 2"));
 	}
 
 	private List<IeltsContentQuestion> questions(String... values) {
