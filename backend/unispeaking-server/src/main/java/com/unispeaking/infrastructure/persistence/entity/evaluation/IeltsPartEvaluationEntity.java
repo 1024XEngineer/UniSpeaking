@@ -38,6 +38,8 @@ public class IeltsPartEvaluationEntity {
 	private String[] recommendedExpressions;
 	private String evaluationStatus;
 	private String failureReason;
+	private String leaseToken;
+	private OffsetDateTime leaseExpiresAt;
 	private OffsetDateTime completedAt;
 	private OffsetDateTime createdAt;
 	private OffsetDateTime updatedAt;

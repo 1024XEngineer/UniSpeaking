@@ -250,6 +250,14 @@ public class EvaluationProcessor {
 			String ieltsId,
 			String sessionId,
 			String userId) {
+		return generateIeltsEvaluationForUser(ieltsId, sessionId, userId, null);
+	}
+
+	public IeltsEvaluationResult generateIeltsEvaluationForUser(
+			String ieltsId,
+			String sessionId,
+			String userId,
+			String leaseToken) {
 		IeltsPracticeRecord practice = requireOwnedIeltsPractice(ieltsId, userId);
 		List<PracticeSessionRecord> sessions = completedIeltsSessions(ieltsId);
 		int sessionIndex = sessionIndex(sessions, sessionId);
@@ -262,12 +270,13 @@ public class EvaluationProcessor {
 		String lockKey = finalTask ? "FINAL:" + ieltsId : "PART:" + sessionId;
 		return withEvaluationLock(
 				lockKey,
-				() -> generateIeltsEvaluationLocked(practice, sessionId));
+				() -> generateIeltsEvaluationLocked(practice, sessionId, leaseToken));
 	}
 
 	private IeltsEvaluationResult generateIeltsEvaluationLocked(
 			IeltsPracticeRecord practice,
-			String sessionId) {
+			String sessionId,
+			String leaseToken) {
 		String ieltsId = practice.ieltsId();
 		List<PracticeSessionRecord> sessions = completedIeltsSessions(ieltsId);
 		int sessionIndex = sessionIndex(sessions, sessionId);
@@ -299,8 +308,13 @@ public class EvaluationProcessor {
 			IeltsEvaluationResult finalResult = evaluateCompleteIeltsTest(
 					sessions,
 					partEvaluations);
-			ieltsEvaluationRepository.saveFinal(ieltsId, finalResult);
-			ieltsPracticeRepository.incrementCompletedCount(practice.userId());
+			boolean committed = leaseToken == null
+					? saveFinalUnclaimed(ieltsId, finalResult)
+					: ieltsEvaluationRepository.completeFinalIfClaimed(
+							ieltsId, leaseToken, finalResult);
+			if (committed) {
+				ieltsPracticeRepository.incrementCompletedCount(practice.userId());
+			}
 			return finalResult;
 		}
 		var cachedPart = ieltsEvaluationRepository.findPart(sessionId);
@@ -314,11 +328,29 @@ public class EvaluationProcessor {
 						practice.selectedPart() != null
 								? practice.selectedPart()
 								: partByIndex(sessionIndex));
-			ieltsEvaluationRepository.savePart(ieltsId, sessionId, result);
-			if (practice.mode() == IeltsMode.PART_PRACTICE) {
+			boolean committed = leaseToken == null
+					? savePartUnclaimed(ieltsId, sessionId, result)
+					: ieltsEvaluationRepository.completePartIfClaimed(
+							sessionId, leaseToken, result);
+			if (committed && practice.mode() == IeltsMode.PART_PRACTICE) {
 				ieltsPracticeRepository.incrementCompletedCount(practice.userId());
 			}
 			return result;
+	}
+
+	private boolean savePartUnclaimed(
+			String ieltsId,
+			String sessionId,
+			IeltsEvaluationResult result) {
+		ieltsEvaluationRepository.savePart(ieltsId, sessionId, result);
+		return true;
+	}
+
+	private boolean saveFinalUnclaimed(
+			String ieltsId,
+			IeltsEvaluationResult result) {
+		ieltsEvaluationRepository.saveFinal(ieltsId, result);
+		return true;
 	}
 
 	public BigDecimal getLatestIeltsEstimatedScore() {

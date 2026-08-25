@@ -80,10 +80,17 @@ class IeltsEvaluationCoordinatorTest {
 		});
 		when(evaluationRepository.findPart(SESSION_ID)).thenAnswer(
 				invocation -> Optional.ofNullable(stored.get()));
+		when(evaluationRepository.claimPart(SESSION_ID))
+				.thenReturn(Optional.of("lease-1"));
 		doAnswer(invocation -> {
 			stored.set(entity("FAILED", invocation.getArgument(1)));
 			return null;
 		}).when(evaluationRepository).markPartFailed(anyString(), anyString());
+		doAnswer(invocation -> {
+			stored.set(entity("FAILED", invocation.getArgument(2)));
+			return null;
+		}).when(evaluationRepository).markPartFailedIfClaimed(
+				anyString(), anyString(), anyString());
 		coordinator = new IeltsEvaluationCoordinator(
 				processor,
 				evaluationRepository,
@@ -101,7 +108,8 @@ class IeltsEvaluationCoordinatorTest {
 		}).when(processor).generateIeltsEvaluationForUser(
 				IELTS_ID,
 				SESSION_ID,
-				USER_ID);
+				USER_ID,
+				"lease-1");
 
 		var response = coordinator.submit(IELTS_ID, SESSION_ID);
 
@@ -110,7 +118,8 @@ class IeltsEvaluationCoordinatorTest {
 		verify(processor).generateIeltsEvaluationForUser(
 				IELTS_ID,
 				SESSION_ID,
-				USER_ID);
+				USER_ID,
+				"lease-1");
 	}
 
 	@Test
@@ -120,7 +129,8 @@ class IeltsEvaluationCoordinatorTest {
 		}).when(processor).generateIeltsEvaluationForUser(
 				IELTS_ID,
 				SESSION_ID,
-				USER_ID);
+				USER_ID,
+				"lease-1");
 
 		var response = coordinator.submit(IELTS_ID, SESSION_ID);
 
@@ -139,6 +149,17 @@ class IeltsEvaluationCoordinatorTest {
 				anyString(),
 				anyString(),
 				anyString());
+	}
+
+	@Test
+	void doesNotDispatchWhenAnotherInstanceOwnsTheDatabaseLease() {
+		when(evaluationRepository.claimPart(SESSION_ID)).thenReturn(Optional.empty());
+
+		var response = coordinator.submit(IELTS_ID, SESSION_ID);
+
+		assertEquals(AsyncTaskStatus.PROCESSING, response.status());
+		verify(processor, never()).generateIeltsEvaluationForUser(
+				anyString(), anyString(), anyString(), anyString());
 	}
 
 	private IeltsPartEvaluationEntity entity(String status, String failureReason) {

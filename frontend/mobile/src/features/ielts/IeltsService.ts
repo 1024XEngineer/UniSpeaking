@@ -1,4 +1,5 @@
 import type { ApiRequestOptions } from '@/infrastructure/http/ApiClient';
+import { waitForAsyncTask } from '@/infrastructure/http/waitForAsyncTask';
 import { createWavUploadFile } from '@/features/scenes/SceneService';
 
 import type {
@@ -78,11 +79,17 @@ export class IeltsService {
     }) as Promise<IeltsSceneFlow>;
   }
 
-  generateEvaluation(ieltsId: string, sessionId: string) {
-    return this.client.request(
-      `/api/ielts/${encodeURIComponent(ieltsId)}/sessions/${encodeURIComponent(sessionId)}/evaluation`,
-      { method: 'POST', timeoutMs: 90_000 },
-    ) as Promise<IeltsEvaluationResult>;
+  async generateEvaluation(ieltsId: string, sessionId: string) {
+    const path = `/api/ielts/${encodeURIComponent(ieltsId)}/sessions/${encodeURIComponent(sessionId)}/evaluation`;
+    const task = await this.client.request(path, {
+      method: 'POST',
+      timeoutMs: 90_000,
+    });
+    return waitForAsyncTask<IeltsEvaluationResult>(
+      task,
+      () => this.client.request(path),
+      'IELTS 评分',
+    );
   }
 
   getEvaluationHistory() {

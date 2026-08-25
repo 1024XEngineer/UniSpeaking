@@ -22,10 +22,15 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -38,6 +43,12 @@ public class IeltsEvaluationCoordinator {
 			IeltsEvaluationCoordinator.class);
 	private static final Duration STALE_REDISPATCH_THRESHOLD = Duration.ofMinutes(2);
 	private static final String FAILED_MESSAGE = "IELTS 评分失败，请稍后重试";
+	private static final ScheduledExecutorService LEASE_HEARTBEAT =
+			Executors.newSingleThreadScheduledExecutor(runnable -> {
+				Thread thread = new Thread(runnable, "ielts-evaluation-lease-heartbeat");
+				thread.setDaemon(true);
+				return thread;
+			});
 
 	private final EvaluationProcessor evaluationProcessor;
 	private final IeltsEvaluationRepository evaluationRepository;
@@ -91,10 +102,15 @@ public class IeltsEvaluationCoordinator {
 
 	private void dispatch(TaskScope scope) {
 		if (isCompleted(scope) || !runningTaskKeys.add(scope.key())) return;
+		Optional<String> leaseToken = claim(scope);
+		if (leaseToken.isEmpty()) {
+			runningTaskKeys.remove(scope.key());
+			return;
+		}
 		try {
 			executor.execute(() -> {
 				try {
-					process(scope);
+					process(scope, leaseToken.get());
 				}
 				finally {
 					runningTaskKeys.remove(scope.key());
@@ -103,24 +119,47 @@ public class IeltsEvaluationCoordinator {
 		}
 		catch (RejectedExecutionException exception) {
 			runningTaskKeys.remove(scope.key());
-			markFailed(scope, "评分任务繁忙，请稍后重试");
+			markFailed(scope, leaseToken.get(), "评分任务繁忙，请稍后重试");
 			LOGGER.warn("IELTS evaluation task rejected taskKey={}", scope.key());
 		}
 	}
 
-	private void process(TaskScope scope) {
+	private void process(TaskScope scope, String leaseToken) {
+		ScheduledFuture<?> heartbeat = LEASE_HEARTBEAT.scheduleAtFixedRate(
+				() -> renewLease(scope, leaseToken),
+				30,
+				30,
+				TimeUnit.SECONDS);
 		try {
 			evaluationProcessor.generateIeltsEvaluationForUser(
 					scope.ieltsId(),
 					scope.sessionId(),
-					scope.userId());
+					scope.userId(),
+					leaseToken);
 		}
 		catch (RuntimeException exception) {
-			markFailed(scope, FAILED_MESSAGE);
+			markFailed(scope, leaseToken, FAILED_MESSAGE);
 			LOGGER.error(
 					"IELTS evaluation task failed taskKey={} errorType={}",
 					scope.key(),
 					exception.getClass().getSimpleName());
+		}
+		finally {
+			heartbeat.cancel(false);
+		}
+	}
+
+	private void renewLease(TaskScope scope, String leaseToken) {
+		try {
+			if (scope.finalTask()) {
+				evaluationRepository.renewFinalLease(scope.ieltsId(), leaseToken);
+			}
+			else {
+				evaluationRepository.renewPartLease(scope.sessionId(), leaseToken);
+			}
+		}
+		catch (RuntimeException exception) {
+			LOGGER.warn("IELTS evaluation lease renewal failed taskKey={}", scope.key());
 		}
 	}
 
@@ -211,12 +250,20 @@ public class IeltsEvaluationCoordinator {
 						OffsetDateTime.now().minus(STALE_REDISPATCH_THRESHOLD));
 	}
 
-	private void markFailed(TaskScope scope, String reason) {
+	private Optional<String> claim(TaskScope scope) {
+		return scope.finalTask()
+				? evaluationRepository.claimFinal(scope.ieltsId())
+				: evaluationRepository.claimPart(scope.sessionId());
+	}
+
+	private void markFailed(TaskScope scope, String leaseToken, String reason) {
 		if (scope.finalTask()) {
-			evaluationRepository.markFinalFailed(scope.ieltsId(), reason);
+			evaluationRepository.markFinalFailedIfClaimed(
+					scope.ieltsId(), leaseToken, reason);
 		}
 		else {
-			evaluationRepository.markPartFailed(scope.sessionId(), reason);
+			evaluationRepository.markPartFailedIfClaimed(
+					scope.sessionId(), leaseToken, reason);
 		}
 	}
 
