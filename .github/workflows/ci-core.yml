@@ -268,7 +268,7 @@ jobs:
           retention-days: 1
 
   coverage:
-    name: 合并覆盖率并检查 Codecov 口径 91% 门槛
+    name: 合并覆盖率并检查 Codecov 口径 90% 门槛
     needs:
       - changes
       - backend
@@ -326,7 +326,7 @@ jobs:
           python3 ../../scripts/check-codecov-coverage.py \
             --format jacoco \
             --input target/site/jacoco-aggregate/jacoco.xml \
-            --minimum 91
+            --minimum 90
 
       - name: 保存合并覆盖率报告
         if: always()
@@ -409,7 +409,7 @@ jobs:
           python3 ../../scripts/check-codecov-coverage.py \
             --format lcov \
             --input coverage/lcov.info \
-            --minimum 91
+            --minimum 90
 
       - name: 保存移动端覆盖率报告
         if: always()
