@@ -223,18 +223,10 @@ function ReadRecordButton({
 
 type SceneMetric = { label: string; value: number };
 
-const defaultSceneMetrics: readonly SceneMetric[] = [
-  { label: '准确', value: 86 },
-  { label: '流利', value: 88 },
-  { label: '语法', value: 82 },
-  { label: '词汇', value: 84 },
-  { label: '自然', value: 87 },
-];
-
 export function sceneMetricsForReport(
   report?: DialogueReport,
 ): readonly SceneMetric[] {
-  if (!report) return defaultSceneMetrics;
+  if (!report) return [];
   const metrics = [
     { label: '准确', value: report.accuracyScore },
     { label: '流利', value: report.fluencyScore },
@@ -517,7 +509,9 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
   const readingResult = trainingSnapshot?.readingResult;
   const trainingTransitioning = trainingSnapshot?.status === 'loading';
   const completionMetrics = sceneMetricsForReport(dialogueCompletion?.evaluation);
-  const completionScoreAvailable = completionMetrics.length > 0;
+  const completionScoreAvailable = completionMetrics.length > 0
+    && Number.isFinite(dialogueCompletion?.evaluation?.finalScore)
+    && Number(dialogueCompletion?.evaluation?.finalScore) > 0;
   const confirmExit = () => {
     Alert.alert(
       '退出当前训练？',
@@ -900,7 +894,7 @@ export function Training({ id, scene, analytics, trainingController: injectedTra
             <View style={styles.completionScoreRow}>
               <Text style={completionScoreAvailable ? styles.completionScore : styles.completionScoreUnavailable}>
                 {completionScoreAvailable
-                  ? Math.round(dialogueCompletion?.evaluation?.finalScore ?? 86)
+                  ? Math.round(Number(dialogueCompletion?.evaluation?.finalScore))
                   : '暂无评分'}
               </Text>
               {completionScoreAvailable ? <Text style={styles.completionScoreMax}>/100</Text> : null}
