@@ -127,6 +127,7 @@ jobs:
           push: true
           build-args: |
             VITE_BACKEND_URL=${{ vars.VITE_BACKEND_URL || '/backend' }}
+            VITE_AUTH_CAPTCHA_PROVIDER=${{ vars.VITE_AUTH_CAPTCHA_PROVIDER || 'aliyun' }}
             VITE_OCR_ENABLED=${{ vars.VITE_OCR_ENABLED || 'true' }}
             VITE_FEEDBACK_URL=${{ vars.VITE_FEEDBACK_URL }}
             VITE_ALIYUN_CAPTCHA_SCENE_ID=${{ vars.VITE_ALIYUN_CAPTCHA_SCENE_ID }}
