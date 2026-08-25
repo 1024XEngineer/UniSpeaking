@@ -15,6 +15,7 @@
     "check:profile-overview": "node scripts/check-profile-overview-refresh.mjs",
     "check:feedback-invitation": "node scripts/check-feedback-invitation.mjs",
     "check:realtime-events": "node scripts/check-realtime-events.mjs",
+    "check:mobile-responsive": "node scripts/check-mobile-responsive.mjs",
     "check:routes": "node scripts/check-routes.mjs",
     "generate:teacher-previews": "node scripts/generate-teacher-previews.mjs",
     "preview": "vite preview"
