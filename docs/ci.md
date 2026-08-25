@@ -1,8 +1,8 @@
 # UniSpeaking 持续集成与分支保护
 
-本文档对应 RFC《UniSpeaking 最小可用 CI 方案》，说明第一阶段 CI 的运行方式、
-报告位置和仓库设置。CI 只证明代码可以安全合并，不发布制品、不部署环境，也不把
-Redis 引入生产运行时。
+本文档对应 RFC《UniSpeaking 最小可用 CI 方案》，说明 CI、GHCR 和 CD 的运行方式、
+报告位置和仓库设置。PR/Main CI 只验证代码和镜像构建；生产发布由 `cd.yml` 负责，必须经过
+`production` Environment 审批。服务器不拉源码，也不执行应用构建。
 
 ## 工作流
 
@@ -13,6 +13,8 @@ Redis 引入生产运行时。
 | `ci-refresh.yml` | `main` 更新后查找全部开放 PR，并行发起重检 |
 | `ci-refresh-pr.yml` | 等待包含最新 `main` 的 merge SHA，跳过冲突或已变化的 PR |
 | `ci-status.yml` | 在可信上下文校验当前 base、head、merge SHA 后发布 `CI / required` |
+| `ci-main.yml` | 对 main 的当前 commit 执行可信主分支核心检查 |
+| `cd.yml` | 校验 main HEAD，构建并推送三个私有 GHCR 镜像，审批后调用服务器固定入口 |
 | `coverage.yml` | `main` 后端变更后生成 JaCoCo 聚合报告并通过 OIDC 上传到 Codecov |
 | `mobile-coverage.yml` | `main` 移动端变更后运行 Jest 覆盖率门禁并通过 OIDC 上传到 Codecov |
 
@@ -24,6 +26,7 @@ Redis 引入生产运行时。
 
 - 后端：编译、单元测试、打包、PostgreSQL/Redis 集成测试、Codecov partial-line 口径 91% 门禁和镜像构建；
 - Web 前端：Node.js 22、`npm ci`、路由与 Realtime 事件检查、生产构建和镜像构建；
+- Admin：Admin 变更识别、Docker 镜像构建和静态服务检查；
 - 移动端：Node.js 22、`npm ci`、TypeScript 检查、Jest 报告与 Codecov partial-line 口径 91% 门禁和 Expo Web 静态导出；
 - Compose、环境模板或 Nginx：配置解析或 `nginx -t`；
 - Maven/npm 依赖文件：Dependency Review，High 和 Critical 阻止合并。
