@@ -15,7 +15,7 @@ RUN ./mvnw --settings docker/maven/settings.xml \
     -DskipIntegrationTests \
     package
 
-FROM ${DOCKER_IMAGE_REGISTRY}/library/eclipse-temurin:21-jdk AS java-runtime
+FROM ${DOCKER_IMAGE_REGISTRY}/library/eclipse-temurin:21-jre AS java-runtime
 
 FROM ${DOCKER_IMAGE_REGISTRY}/library/python:3.11-slim-bookworm AS ocr-base
 WORKDIR /app

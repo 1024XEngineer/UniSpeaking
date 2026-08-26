@@ -3,7 +3,7 @@ name: CD Verify (Fork)
 on:
   push:
     branches:
-      - codex/ci-cd-ghcr-deploy
+      - codex/cd-integrated
   workflow_dispatch:
     inputs:
       commit_sha:
@@ -22,6 +22,7 @@ concurrency:
 jobs:
   publish:
     name: Build and publish verification images
+    if: github.repository != '1024XEngineer/UniSpeaking'
     runs-on: ubuntu-latest
     env:
       REGISTRY: ghcr.io

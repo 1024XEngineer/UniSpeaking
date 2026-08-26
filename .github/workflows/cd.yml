@@ -191,24 +191,7 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/ssh/id_ed25519"
           chmod 600 "$RUNNER_TEMP/ssh/id_ed25519" "$RUNNER_TEMP/ssh/known_hosts"
 
-      - name: 同步非敏感部署配置
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          SSH_DIR: ${{ runner.temp }}/ssh
-        shell: bash
-        run: |
-          set -euo pipefail
-          ssh=(ssh -i "$SSH_DIR/id_ed25519" -p "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts")
-          scp=(scp -i "$SSH_DIR/id_ed25519" -P "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts")
-          "${scp[@]}" deploy/docker-compose.prod.yml "$DEPLOY_USER@$DEPLOY_HOST:/tmp/unispeaking-cd-compose.prod.yml"
-          "${scp[@]}" deploy/nginx/nginx.prod.conf "$DEPLOY_USER@$DEPLOY_HOST:/tmp/unispeaking-cd-nginx.prod.conf"
-          "${scp[@]}" deploy/coturn/turnserver.conf "$DEPLOY_USER@$DEPLOY_HOST:/tmp/unispeaking-cd-turnserver.conf"
-          "${scp[@]}" deploy/scripts/deploy-release.sh "$DEPLOY_USER@$DEPLOY_HOST:/tmp/unispeaking-cd-release.sh"
-          "${ssh[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'sudo -n install -d -m 755 /opt/unispeaking-cd/deploy /opt/unispeaking-cd/deploy/nginx /opt/unispeaking-cd/deploy/coturn /opt/unispeaking-cd/deploy/env && sudo -n install -m 644 /tmp/unispeaking-cd-compose.prod.yml /opt/unispeaking-cd/deploy/docker-compose.prod.yml && sudo -n install -m 644 /tmp/unispeaking-cd-nginx.prod.conf /opt/unispeaking-cd/deploy/nginx/nginx.prod.conf && sudo -n install -m 644 /tmp/unispeaking-cd-turnserver.conf /opt/unispeaking-cd/deploy/coturn/turnserver.conf && sudo -n install -m 755 /tmp/unispeaking-cd-release.sh /opt/unispeaking-cd/deploy-release.sh && rm -f /tmp/unispeaking-cd-compose.prod.yml /tmp/unispeaking-cd-nginx.prod.conf /tmp/unispeaking-cd-turnserver.conf /tmp/unispeaking-cd-release.sh'
-
-      - name: 写入镜像版本并执行固定部署入口
+      - name: 调用服务器固定部署入口
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
@@ -219,11 +202,6 @@ jobs:
         run: |
           set -euo pipefail
           ssh=(ssh -i "$SSH_DIR/id_ed25519" -p "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts")
-          scp=(scp -i "$SSH_DIR/id_ed25519" -P "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts")
-          printf '%s\n' \
-            "UNISPEAKING_BACKEND_IMAGE=ghcr.io/1024xengineer/unispeaking-backend:sha-${RELEASE_SHA}" \
-            "UNISPEAKING_FRONTEND_IMAGE=ghcr.io/1024xengineer/unispeaking-frontend:sha-${RELEASE_SHA}" \
-            "UNISPEAKING_ADMIN_IMAGE=ghcr.io/1024xengineer/unispeaking-admin:sha-${RELEASE_SHA}" \
-            > "$RUNNER_TEMP/images.env"
-          "${scp[@]}" "$RUNNER_TEMP/images.env" "$DEPLOY_USER@$DEPLOY_HOST:/tmp/unispeaking-cd-images.env"
-          "${ssh[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'sudo -n install -m 600 /tmp/unispeaking-cd-images.env /opt/unispeaking-cd/deploy/env/.images && rm -f /tmp/unispeaking-cd-images.env && sudo -n /opt/unispeaking-cd/deploy-release.sh'
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "发布 SHA 格式错误" >&2; exit 1; }
+          "${ssh[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "sudo -n /usr/local/sbin/unispeaking-deploy '$RELEASE_SHA'"

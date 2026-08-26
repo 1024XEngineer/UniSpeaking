@@ -12,8 +12,8 @@ PR CI
 → 构建 backend、frontend、admin
 → 推送 GHCR
 → production Environment 审批
-→ 同步非敏感部署配置
-→ 服务器固定脚本 pull + up -d
+→ SSH 只传递 release SHA
+→ 服务器 root-owned 固定入口 pull + up -d
 → readiness、HTTP 和业务验收
 ```
 
@@ -43,6 +43,26 @@ PR 和 Main CI 不读取生产 Secrets。前端公开构建变量只能放 Varia
 
 服务器使用专用 GHCR 只读凭据，至少具备 `read:packages`，不能用于推送镜像或修改源码。
 
+## 服务器 deploy 用户
+
+以下命令只在服务器首次配置时由 root 执行。不要把 `deploy` 加入 `docker` 组；Actions 只需要通过受限 sudo 调用固定入口。
+
+```bash
+adduser --disabled-password --gecos "" deploy
+install -d -o deploy -g deploy -m 700 /home/deploy/.ssh
+install -o deploy -g deploy -m 600 /path/to/authorized_keys /home/deploy/.ssh/authorized_keys
+```
+
+`authorized_keys` 中只放本次 CD 使用的 ed25519 公钥，并加入 `restrict`（或至少 `no-agent-forwarding,no-port-forwarding,no-X11-forwarding`）选项。GitHub Environment Secret `DEPLOY_USER` 填 `deploy`，`DEPLOY_PORT` 填 SSH 端口；`DEPLOY_KNOWN_HOSTS` 使用管理员在可信网络中执行 `ssh-keyscan` 后人工核对的结果。
+
+服务器 root 还需要登录 GHCR。使用仅有 `read:packages` 的短期或专用 Token，凭据只写入 root 的 Docker 配置：
+
+```bash
+printf '%s' '<GHCR_READ_TOKEN>' | docker login ghcr.io --username '<GHCR_USER>' --password-stdin
+```
+
+不要把该 Token 写入仓库、`.env`、Actions 日志或镜像构建参数。确认 `/root/.docker/config.json` 权限为 `600`。
+
 ## 服务器目录和文件
 
 服务器使用独立 CD 目录：
@@ -56,10 +76,10 @@ PR 和 Main CI 不读取生产 Secrets。前端公开构建变量只能放 Varia
 │   └── env/
 │       ├── .env
 │       └── .images
-└── deploy-release.sh
+└── scripts/deploy-release.sh  (安装后位于 /usr/local/sbin/unispeaking-deploy)
 ```
 
-`.env` 仅保存生产运行配置，权限必须为 600，不由 Workflow 覆盖。`.images` 仅保存三个应用镜像地址，三个地址必须来自同一 SHA：
+`deploy-release.sh` 必须由 root 预先安装为 `/usr/local/sbin/unispeaking-deploy`，所有者为 `root:root`，权限为 `0755`。生产 Workflow 不上传或覆盖它，也不上传 Compose、Nginx、TURN 和 `.env`；这些配置只在服务器初始化或人工审核配置变更时安装。`.env` 仅保存生产运行配置，权限必须为 600，不由 Workflow 覆盖。`.images` 由固定入口原子更新，保存三个应用镜像地址，三个地址必须来自同一 SHA：
 
 ```dotenv
 UNISPEAKING_BACKEND_IMAGE=ghcr.io/1024xengineer/unispeaking-backend:sha-<commit SHA>
@@ -68,6 +88,23 @@ UNISPEAKING_ADMIN_IMAGE=ghcr.io/1024xengineer/unispeaking-admin:sha-<commit SHA>
 ```
 
 生产 Compose 必须保持项目名 `deploy`，并使用现有 `deploy_postgres_data`。不得创建新数据库 Volume。monitoring 网络、OpenTelemetry Agent、证书和 Umami 不随应用镜像同步或删除。
+
+deploy 用户只允许执行固定入口，不允许直接运行 Docker、修改 `/opt/unispeaking-cd` 或替换 root 脚本。服务器初始化时由 root 执行：
+
+```bash
+install -o root -g root -m 0755 deploy/scripts/deploy-release.sh /usr/local/sbin/unispeaking-deploy
+install -d -o root -g root -m 0755 /opt/unispeaking-cd/releases
+install -d -o root -g root -m 0755 /opt/unispeaking-cd/deploy/env
+chmod 600 /opt/unispeaking-cd/deploy/env/.env
+```
+
+`/etc/sudoers.d/unispeaking-deploy` 只授予固定入口：
+
+```sudoers
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/unispeaking-deploy *
+```
+
+保存后以 root 执行 `visudo -cf /etc/sudoers.d/unispeaking-deploy` 校验。首次切换前，人工将本目录的生产 Compose、Nginx、TURN 配置和 `.env` 安装到 `/opt/unispeaking-cd/deploy/`，并确认监控网络、Agent、证书及外部 Volume 存在。
 
 ## 首次部署前检查
 
@@ -98,7 +135,7 @@ docker exec -i deploy-postgres-1 pg_restore --list < "$BACKUP_PATH" >/tmp/pre-cd
 固定脚本按以下顺序执行：
 
 ```text
-校验用户、路径、权限、镜像 SHA、Compose project 和 Volume
+校验 root、路径、权限、证书、监控网络、Agent、镜像 SHA、Compose project 和 Volume
 → config --quiet
 → pull
 → up -d
@@ -112,7 +149,7 @@ docker exec -i deploy-postgres-1 pg_restore --list < "$BACKUP_PATH" >/tmp/pre-cd
 
 ## 回滚和数据库规则
 
-应用回滚使用上一个已验收 SHA：修改 `.images`，依次执行 `config --quiet`、`pull`、`up -d` 和健康检查。
+应用回滚使用上一个已验收 SHA：由 root 执行 `/usr/local/sbin/unispeaking-deploy <已验收的40位SHA>`，脚本依次执行 `config --quiet`、`pull`、`up -d` 和健康检查。不要手工改成 `main` 标签。
 
 应用镜像回滚不等于数据库回滚。已执行不可逆 migration、schema 不兼容或数据格式已变化时，不能简单回退镜像；必须使用兼容代码、前向修复 migration 或验证过的备份恢复流程。不得修改已执行的 Flyway migration。
 

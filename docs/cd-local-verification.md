@@ -4,7 +4,7 @@
 
 ## 1. Fork Actions
 
-将验证分支推送到个人 Fork 后，`CD Verify (Fork)` 会自动运行；也可以在 Workflow 出现在 Actions 页面后手动运行并输入要验证的 40 位 commit SHA。Workflow 会将三个镜像推送到：
+将 `codex/cd-integrated` 分支推送到个人 Fork 后，`CD Verify (Fork)` 会自动运行；也可以在 Workflow 出现在 Actions 页面后手动运行并输入要验证的 40 位 commit SHA。Workflow 会将三个镜像推送到：
 
 ```text
 ghcr.io/<个人账号>/unispeaking-backend:sha-<SHA>
@@ -12,7 +12,7 @@ ghcr.io/<个人账号>/unispeaking-frontend:sha-<SHA>
 ghcr.io/<个人账号>/unispeaking-admin:sha-<SHA>
 ```
 
-生产 `CD` Workflow 已限制为仅在 `1024XEngineer/UniSpeaking` 运行；Fork 中即使 Main CI 成功，也不会触发生产发布。Fork 只运行本文件新增的 `CD Verify (Fork)`。
+生产 `CD` Workflow 已限制为仅在 `1024XEngineer/UniSpeaking` 运行；`CD Verify (Fork)` 自身也带有官方仓库保护条件，Fork 中即使 Main CI 成功，也不会触发生产发布。Fork 只运行本文件新增的 `CD Verify (Fork)`。
 
 ## 2. 本机准备
 
