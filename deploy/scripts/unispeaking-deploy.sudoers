@@ -1,0 +1,4 @@
+# Install as /etc/sudoers.d/unispeaking-deploy with mode 0440.
+# The deploy user must not receive Docker group membership or any other sudo
+# rule; this is the only command the GitHub Actions SSH key may invoke.
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/unispeaking-deploy *

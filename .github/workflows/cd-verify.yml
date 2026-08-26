@@ -1,0 +1,117 @@
+name: CD Verify (Fork)
+
+on:
+  push:
+    branches:
+      - codex/cd-integrated
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Full commit SHA to build and publish for local verification
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: cd-verify-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish verification images
+    if: github.repository != '1024XEngineer/UniSpeaking'
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAMESPACE: ghcr.io/${{ github.repository_owner }}
+      RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.commit_sha || github.sha }}
+    steps:
+      - name: Validate commit SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "commit_sha must be a 40-character lowercase SHA" >&2
+            exit 1
+          }
+
+      - name: Checkout verification commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.5.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend
+        id: backend
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: backend/unispeaking-server
+          file: backend/unispeaking-server/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_NAMESPACE }}/unispeaking-backend:sha-${{ env.RELEASE_SHA }}
+          cache-from: type=gha,scope=unispeaking-backend-verify
+          cache-to: type=gha,scope=unispeaking-backend-verify,mode=max
+
+      - name: Build and push frontend
+        id: frontend
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: frontend/web
+          file: frontend/web/Dockerfile
+          push: true
+          build-args: |
+            VITE_BACKEND_URL=${{ vars.VITE_BACKEND_URL || '/backend' }}
+            VITE_AUTH_CAPTCHA_PROVIDER=development
+            VITE_OCR_ENABLED=${{ vars.VITE_OCR_ENABLED || 'true' }}
+            VITE_FEEDBACK_URL=${{ vars.VITE_FEEDBACK_URL }}
+            VITE_ALIYUN_CAPTCHA_SCENE_ID=${{ vars.VITE_ALIYUN_CAPTCHA_SCENE_ID }}
+            VITE_ALIYUN_CAPTCHA_PREFIX=${{ vars.VITE_ALIYUN_CAPTCHA_PREFIX }}
+            VITE_ALIYUN_CAPTCHA_REGION=${{ vars.VITE_ALIYUN_CAPTCHA_REGION || 'cn' }}
+            VITE_UMAMI_ENABLED=${{ vars.VITE_UMAMI_ENABLED || 'false' }}
+            VITE_UMAMI_SCRIPT_URL=${{ vars.VITE_UMAMI_SCRIPT_URL || 'https://cloud.umami.is/script.js' }}
+            VITE_UMAMI_WEBSITE_ID=${{ vars.VITE_UMAMI_WEBSITE_ID }}
+            VITE_UMAMI_DOMAINS=${{ vars.VITE_UMAMI_DOMAINS }}
+            VITE_REALTIME_ICE_TRANSPORT_POLICY=${{ vars.VITE_REALTIME_ICE_TRANSPORT_POLICY || 'all' }}
+            VITE_REALTIME_TURN_ENABLED=${{ vars.VITE_REALTIME_TURN_ENABLED || 'false' }}
+            VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }}
+            VITE_APP_RELEASE=web@sha-${{ env.RELEASE_SHA }}
+          tags: ${{ env.IMAGE_NAMESPACE }}/unispeaking-frontend:sha-${{ env.RELEASE_SHA }}
+          cache-from: type=gha,scope=unispeaking-frontend-verify
+          cache-to: type=gha,scope=unispeaking-frontend-verify,mode=max
+
+      - name: Build and push admin
+        id: admin
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: frontend/admin
+          file: frontend/admin/Dockerfile
+          push: true
+          build-args: |
+            VITE_BACKEND_URL=${{ vars.VITE_BACKEND_URL || '/backend' }}
+          tags: ${{ env.IMAGE_NAMESPACE }}/unispeaking-admin:sha-${{ env.RELEASE_SHA }}
+          cache-from: type=gha,scope=unispeaking-admin-verify
+          cache-to: type=gha,scope=unispeaking-admin-verify,mode=max
+
+      - name: Publish image metadata
+        run: |
+          {
+            echo "commit_sha=${RELEASE_SHA}"
+            echo "backend_image=${IMAGE_NAMESPACE}/unispeaking-backend:sha-${RELEASE_SHA}"
+            echo "frontend_image=${IMAGE_NAMESPACE}/unispeaking-frontend:sha-${RELEASE_SHA}"
+            echo "admin_image=${IMAGE_NAMESPACE}/unispeaking-admin:sha-${RELEASE_SHA}"
+            echo "backend_digest=${{ steps.backend.outputs.digest }}"
+            echo "frontend_digest=${{ steps.frontend.outputs.digest }}"
+            echo "admin_digest=${{ steps.admin.outputs.digest }}"
+          } >> "$GITHUB_STEP_SUMMARY"

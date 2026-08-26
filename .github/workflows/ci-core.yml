@@ -19,6 +19,11 @@ on:
         description: GitHub-generated merge commit to test
         required: true
         type: string
+      force_all:
+        description: Run all conditional checks for a trusted main/manual run
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ci-pr-${{ inputs.pr_number }}
@@ -38,8 +43,10 @@ jobs:
       mobile: ${{ steps.paths.outputs.mobile }}
       docker_backend: ${{ steps.paths.outputs.docker_backend }}
       docker_frontend: ${{ steps.paths.outputs.docker_frontend }}
+      docker_admin: ${{ steps.paths.outputs.docker_admin }}
       compose: ${{ steps.paths.outputs.compose }}
       nginx: ${{ steps.paths.outputs.nginx }}
+      scripts: ${{ steps.paths.outputs.scripts }}
       dependencies: ${{ steps.paths.outputs.dependencies }}
     steps:
       - name: 检出待测合并提交
@@ -53,10 +60,15 @@ jobs:
         env:
           BASE_SHA: ${{ inputs.base_sha }}
           HEAD_SHA: ${{ inputs.head_sha }}
+          FORCE_ALL_INPUT: ${{ inputs.force_all }}
         shell: bash
         run: |
           set -euo pipefail
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+          if [[ "$FORCE_ALL_INPUT" == true || "$BASE_SHA" =~ ^0+$ ]]; then
+            : > "$RUNNER_TEMP/changed-files"
+          else
+            git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+          fi
 
           backend=false
           ocr=false
@@ -64,8 +76,10 @@ jobs:
           mobile=false
           docker_backend=false
           docker_frontend=false
+          docker_admin=false
           compose=false
           nginx=false
+          scripts=false
           dependencies=false
           force_all=false
 
@@ -81,6 +95,9 @@ jobs:
               frontend/web/*)
                 frontend=true
                 docker_frontend=true
+                ;;
+              frontend/admin/*)
+                docker_admin=true
                 ;;
               frontend/mobile/*)
                 mobile=true
@@ -101,24 +118,35 @@ jobs:
               frontend/mobile/package.json|frontend/mobile/package-lock.json)
                 dependencies=true
                 ;;
-              deploy/docker-compose.yml|deploy/docker-compose.yaml|deploy/compose.yml|deploy/compose.yaml|deploy/env/.env.example)
+              frontend/admin/package.json|frontend/admin/package-lock.json)
+                dependencies=true
+                ;;
+              deploy/docker-compose.yml|deploy/docker-compose.yaml|deploy/docker-compose.prod.yml|deploy/compose.yml|deploy/compose.yaml|deploy/env/.env.example)
                 compose=true
                 ;;
               deploy/nginx/*)
                 nginx=true
                 ;;
+              deploy/scripts/*)
+                scripts=true
+                ;;
+              deploy/docker-compose.verify.yml|deploy/env/.env.verify.example)
+                compose=true
+                ;;
             esac
           done < "$RUNNER_TEMP/changed-files"
 
-          if [[ "$force_all" == true ]]; then
+          if [[ "$force_all" == true || "$FORCE_ALL_INPUT" == true ]]; then
             backend=true
             ocr=true
             frontend=true
             mobile=true
             docker_backend=true
             docker_frontend=true
+            docker_admin=true
             compose=true
             nginx=true
+            scripts=true
             dependencies=true
           fi
 
@@ -129,8 +157,10 @@ jobs:
             echo "mobile=$mobile"
             echo "docker_backend=$docker_backend"
             echo "docker_frontend=$docker_frontend"
+            echo "docker_admin=$docker_admin"
             echo "compose=$compose"
             echo "nginx=$nginx"
+            echo "scripts=$scripts"
             echo "dependencies=$dependencies"
           } >> "$GITHUB_OUTPUT"
 
@@ -485,6 +515,44 @@ jobs:
           --tag unispeaking-frontend:ci
           frontend/web
 
+  docker_admin:
+    name: 构建 Admin 镜像
+    needs: changes
+    if: needs.changes.outputs.docker_admin == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出待测提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 配置 Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: 验证 Admin 镜像构建
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: frontend/admin
+          file: frontend/admin/Dockerfile
+          load: true
+          tags: unispeaking-admin:ci
+
+      - name: 验证 Admin 静态服务
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -d --name unispeaking-admin-ci unispeaking-admin:ci
+          trap 'docker rm -f unispeaking-admin-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..30}; do
+            if docker exec unispeaking-admin-ci wget -qO- http://127.0.0.1/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Admin 静态服务未在限定时间内就绪"
+          exit 1
+
   compose:
     name: 校验 Compose 配置
     needs: changes
@@ -498,10 +566,44 @@ jobs:
           ref: ${{ inputs.merge_sha }}
 
       - name: 准备 CI 环境模板
-        run: cp deploy/env/.env.example deploy/env/.env
+        run: |
+          cp deploy/env/.env.example deploy/env/.env
+          cp deploy/env/.env.verify.example deploy/env/.env.verify
 
-      - name: 校验配置
-        run: docker compose --env-file deploy/env/.env.example -f deploy/docker-compose.yml config --quiet
+      - name: 准备镜像版本模板
+        run: |
+          cat > "$RUNNER_TEMP/images.env" <<'EOF'
+          UNISPEAKING_BACKEND_IMAGE=ghcr.io/1024xengineer/unispeaking-backend:sha-0000000000000000000000000000000000000000
+          UNISPEAKING_FRONTEND_IMAGE=ghcr.io/1024xengineer/unispeaking-frontend:sha-0000000000000000000000000000000000000000
+          UNISPEAKING_ADMIN_IMAGE=ghcr.io/1024xengineer/unispeaking-admin:sha-0000000000000000000000000000000000000000
+          EOF
+
+      - name: 校验默认开发 Compose
+        run: >-
+          docker compose
+          --env-file deploy/env/.env
+          --env-file "$RUNNER_TEMP/images.env"
+          --project-name deploy-dev
+          --file deploy/docker-compose.yml
+          config --quiet
+
+      - name: 校验生产 Compose
+        run: >-
+          docker compose
+          --env-file deploy/env/.env
+          --env-file "$RUNNER_TEMP/images.env"
+          --project-name deploy
+          --file deploy/docker-compose.prod.yml
+          config --quiet
+
+      - name: 校验 CD 验证 Compose
+        run: >-
+          docker compose
+          --env-file deploy/env/.env.verify
+          --env-file "$RUNNER_TEMP/images.env"
+          --project-name unispeaking-cd-verify
+          --file deploy/docker-compose.verify.yml
+          config --quiet
 
   nginx:
     name: 校验 Nginx 配置
@@ -524,6 +626,55 @@ jobs:
           --volume "$PWD/deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
           nginx:1.27-alpine
           nginx -t
+
+      - name: 准备临时 TLS 证书
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/nginx-certs"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj '/CN=unispeaking.qnsdk.com' \
+            -keyout "$RUNNER_TEMP/nginx-certs/privkey.pem" \
+            -out "$RUNNER_TEMP/nginx-certs/fullchain.pem"
+
+      - name: 校验生产 Nginx 配置
+        run: >-
+          docker run --rm
+          --add-host backend:127.0.0.1
+          --add-host frontend:127.0.0.1
+          --add-host admin:127.0.0.1
+          --add-host unispeaking-umami:127.0.0.1
+          --volume "$PWD/deploy/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro"
+          --volume "$RUNNER_TEMP/nginx-certs:/etc/nginx/certs:ro"
+          nginx:1.27-alpine
+          nginx -t
+
+      - name: 校验 CD 验证 Nginx 配置
+        run: >-
+          docker run --rm
+          --add-host backend:127.0.0.1
+          --add-host frontend:127.0.0.1
+          --add-host admin:127.0.0.1
+          --volume "$PWD/deploy/nginx/nginx.verify.conf:/etc/nginx/nginx.conf:ro"
+          nginx:1.27-alpine
+          nginx -t
+
+  scripts:
+    name: 校验部署脚本
+    needs: changes
+    if: needs.changes.outputs.scripts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 校验 Shell 脚本语法
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n deploy/scripts/*.sh
 
   dependency_review:
     name: 审查新增依赖漏洞
@@ -555,8 +706,10 @@ jobs:
       - mobile
       - docker_backend
       - docker_frontend
+      - docker_admin
       - compose
       - nginx
+      - scripts
       - dependency_review
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -575,16 +728,20 @@ jobs:
           MOBILE_RESULT: ${{ needs.mobile.result }}
           DOCKER_BACKEND_RESULT: ${{ needs.docker_backend.result }}
           DOCKER_FRONTEND_RESULT: ${{ needs.docker_frontend.result }}
+          DOCKER_ADMIN_RESULT: ${{ needs.docker_admin.result }}
           COMPOSE_RESULT: ${{ needs.compose.result }}
           NGINX_RESULT: ${{ needs.nginx.result }}
+          SCRIPTS_RESULT: ${{ needs.scripts.result }}
           DEPENDENCY_RESULT: ${{ needs.dependency_review.result }}
           BACKEND_REQUIRED: ${{ needs.changes.outputs.backend }}
           FRONTEND_REQUIRED: ${{ needs.changes.outputs.frontend }}
           MOBILE_REQUIRED: ${{ needs.changes.outputs.mobile }}
           DOCKER_BACKEND_REQUIRED: ${{ needs.changes.outputs.docker_backend }}
           DOCKER_FRONTEND_REQUIRED: ${{ needs.changes.outputs.docker_frontend }}
+          DOCKER_ADMIN_REQUIRED: ${{ needs.changes.outputs.docker_admin }}
           COMPOSE_REQUIRED: ${{ needs.changes.outputs.compose }}
           NGINX_REQUIRED: ${{ needs.changes.outputs.nginx }}
+          SCRIPTS_REQUIRED: ${{ needs.changes.outputs.scripts }}
           DEPENDENCY_REQUIRED: ${{ needs.changes.outputs.dependencies == 'true' && github.event.repository.fork == false }}
         shell: bash
         run: |
@@ -616,8 +773,10 @@ jobs:
           require_job mobile "$MOBILE_RESULT" "$MOBILE_REQUIRED"
           require_job docker_backend "$DOCKER_BACKEND_RESULT" "$DOCKER_BACKEND_REQUIRED"
           require_job docker_frontend "$DOCKER_FRONTEND_RESULT" "$DOCKER_FRONTEND_REQUIRED"
+          require_job docker_admin "$DOCKER_ADMIN_RESULT" "$DOCKER_ADMIN_REQUIRED"
           require_job compose "$COMPOSE_RESULT" "$COMPOSE_REQUIRED"
           require_job nginx "$NGINX_RESULT" "$NGINX_REQUIRED"
+          require_job scripts "$SCRIPTS_RESULT" "$SCRIPTS_REQUIRED"
           require_job dependency_review "$DEPENDENCY_RESULT" "$DEPENDENCY_REQUIRED"
 
       - name: 执行最终门禁
