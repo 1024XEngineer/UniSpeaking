@@ -46,6 +46,7 @@ jobs:
       docker_admin: ${{ steps.paths.outputs.docker_admin }}
       compose: ${{ steps.paths.outputs.compose }}
       nginx: ${{ steps.paths.outputs.nginx }}
+      scripts: ${{ steps.paths.outputs.scripts }}
       dependencies: ${{ steps.paths.outputs.dependencies }}
     steps:
       - name: 检出待测合并提交
@@ -78,6 +79,7 @@ jobs:
           docker_admin=false
           compose=false
           nginx=false
+          scripts=false
           dependencies=false
           force_all=false
 
@@ -122,8 +124,14 @@ jobs:
               deploy/docker-compose.yml|deploy/docker-compose.yaml|deploy/docker-compose.prod.yml|deploy/compose.yml|deploy/compose.yaml|deploy/env/.env.example)
                 compose=true
                 ;;
-              deploy/nginx/*|deploy/scripts/*)
+              deploy/nginx/*)
                 nginx=true
+                ;;
+              deploy/scripts/*)
+                scripts=true
+                ;;
+              deploy/docker-compose.verify.yml|deploy/env/.env.verify.example)
+                compose=true
                 ;;
             esac
           done < "$RUNNER_TEMP/changed-files"
@@ -138,6 +146,7 @@ jobs:
             docker_admin=true
             compose=true
             nginx=true
+            scripts=true
             dependencies=true
           fi
 
@@ -151,6 +160,7 @@ jobs:
             echo "docker_admin=$docker_admin"
             echo "compose=$compose"
             echo "nginx=$nginx"
+            echo "scripts=$scripts"
             echo "dependencies=$dependencies"
           } >> "$GITHUB_OUTPUT"
 
@@ -556,7 +566,9 @@ jobs:
           ref: ${{ inputs.merge_sha }}
 
       - name: 准备 CI 环境模板
-        run: cp deploy/env/.env.example deploy/env/.env
+        run: |
+          cp deploy/env/.env.example deploy/env/.env
+          cp deploy/env/.env.verify.example deploy/env/.env.verify
 
       - name: 准备镜像版本模板
         run: |
@@ -566,13 +578,31 @@ jobs:
           UNISPEAKING_ADMIN_IMAGE=ghcr.io/1024xengineer/unispeaking-admin:sha-0000000000000000000000000000000000000000
           EOF
 
+      - name: 校验默认开发 Compose
+        run: >-
+          docker compose
+          --env-file deploy/env/.env
+          --env-file "$RUNNER_TEMP/images.env"
+          --project-name deploy-dev
+          --file deploy/docker-compose.yml
+          config --quiet
+
       - name: 校验生产 Compose
         run: >-
           docker compose
-          --env-file deploy/env/.env.example
+          --env-file deploy/env/.env
           --env-file "$RUNNER_TEMP/images.env"
           --project-name deploy
           --file deploy/docker-compose.prod.yml
+          config --quiet
+
+      - name: 校验 CD 验证 Compose
+        run: >-
+          docker compose
+          --env-file deploy/env/.env.verify
+          --env-file "$RUNNER_TEMP/images.env"
+          --project-name unispeaking-cd-verify
+          --file deploy/docker-compose.verify.yml
           config --quiet
 
   nginx:
@@ -596,6 +626,55 @@ jobs:
           --volume "$PWD/deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
           nginx:1.27-alpine
           nginx -t
+
+      - name: 准备临时 TLS 证书
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/nginx-certs"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj '/CN=unispeaking.qnsdk.com' \
+            -keyout "$RUNNER_TEMP/nginx-certs/privkey.pem" \
+            -out "$RUNNER_TEMP/nginx-certs/fullchain.pem"
+
+      - name: 校验生产 Nginx 配置
+        run: >-
+          docker run --rm
+          --add-host backend:127.0.0.1
+          --add-host frontend:127.0.0.1
+          --add-host admin:127.0.0.1
+          --add-host unispeaking-umami:127.0.0.1
+          --volume "$PWD/deploy/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro"
+          --volume "$RUNNER_TEMP/nginx-certs:/etc/nginx/certs:ro"
+          nginx:1.27-alpine
+          nginx -t
+
+      - name: 校验 CD 验证 Nginx 配置
+        run: >-
+          docker run --rm
+          --add-host backend:127.0.0.1
+          --add-host frontend:127.0.0.1
+          --add-host admin:127.0.0.1
+          --volume "$PWD/deploy/nginx/nginx.verify.conf:/etc/nginx/nginx.conf:ro"
+          nginx:1.27-alpine
+          nginx -t
+
+  scripts:
+    name: 校验部署脚本
+    needs: changes
+    if: needs.changes.outputs.scripts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 校验 Shell 脚本语法
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n deploy/scripts/*.sh
 
   dependency_review:
     name: 审查新增依赖漏洞
@@ -630,6 +709,7 @@ jobs:
       - docker_admin
       - compose
       - nginx
+      - scripts
       - dependency_review
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -651,6 +731,7 @@ jobs:
           DOCKER_ADMIN_RESULT: ${{ needs.docker_admin.result }}
           COMPOSE_RESULT: ${{ needs.compose.result }}
           NGINX_RESULT: ${{ needs.nginx.result }}
+          SCRIPTS_RESULT: ${{ needs.scripts.result }}
           DEPENDENCY_RESULT: ${{ needs.dependency_review.result }}
           BACKEND_REQUIRED: ${{ needs.changes.outputs.backend }}
           FRONTEND_REQUIRED: ${{ needs.changes.outputs.frontend }}
@@ -660,6 +741,7 @@ jobs:
           DOCKER_ADMIN_REQUIRED: ${{ needs.changes.outputs.docker_admin }}
           COMPOSE_REQUIRED: ${{ needs.changes.outputs.compose }}
           NGINX_REQUIRED: ${{ needs.changes.outputs.nginx }}
+          SCRIPTS_REQUIRED: ${{ needs.changes.outputs.scripts }}
           DEPENDENCY_REQUIRED: ${{ needs.changes.outputs.dependencies == 'true' && github.event.repository.fork == false }}
         shell: bash
         run: |
@@ -694,6 +776,7 @@ jobs:
           require_job docker_admin "$DOCKER_ADMIN_RESULT" "$DOCKER_ADMIN_REQUIRED"
           require_job compose "$COMPOSE_RESULT" "$COMPOSE_REQUIRED"
           require_job nginx "$NGINX_RESULT" "$NGINX_REQUIRED"
+          require_job scripts "$SCRIPTS_RESULT" "$SCRIPTS_REQUIRED"
           require_job dependency_review "$DEPENDENCY_RESULT" "$DEPENDENCY_REQUIRED"
 
       - name: 执行最终门禁
