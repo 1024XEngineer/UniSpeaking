@@ -1551,7 +1551,7 @@ export function TrendLineChart({
         context.beginPath();
         context.moveTo(scoredPoints[0].x, padding.top + chartHeight);
         scoredPoints.forEach((point) => context.lineTo(point.x, point.y));
-        context.lineTo(scoredPoints.at(-1).x, padding.top + chartHeight);
+        context.lineTo(scoredPoints[scoredPoints.length - 1].x, padding.top + chartHeight);
         context.closePath();
         context.fillStyle = gradient;
         context.fill();
@@ -1592,7 +1592,7 @@ function AssetsTrends({ settings, reports }) {
   const mocks = reports.filter((item) => item.mode === "MOCK_TEST").slice(0, 5).reverse();
   const actualValues = mocks.map((item) => item.overallBandScore).filter((value) => value != null && value !== "").map(Number).filter(Number.isFinite);
   const values = [...actualValues, ...Array(Math.max(0, 5 - actualValues.length)).fill(null)].slice(0, 5);
-  const latest = actualValues.at(-1);
+  const latest = actualValues[actualValues.length - 1];
   const change = actualValues.length >= 2 ? (latest - actualValues[0]).toFixed(1) : null;
   const recent = reports.slice(0, 10);
   const dimensionValues = [

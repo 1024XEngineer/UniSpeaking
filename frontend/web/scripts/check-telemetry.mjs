@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { flushTelemetry, recordTelemetry } from "../src/telemetry/clientTelemetry.js";
@@ -58,4 +59,23 @@ test("RTC telemetry calculates interval loss and TURN usage", () => {
   assert.equal(result.attributes.jitter_ms, 10);
   assert.equal(result.attributes.turn_used, true);
   assert.equal(result.attributes.packet_loss_pct, 5);
+});
+
+test("production web sources avoid Array.at for legacy browser compatibility", async () => {
+  const sourceFiles = [
+    "../src/telemetry/clientTelemetry.js",
+    "../src/analytics/pageCatalog.js",
+    "../src/component/ielts/IeltsModule.jsx",
+    "../src/component/interview/InterviewModule.jsx",
+  ];
+  for (const sourceFile of sourceFiles) {
+    const source = await readFile(new URL(sourceFile, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /\.at\s*\(/, `${sourceFile} must not require Array.prototype.at`);
+  }
+});
+
+test("web nginx serves teacher previews with registered audio MIME types", async () => {
+  const nginx = await readFile(new URL("../nginx.conf", import.meta.url), "utf8");
+  assert.match(nginx, /include \/etc\/nginx\/mime\.types;/);
+  assert.match(nginx, /wav\|mp3\|m4a\|aac\|ogg/);
 });

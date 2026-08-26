@@ -167,7 +167,8 @@ function observePerformance() {
   try {
     let lcp = 0;
     const lcpObserver = new PerformanceObserver((list) => {
-      const latest = list.getEntries().at(-1);
+      const entries = list.getEntries();
+      const latest = entries[entries.length - 1];
       if (latest) lcp = latest.startTime;
     });
     lcpObserver.observe({ type: "largest-contentful-paint", buffered: true });
