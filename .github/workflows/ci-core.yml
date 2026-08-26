@@ -115,6 +115,11 @@ jobs:
               frontend/web/package.json|frontend/web/package-lock.json)
                 dependencies=true
                 ;;
+              codecov.yml|scripts/check-codecov-coverage.py)
+                backend=true
+                frontend=true
+                mobile=true
+                ;;
               frontend/mobile/package.json|frontend/mobile/package-lock.json)
                 dependencies=true
                 ;;
@@ -370,7 +375,7 @@ jobs:
           retention-days: 30
 
   frontend:
-    name: Web 前端依赖与生产构建
+    name: Web 前端测试、覆盖率与生产构建
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
@@ -399,6 +404,30 @@ jobs:
 
       - name: 检查 Realtime 事件
         run: npm run check:realtime-events
+
+      - name: 运行 Web 静态检查
+        run: npm run test:checks
+
+      - name: 生成 Web LCOV 覆盖率
+        run: npm run test:coverage
+
+      - name: 检查 Web Codecov 口径覆盖率
+        run: |
+          python3 ../../scripts/check-codecov-coverage.py \
+            --format lcov \
+            --input coverage/lcov.info \
+            --minimum 85
+
+      - name: 保存 Web 覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: web-coverage-${{ inputs.pr_number }}
+          path: |
+            frontend/web/coverage/lcov.info
+            frontend/web/coverage/coverage-summary.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: 生产构建
         run: npm run build
