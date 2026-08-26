@@ -1,6 +1,8 @@
 # UniSpeaking production deployment
 
-> This document describes the legacy/manual source-build procedure. New production releases must use [`docs/deployment-cd.md`](deployment-cd.md): GitHub Actions builds private GHCR images and the server only pulls and runs a pinned SHA. Do not use `git pull` or `up -d --build` for CD releases.
+> This document describes the legacy/manual source-build procedure only. The production server is now managed by [`docs/deployment-cd.md`](deployment-cd.md): GitHub Actions builds private GHCR images and the server only pulls and runs a pinned SHA. Do not use `git pull` or `up -d --build` for CD releases.
+
+> For the CD-managed server, do not copy the repository into `/opt/unispeaking` and do not replace `/opt/unispeaking-cd` with a source checkout. The application source remains in GitHub; the server keeps only server-owned runtime state, persistent data, and reviewed release configuration.
 
 This runbook targets the single-server Docker deployment for `unispeaking.qnsdk.com`.
 It assumes Ubuntu 24.04, Docker Compose, PostgreSQL 17, and public TCP ports
