@@ -77,5 +77,6 @@ test("production web sources avoid Array.at for legacy browser compatibility", a
 test("web nginx serves teacher previews with registered audio MIME types", async () => {
   const nginx = await readFile(new URL("../nginx.conf", import.meta.url), "utf8");
   assert.match(nginx, /include \/etc\/nginx\/mime\.types;/);
+  assert.match(nginx, /audio\/wav\s+wav;/);
   assert.match(nginx, /wav\|mp3\|m4a\|aac\|ogg/);
 });
