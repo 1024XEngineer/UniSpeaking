@@ -150,6 +150,10 @@ export function captureException(error, context = {}) {
   }
 }
 
+export function isOptionalTelemetryResource(resource) {
+  return Boolean(resource?.hasAttribute?.("data-umami-tracker"));
+}
+
 function observePerformance() {
   if (!("PerformanceObserver" in window)) return;
   const reportMetric = (metricName, value, unit = "ms") => recordTelemetry("web.performance", {
@@ -247,13 +251,21 @@ export function initializeBrowserTelemetry() {
     const resource = event.target;
     if (resource && resource !== window && !(event instanceof ErrorEvent)) {
       const resourceUrl = resource.currentSrc || resource.src || resource.href || "";
-      recordTelemetry("web.resource_error", {
-        severity: "ERROR",
+      const optional = isOptionalTelemetryResource(resource);
+      recordTelemetry(optional ? "web.optional_resource_error" : "web.resource_error", {
+        severity: optional ? "WARN" : "ERROR",
         message: `Failed to load ${resource.tagName || "resource"}`,
         attributes: {
           resource_tag: String(resource.tagName || "unknown").toLowerCase(),
           resource_path: cleanRoute(resourceUrl),
         },
+      });
+      return;
+    }
+    if (!event.error && event.message === "Script error.") {
+      recordTelemetry("web.opaque_script_error", {
+        severity: "WARN",
+        message: event.message,
       });
       return;
     }

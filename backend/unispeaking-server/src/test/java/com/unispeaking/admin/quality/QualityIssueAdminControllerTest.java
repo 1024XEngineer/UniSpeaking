@@ -5,8 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.unispeaking.admin.auth.domain.AdminAccount;
-import com.unispeaking.admin.auth.domain.AdminRole;
+import com.unispeaking.admin.auth.application.AuthService.CurrentAdmin;
 import com.unispeaking.admin.quality.QualityIssueAdminService.*;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -18,7 +17,7 @@ class QualityIssueAdminControllerTest {
         QualityIssueAdminController controller = new QualityIssueAdminController(service);
         UUID issueId = UUID.randomUUID();
         UUID adminId = UUID.randomUUID();
-        AdminAccount admin = new AdminAccount(adminId, "admin", "hash", AdminRole.TECHNICAL, true);
+        CurrentAdmin admin = new CurrentAdmin(adminId, "admin", "TECHNICAL");
         QualitySummary summary = mock(QualitySummary.class);
         IssueListResponse list = mock(IssueListResponse.class);
         QualityIssueView view = mock(QualityIssueView.class);

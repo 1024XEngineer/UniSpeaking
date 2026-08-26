@@ -17,7 +17,7 @@ class MonitoringAdminControllerTest {
     void exposesMonitoringOverviewEndpoint() throws Exception {
         MonitoringAdminService service = mock(MonitoringAdminService.class);
         when(service.overview()).thenReturn(new MonitoringAdminService.MonitoringResponse(
-                new MonitoringAdminService.Summary("UP", 1.0, 0.2, 0.8, 2, 3, 4,
+                new MonitoringAdminService.Summary("UP", 1.0, 0.2, 0.8, 2, 3, 4, 5,
                         Instant.parse("2026-08-25T00:00:00Z")),
                 List.of(), List.of(), List.of(), List.of(), List.of()));
         var mvc = MockMvcBuilders.standaloneSetup(new MonitoringAdminController(service)).build();
@@ -25,6 +25,7 @@ class MonitoringAdminControllerTest {
         mvc.perform(get("/api/admin/monitoring/overview"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.summary.backendStatus").value("UP"))
-                .andExpect(jsonPath("$.summary.activeAlerts").value(2));
+                .andExpect(jsonPath("$.summary.activeAlerts").value(2))
+                .andExpect(jsonPath("$.summary.resolvedBugs7d").value(5));
     }
 }

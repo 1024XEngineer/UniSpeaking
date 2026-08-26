@@ -14,7 +14,7 @@ public class MonitoringAdminService {
 
     public record Summary(String backendStatus, double clientErrorRate, double api5xxRate,
             double apiP95Seconds, long activeAlerts, long affectedUsers,
-            long completedOptimizations, Instant generatedAt) {}
+            long completedOptimizations, long resolvedBugs7d, Instant generatedAt) {}
     public record Problem(String problem, String platform, String path, long count,
             long affectedUsers, Instant lastSeen, String status) {}
     public record SlowEndpoint(String method, String path, long calls, double averageSeconds,
@@ -43,7 +43,7 @@ public class MonitoringAdminService {
                 queryPrometheus("(100 * sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + ",http_response_status_code=~\"4..|5..\"}[5m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + "}[5m])), 0.000001)) or vector(0)"),
                 queryPrometheus("(100 * sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + ",http_response_status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count{" + API_REQUESTS + "}[5m])), 0.000001)) or vector(0)"),
                 queryPrometheus("histogram_quantile(0.95, sum by (le) (increase(http_server_request_duration_seconds_bucket{" + API_REQUESTS + "}[24h]))) or vector(0)"),
-                activeAlerts(), affectedUsers(), completedOptimizations(), Instant.now());
+                activeAlerts(), affectedUsers(), completedOptimizations(), resolvedBugs7d(), Instant.now());
         return new MonitoringResponse(summary, problems(), slowEndpoints(), recentEvents(),
                 platformSummaries(), trend());
     }
@@ -124,16 +124,31 @@ public class MonitoringAdminService {
         return value == null ? 0 : value;
     }
 
+    private long resolvedBugs7d() {
+        Long value = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM quality_issues
+                WHERE issue_type = 'BUG'
+                  AND status IN ('RESOLVED', 'VERIFIED')
+                  AND resolved_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
+                """, Long.class);
+        return value == null ? 0 : value;
+    }
+
     private List<Problem> problems() {
         return jdbc.query("""
-                SELECT COALESCE(error_code, error_name, message, 'HTTP ' || http_status::text),
-                       LOWER(platform), COALESCE(api_path, route, ''), COUNT(*),
-                       COUNT(DISTINCT COALESCE(user_id::text, 'anon:' || anonymous_id)), MAX(occurred_at)
-                FROM quality_issue_events
-                WHERE http_status >= 400 AND occurred_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
-                GROUP BY 1, 2, 3 ORDER BY COUNT(*) DESC, MAX(occurred_at) DESC LIMIT 10
+                SELECT COALESCE(e.error_code, e.error_name, e.message, 'HTTP ' || e.http_status::text),
+                       LOWER(e.platform), COALESCE(e.api_path, e.route, ''), COUNT(*),
+                       COUNT(DISTINCT COALESCE(e.user_id::text, 'anon:' || e.anonymous_id)),
+                       MAX(e.occurred_at), q.status
+                FROM quality_issue_events e
+                JOIN quality_issues q ON q.issue_id = e.issue_id
+                WHERE e.http_status >= 400
+                  AND e.occurred_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
+                  AND q.status IN ('OPEN', 'INVESTIGATING', 'IN_PROGRESS')
+                GROUP BY 1, 2, 3, q.status
+                ORDER BY COUNT(*) DESC, MAX(e.occurred_at) DESC LIMIT 10
                 """, (rs, n) -> new Problem(rs.getString(1), rs.getString(2), rs.getString(3),
-                rs.getLong(4), rs.getLong(5), rs.getTimestamp(6).toInstant(), "OPEN"));
+                rs.getLong(4), rs.getLong(5), rs.getTimestamp(6).toInstant(), rs.getString(7)));
     }
 
     private List<SlowEndpoint> slowEndpoints() {

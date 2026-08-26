@@ -1,6 +1,6 @@
 package com.unispeaking.admin.quality;
 
-import com.unispeaking.admin.auth.domain.AdminAccount;
+import com.unispeaking.admin.auth.application.AuthService.CurrentAdmin;
 import com.unispeaking.admin.quality.QualityIssueAdminService.CreateIssueRequest;
 import com.unispeaking.admin.quality.QualityIssueAdminService.IssueEventsResponse;
 import com.unispeaking.admin.quality.QualityIssueAdminService.IssueListResponse;
@@ -61,7 +61,7 @@ public class QualityIssueAdminController {
 	@PostMapping("/issues")
 	QualityIssueView create(
 			@Valid @RequestBody CreateIssueRequest request,
-			@AuthenticationPrincipal AdminAccount administrator) {
+			@AuthenticationPrincipal CurrentAdmin administrator) {
 		return service.create(request, administrator.id(), administrator.login());
 	}
 
@@ -69,7 +69,7 @@ public class QualityIssueAdminController {
 	QualityIssueView update(
 			@PathVariable UUID issueId,
 			@Valid @RequestBody UpdateIssueRequest request,
-			@AuthenticationPrincipal AdminAccount administrator) {
+			@AuthenticationPrincipal CurrentAdmin administrator) {
 		return service.update(issueId, request, administrator.id(), administrator.login());
 	}
 }

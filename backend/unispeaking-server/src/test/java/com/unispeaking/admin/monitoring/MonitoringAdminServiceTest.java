@@ -51,7 +51,7 @@ class MonitoringAdminServiceTest {
     void mapsPrometheusAndDatabaseOverviewRows() throws IOException {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         when(jdbc.queryForObject(anyString(), eq(Long.class)))
-                .thenReturn(11L, 12L, 13L);
+                .thenReturn(11L, 12L, 13L, 14L);
         AtomicInteger queryNumber = new AtomicInteger();
         when(jdbc.query(anyString(), any(RowMapper.class))).thenAnswer(invocation -> {
             @SuppressWarnings("unchecked")
@@ -65,6 +65,7 @@ class MonitoringAdminServiceTest {
                     when(row.getLong(4)).thenReturn(4L);
                     when(row.getLong(5)).thenReturn(3L);
                     when(row.getTimestamp(6)).thenReturn(Timestamp.from(EVENT_TIME));
+                    when(row.getString(7)).thenReturn("INVESTIGATING");
                 }
                 case 1 -> {
                     when(row.getString(1)).thenReturn("GET");
@@ -114,7 +115,9 @@ class MonitoringAdminServiceTest {
             assertEquals("UP", response.summary().backendStatus());
             assertEquals(2.5, response.summary().clientErrorRate());
             assertEquals(11, response.summary().activeAlerts());
+            assertEquals(14, response.summary().resolvedBugs7d());
             assertEquals("TIMEOUT", response.problems().getFirst().problem());
+            assertEquals("INVESTIGATING", response.problems().getFirst().status());
             assertEquals(2.5, response.slowEndpoints().getFirst().p95Seconds());
             assertEquals("request-1", response.recentEvents().getFirst().requestId());
             assertEquals(3, response.platformSummaries().getFirst().errorCount());
@@ -128,6 +131,7 @@ class MonitoringAdminServiceTest {
             ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
             verify(jdbc, times(4)).query(sql.capture(), any(RowMapper.class));
             String slowEndpointSql = sql.getAllValues().get(1);
+            assertTrue(sql.getAllValues().getFirst().contains("q.status IN"));
             assertTrue(slowEndpointSql.contains("WHERE duration_ms IS NOT NULL"));
             assertTrue(slowEndpointSql.contains("duration_ms > 1000"));
         }

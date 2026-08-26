@@ -160,6 +160,9 @@ public class QualityIssueTelemetrySink implements ClientTelemetrySink {
 		Integer status = integer(fields, "http_status");
 		String outcome = lower(text(fields, "outcome"));
 		if ((status != null && status == 401) || "unauthenticated".equals(outcome)) return false;
+		String eventType = lower(text(fields, "event_type"));
+		if ("api.request".equals(eventType) && status != null
+				&& status >= 400 && status < 500 && status != 408) return false;
 		String level = lower(text(fields, "level"));
 		return "error".equals(level) || "fatal".equals(level)
 				|| "error".equals(outcome) || "network_error".equals(outcome) || "timeout".equals(outcome);

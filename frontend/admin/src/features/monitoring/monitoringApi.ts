@@ -1,6 +1,6 @@
 import { buildAdminApiUrl } from '../auth/authApi'
 
-export interface MonitoringSummary { backendStatus: string; clientErrorRate: number; api5xxRate: number; apiP95Seconds: number; activeAlerts: number; affectedUsers: number; completedOptimizations: number; generatedAt: string }
+export interface MonitoringSummary { backendStatus: string; clientErrorRate: number; api5xxRate: number; apiP95Seconds: number; activeAlerts: number; affectedUsers: number; completedOptimizations: number; resolvedBugs7d: number; generatedAt: string }
 export interface MonitoringProblem { problem: string; platform: string; path: string; count: number; affectedUsers: number; lastSeen: string; status: string }
 export interface SlowEndpoint { method: string; path: string; calls: number; averageSeconds: number; p95Seconds: number; maxSeconds: number; slowCount: number }
 export interface MonitoringEvent { timestamp: string; userId: string; platform: string; page: string; errorType: string; errorMessage: string; apiPath: string; httpStatus: number | null; requestId: string }

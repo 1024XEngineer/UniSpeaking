@@ -42,6 +42,24 @@ class QualityIssueTelemetrySinkTest {
 	}
 
 	@Test
+	void ignoresExpectedBusinessValidationFailuresButKeepsTimeoutsActionable() {
+		JdbcTemplate jdbc = mock(JdbcTemplate.class);
+		QualityIssueTelemetrySink sink = new QualityIssueTelemetrySink(jdbc, new ObjectMapper());
+
+		sink.write(new ClientTelemetryRecord(Map.of(
+				"event_id", "evt-400",
+				"event_type", "api.request",
+				"platform", "web",
+				"level", "error",
+				"http_status", 400,
+				"outcome", "error",
+				"message", "今日练习额度已用完")));
+
+		verify(jdbc, never()).queryForObject(anyString(), eq(UUID.class), any(Object[].class));
+		verify(jdbc, never()).update(anyString(), any(Object[].class));
+	}
+
+	@Test
 	void aggregatesActionableErrorsAndDeduplicatesTheirEvents() {
 		JdbcTemplate jdbc = mock(JdbcTemplate.class);
 		UUID issueId = UUID.randomUUID();
