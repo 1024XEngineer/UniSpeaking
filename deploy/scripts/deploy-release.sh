@@ -117,6 +117,12 @@ env_value() {
     sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
 }
 
+image_registry="$(env_value DEPLOY_IMAGE_REGISTRY)"
+image_namespace="$(env_value DEPLOY_IMAGE_NAMESPACE)"
+[[ "$image_registry" =~ ^[a-z0-9.-]+$ ]] || fail "DEPLOY_IMAGE_REGISTRY 配置无效"
+[[ "$image_namespace" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || fail "DEPLOY_IMAGE_NAMESPACE 配置无效"
+image_prefix="$image_registry/$image_namespace/unispeaking-"
+
 monitoring_network="$(env_value MONITORING_NETWORK_NAME)"
 monitoring_network="${monitoring_network:-$MONITORING_NETWORK_DEFAULT}"
 docker network inspect "$monitoring_network" >/dev/null 2>&1 \
@@ -136,23 +142,24 @@ cleanup() { rm -f "$image_tmp" "$config_json" "$config_images"; }
 trap cleanup EXIT
 umask 077
 cat > "$image_tmp" <<EOF
-UNISPEAKING_BACKEND_IMAGE=ghcr.io/1024xengineer/unispeaking-backend:sha-$release_sha
-UNISPEAKING_FRONTEND_IMAGE=ghcr.io/1024xengineer/unispeaking-frontend:sha-$release_sha
-UNISPEAKING_ADMIN_IMAGE=ghcr.io/1024xengineer/unispeaking-admin:sha-$release_sha
+UNISPEAKING_BACKEND_IMAGE=${image_prefix}backend:sha-$release_sha
+UNISPEAKING_FRONTEND_IMAGE=${image_prefix}frontend:sha-$release_sha
+UNISPEAKING_ADMIN_IMAGE=${image_prefix}admin:sha-$release_sha
 EOF
 
 get_image() {
   local key="$1"
+  local service="$2"
+  local expected="${image_prefix}${service}:sha-$release_sha"
   local value
   value="$(awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$image_tmp")"
-  [[ "$value" =~ ^ghcr\.io/1024xengineer/unispeaking-(backend|frontend|admin):sha-[0-9a-f]{40}$ ]] \
-    || fail "$key 不是允许的 GHCR SHA 镜像"
+  [[ "$value" == "$expected" ]] || fail "$key 不是目标 ACR SHA 镜像"
   printf '%s\n' "$value"
 }
 
-backend_image="$(get_image UNISPEAKING_BACKEND_IMAGE)"
-frontend_image="$(get_image UNISPEAKING_FRONTEND_IMAGE)"
-admin_image="$(get_image UNISPEAKING_ADMIN_IMAGE)"
+backend_image="$(get_image UNISPEAKING_BACKEND_IMAGE backend)"
+frontend_image="$(get_image UNISPEAKING_FRONTEND_IMAGE frontend)"
+admin_image="$(get_image UNISPEAKING_ADMIN_IMAGE admin)"
 [[ "${backend_image##*:sha-}" == "$release_sha" ]] || fail "backend 镜像 SHA 不匹配"
 [[ "${frontend_image##*:sha-}" == "$release_sha" ]] || fail "frontend 镜像 SHA 不匹配"
 [[ "${admin_image##*:sha-}" == "$release_sha" ]] || fail "admin 镜像 SHA 不匹配"
