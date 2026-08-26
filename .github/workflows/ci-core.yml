@@ -491,7 +491,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docker_backend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The backend image includes the OCR runtime and model assets. Workflow
+    # changes force this job to run even when backend sources are unchanged.
+    timeout-minutes: 45
     steps:
       - name: 检出待测合并提交
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
