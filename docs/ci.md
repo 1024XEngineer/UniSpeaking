@@ -17,7 +17,7 @@ CD 只同步 `deploy/docker-compose.prod.yml`、`deploy/nginx/nginx.prod.conf` �
 | `ci-refresh-pr.yml` | 等待包含最新 `main` 的 merge SHA，跳过冲突或已变化的 PR |
 | `ci-status.yml` | 在可信上下文校验当前 base、head、merge SHA 后发布 `CI / required` |
 | `ci-main.yml` | 对 main 的当前 commit 执行可信主分支核心检查 |
-| `cd.yml` | 校验 main HEAD，构建并推送三个私有 GHCR 镜像，审批后上传同一 commit 的非敏感部署配置并调用服务器固定入口 |
+| `cd.yml` | 校验 main HEAD，构建并推送三个私有 GHCR 镜像，审批后复制到 ACR、上传同一 commit 的非敏感部署配置并调用服务器固定入口 |
 | `cd-verify.yml` | 仅在 Fork 的 CD 分支构建并推送隔离验证镜像，不连接生产服务器 |
 | `coverage.yml` | `main` 后端变更后生成 JaCoCo 聚合报告并通过 OIDC 上传到 Codecov |
 | `mobile-coverage.yml` | `main` 移动端变更后运行 Jest 覆盖率门禁并通过 OIDC 上传到 Codecov |

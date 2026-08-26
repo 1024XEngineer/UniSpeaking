@@ -173,6 +173,9 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
+    env:
+      ACR_REGISTRY: ${{ vars.ACR_REGISTRY }}
+      ACR_NAMESPACE: ${{ vars.ACR_NAMESPACE }}
     steps:
       - name: 检出部署配置
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -218,6 +221,32 @@ jobs:
           test -s "$signature"
           rm -f "$key_file"
           trap - EXIT
+
+      - name: 登录并复制发布镜像到 ACR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ACR_REGISTRY" =~ ^[a-z0-9.-]+$ ]] || { echo "ACR_REGISTRY 格式无效" >&2; exit 1; }
+          [[ "$ACR_NAMESPACE" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || { echo "ACR_NAMESPACE 格式无效" >&2; exit 1; }
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io \
+            --username "$GITHUB_ACTOR" \
+            --password-stdin
+          printf '%s' "$ACR_PASSWORD" | docker login "$ACR_REGISTRY" \
+            --username "$ACR_USERNAME" \
+            --password-stdin
+          for service in backend frontend admin; do
+            source_image="ghcr.io/1024xengineer/unispeaking-${service}:sha-${RELEASE_SHA}"
+            target_image="${ACR_REGISTRY}/${ACR_NAMESPACE}/unispeaking-${service}:sha-${RELEASE_SHA}"
+            echo "复制 ${service} 镜像到 ACR"
+            docker pull "$source_image"
+            docker tag "$source_image" "$target_image"
+            docker push "$target_image"
+          done
 
       - name: 上传部署配置包
         env:

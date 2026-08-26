@@ -1,6 +1,6 @@
 # UniSpeaking CD 部署说明
 
-本流程将应用部署从“服务器拉源码并构建”切换为“GitHub Actions 构建并推送私有 GHCR，服务器只拉取并运行镜像”。服务器不保存源码，不读取 GitHub 仓库，也不执行应用构建。
+本流程将应用部署从“服务器拉源码并构建”切换为“GitHub Actions 构建并推送私有 GHCR，在生产审批后复制到阿里云 ACR，服务器只从 ACR 拉取并运行镜像”。服务器不保存源码，不读取 GitHub 仓库，也不执行应用构建。
 
 ## 发布链路
 
@@ -12,18 +12,19 @@ PR CI
 → 构建 backend、frontend、admin
 → 推送 GHCR
 → production Environment 审批
+→ 将同一 SHA 的三个镜像复制到 ACR
 → production Environment 审批后上传非敏感 release 配置包
 → SSH 只传递 release SHA
 → 服务器 root-owned 固定入口校验配置包、pull + up -d
 → readiness、HTTP 和业务验收
 ```
 
-生产镜像使用以下地址：
+GHCR 保留构建产物和回滚来源，生产服务器从 ACR 拉取同一 SHA 的镜像。ACR 地址由 `production` Environment Variables 和服务器 root-owned `.env` 共同约束：
 
 ```text
-ghcr.io/1024xengineer/unispeaking-backend
-ghcr.io/1024xengineer/unispeaking-frontend
-ghcr.io/1024xengineer/unispeaking-admin
+<ACR_REGISTRY>/unispeaking/unispeaking-backend
+<ACR_REGISTRY>/unispeaking/unispeaking-frontend
+<ACR_REGISTRY>/unispeaking/unispeaking-admin
 ```
 
 每个镜像至少推送 `sha-<完整 commit SHA>` 和 `main` 两个标签。生产只能使用同一 commit 的 SHA 标签；`main` 只能作为快捷标签，不能作为回滚依据。
@@ -39,11 +40,20 @@ DEPLOY_USER
 DEPLOY_SSH_PRIVATE_KEY
 DEPLOY_KNOWN_HOSTS
 DEPLOY_CONFIG_SIGNING_KEY
+ACR_USERNAME
+ACR_PASSWORD
+```
+
+Environment Variables：
+
+```text
+ACR_REGISTRY
+ACR_NAMESPACE
 ```
 
 PR 和 Main CI 不读取生产 Secrets。前端公开构建变量只能放 Variables；数据库密码、JWT、供应商密钥、邮件密码、TURN shared secret 和管理员密码不得进入 `VITE_*`、Docker build args、镜像层或 Artifact。
 
-服务器使用专用 GHCR 只读凭据，至少具备 `read:packages`，不能用于推送镜像或修改源码。
+GitHub Actions 使用 ACR 推送凭据；服务器只保存 ACR 拉取凭据。个人版 ACR 不能细分权限时可以暂时使用固定凭据，升级企业版后应拆分为推送账号和只读拉取账号。
 
 ## 服务器 deploy 用户
 
@@ -57,10 +67,12 @@ install -o deploy -g deploy -m 600 /path/to/authorized_keys /home/deploy/.ssh/au
 
 `authorized_keys` 中只放本次 CD 使用的 ed25519 公钥，并加入 `restrict`（或至少 `no-agent-forwarding,no-port-forwarding,no-X11-forwarding`）选项。GitHub Environment Secret `DEPLOY_USER` 填 `deploy`，`DEPLOY_PORT` 填 SSH 端口；`DEPLOY_KNOWN_HOSTS` 使用管理员在可信网络中执行 `ssh-keyscan` 后人工核对的结果。
 
-服务器 root 还需要登录 GHCR。使用仅有 `read:packages` 的短期或专用 Token，凭据只写入 root 的 Docker 配置：
+服务器 root 需要登录 ACR，凭据只写入 root 的 Docker 配置：
 
 ```bash
-printf '%s' '<GHCR_READ_TOKEN>' | docker login ghcr.io --username '<GHCR_USER>' --password-stdin
+printf '%s' '<ACR_PASSWORD>' | docker login '<ACR_REGISTRY>' \
+  --username '<ACR_USERNAME>' \
+  --password-stdin
 ```
 
 不要把该 Token 写入仓库、`.env`、Actions 日志或镜像构建参数。确认 `/root/.docker/config.json` 权限为 `600`。
@@ -105,9 +117,16 @@ openssl pkey -in deploy-config-signing-private.pem -pubout \
 固定入口会先将上传包复制到 root-owned 临时文件，再使用该公钥验签，然后校验归档路径清单并解包到 `releases/<commit SHA>/`。签名校验失败、归档内容超出白名单或镜像 `pull` 失败时，不会执行该配置。仅在镜像 `pull` 成功后才切换 `current`。生产 `.env` 仅保存服务器运行配置，权限必须为 600，不由 Workflow 覆盖；TLS 证书、监控 Agent 和数据库 Volume 也不进入配置包。`.images` 由固定入口原子更新，保存三个应用镜像地址，三个地址必须来自同一 SHA：
 
 ```dotenv
-UNISPEAKING_BACKEND_IMAGE=ghcr.io/1024xengineer/unispeaking-backend:sha-<commit SHA>
-UNISPEAKING_FRONTEND_IMAGE=ghcr.io/1024xengineer/unispeaking-frontend:sha-<commit SHA>
-UNISPEAKING_ADMIN_IMAGE=ghcr.io/1024xengineer/unispeaking-admin:sha-<commit SHA>
+UNISPEAKING_BACKEND_IMAGE=<ACR_REGISTRY>/unispeaking/unispeaking-backend:sha-<commit SHA>
+UNISPEAKING_FRONTEND_IMAGE=<ACR_REGISTRY>/unispeaking/unispeaking-frontend:sha-<commit SHA>
+UNISPEAKING_ADMIN_IMAGE=<ACR_REGISTRY>/unispeaking/unispeaking-admin:sha-<commit SHA>
+```
+
+服务器 root-owned `/opt/unispeaking-cd/deploy/env/.env` 还必须包含：
+
+```dotenv
+DEPLOY_IMAGE_REGISTRY=<ACR_REGISTRY>
+DEPLOY_IMAGE_NAMESPACE=unispeaking
 ```
 
 生产 Compose 必须保持项目名 `deploy`，并使用现有 `deploy_postgres_data`。不得创建新数据库 Volume。monitoring 网络、OpenTelemetry Agent、证书和 Umami 不随应用镜像同步或删除。
@@ -140,7 +159,7 @@ deploy ALL=(root) NOPASSWD: /usr/local/sbin/unispeaking-deploy *
 3. 生成 PostgreSQL Custom Format 备份；
 4. 记录备份 SHA256，并用 `pg_restore --list` 验证；
 5. 将备份复制到独立磁盘、对象存储或其他服务器；
-6. 确认三个 GHCR SHA 镜像可拉取；
+6. 确认三个 ACR SHA 镜像可拉取；
 7. `docker compose config --quiet` 成功，且没有 `build`、新 Volume 或缺少 monitoring 网络。
 
 备份示例：
@@ -168,7 +187,7 @@ docker exec -i deploy-postgres-1 pg_restore --list < "$BACKUP_PATH" >/tmp/pre-cd
 → 首页和 Admin HTTP 检查
 ```
 
-失败时返回非零。GHCR 拉取失败或 Compose 校验失败时，不停止当前容器。部署后检查 PostgreSQL、Flyway、Nginx、监控、日志、首页、Admin、登录、WebSocket、FreeChat、IELTS、Interview、Custom Scene、评分、报告和对象存储。
+失败时返回非零。ACR 拉取失败或 Compose 校验失败时，不停止当前容器。部署后检查 PostgreSQL、Flyway、Nginx、监控、日志、首页、Admin、登录、WebSocket、FreeChat、IELTS、Interview、Custom Scene、评分、报告和对象存储。
 
 公网 `/backend/actuator/` 必须保持不可访问；TURN 保留为 profile，未完成 DNS、安全组和网络验收前不得启动。
 
