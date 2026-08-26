@@ -199,7 +199,25 @@ jobs:
           set -euo pipefail
           bash deploy/scripts/package-release-config.sh \
             "$RELEASE_SHA" \
-            "$RUNNER_TEMP/unispeaking-release-$RELEASE_SHA.tar.gz"
+            "$RUNNER_TEMP/release-$RELEASE_SHA.tar.gz"
+
+      - name: 签名部署配置包
+        env:
+          DEPLOY_CONFIG_SIGNING_KEY: ${{ secrets.DEPLOY_CONFIG_SIGNING_KEY }}
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          key_file="$RUNNER_TEMP/deploy-config-signing-key.pem"
+          archive="$RUNNER_TEMP/release-$RELEASE_SHA.tar.gz"
+          signature="$archive.sig"
+          trap 'rm -f "$key_file"' EXIT
+          printf '%s\n' "$DEPLOY_CONFIG_SIGNING_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          openssl dgst -sha256 -sign "$key_file" -out "$signature" "$archive"
+          test -s "$signature"
+          rm -f "$key_file"
+          trap - EXIT
 
       - name: 上传部署配置包
         env:
@@ -212,9 +230,9 @@ jobs:
         run: |
           set -euo pipefail
           scp=(scp -i "$SSH_DIR/id_ed25519" -P "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts")
-          archive="$RUNNER_TEMP/unispeaking-release-$RELEASE_SHA.tar.gz"
-          "${scp[@]}" "$archive" \
-            "$DEPLOY_USER@$DEPLOY_HOST:/opt/unispeaking-cd/incoming/release-$RELEASE_SHA.tar.gz"
+          archive="$RUNNER_TEMP/release-$RELEASE_SHA.tar.gz"
+          "${scp[@]}" "$archive" "$archive.sig" \
+            "$DEPLOY_USER@$DEPLOY_HOST:/opt/unispeaking-cd/incoming/"
 
       - name: 调用服务器固定部署入口
         env:

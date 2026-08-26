@@ -10,6 +10,7 @@ readonly ENV_FILE="$DEPLOY_DIR/env/.env"
 readonly INCOMING_DIR="$ROOT_DIR/incoming"
 readonly RELEASES_DIR="$ROOT_DIR/releases"
 readonly CURRENT_LINK="$ROOT_DIR/current"
+readonly CONFIG_SIGNING_PUBLIC_KEY="/etc/unispeaking/deploy-config-signing-public.pem"
 readonly PROJECT_NAME="deploy"
 readonly EXPECTED_VOLUME="deploy_postgres_data"
 readonly MONITORING_NETWORK_DEFAULT="monitoring_default"
@@ -30,22 +31,25 @@ command -v docker >/dev/null 2>&1 || fail "未找到 docker"
 command -v curl >/dev/null 2>&1 || fail "未找到 curl"
 command -v awk >/dev/null 2>&1 || fail "未找到 awk"
 command -v tar >/dev/null 2>&1 || fail "未找到 tar"
+command -v openssl >/dev/null 2>&1 || fail "未找到 openssl"
 
 [[ -f "$ENV_FILE" ]] || fail "生产环境文件不存在：$ENV_FILE"
 [[ "$(stat -c '%a' "$ENV_FILE")" == 600 ]] || fail ".env 权限必须为 600"
 [[ -f /etc/unispeaking/certs/fullchain.pem ]] || fail "TLS fullchain.pem 不存在"
 [[ -f /etc/unispeaking/certs/privkey.pem ]] || fail "TLS privkey.pem 不存在"
+[[ -f "$CONFIG_SIGNING_PUBLIC_KEY" ]] || fail "部署配置签名公钥不存在：$CONFIG_SIGNING_PUBLIC_KEY"
 [[ -d "$INCOMING_DIR" ]] || fail "配置上传目录不存在：$INCOMING_DIR"
 [[ -d "$RELEASES_DIR" ]] || fail "release 目录不存在：$RELEASES_DIR"
 
 readonly ARCHIVE_PATH="$INCOMING_DIR/release-$release_sha.tar.gz"
+readonly SIGNATURE_PATH="$ARCHIVE_PATH.sig"
 readonly RELEASE_DIR="$RELEASES_DIR/$release_sha"
 readonly COMPOSE_FILE="$RELEASE_DIR/deploy/docker-compose.prod.yml"
 readonly IMAGE_FILE="$RELEASE_DIR/.images"
 
 safe_archive_entry() {
   case "$1" in
-    deploy/|deploy/nginx/|deploy/coturn/|deploy/docker-compose.prod.yml|deploy/nginx/nginx.prod.conf|deploy/coturn/turnserver.conf)
+    .release-sha|deploy/|deploy/nginx/|deploy/coturn/|deploy/docker-compose.prod.yml|deploy/nginx/nginx.prod.conf|deploy/coturn/turnserver.conf)
       return 0
       ;;
     *)
@@ -56,14 +60,32 @@ safe_archive_entry() {
 
 if [[ ! -d "$RELEASE_DIR" ]]; then
   [[ -f "$ARCHIVE_PATH" ]] || fail "发布配置包不存在：$ARCHIVE_PATH"
+  [[ -f "$SIGNATURE_PATH" ]] || fail "配置包签名不存在：$SIGNATURE_PATH"
+
+  # Snapshot upload files into root-owned files before verification. The
+  # deploy user owns incoming/, so verifying the original path would allow a
+  # replacement between verification and extraction.
+  archive_tmp="$(mktemp "$ROOT_DIR/.release-archive.XXXXXX.tar.gz")"
+  signature_tmp="$(mktemp "$ROOT_DIR/.release-signature.XXXXXX")"
+  cleanup_upload_tmp() { rm -f "$archive_tmp" "$signature_tmp"; }
+  trap cleanup_upload_tmp EXIT
+  install -o root -g root -m 600 "$ARCHIVE_PATH" "$archive_tmp"
+  install -o root -g root -m 600 "$SIGNATURE_PATH" "$signature_tmp"
+  rm -f "$ARCHIVE_PATH" "$SIGNATURE_PATH"
+  openssl dgst -sha256 -verify "$CONFIG_SIGNING_PUBLIC_KEY" \
+    -signature "$signature_tmp" "$archive_tmp" >/dev/null 2>&1 \
+    || fail "配置包签名校验失败"
+
   while IFS= read -r entry; do
     safe_archive_entry "$entry" || fail "配置包包含未允许的路径：$entry"
-  done < <(tar -tzf "$ARCHIVE_PATH")
+  done < <(tar -tzf "$archive_tmp")
 
   release_tmp="$(mktemp -d "$RELEASES_DIR/.release-$release_sha.XXXXXX")"
-  cleanup_release_tmp() { rm -rf "$release_tmp"; }
+  cleanup_release_tmp() { rm -rf "$release_tmp"; cleanup_upload_tmp; }
   trap cleanup_release_tmp EXIT
-  tar -xzf "$ARCHIVE_PATH" -C "$release_tmp" --no-same-owner --no-same-permissions
+  tar -xzf "$archive_tmp" -C "$release_tmp" --no-same-owner --no-same-permissions
+  [[ -f "$release_tmp/.release-sha" ]] || fail "配置包缺少 release SHA"
+  [[ "$(cat "$release_tmp/.release-sha")" == "$release_sha" ]] || fail "配置包 release SHA 不匹配"
   [[ -f "$release_tmp/deploy/docker-compose.prod.yml" ]] || fail "配置包缺少 Compose 文件"
   [[ -f "$release_tmp/deploy/nginx/nginx.prod.conf" ]] || fail "配置包缺少 Nginx 配置"
   [[ -f "$release_tmp/deploy/coturn/turnserver.conf" ]] || fail "配置包缺少 TURN 配置"
@@ -72,7 +94,11 @@ if [[ ! -d "$RELEASE_DIR" ]]; then
   fi
   mv "$release_tmp" "$RELEASE_DIR"
   trap - EXIT
-  rm -f "$ARCHIVE_PATH"
+  cleanup_upload_tmp
+else
+  # A previously verified immutable release is authoritative. Discard any
+  # duplicate upload for the same SHA instead of inspecting or executing it.
+  rm -f "$ARCHIVE_PATH" "$SIGNATURE_PATH"
 fi
 
 [[ -f "$COMPOSE_FILE" ]] || fail "release Compose 文件不存在：$COMPOSE_FILE"

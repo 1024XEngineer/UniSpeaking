@@ -38,6 +38,7 @@ DEPLOY_PORT
 DEPLOY_USER
 DEPLOY_SSH_PRIVATE_KEY
 DEPLOY_KNOWN_HOSTS
+DEPLOY_CONFIG_SIGNING_KEY
 ```
 
 PR 和 Main CI 不读取生产 Secrets。前端公开构建变量只能放 Variables；数据库密码、JWT、供应商密钥、邮件密码、TURN shared secret 和管理员密码不得进入 `VITE_*`、Docker build args、镜像层或 Artifact。
@@ -77,7 +78,7 @@ printf '%s' '<GHCR_READ_TOKEN>' | docker login ghcr.io --username '<GHCR_USER>' 
 └── current -> releases/<commit SHA>  当前生效配置
 ```
 
-`deploy-release.sh` 必须由 root 预先安装为 `/usr/local/sbin/unispeaking-deploy`，所有者为 `root:root`，权限为 `0755`。生产 Workflow 不上传或覆盖它，也不上传 `.env`、证书或其他 Secret。Workflow 会将当前 commit 中的以下非敏感文件打包上传到 `incoming/`：
+`deploy-release.sh` 必须由 root 预先安装为 `/usr/local/sbin/unispeaking-deploy`，所有者为 `root:root`，权限为 `0755`。生产 Workflow 不上传或覆盖它，也不上传 `.env`、证书或其他 Secret。Workflow 会将当前 commit 中的以下非敏感文件打包上传到 `incoming/`，并使用 GitHub `production` Environment Secret `DEPLOY_CONFIG_SIGNING_KEY` 生成签名：
 
 ```text
 deploy/docker-compose.prod.yml
@@ -85,7 +86,23 @@ deploy/nginx/nginx.prod.conf
 deploy/coturn/turnserver.conf
 ```
 
-固定入口会校验归档路径清单，解包到 `releases/<commit SHA>/`，并仅在镜像 `pull` 成功后切换 `current`。生产 `.env` 仅保存服务器运行配置，权限必须为 600，不由 Workflow 覆盖；TLS 证书、监控 Agent 和数据库 Volume 也不进入配置包。`.images` 由固定入口原子更新，保存三个应用镜像地址，三个地址必须来自同一 SHA：
+在受信任的管理员工作站一次性生成 RSA 签名密钥。私钥完整内容保存为 GitHub `production` Environment Secret `DEPLOY_CONFIG_SIGNING_KEY`；公钥安装到服务器。两者都不得提交到仓库：
+
+```bash
+umask 077
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
+  -out deploy-config-signing-private.pem
+openssl pkey -in deploy-config-signing-private.pem -pubout \
+  -out deploy-config-signing-public.pem
+```
+
+服务器必须预先安装与该 Secret 对应的 root-owned 公钥：
+
+```text
+/etc/unispeaking/deploy-config-signing-public.pem
+```
+
+固定入口会先将上传包复制到 root-owned 临时文件，再使用该公钥验签，然后校验归档路径清单并解包到 `releases/<commit SHA>/`。签名校验失败、归档内容超出白名单或镜像 `pull` 失败时，不会执行该配置。仅在镜像 `pull` 成功后才切换 `current`。生产 `.env` 仅保存服务器运行配置，权限必须为 600，不由 Workflow 覆盖；TLS 证书、监控 Agent 和数据库 Volume 也不进入配置包。`.images` 由固定入口原子更新，保存三个应用镜像地址，三个地址必须来自同一 SHA：
 
 ```dotenv
 UNISPEAKING_BACKEND_IMAGE=ghcr.io/1024xengineer/unispeaking-backend:sha-<commit SHA>
@@ -99,6 +116,7 @@ deploy 用户只允许上传配置包到 `/opt/unispeaking-cd/incoming`，不允
 
 ```bash
 install -o root -g root -m 0755 deploy/scripts/deploy-release.sh /usr/local/sbin/unispeaking-deploy
+install -o root -g root -m 0644 deploy-config-signing-public.pem /etc/unispeaking/deploy-config-signing-public.pem
 install -d -o deploy -g deploy -m 0700 /opt/unispeaking-cd/incoming
 install -d -o root -g root -m 0755 /opt/unispeaking-cd/releases
 install -d -o root -g root -m 0755 /opt/unispeaking-cd/deploy/env

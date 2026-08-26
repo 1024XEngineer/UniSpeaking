@@ -13,6 +13,10 @@ output_path="$2"
 [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || fail "commit SHA 格式错误"
 command -v tar >/dev/null 2>&1 || fail "未找到 tar"
 
+staging_dir="$(mktemp -d)"
+cleanup() { rm -rf "$staging_dir"; }
+trap cleanup EXIT
+
 for path in \
   deploy/docker-compose.prod.yml \
   deploy/nginx/nginx.prod.conf \
@@ -23,6 +27,11 @@ do
 done
 
 mkdir -p "$(dirname -- "$output_path")"
+install -d "$staging_dir/deploy/nginx" "$staging_dir/deploy/coturn"
+install -m 0644 deploy/docker-compose.prod.yml "$staging_dir/deploy/docker-compose.prod.yml"
+install -m 0644 deploy/nginx/nginx.prod.conf "$staging_dir/deploy/nginx/nginx.prod.conf"
+install -m 0644 deploy/coturn/turnserver.conf "$staging_dir/deploy/coturn/turnserver.conf"
+printf '%s\n' "$release_sha" > "$staging_dir/.release-sha"
 tar \
   --create \
   --gzip \
@@ -32,6 +41,8 @@ tar \
   --owner=0 \
   --group=0 \
   --numeric-owner \
+  --directory "$staging_dir" \
+  .release-sha \
   deploy/docker-compose.prod.yml \
   deploy/nginx/nginx.prod.conf \
   deploy/coturn/turnserver.conf
