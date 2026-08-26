@@ -280,10 +280,11 @@ class IflytekScoringProviderTest {
 	@Test
 	void coversCredentialAndEndpointOverridesAndTimeoutResponsePaths() {
 		RecordingConnector endpointConnector = new RecordingConnector(FINAL_RESPONSE);
+		endpointConnector.connectFuture = new CompletableFuture<>();
 		IflytekScoringProvider endpointProvider = new IflytekScoringProvider(
 				new ObjectMapper(), endpointConnector, "app", "key", "secret",
 				URI.create("wss://cn-east-1.ws-api.xf-yun.com/v1/private/s8e098720"),
-				"en", "sent", Duration.ofMillis(1), 1_048_576, Duration.ZERO);
+				"en", "sent", Duration.ofMillis(10), 1_048_576, Duration.ZERO);
 		assertEquals("IFLYTEK_SUNTONE_TIMEOUT", assertThrows(
 				BusinessException.class,
 				() -> endpointProvider.evaluatePronunciation("hello", wav(16_000, 2), null)).code());
