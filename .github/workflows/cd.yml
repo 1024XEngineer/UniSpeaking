@@ -191,6 +191,31 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/ssh/id_ed25519"
           chmod 600 "$RUNNER_TEMP/ssh/id_ed25519" "$RUNNER_TEMP/ssh/known_hosts"
 
+      - name: 打包部署配置
+        env:
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash deploy/scripts/package-release-config.sh \
+            "$RELEASE_SHA" \
+            "$RUNNER_TEMP/unispeaking-release-$RELEASE_SHA.tar.gz"
+
+      - name: 上传部署配置包
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_DIR: ${{ runner.temp }}/ssh
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          scp=(scp -i "$SSH_DIR/id_ed25519" -P "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts")
+          archive="$RUNNER_TEMP/unispeaking-release-$RELEASE_SHA.tar.gz"
+          "${scp[@]}" "$archive" \
+            "$DEPLOY_USER@$DEPLOY_HOST:/opt/unispeaking-cd/incoming/release-$RELEASE_SHA.tar.gz"
+
       - name: 调用服务器固定部署入口
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}

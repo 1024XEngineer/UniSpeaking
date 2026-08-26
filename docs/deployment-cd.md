@@ -12,8 +12,9 @@ PR CI
 → 构建 backend、frontend、admin
 → 推送 GHCR
 → production Environment 审批
+→ production Environment 审批后上传非敏感 release 配置包
 → SSH 只传递 release SHA
-→ 服务器 root-owned 固定入口 pull + up -d
+→ 服务器 root-owned 固定入口校验配置包、pull + up -d
 → readiness、HTTP 和业务验收
 ```
 
@@ -69,17 +70,22 @@ printf '%s' '<GHCR_READ_TOKEN>' | docker login ghcr.io --username '<GHCR_USER>' 
 
 ```text
 /opt/unispeaking-cd/
-├── deploy/
-│   ├── docker-compose.prod.yml
-│   ├── nginx/nginx.prod.conf
-│   ├── coturn/turnserver.conf
-│   └── env/
-│       ├── .env
-│       └── .images
-└── scripts/deploy-release.sh  (安装后位于 /usr/local/sbin/unispeaking-deploy)
+├── incoming/                         GitHub Actions 上传的临时配置包
+├── releases/<commit SHA>/deploy/     对应 commit 的不可变配置
+├── deploy/env/.env                   服务器生产配置，不由 Workflow 覆盖
+├── releases/<commit SHA>/.images     对应发布的镜像地址
+└── current -> releases/<commit SHA>  当前生效配置
 ```
 
-`deploy-release.sh` 必须由 root 预先安装为 `/usr/local/sbin/unispeaking-deploy`，所有者为 `root:root`，权限为 `0755`。生产 Workflow 不上传或覆盖它，也不上传 Compose、Nginx、TURN 和 `.env`；这些配置只在服务器初始化或人工审核配置变更时安装。`.env` 仅保存生产运行配置，权限必须为 600，不由 Workflow 覆盖。`.images` 由固定入口原子更新，保存三个应用镜像地址，三个地址必须来自同一 SHA：
+`deploy-release.sh` 必须由 root 预先安装为 `/usr/local/sbin/unispeaking-deploy`，所有者为 `root:root`，权限为 `0755`。生产 Workflow 不上传或覆盖它，也不上传 `.env`、证书或其他 Secret。Workflow 会将当前 commit 中的以下非敏感文件打包上传到 `incoming/`：
+
+```text
+deploy/docker-compose.prod.yml
+deploy/nginx/nginx.prod.conf
+deploy/coturn/turnserver.conf
+```
+
+固定入口会校验归档路径清单，解包到 `releases/<commit SHA>/`，并仅在镜像 `pull` 成功后切换 `current`。生产 `.env` 仅保存服务器运行配置，权限必须为 600，不由 Workflow 覆盖；TLS 证书、监控 Agent 和数据库 Volume 也不进入配置包。`.images` 由固定入口原子更新，保存三个应用镜像地址，三个地址必须来自同一 SHA：
 
 ```dotenv
 UNISPEAKING_BACKEND_IMAGE=ghcr.io/1024xengineer/unispeaking-backend:sha-<commit SHA>
@@ -89,10 +95,11 @@ UNISPEAKING_ADMIN_IMAGE=ghcr.io/1024xengineer/unispeaking-admin:sha-<commit SHA>
 
 生产 Compose 必须保持项目名 `deploy`，并使用现有 `deploy_postgres_data`。不得创建新数据库 Volume。monitoring 网络、OpenTelemetry Agent、证书和 Umami 不随应用镜像同步或删除。
 
-deploy 用户只允许执行固定入口，不允许直接运行 Docker、修改 `/opt/unispeaking-cd` 或替换 root 脚本。服务器初始化时由 root 执行：
+deploy 用户只允许上传配置包到 `/opt/unispeaking-cd/incoming`，不允许直接运行 Docker、修改 release/current 配置或替换 root 脚本。服务器初始化时由 root 执行：
 
 ```bash
 install -o root -g root -m 0755 deploy/scripts/deploy-release.sh /usr/local/sbin/unispeaking-deploy
+install -d -o deploy -g deploy -m 0700 /opt/unispeaking-cd/incoming
 install -d -o root -g root -m 0755 /opt/unispeaking-cd/releases
 install -d -o root -g root -m 0755 /opt/unispeaking-cd/deploy/env
 chmod 600 /opt/unispeaking-cd/deploy/env/.env
@@ -122,7 +129,7 @@ deploy ALL=(root) NOPASSWD: /usr/local/sbin/unispeaking-deploy *
 
 ```bash
 BACKUP_PATH="/opt/backups/unispeaking/pre-cd/pre-cd-$(date -u +%Y%m%dT%H%M%SZ).dump"
-docker exec -T deploy-postgres-1 pg_dump -U unispeaking -d unispeaking -Fc > "$BACKUP_PATH"
+docker exec deploy-postgres-1 pg_dump -U unispeaking -d unispeaking -Fc > "$BACKUP_PATH"
 test -s "$BACKUP_PATH"
 sha256sum "$BACKUP_PATH"
 docker exec -i deploy-postgres-1 pg_restore --list < "$BACKUP_PATH" >/tmp/pre-cd.list
