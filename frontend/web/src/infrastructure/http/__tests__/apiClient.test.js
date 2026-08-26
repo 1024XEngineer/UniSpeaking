@@ -28,6 +28,13 @@ function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+async function expectAudioBlob(request) {
+  const result = await request;
+  expect(result.size).toBe(5);
+  expect(Object.prototype.toString.call(result)).toBe("[object Blob]");
+  await expect(new Response(result).text()).resolves.toBe("audio");
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   auth.get.mockReturnValue(auth.token);
@@ -148,9 +155,8 @@ describe("web API client request behavior", () => {
     await expect(api.completeCustomDialogue("scene", "session", "now")).resolves.toEqual({ completed: true });
     expect(fetch.mock.calls.at(-1)[1].signal).toBeInstanceOf(AbortSignal);
 
-    const audio = new Blob(["audio"]);
-    fetch.mockResolvedValueOnce(new Response(audio, { status: 200 }));
-    await expect(api.synthesizeSpeech("scene/a", "hello", "voice")).resolves.toBeInstanceOf(Blob);
+    fetch.mockResolvedValueOnce(new Response("audio", { status: 200 }));
+    await expectAudioBlob(api.synthesizeSpeech("scene/a", "hello", "voice"));
   });
 
   it("handles media auth expiry and speech error fallbacks", async () => {
@@ -199,12 +205,11 @@ describe("web API client request behavior", () => {
   });
 
   it("supports media requests, auth, multipart, speech errors, and async scene generation", async () => {
-    const blob = new Blob(["audio"]);
-    fetch.mockResolvedValueOnce(new Response(blob, { status: 200 }));
-    await expect(api.fetchAuthenticatedMedia("/media.wav")).resolves.toBeInstanceOf(Blob);
+    fetch.mockResolvedValueOnce(new Response("audio", { status: 200 }));
+    await expectAudioBlob(api.fetchAuthenticatedMedia("/media.wav"));
     expect(fetch).toHaveBeenCalledWith("/media.wav", { headers: { Authorization: "Bearer access-token" } });
-    fetch.mockResolvedValueOnce(new Response(blob, { status: 401 })).mockResolvedValueOnce(new Response(blob, { status: 200 }));
-    await expect(api.fetchAuthenticatedMedia("/media.wav")).resolves.toBeInstanceOf(Blob);
+    fetch.mockResolvedValueOnce(new Response("expired", { status: 401 })).mockResolvedValueOnce(new Response("audio", { status: 200 }));
+    await expectAudioBlob(api.fetchAuthenticatedMedia("/media.wav"));
     fetch.mockResolvedValueOnce(new Response("no", { status: 404 }));
     await expect(api.fetchAuthenticatedMedia("https://cdn.example/media.wav")).rejects.toThrow("录音加载失败（404）");
     fetch.mockResolvedValueOnce(new Response("bad", { status: 500 }));
