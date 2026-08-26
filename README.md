@@ -5,7 +5,9 @@
 
 移动端： [![移动端覆盖率](https://codecov.io/gh/1024XEngineer/UniSpeaking/branch/main/graph/badge.svg?flag=mobile)](https://codecov.io/gh/1024XEngineer/UniSpeaking)
 
-后端与移动端 Codecov 使用独立的 `backend`、`mobile` flag，分别统计后端 JaCoCo 合并测试和移动端 Jest 报告；覆盖率门禁按 Codecov 的 `hits / (hits + partials + misses)` 口径计算，两个 flag 均要求超过 90%。
+Web 前端： [![Web 覆盖率](https://codecov.io/gh/1024XEngineer/UniSpeaking/branch/main/graph/badge.svg?flag=web)](https://codecov.io/gh/1024XEngineer/UniSpeaking)
+
+后端、移动端与 Web 使用独立的 `backend`、`mobile`、`web` Codecov flag；覆盖率门禁按 Codecov 的 `hits / (hits + partials + misses)` 口径计算，后端与移动端要求至少 90%，Web 要求至少 85%。Web 使用 Vitest + V8 生成覆盖率报告。
 
 UniSpeaking 是一个面向英语口语训练的 AI 实时陪练系统。仓库包含 Spring Boot 后端、
 React Web 客户端、React Native 移动端、PostgreSQL 数据模型以及 Docker/Nginx 部署配置。
@@ -343,6 +345,19 @@ cd frontend/web
 npm run build
 npm run check:routes
 npm run check:realtime-events
+```
+
+Web 覆盖率检查：
+
+```bash
+cd frontend/web
+npm ci
+npm run test:checks
+npm run test:coverage
+python3 ../../scripts/check-codecov-coverage.py \
+  --format lcov \
+  --input coverage/lcov.info \
+  --minimum 85
 ```
 
 移动端检查：

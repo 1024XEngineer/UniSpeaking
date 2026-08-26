@@ -9,6 +9,11 @@ flags:
       - frontend/mobile/src/**
     carryforward: true
 
+  web:
+    paths:
+      - frontend/web/src/**
+    carryforward: true
+
 coverage:
   status:
     project:
@@ -23,5 +28,10 @@ coverage:
         threshold: 0%
         flags:
           - mobile
+      web:
+        target: 85%
+        threshold: 0%
+        flags:
+          - web
     patch:
       default: off
