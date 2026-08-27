@@ -1,0 +1,15 @@
+[Unit]
+Description=UniSpeaking source synchronization and deployment
+After=docker.service network-online.target
+Wants=docker.service network-online.target
+ConditionPathIsDirectory=/opt/unispeaking/.git
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/unispeaking
+ExecStart=/opt/unispeaking/deploy/scripts/sync-build-deploy.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=2h
+

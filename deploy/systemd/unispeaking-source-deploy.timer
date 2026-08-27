@@ -1,0 +1,12 @@
+[Unit]
+Description=Check UniSpeaking main for new source releases
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+Persistent=true
+Unit=unispeaking-source-deploy.service
+
+[Install]
+WantedBy=timers.target
+

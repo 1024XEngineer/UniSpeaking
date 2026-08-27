@@ -16,7 +16,16 @@ services:
     restart: unless-stopped
 
   backend:
-    image: ${UNISPEAKING_BACKEND_IMAGE:?UNISPEAKING_BACKEND_IMAGE is required}
+    image: deploy-backend:latest
+    build:
+      context: ../backend/unispeaking-server
+      args:
+        DOCKER_IMAGE_REGISTRY: ${DOCKER_IMAGE_REGISTRY:-docker.m.daocloud.io}
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-https://mirrors.aliyun.com/debian}
+        DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-https://mirrors.aliyun.com/debian-security}
+        MAVEN_REPO_URL: ${MAVEN_REPO_URL:-https://maven.aliyun.com/repository/public}
+        PYPI_INDEX_URL: ${PYPI_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        PADDLE_PDX_MODEL_SOURCE: ${PADDLE_PDX_MODEL_SOURCE:-bos}
     env_file:
       - path: ./env/.env
         required: false
@@ -54,13 +63,39 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ${UNISPEAKING_FRONTEND_IMAGE:?UNISPEAKING_FRONTEND_IMAGE is required}
+    image: deploy-frontend:latest
+    build:
+      context: ../frontend/web
+      args:
+        DOCKER_IMAGE_REGISTRY: ${DOCKER_IMAGE_REGISTRY:-docker.m.daocloud.io}
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-/backend}
+        VITE_OCR_ENABLED: ${VITE_OCR_ENABLED:-true}
+        VITE_AUTH_CAPTCHA_PROVIDER: ${VITE_AUTH_CAPTCHA_PROVIDER:-aliyun}
+        VITE_FEEDBACK_URL: ${VITE_FEEDBACK_URL:-}
+        VITE_ALIYUN_CAPTCHA_SCENE_ID: ${VITE_ALIYUN_CAPTCHA_SCENE_ID:-}
+        VITE_ALIYUN_CAPTCHA_PREFIX: ${VITE_ALIYUN_CAPTCHA_PREFIX:-}
+        VITE_ALIYUN_CAPTCHA_REGION: ${VITE_ALIYUN_CAPTCHA_REGION:-cn}
+        VITE_UMAMI_ENABLED: ${VITE_UMAMI_ENABLED:-false}
+        VITE_UMAMI_SCRIPT_URL: ${VITE_UMAMI_SCRIPT_URL:-https://cloud.umami.is/script.js}
+        VITE_UMAMI_WEBSITE_ID: ${VITE_UMAMI_WEBSITE_ID:-}
+        VITE_UMAMI_DOMAINS: ${VITE_UMAMI_DOMAINS:-}
+        VITE_REALTIME_ICE_TRANSPORT_POLICY: ${VITE_REALTIME_ICE_TRANSPORT_POLICY:-all}
+        VITE_REALTIME_TURN_ENABLED: ${VITE_REALTIME_TURN_ENABLED:-false}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_APP_RELEASE: ${VITE_APP_RELEASE:-web@production}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     expose:
       - "80"
     restart: unless-stopped
 
   admin:
-    image: ${UNISPEAKING_ADMIN_IMAGE:?UNISPEAKING_ADMIN_IMAGE is required}
+    image: deploy-admin:latest
+    build:
+      context: ../frontend/admin
+      args:
+        DOCKER_IMAGE_REGISTRY: ${DOCKER_IMAGE_REGISTRY:-docker.m.daocloud.io}
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-/backend}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     expose:
       - "80"
     restart: unless-stopped
