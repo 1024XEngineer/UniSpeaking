@@ -52,7 +52,7 @@ PostgreSQL 与 Redis 集成测试：
   -Pci-integration -DskipUnitTests verify
 ```
 
-合并两类测试的 JaCoCo 数据并执行 Codecov 覆盖行口径门禁。脚本将命中行和 partial 行都视为覆盖行：
+合并两类测试的 JaCoCo 数据并执行 Codecov 覆盖行口径门禁。脚本将命中行计入覆盖率，partial 行仅计入分母：
 
 ```bash
 ./mvnw --batch-mode --no-transfer-progress \
@@ -123,7 +123,7 @@ PR 不上传后端 JAR、前端 `dist` 或 Docker 镜像。用于在任务间合
 及 PostgreSQL、Redis 集成测试所执行的后端 Java 代码；它不是数据库表或 SQL 语句的
 覆盖率。后端、移动端和 Web 使用独立的 `backend`、`mobile`、`web` flag；本地门禁统一以
 `scripts/check-codecov-coverage.py` 的 Codecov 覆盖行口径计算，即
-`100 * (hits + partials) / (hits + partials + misses)`，后端至少 90%，移动端和 Web 至少
+`100 * hits / (hits + partials + misses)`，后端至少 90%，移动端和 Web 至少
 85%。Web 使用 Vitest + V8 生成 LCOV；普通 Jest/JaCoCo/LCOV 行覆盖率仅作为辅助报告，
 实际门禁以该脚本的 Codecov 口径为准。
 `coverage.yml` 上传的是 JaCoCo 聚合报告

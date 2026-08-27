@@ -59,7 +59,7 @@ end_of_record
 
             self.assertEqual(MODULE.read_jacoco(path), (1, 1, 1))
 
-    def test_main_uses_inclusive_codecov_coverage_for_the_threshold(self) -> None:
+    def test_main_excludes_partial_lines_from_covered_line_count(self) -> None:
         report = """\
 TN:
 SF:src/example.js
@@ -87,14 +87,32 @@ end_of_record
                     "--input",
                     str(path),
                     "--minimum",
-                    "66.66",
+                    "33.33",
                 ],
             ), redirect_stdout(stdout), redirect_stderr(stderr):
                 exit_code = MODULE.main()
 
             self.assertEqual(exit_code, 0)
-            self.assertEqual(json.loads(stdout.getvalue())["coverage"], 66.67)
+            self.assertEqual(json.loads(stdout.getvalue())["coverage"], 33.33)
             self.assertEqual(stderr.getvalue(), "")
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    str(SCRIPT_PATH),
+                    "--format",
+                    "lcov",
+                    "--input",
+                    str(path),
+                    "--minimum",
+                    "33.34",
+                ],
+            ), redirect_stdout(stdout := io.StringIO()), redirect_stderr(stderr := io.StringIO()):
+                exit_code = MODULE.main()
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("coverage 33.33% is below required 33.34%", stderr.getvalue())
 
 
 if __name__ == "__main__":
