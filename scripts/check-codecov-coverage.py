@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check coverage using Codecov's hit/partial/miss line model."""
+"""Check coverage using Codecov's covered-line model."""
 
 from __future__ import annotations
 
@@ -101,7 +101,8 @@ def main() -> int:
 
     hits, partials, misses = result
     total = hits + partials + misses
-    coverage = 100 * hits / total if total else 0
+    # Codecov treats both hit and partial lines as covered lines.
+    coverage = 100 * (hits + partials) / total if total else 0
     print(json.dumps({
         "hits": hits,
         "partials": partials,
