@@ -7,7 +7,7 @@
 
 Web 前端： [![Web 覆盖率](https://codecov.io/gh/1024XEngineer/UniSpeaking/branch/main/graph/badge.svg?flag=web)](https://codecov.io/gh/1024XEngineer/UniSpeaking)
 
-后端、移动端与 Web 使用独立的 `backend`、`mobile`、`web` Codecov flag；覆盖率门禁按 Codecov 的 `hits / (hits + partials + misses)` 口径计算，后端与移动端要求至少 90%，Web 要求至少 85%。Web 使用 Vitest + V8 生成覆盖率报告。
+后端、移动端与 Web 使用独立的 `backend`、`mobile`、`web` Codecov flag；覆盖率门禁按 Codecov 的覆盖行口径计算，即 `100 * hits / (hits + partials + misses)`，后端要求至少 90%，移动端和 Web 要求至少 85%。Web 使用 Vitest + V8 生成覆盖率报告。
 
 UniSpeaking 是一个面向英语口语训练的 AI 实时陪练系统。仓库包含 Spring Boot 后端、
 React Web 客户端、React Native 移动端、PostgreSQL 数据模型以及 Docker/Nginx 部署配置。

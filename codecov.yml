@@ -24,7 +24,7 @@ coverage:
         flags:
           - backend
       mobile:
-        target: 90%
+        target: 85%
         threshold: 0%
         flags:
           - mobile

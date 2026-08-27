@@ -101,6 +101,8 @@ def main() -> int:
 
     hits, partials, misses = result
     total = hits + partials + misses
+    # Codecov counts partial lines in the denominator, but not as fully hit
+    # lines in the numerator.
     coverage = 100 * hits / total if total else 0
     print(json.dumps({
         "hits": hits,

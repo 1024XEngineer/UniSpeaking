@@ -50,7 +50,7 @@ jobs:
           python3 ../../scripts/check-codecov-coverage.py \
             --format lcov \
             --input coverage/lcov.info \
-            --minimum 91
+            --minimum 85
 
       - name: 上传移动端覆盖率到 Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6.0.2

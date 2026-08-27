@@ -55,7 +55,7 @@ jobs:
           python3 ../../scripts/check-codecov-coverage.py \
             --format jacoco \
             --input target/site/jacoco-aggregate/jacoco.xml \
-            --minimum 91
+            --minimum 90
 
       - name: 上传 JaCoCo XML 到 Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6.0.2
