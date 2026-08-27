@@ -21,7 +21,7 @@ SPEC.loader.exec_module(MODULE)
 
 
 class CheckCodecovCoverageTest(unittest.TestCase):
-    def test_lcov_counts_partial_lines_as_covered(self) -> None:
+    def test_lcov_classifies_partially_covered_lines(self) -> None:
         report = """\
 TN:
 SF:src/example.js
@@ -39,7 +39,7 @@ end_of_record
 
             self.assertEqual(MODULE.read_lcov(path), (1, 1, 1))
 
-    def test_jacoco_counts_partial_lines_as_covered(self) -> None:
+    def test_jacoco_classifies_partially_covered_lines(self) -> None:
         report = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <report name="test">

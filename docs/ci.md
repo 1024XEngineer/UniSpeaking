@@ -12,7 +12,7 @@ CD 只同步 `deploy/docker-compose.prod.yml`、`deploy/nginx/nginx.prod.conf` �
 | 文件 | 职责 |
 | --- | --- |
 | `ci-pr.yml` | 在 PR 创建、重新打开、新提交和转为 Ready 时测试 GitHub merge commit |
-| `ci-core.yml` | 按变更范围运行后端、前端、Docker、Compose、Nginx 和依赖检查 |
+| `ci-core.yml` | 按变更范围运行覆盖率脚本回归、后端、前端、Docker、Compose、Nginx 和依赖检查 |
 | `ci-refresh.yml` | `main` 更新后查找全部开放 PR，并行发起重检 |
 | `ci-refresh-pr.yml` | 等待包含最新 `main` 的 merge SHA，跳过冲突或已变化的 PR |
 | `ci-status.yml` | 在可信上下文校验当前 base、head、merge SHA 后发布 `CI / required` |
@@ -29,7 +29,7 @@ CD 只同步 `deploy/docker-compose.prod.yml`、`deploy/nginx/nginx.prod.conf` �
 
 工作流文件本身发生变化时会强制运行全部检查。其他变更按路径执行：
 
-- 后端：编译、单元测试、打包、PostgreSQL/Redis 集成测试、Codecov 覆盖行口径 90% 门禁和镜像构建；
+- 后端：覆盖率脚本回归测试、编译、单元测试、打包、PostgreSQL/Redis 集成测试、Codecov 覆盖行口径 90% 门禁和镜像构建；
 - Web 前端：Node.js 22、`npm ci`、现有 Node 测试、Vitest 测试、LCOV 生成、Codecov 覆盖行口径 85% 门禁、路由与 Realtime 事件检查、生产构建和镜像构建；覆盖率检查在现有 `frontend` job 中执行，因此由 `required` 汇总任务阻断合并；
 - Admin：Admin 变更识别、Docker 镜像构建和静态服务检查；
 - 移动端：Node.js 22、`npm ci`、TypeScript 检查、Jest 报告与 Codecov 覆盖行口径 85% 门禁和 Expo Web 静态导出；

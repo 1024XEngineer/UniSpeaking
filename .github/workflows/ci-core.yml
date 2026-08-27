@@ -115,7 +115,7 @@ jobs:
               frontend/web/package.json|frontend/web/package-lock.json)
                 dependencies=true
                 ;;
-              codecov.yml|scripts/check-codecov-coverage.py)
+              codecov.yml|scripts/check-codecov-coverage.py|scripts/test_check_codecov_coverage.py)
                 backend=true
                 frontend=true
                 mobile=true
@@ -251,6 +251,21 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  coverage_script:
+    name: 覆盖率脚本回归测试
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 检出待测合并提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.merge_sha }}
+
+      - name: 运行覆盖率脚本测试
+        run: python3 scripts/test_check_codecov_coverage.py
+
   integration:
     name: PostgreSQL 与 Redis 集成测试
     needs: changes
@@ -307,6 +322,7 @@ jobs:
     needs:
       - changes
       - backend
+      - coverage_script
       - integration
     if: >-
       always() &&
@@ -731,6 +747,7 @@ jobs:
     needs:
       - changes
       - backend
+      - coverage_script
       - integration
       - coverage
       - frontend
@@ -753,6 +770,7 @@ jobs:
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           BACKEND_RESULT: ${{ needs.backend.result }}
+          COVERAGE_SCRIPT_RESULT: ${{ needs.coverage_script.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
           COVERAGE_RESULT: ${{ needs.coverage.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
@@ -798,6 +816,7 @@ jobs:
           }
 
           require_job backend "$BACKEND_RESULT" "$BACKEND_REQUIRED"
+          require_job coverage_script "$COVERAGE_SCRIPT_RESULT" "$BACKEND_REQUIRED"
           require_job integration "$INTEGRATION_RESULT" "$BACKEND_REQUIRED"
           require_job coverage "$COVERAGE_RESULT" "$BACKEND_REQUIRED"
           require_job frontend "$FRONTEND_RESULT" "$FRONTEND_REQUIRED"
