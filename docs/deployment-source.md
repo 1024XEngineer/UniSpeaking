@@ -2,6 +2,8 @@
 
 生产服务器使用单一工作区 `/opt/unispeaking`。服务器定时检查主仓库 `main`，发现新提交后同步源码，在服务器本地构建三个应用镜像，并使用 Docker Compose 启动应用服务。GitHub Actions 只负责 CI，不访问生产服务器，也不推送或拉取应用镜像。
 
+日常维护、故障排查和回滚速查见 [`source-deployment-maintenance.md`](source-deployment-maintenance.md)。
+
 本流程不会迁移或重建数据库。PostgreSQL 使用现有外部 Volume `deploy_postgres_data`，MinIO、证书、监控 Agent 等宿主机资源保持原路径。严禁执行 `docker compose down -v`、`docker volume prune` 或删除 `deploy_postgres_data`。
 
 ## 文件职责
