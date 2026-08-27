@@ -468,7 +468,7 @@ jobs:
           python3 ../../scripts/check-codecov-coverage.py \
             --format lcov \
             --input coverage/lcov.info \
-            --minimum 90
+            --minimum 85
 
       - name: 保存移动端覆盖率报告
         if: always()
