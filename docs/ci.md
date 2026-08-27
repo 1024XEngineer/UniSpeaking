@@ -29,10 +29,10 @@ CD 只同步 `deploy/docker-compose.prod.yml`、`deploy/nginx/nginx.prod.conf` �
 
 工作流文件本身发生变化时会强制运行全部检查。其他变更按路径执行：
 
-- 后端：编译、单元测试、打包、PostgreSQL/Redis 集成测试、Codecov partial-line 口径 91% 门禁和镜像构建；
-- Web 前端：Node.js 22、`npm ci`、现有 Node 测试、Vitest 测试、LCOV 生成、Codecov partial-line 口径 85% 门禁、路由与 Realtime 事件检查、生产构建和镜像构建；覆盖率检查在现有 `frontend` job 中执行，因此由 `required` 汇总任务阻断合并；
+- 后端：编译、单元测试、打包、PostgreSQL/Redis 集成测试、Codecov 覆盖行口径 90% 门禁和镜像构建；
+- Web 前端：Node.js 22、`npm ci`、现有 Node 测试、Vitest 测试、LCOV 生成、Codecov 覆盖行口径 85% 门禁、路由与 Realtime 事件检查、生产构建和镜像构建；覆盖率检查在现有 `frontend` job 中执行，因此由 `required` 汇总任务阻断合并；
 - Admin：Admin 变更识别、Docker 镜像构建和静态服务检查；
-- 移动端：Node.js 22、`npm ci`、TypeScript 检查、Jest 报告与 Codecov partial-line 口径 91% 门禁和 Expo Web 静态导出；
+- 移动端：Node.js 22、`npm ci`、TypeScript 检查、Jest 报告与 Codecov 覆盖行口径 85% 门禁和 Expo Web 静态导出；
 - Compose、环境模板或 Nginx：配置解析或 `nginx -t`；
 - Maven/npm 依赖文件：Dependency Review，High 和 Critical 阻止合并。
 
@@ -52,7 +52,7 @@ PostgreSQL 与 Redis 集成测试：
   -Pci-integration -DskipUnitTests verify
 ```
 
-合并两类测试的 JaCoCo 数据并执行 Codecov partial-line 口径门禁：
+合并两类测试的 JaCoCo 数据并执行 Codecov 覆盖行口径门禁。脚本将命中行和 partial 行都视为覆盖行：
 
 ```bash
 ./mvnw --batch-mode --no-transfer-progress \
@@ -64,7 +64,7 @@ PostgreSQL 与 Redis 集成测试：
 python3 ../../scripts/check-codecov-coverage.py \
   --format jacoco \
   --input target/site/jacoco-aggregate/jacoco.xml \
-  --minimum 91
+  --minimum 90
 ```
 
 集成测试使用 Testcontainers，需要本机 Docker 可用；测试结束后容器会自动清理。
@@ -102,7 +102,7 @@ npm run test:ci
 python3 ../../scripts/check-codecov-coverage.py \
   --format lcov \
   --input coverage/lcov.info \
-  --minimum 91
+  --minimum 85
 EXPO_OFFLINE=1 npx expo export --platform web
 ```
 
@@ -121,7 +121,11 @@ PR 不上传后端 JAR、前端 `dist` 或 Docker 镜像。用于在任务间合
 
 根目录 README 显示 `main` 分支的后端测试状态、后端 Codecov 覆盖率、移动端 Codecov 覆盖率和 Web Codecov 覆盖率。覆盖率合并单元测试
 及 PostgreSQL、Redis 集成测试所执行的后端 Java 代码；它不是数据库表或 SQL 语句的
-覆盖率。后端、移动端和 Web 使用独立的 `backend`、`mobile`、`web` flag；Web 本地门禁以 `scripts/check-codecov-coverage.py` 的 Codecov partial-line 口径要求至少 85%，后端与移动端保持现有本地门禁。Web 使用 Vitest + V8 生成 LCOV；普通 Jest/JaCoCo/LCOV 行覆盖率仅作为辅助报告，实际门禁以该脚本的 Codecov 口径为准。
+覆盖率。后端、移动端和 Web 使用独立的 `backend`、`mobile`、`web` flag；本地门禁统一以
+`scripts/check-codecov-coverage.py` 的 Codecov 覆盖行口径计算，即
+`100 * (hits + partials) / (hits + partials + misses)`，后端至少 90%，移动端和 Web 至少
+85%。Web 使用 Vitest + V8 生成 LCOV；普通 Jest/JaCoCo/LCOV 行覆盖率仅作为辅助报告，
+实际门禁以该脚本的 Codecov 口径为准。
 `coverage.yml` 上传的是 JaCoCo 聚合报告
 `backend/unispeaking-server/target/site/jacoco-aggregate/jacoco.xml`，同时使用
 `backend` flag 标记报告。上传通过 GitHub OIDC 鉴权，不需要配置 `CODECOV_TOKEN`。
