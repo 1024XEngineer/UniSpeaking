@@ -211,7 +211,10 @@ unispeaking:
       region: ${ALIYUN_SLS_REGION:cn-beijing}
       project: ${ALIYUN_SLS_PROJECT:}
       audit-logstore: ${ALIYUN_SLS_AUDIT_LOGSTORE:bailian-model-audit-log}
-      inference-logstore: ${ALIYUN_SLS_USAGE_LOGSTORE:${ALIYUN_SLS_INFERENCE_LOGSTORE:bailian-model-audit-log}}
+      inference-logstore: ${ALIYUN_SLS_INFERENCE_LOGSTORE:bailian-model-inference-log}
+      # Official billing fields such as status_code and usage are emitted by
+      # the audit logstore, not the request/response inference logstore.
+      usage-logstore: ${ALIYUN_SLS_USAGE_LOGSTORE:${ALIYUN_SLS_AUDIT_LOGSTORE:bailian-model-audit-log}}
       access-key-id: ${ALIYUN_SLS_ACCESS_KEY_ID:${ALIBABA_CLOUD_ACCESS_KEY_ID:}}
       access-key-secret: ${ALIYUN_SLS_ACCESS_KEY_SECRET:${ALIBABA_CLOUD_ACCESS_KEY_SECRET:}}
       workspace-id: ${ALIYUN_MODEL_WORKSPACE_ID:${BAILIAN_WORKSPACE_ID:}}

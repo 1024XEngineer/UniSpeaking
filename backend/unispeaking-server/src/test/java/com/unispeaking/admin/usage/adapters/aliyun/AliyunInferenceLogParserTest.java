@@ -118,6 +118,16 @@ class AliyunInferenceLogParserTest {
     }
 
     @Test
+    void unwrapsProviderPayloadWhenSlsWrapsItInMessage() {
+        String payload = validJson().replace("\n", " ").replace("\"", "\\\"");
+        var record = parser.parse("{\"message\":\"" + payload + "\"}");
+
+        assertThat(record.requestId()).isEqualTo("3131bedf-7956-91c3-90fe-27cbcb3dfbcf");
+        assertThat(record.protocol()).isEqualTo("ws");
+        assertThat(record.usage().totalTokens()).isEqualTo(13289);
+    }
+
+    @Test
     void parsesHttpLlmUsageWithoutTaskUuid() {
         var record = parser.parse("""
                 {

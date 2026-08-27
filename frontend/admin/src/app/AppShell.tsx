@@ -19,7 +19,7 @@ const navigation = [
     external: true,
   },
   { label: '运行监控', to: '/monitoring', icon: 'pulse' },
-  { label: '系统管理', to: '/system', icon: 'settings' },
+  { label: '模型供应商与费用', to: '/system', icon: 'settings' },
 ] as const
 
 const roleLabels: Record<AdminMe['role'], string> = {

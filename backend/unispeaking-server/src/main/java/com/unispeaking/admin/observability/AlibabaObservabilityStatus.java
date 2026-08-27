@@ -10,6 +10,7 @@ public final class AlibabaObservabilityStatus {
     private final String project;
     private final String auditLogstore;
     private final String inferenceLogstore;
+    private final String usageLogstore;
     private final boolean credentialsConfigured;
     private final boolean prometheusEnabled;
 
@@ -19,10 +20,11 @@ public final class AlibabaObservabilityStatus {
             @Value("${unispeaking.integrations.aliyun.project:}") String project,
             @Value("${unispeaking.integrations.aliyun.audit-logstore:bailian-model-audit-log}") String auditLogstore,
             @Value("${unispeaking.integrations.aliyun.inference-logstore:bailian-model-inference-log}") String inferenceLogstore,
+            @Value("${unispeaking.integrations.aliyun.usage-logstore:${unispeaking.integrations.aliyun.audit-logstore:bailian-model-audit-log}}") String usageLogstore,
             @Value("${unispeaking.integrations.aliyun.access-key-id:}") String accessKeyId,
             @Value("${unispeaking.integrations.aliyun.access-key-secret:}") String accessKeySecret,
             @Value("${unispeaking.integrations.aliyun.prometheus-enabled:false}") boolean prometheusEnabled) {
-        this(region, project, auditLogstore, inferenceLogstore,
+        this(region, project, auditLogstore, inferenceLogstore, usageLogstore,
                 !accessKeyId.isBlank() && !accessKeySecret.isBlank(), prometheusEnabled);
     }
 
@@ -33,10 +35,23 @@ public final class AlibabaObservabilityStatus {
             String inferenceLogstore,
             boolean credentialsConfigured,
             boolean prometheusEnabled) {
+        this(region, project, auditLogstore, inferenceLogstore, auditLogstore,
+                credentialsConfigured, prometheusEnabled);
+    }
+
+    public AlibabaObservabilityStatus(
+            String region,
+            String project,
+            String auditLogstore,
+            String inferenceLogstore,
+            String usageLogstore,
+            boolean credentialsConfigured,
+            boolean prometheusEnabled) {
         this.region = region;
         this.project = project;
         this.auditLogstore = auditLogstore;
         this.inferenceLogstore = inferenceLogstore;
+        this.usageLogstore = usageLogstore;
         this.credentialsConfigured = credentialsConfigured;
         this.prometheusEnabled = prometheusEnabled;
     }
@@ -45,6 +60,7 @@ public final class AlibabaObservabilityStatus {
     public String project() { return project; }
     public String auditLogstore() { return auditLogstore; }
     public String inferenceLogstore() { return inferenceLogstore; }
+    public String usageLogstore() { return usageLogstore; }
     public boolean credentialsConfigured() { return credentialsConfigured; }
     public boolean prometheusEnabled() { return prometheusEnabled; }
 }

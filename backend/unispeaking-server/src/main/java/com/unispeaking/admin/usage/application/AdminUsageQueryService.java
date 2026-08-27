@@ -108,7 +108,7 @@ public final class AdminUsageQueryService {
         }
         var slsState = missingSlsConfiguration.isEmpty() ? "READY" : "CONFIGURATION_REQUIRED";
         var project = configured(alibaba.project()) ? alibaba.project() : "未配置";
-        var slsLocation = alibaba.region() + " · " + project + " · " + alibaba.inferenceLogstore();
+        var slsLocation = alibaba.region() + " · " + project + " · " + alibaba.usageLogstore();
         var slsDetail = missingSlsConfiguration.isEmpty()
                 ? slsLocation
                 : String.join("、", missingSlsConfiguration) + " · " + slsLocation;

@@ -46,6 +46,7 @@ public final class JdbcOfficialUsageSink implements OfficialUsageSink {
         int unmatched = 0;
         for (OfficialUsageRecord record : records) {
             if (exists(record.requestId())) {
+                refreshPreviouslyEmptyUsage(record);
                 duplicates++;
             } else {
                 try {
@@ -62,6 +63,26 @@ public final class JdbcOfficialUsageSink implements OfficialUsageSink {
             else unmatched++;
         }
         return new ImportResult(imported, duplicates, matched, unmatched);
+    }
+
+    /**
+     * Older sync runs stored non-200 Realtime rows with zero token fields.
+     * Keep imports idempotent while allowing a later, richer SLS payload to
+     * repair those rows in place.
+     */
+    private void refreshPreviouslyEmptyUsage(OfficialUsageRecord record) {
+        var usage = record.usage();
+        if (usage.totalTokens() <= 0 && record.characters() <= 0) {
+            return;
+        }
+        jdbc.update(
+                "update official_usage_records set status_code = ?, model = ?, protocol = ?, "
+                        + "total_tokens = ?, input_tokens = ?, output_tokens = ?, input_text_tokens = ?, "
+                        + "input_audio_tokens = ?, output_text_tokens = ?, output_audio_tokens = ?, characters = ? "
+                        + "where request_id = ? and total_tokens = 0 and characters = 0",
+                record.statusCode(), record.model(), record.protocol(), usage.totalTokens(), usage.inputTokens(),
+                usage.outputTokens(), usage.inputTextTokens(), usage.inputAudioTokens(), usage.outputTextTokens(),
+                usage.outputAudioTokens(), record.characters(), record.requestId());
     }
 
     private void insert(OfficialUsageRecord record) {

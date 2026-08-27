@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getMonitoringOverview, grafanaDashboards, grafanaUrl } from './monitoringApi'
-import { formatDuration } from './monitoringFormat'
+import { formatDuration, formatMilliseconds, improvementRate } from './monitoringFormat'
 
 describe('monitoringApi', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -14,10 +14,19 @@ describe('monitoringApi', () => {
 
     await getMonitoringOverview()
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/admin/monitoring/overview', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/admin/monitoring/overview?range=24h', {
       credentials: 'include',
       cache: 'no-store',
     })
+  })
+
+  it('passes the selected trend range to the backend', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ summary: {} }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await getMonitoringOverview('7d')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/admin/monitoring/overview?range=7d', expect.any(Object))
   })
 
   it('uses the dashboard UIDs provisioned by production Grafana', () => {
@@ -40,5 +49,9 @@ describe('monitoringApi', () => {
     expect(formatDuration(0.7241)).toBe('724.1 ms')
     expect(formatDuration(15.032)).toBe('15.03 s')
     expect(formatDuration(60.2058)).toBe('60.21 s')
+    expect(formatMilliseconds(724.1)).toBe('724.1 ms')
+    expect(formatMilliseconds(null)).toBe('—')
+    expect(improvementRate(1000, 750)).toBe(25)
+    expect(improvementRate(0, 750)).toBeNull()
   })
 })

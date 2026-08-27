@@ -58,9 +58,14 @@ async function postJson<T>(path: string, headers: Record<string, string> = {}): 
     } catch {
       body = undefined
     }
+    const fallbackMessage = response.status === 401
+      ? '管理员登录已过期，请重新登录后再同步。'
+      : response.status === 403
+        ? '当前管理员无权执行 SLS 同步。'
+        : '同步服务暂时不可用'
     throw new GovernanceApiError(
-      body?.error?.code ?? 'NETWORK_RESPONSE_INVALID',
-      body?.error?.message ?? '同步服务暂时不可用',
+      body?.error?.code ?? `HTTP_${response.status}`,
+      body?.error?.message ?? fallbackMessage,
       body?.request_id,
     )
   }

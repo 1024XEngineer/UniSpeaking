@@ -26,12 +26,12 @@ import org.junit.jupiter.api.Test;
 
 class AliyunSlsUsageLogSourceTest {
     @Test
-    void readsInferenceLogsThroughRawShardCursorsWithoutIndexSearch() {
+    void readsOfficialUsageLogsThroughRawShardCursorsWithoutIndexSearch() {
         var client = new AliyunSlsUsageLogSource.RawLogClient() {
             @Override
             public List<Integer> listShardIds(String project, String logstore) {
                 assertThat(project).isEqualTo("test-project");
-                assertThat(logstore).isEqualTo("bailian-model-inference-log");
+                assertThat(logstore).isEqualTo("bailian-model-audit-log");
                 return List.of(0, 1);
             }
 
@@ -57,7 +57,7 @@ class AliyunSlsUsageLogSourceTest {
 
         var source = new AliyunSlsUsageLogSource(
                 "test-project",
-                "bailian-model-inference-log",
+                "bailian-model-audit-log",
                 100,
                 client);
 

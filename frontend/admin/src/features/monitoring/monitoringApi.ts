@@ -1,15 +1,19 @@
 import { buildAdminApiUrl } from '../auth/authApi'
 
-export interface MonitoringSummary { backendStatus: string; clientErrorRate: number; api5xxRate: number; apiP95Seconds: number; activeAlerts: number; affectedUsers: number; completedOptimizations: number; resolvedBugs7d: number; generatedAt: string }
-export interface MonitoringProblem { problem: string; platform: string; path: string; count: number; affectedUsers: number; lastSeen: string; status: string }
-export interface SlowEndpoint { method: string; path: string; calls: number; averageSeconds: number; p95Seconds: number; maxSeconds: number; slowCount: number }
+export type MonitoringRange = '1h' | '6h' | '24h' | '7d'
+export interface MonitoringSummary { backendStatus: string; apiErrorRate5m: number; api5xxCount24h: number; apiP95Milliseconds24h: number; activeAlerts: number; affectedUsers24h: number; generatedAt: string }
+export interface MonitoringComparison { previous: number; current: number }
+export interface MonitoringGovernance { pendingIssues: number; newBugs7d: number; resolvedBugs7d: number; bugFixRate: number; errorEvents: MonitoringComparison; apiP95Milliseconds: MonitoringComparison; affectedUsers: MonitoringComparison }
+export interface MonitoringProblem { problem: string; platform: string; path: string; count: number; errorRate: number | null; affectedUsers: number; lastSeen: string; status: string }
+export type PerformanceStatus = 'OPTIMIZED' | 'OBSERVING' | 'PENDING' | 'REGRESSED'
+export interface PerformanceEndpoint { method: string; path: string; previousPeriodP95Milliseconds: number | null; currentPeriodP95Milliseconds: number | null; improvementRate: number | null; status: PerformanceStatus }
 export interface MonitoringEvent { timestamp: string; userId: string; platform: string; page: string; errorType: string; errorMessage: string; apiPath: string; httpStatus: number | null; requestId: string }
 export interface PlatformSummary { platform: 'web' | 'mobile' | 'backend'; p95DurationMs: number; requestFailureRate: number; affectedUsers: number; errorCount: number }
-export interface MonitoringTrendPoint { timestamp: number; clientErrors: number; slowRequests: number; backendErrors: number }
-export interface MonitoringOverview { summary: MonitoringSummary; problems: MonitoringProblem[]; slowEndpoints: SlowEndpoint[]; recentEvents: MonitoringEvent[]; platformSummaries: PlatformSummary[]; trend: MonitoringTrendPoint[] }
+export interface MonitoringTrendPoint { timestamp: number; clientErrors: number | null; backendErrors: number | null; slowRequests: number | null }
+export interface MonitoringOverview { summary: MonitoringSummary; governance: MonitoringGovernance; problems: MonitoringProblem[]; performanceEndpoints: PerformanceEndpoint[]; recentEvents: MonitoringEvent[]; platformSummaries: PlatformSummary[]; trend: MonitoringTrendPoint[] }
 
-export async function getMonitoringOverview(): Promise<MonitoringOverview> {
-  const response = await fetch(buildAdminApiUrl('/api/admin/monitoring/overview'), {
+export async function getMonitoringOverview(range: MonitoringRange = '24h'): Promise<MonitoringOverview> {
+  const response = await fetch(buildAdminApiUrl(`/api/admin/monitoring/overview?range=${range}`), {
     credentials: 'include',
     cache: 'no-store',
   })

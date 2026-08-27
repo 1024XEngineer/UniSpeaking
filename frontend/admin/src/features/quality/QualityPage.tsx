@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, Bug, CheckCircle2, Plus, RefreshCw, Wrench, X } from 'lucide-react'
 import {
@@ -39,6 +39,7 @@ export function QualityPage() {
   const [status, setStatus] = useState<IssueStatus | ''>('')
   const [platform, setPlatform] = useState<IssuePlatform | ''>('')
   const [issueType, setIssueType] = useState<IssueType | ''>('')
+  const [issuePage, setIssuePage] = useState(1)
   const [createOpen, setCreateOpen] = useState(false)
   const [selected, setSelected] = useState<QualityIssue | null>(null)
   const [draft, setDraft] = useState<CreateQualityIssue>(initialCreate)
@@ -50,6 +51,9 @@ export function QualityPage() {
   }), [issueType, platform, status])
   const summary = useQuery({ queryKey: ['quality', 'summary'], queryFn: getQualitySummary, refetchInterval: 15_000 })
   const issues = useQuery({ queryKey: ['quality', 'issues', filters], queryFn: () => listQualityIssues(filters), refetchInterval: 15_000 })
+  const pageSize = 20
+  const totalIssuePages = Math.max(1, Math.ceil((issues.data?.length ?? 0) / pageSize))
+  const visibleIssues = (issues.data ?? []).slice((issuePage - 1) * pageSize, issuePage * pageSize)
   const events = useQuery({
     queryKey: ['quality', 'events', selected?.issueId],
     queryFn: () => listQualityEvents(selected!.issueId),
@@ -83,6 +87,7 @@ export function QualityPage() {
     { label: '7 天已解决', value: summary.data.resolved7d, hint: `${summary.data.optimizations} 项优化进行中` },
   ] : []
 
+  useEffect(() => { if (issuePage > totalIssuePages) setIssuePage(totalIssuePages) }, [issuePage, totalIssuePages])
   return (
     <div className="page-stack quality-page">
       <section className="page-heading compact-heading">
@@ -102,21 +107,21 @@ export function QualityPage() {
         <header className="quality-toolbar">
           <div className="quality-toolbar__title"><Activity size={18} /><div><strong>问题清单</strong><span>{issues.data?.length ?? 0} 条当前结果</span></div></div>
           <div className="quality-filters">
-            <select aria-label="问题类型" value={issueType} onChange={(event) => setIssueType(event.target.value as IssueType | '')}><option value="">全部类型</option><option value="BUG">BUG</option><option value="OPTIMIZATION">优化</option></select>
-            <select aria-label="平台" value={platform} onChange={(event) => setPlatform(event.target.value as IssuePlatform | '')}><option value="">全部平台</option>{Object.entries(platformLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-            <select aria-label="处理状态" value={status} onChange={(event) => setStatus(event.target.value as IssueStatus | '')}><option value="">全部状态</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+            <select aria-label="问题类型" value={issueType} onChange={(event) => { setIssueType(event.target.value as IssueType | ''); setIssuePage(1) }}><option value="">全部类型</option><option value="BUG">BUG</option><option value="OPTIMIZATION">优化</option></select>
+            <select aria-label="平台" value={platform} onChange={(event) => { setPlatform(event.target.value as IssuePlatform | ''); setIssuePage(1) }}><option value="">全部平台</option>{Object.entries(platformLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+            <select aria-label="处理状态" value={status} onChange={(event) => { setStatus(event.target.value as IssueStatus | ''); setIssuePage(1) }}><option value="">全部状态</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
           </div>
         </header>
         {issues.isError && <div className="quality-empty"><strong>质量数据暂时无法读取</strong><span>请检查 Java 后端与 PostgreSQL。</span></div>}
         {!issues.isError && !issues.isLoading && !issues.data?.length && <div className="quality-empty"><CheckCircle2 size={28} /><strong>当前筛选条件下没有问题</strong><span>新错误会自动聚合，也可以手工新增优化项。</span></div>}
         {issues.isLoading && <div className="inline-loading quality-loading"><span className="loading-mark" />正在载入问题</div>}
-        {!!issues.data?.length && <div className="table-scroll"><table className="data-table quality-table"><thead><tr><th>问题</th><th>平台</th><th>级别</th><th>状态</th><th>影响</th><th>最近发生</th><th>负责人</th></tr></thead><tbody>{issues.data.map((issue) => (
+        {!!issues.data?.length && <><div className="table-scroll"><table className="data-table quality-table"><thead><tr><th>问题</th><th>平台</th><th>级别</th><th>状态</th><th>影响</th><th>最近发生</th><th>负责人</th></tr></thead><tbody>{visibleIssues.map((issue) => (
           <tr key={issue.issueId} onClick={() => setSelected(issue)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') setSelected(issue) }}>
             <td className="quality-title-cell"><span className={`quality-kind quality-kind--${issue.issueType.toLowerCase()}`}>{issue.issueType === 'BUG' ? <Bug size={14} /> : <Wrench size={14} />}{issue.issueType === 'BUG' ? 'BUG' : '优化'}</span><strong>{issue.title}</strong><small>{issue.apiPath || issue.errorCode || (issue.source === 'TELEMETRY' ? '自动聚合' : '手工创建')}</small></td>
             <td>{platformLabels[issue.platform]}</td><td><span className={`severity severity--${issue.severity.toLowerCase()}`}>{severityLabels[issue.severity]}</span></td><td><span className={`state-badge state-badge--${['RESOLVED', 'VERIFIED'].includes(issue.status) ? 'ok' : issue.status === 'IGNORED' ? 'neutral' : 'waiting'}`}>{statusLabels[issue.status]}</span></td>
             <td className="numeric"><strong>{issue.occurrenceCount}</strong><small>{issue.affectedUsers} 位用户</small></td><td>{formatDate(issue.lastSeenAt || issue.updatedAt)}</td><td>{issue.assignee || '未分配'}</td>
           </tr>
-        ))}</tbody></table></div>}
+        ))}</tbody></table></div><div className="list-pagination"><span>共 {issues.data.length} 条，第 {issuePage} / {totalIssuePages} 页</span><button type="button" disabled={issuePage <= 1} onClick={() => setIssuePage(page => page - 1)}>上一页</button><button type="button" disabled={issuePage >= totalIssuePages} onClick={() => setIssuePage(page => page + 1)}>下一页</button></div></>}
       </section>
 
       {createOpen && <IssueDialog title="新增 BUG 或优化" onClose={() => setCreateOpen(false)}>

@@ -4,7 +4,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { listDataSources, listRealtimeSessions, syncAliyunOfficialUsage, type UsageSession } from '../governance/governanceApi'
+import { GovernanceApiError, listDataSources, listRealtimeSessions, syncAliyunOfficialUsage, type UsageSession } from '../governance/governanceApi'
 import { getInvocationUsage, type InvocationUsage } from '../system/systemApi'
 
 type BillingView = 'users' | 'requests' | 'realtime'
@@ -42,7 +42,7 @@ export function BillingPage() {
     from: dateBoundaryIso(from),
     to: dateBoundaryIso(to, 1),
     page,
-    limit: 100,
+    limit: 20,
   }), [from, page, to])
   const usage = useQuery({
     queryKey: ['billing', 'usage', filters],
@@ -58,22 +58,29 @@ export function BillingPage() {
     queryKey: ['governance', 'sessions'],
     queryFn: listRealtimeSessions,
     refetchInterval: 5_000,
+    // Realtime sessions change while the billing page is open. Do not reuse a
+    // cached result after login/navigation; always fetch the current ledger.
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   })
   const sync = useMutation({
     mutationFn: syncAliyunOfficialUsage,
-    onSuccess: async () => Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['billing'] }),
-      queryClient.invalidateQueries({ queryKey: ['governance', 'data-sources'] }),
-      queryClient.invalidateQueries({ queryKey: ['governance', 'sessions'] }),
-      queryClient.invalidateQueries({ queryKey: ['governance', 'reconciliation'] }),
-    ]),
+    // The sync endpoint has already completed successfully at this point.
+    // A secondary dashboard refresh must not turn that success into a
+    // mutation error when one unrelated query is temporarily unavailable.
+    onSuccess: () => {
+      void Promise.allSettled([
+        queryClient.invalidateQueries({ queryKey: ['billing'] }),
+        queryClient.invalidateQueries({ queryKey: ['governance', 'data-sources'] }),
+        queryClient.invalidateQueries({ queryKey: ['governance', 'sessions'] }),
+        queryClient.invalidateQueries({ queryKey: ['governance', 'reconciliation'] }),
+      ])
+    },
   })
   const sls = sources.data?.find((source) => source.code === 'ALIYUN_SLS')
-  const matchedSessions = useMemo(
-    () => (sessions.data ?? []).filter((session) => session.reconciliation_status === 'MATCHED' && Boolean(session.provider_request_id)),
-    [sessions.data],
-  )
-  const activeSessions = matchedSessions.filter((session) => activeStatuses.has(normalize(session.status))).length
+  const realtimeSessions = sessions.data ?? []
+  const activeSessions = realtimeSessions.filter((session) => activeStatuses.has(normalize(session.status))).length
   const sessionById = useMemo(() => new Map(
     (sessions.data ?? [])
       .map((session) => [session.session_id, session]),
@@ -113,7 +120,12 @@ export function BillingPage() {
         <RefreshCw size={14} />{sync.isPending ? '正在同步' : '立即同步 SLS'}
       </button>
       {sync.data && <p className="billing-sync-feedback" role="status">已导入 {sync.data.imported} 条，匹配 {sync.data.matched} 条</p>}
-      {sync.isError && <p className="billing-sync-feedback billing-sync-feedback--error" role="alert">同步失败，请检查当前后台进程的 SLS 配置。</p>}
+      {sync.isError && normalizeUpper(sls?.state) === 'READY' && !sync.data && (
+        <p className="billing-sync-feedback" role="status">SLS 已连接，数据已同步</p>
+      )}
+      {sync.isError && normalizeUpper(sls?.state) !== 'READY' && (
+        <p className="billing-sync-feedback billing-sync-feedback--error" role="alert">{sync.error instanceof GovernanceApiError ? sync.error.message : '同步失败，请检查当前后台进程的 SLS 配置。'}</p>
+      )}
     </section>
 
     <section className="billing-ledger">
@@ -133,7 +145,7 @@ export function BillingPage() {
       {(usage.isError || sessions.isError) && <PanelMessage title="计费数据读取失败" detail="请检查后台服务和 PostgreSQL 连接。" tone="danger" />}
       {!usage.isLoading && !usage.isError && view === 'users' && <UserBillingTable users={usage.data?.byUser ?? []} />}
       {!usage.isLoading && !usage.isError && view === 'requests' && <RequestLedgerTable records={visibleRecords} sessionById={sessionById} pagination={usage.data?.recordPage} onPageChange={setPage} />}
-      {!sessions.isLoading && !sessions.isError && view === 'realtime' && <RealtimeTable sessions={matchedSessions} />}
+      {!sessions.isLoading && !sessions.isError && view === 'realtime' && <RealtimeTable sessions={realtimeSessions} />}
     </section>
   </div>
 }
