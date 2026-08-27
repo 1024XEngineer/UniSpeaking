@@ -43,18 +43,18 @@ test "$(stat -c '%a' /opt/unispeaking/deploy/env/.env)" = 600
 
 ## 同步工作区
 
-以下操作会让跟踪文件严格匹配远程 `main`，并删除工作区内未跟踪的临时文件；服务器私有 `.env` 和 `runtime-logs/` 会保留：
+以下操作会让跟踪文件严格匹配远程 `main`，并删除工作区内未跟踪的临时文件；服务器私有 `.env`、`backups/` 和 `runtime-logs/` 会保留：
 
 ```bash
 cd /opt/unispeaking
 git remote set-url origin https://github.com/1024XEngineer/UniSpeaking.git
 git fetch --prune origin main
 git reset --hard origin/main
-git clean -fd -e deploy/env/ -e runtime-logs/ -e .source-deploy-state
+git clean -fd -e deploy/env/ -e backups/ -e runtime-logs/ -e .source-deploy-state
 git status --short
 ```
 
-`git status --short` 只能显示服务器保留的 `deploy/env/` 或 `runtime-logs/` 内容；若出现其他修改，应停止并人工确认。
+`git status --short` 只能显示服务器保留的 `deploy/env/`、`backups/` 或 `runtime-logs/` 内容；若出现其他修改，应停止并人工确认。
 
 ## 安装定时部署
 
@@ -142,7 +142,7 @@ git log --oneline -10
 
 ```bash
 git reset --hard <GOOD_SHA>
-git clean -fd -e deploy/env/ -e runtime-logs/ -e .source-deploy-state
+git clean -fd -e deploy/env/ -e backups/ -e runtime-logs/ -e .source-deploy-state
 systemctl start unispeaking-source-deploy.service
 journalctl -u unispeaking-source-deploy.service -n 200 --no-pager
 ```
