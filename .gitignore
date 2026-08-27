@@ -53,6 +53,8 @@ dist/
 ### Runtime logs ###
 logs/
 data/
+runtime-logs/
+.source-deploy-state
 
 ### Architecture design working files (not committed) ###
 docs/arch-design/

@@ -135,9 +135,6 @@ jobs:
               deploy/scripts/*)
                 scripts=true
                 ;;
-              deploy/docker-compose.verify.yml|deploy/env/.env.verify.example)
-                compose=true
-                ;;
             esac
           done < "$RUNNER_TEMP/changed-files"
 
@@ -615,7 +612,6 @@ jobs:
       - name: 准备 CI 环境模板
         run: |
           cp deploy/env/.env.example deploy/env/.env
-          cp deploy/env/.env.verify.example deploy/env/.env.verify
 
       - name: 准备镜像版本模板
         run: |
@@ -641,15 +637,6 @@ jobs:
           --env-file "$RUNNER_TEMP/images.env"
           --project-name deploy
           --file deploy/docker-compose.prod.yml
-          config --quiet
-
-      - name: 校验 CD 验证 Compose
-        run: >-
-          docker compose
-          --env-file deploy/env/.env.verify
-          --env-file "$RUNNER_TEMP/images.env"
-          --project-name unispeaking-cd-verify
-          --file deploy/docker-compose.verify.yml
           config --quiet
 
   nginx:
