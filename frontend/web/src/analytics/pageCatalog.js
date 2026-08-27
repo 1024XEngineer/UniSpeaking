@@ -19,7 +19,10 @@ export function normalizeTrackedPath(pathname = '/') {
   if (/^\/conversation\/[^/]+$/.test(path)) return '/conversation/session'
   if (/^\/scenes\/[^/]+\/session\/[^/]+\/result$/.test(path)) return '/scenes/session/result'
   if (/^\/scenes\/[^/]+\/session\/[^/]+$/.test(path)) return '/scenes/session'
-  if (/^\/scenes\/[^/]+\/(word|phrase|sentence|assets)$/.test(path)) return `/scenes/${path.split('/').at(-1)}`
+  if (/^\/scenes\/[^/]+\/(word|phrase|sentence|assets)$/.test(path)) {
+    const segments = path.split('/')
+    return `/scenes/${segments[segments.length - 1]}`
+  }
   if (/^\/interview\/scenes\/[^/]+\/session\/[^/]+\/report$/.test(path)) return '/interview/session/report'
   if (/^\/interview\/scenes\/[^/]+\/session$/.test(path)) return '/interview/session'
   if (/^\/ielts\/(part1|part2|part3)\/[^/]+\/(setup|session|analysis|report)$/.test(path)) {

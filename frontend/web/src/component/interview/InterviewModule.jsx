@@ -1116,7 +1116,7 @@ function InterviewAssetsTrends({ items, reportsByScene, reportsLoading }) {
     .slice(0, 5)
     .reverse();
   const scores = scoredItems.map((item) => Math.round(Number(item.latestOverallScore)));
-  const latestScore = scores.at(-1);
+  const latestScore = scores[scores.length - 1];
   const change = scores.length >= 2 ? latestScore - scores[0] : null;
   const reports = Object.values(reportsByScene).map((item) => item?.report).filter(Boolean);
   const dimensions = Object.entries(reportDimensionMeta).map(([dimension, meta]) => {

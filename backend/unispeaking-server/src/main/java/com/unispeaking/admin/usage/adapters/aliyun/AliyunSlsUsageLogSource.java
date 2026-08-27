@@ -26,7 +26,7 @@ public final class AliyunSlsUsageLogSource implements OfficialUsageLogSource {
     public AliyunSlsUsageLogSource(
             @Value("${unispeaking.integrations.aliyun.region:cn-beijing}") String region,
             @Value("${unispeaking.integrations.aliyun.project:}") String project,
-            @Value("${unispeaking.integrations.aliyun.inference-logstore:bailian-model-inference-log}") String logstore,
+            @Value("${unispeaking.integrations.aliyun.usage-logstore:bailian-model-audit-log}") String logstore,
             @Value("${unispeaking.integrations.aliyun.access-key-id:}") String accessKeyId,
             @Value("${unispeaking.integrations.aliyun.access-key-secret:}") String accessKeySecret,
             @Value("${unispeaking.integrations.aliyun.max-query-records:1000}") int maxRecords) {

@@ -18,7 +18,7 @@ describe('AppShell', () => {
       </MemoryRouter>,
     )
 
-    const labels = ['总览', '用户与权益', '用量与计费', 'BUG 与优化', '用户追踪', '系统管理']
+    const labels = ['总览', '用户与权益', '用量与计费', 'BUG 与优化', '用户追踪', '模型供应商与费用']
     for (const label of labels) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }

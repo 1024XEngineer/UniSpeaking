@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { flushTelemetry, recordTelemetry } from "../src/telemetry/clientTelemetry.js";
+import { flushTelemetry, isOptionalTelemetryResource, recordTelemetry } from "../src/telemetry/clientTelemetry.js";
 import { summarizeRtcStats } from "../src/telemetry/rtcTelemetry.js";
 
 test("client telemetry works when a test window has no location", async () => {
@@ -58,4 +59,35 @@ test("RTC telemetry calculates interval loss and TURN usage", () => {
   assert.equal(result.attributes.jitter_ms, 10);
   assert.equal(result.attributes.turn_used, true);
   assert.equal(result.attributes.packet_loss_pct, 5);
+});
+
+test("optional analytics failures are distinguishable from application resources", () => {
+  assert.equal(isOptionalTelemetryResource({ hasAttribute: (name) => name === "data-umami-tracker" }), true);
+  assert.equal(isOptionalTelemetryResource({ hasAttribute: () => false }), false);
+});
+
+test("web root prevents automatic translation from mutating React-owned DOM", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(html, /<html[^>]*translate="no"[^>]*class="notranslate"/);
+  assert.match(html, /<div id="root"[^>]*class="notranslate"[^>]*translate="no"/);
+});
+
+test("production web sources avoid Array.at for legacy browser compatibility", async () => {
+  const sourceFiles = [
+    "../src/telemetry/clientTelemetry.js",
+    "../src/analytics/pageCatalog.js",
+    "../src/component/ielts/IeltsModule.jsx",
+    "../src/component/interview/InterviewModule.jsx",
+  ];
+  for (const sourceFile of sourceFiles) {
+    const source = await readFile(new URL(sourceFile, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /\.at\s*\(/, `${sourceFile} must not require Array.prototype.at`);
+  }
+});
+
+test("web nginx serves teacher previews with registered audio MIME types", async () => {
+  const nginx = await readFile(new URL("../nginx.conf", import.meta.url), "utf8");
+  assert.match(nginx, /include \/etc\/nginx\/mime\.types;/);
+  assert.match(nginx, /audio\/wav\s+wav;/);
+  assert.match(nginx, /wav\|mp3\|m4a\|aac\|ogg/);
 });

@@ -64,7 +64,7 @@ class AdminUsageQueryServiceTest {
         assertThat(sls.state()).isEqualTo("CONFIGURATION_REQUIRED");
         assertThat(sls.detail()).contains("缺少 SLS Project");
         assertThat(sls.detail()).doesNotContain("缺少 RAM AccessKey");
-        assertThat(sls.detail()).contains("bailian-model-inference-log");
+        assertThat(sls.detail()).contains("audit");
     }
 
     @Test
@@ -122,7 +122,7 @@ class AdminUsageQueryServiceTest {
         assertThat(dataSources.get(0).state()).isEqualTo("ONLINE");
         assertThat(dataSources.get(0).detail()).contains("当前 1 个账户");
         assertThat(dataSources.get(1).state()).isEqualTo("READY");
-        assertThat(dataSources.get(1).detail()).isEqualTo("cn-beijing · project · bailian-model-inference-log");
+        assertThat(dataSources.get(1).detail()).isEqualTo("cn-beijing · project · audit");
         assertThat(dataSources.get(2).state()).isEqualTo("ENABLED");
     }
 
@@ -138,7 +138,7 @@ class AdminUsageQueryServiceTest {
         assertThat(dataSources.get(0).detail()).isEqualTo("数据库不可用");
         assertThat(dataSources.get(1).state()).isEqualTo("CONFIGURATION_REQUIRED");
         assertThat(dataSources.get(1).detail())
-                .startsWith("缺少 RAM AccessKey、缺少 SLS Project · cn-beijing · 未配置 · bailian-model-inference-log");
+                .startsWith("缺少 RAM AccessKey、缺少 SLS Project · cn-beijing · 未配置 · audit");
         assertThat(dataSources.get(2).state()).isEqualTo("DISABLED");
     }
 
@@ -148,7 +148,7 @@ class AdminUsageQueryServiceTest {
         assertSls(alibaba(false, "project"), "CONFIGURATION_REQUIRED", "缺少 RAM AccessKey");
         assertSls(alibaba(true, "  "), "CONFIGURATION_REQUIRED", "缺少 SLS Project");
         assertSls(alibaba(true, "replace-with-project"), "CONFIGURATION_REQUIRED", "缺少 SLS Project");
-        assertSls(alibaba(true, "project"), "READY", "cn-beijing · project · bailian-model-inference-log");
+        assertSls(alibaba(true, "project"), "READY", "cn-beijing · project · audit");
     }
 
     private static void assertSls(AlibabaObservabilityStatus alibaba, String state, String detail) {

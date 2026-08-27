@@ -136,7 +136,7 @@ export class SceneService {
     body.append('audio', createWavUploadFile(wavUri));
     return this.client.request(
       `/api/custom-scenes/${encodeURIComponent(sceneId)}/sentences/${encodeURIComponent(sentenceId)}/evaluation`,
-      { method: 'POST', body },
+      { method: 'POST', body, timeoutMs: 60_000 },
     ) as Promise<SentenceEvaluation>;
   }
 }

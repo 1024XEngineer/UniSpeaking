@@ -130,7 +130,7 @@ describe('SceneService', () => {
       '/api/custom-scenes/scene%2F1/sentences/sentence%201/evaluation',
     );
     expect(options).toEqual(
-      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData), timeoutMs: 60_000 }),
     );
     const uploadFile = createWavUploadFile('file:///take.wav');
     expect(uploadFile.uri).toBe('file:///take.wav');

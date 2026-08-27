@@ -78,6 +78,6 @@ class AdminUsageControllerTest {
                 .andExpect(jsonPath("$.sources[1].code").value("ALIYUN_SLS"))
                 .andExpect(jsonPath("$.sources[1].state").value("CONFIGURATION_REQUIRED"))
                 .andExpect(jsonPath("$.sources[1].detail").value(org.hamcrest.Matchers.containsString("缺少 RAM AccessKey")))
-                .andExpect(jsonPath("$.sources[1].detail").value(org.hamcrest.Matchers.containsString("bailian-model-inference-log")));
+                .andExpect(jsonPath("$.sources[1].detail").value(org.hamcrest.Matchers.containsString("bailian-model-audit-log")));
     }
 }

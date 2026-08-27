@@ -105,7 +105,7 @@ class OfficialUsageSyncServiceTest {
     }
 
     @Test
-    void acceptsSuccessfulHttpLlmAndTtsLogsButRejectsRateLimitedTts() {
+    void acceptsProviderLogsRegardlessOfStatusCodeWhenLocallyBound() {
         var accepted = new ArrayList<com.unispeaking.admin.usage.domain.OfficialUsageRecord>();
         var source = new StubOfficialUsageLogSource(List.of(
                 httpJson("request-llm", "qwen3.5-plus", "200",
@@ -113,7 +113,8 @@ class OfficialUsageSyncServiceTest {
                                 + "\"input_tokens_details\":{\"text_tokens\":970},"
                                 + "\"output_tokens_details\":{\"text_tokens\":177}}"),
                 httpJson("request-tts", "qwen3-tts-flash", "200", "{\"characters\":51}"),
-                httpJson("request-rate-limit", "qwen3-tts-flash", "429", "{}")));
+                httpJson("request-rate-limit", "qwen3-tts-flash", "429",
+                        "{\"input_tokens\":1596,\"output_tokens\":116,\"total_tokens\":1712}")));
         OfficialUsageSink sink = records -> {
             accepted.addAll(records);
             return new OfficialUsageSink.ImportResult(records.size(), 0, records.size(), 0);
@@ -121,7 +122,7 @@ class OfficialUsageSyncServiceTest {
         var service = new OfficialUsageSyncService(
                 source,
                 sink,
-                snapshot("sess_local_01", "request-llm", "request-tts"),
+                snapshot("sess_local_01", "request-llm", "request-tts", "request-rate-limit"),
                 new AliyunInferenceLogParser(new ObjectMapper()),
                 Clock.fixed(Instant.parse("2026-08-19T02:40:00Z"), ZoneOffset.UTC),
                 "ws-67zfnonsdn4x96ia",
@@ -131,8 +132,9 @@ class OfficialUsageSyncServiceTest {
         var result = service.syncNow();
 
         assertThat(accepted).extracting(record -> record.requestId())
-                .containsExactly("request-llm", "request-tts");
-        assertThat(result.rejectedContext()).isEqualTo(1);
+                .containsExactly("request-llm", "request-tts", "request-rate-limit");
+        assertThat(result.rejectedContext()).isZero();
+        assertThat(accepted.get(2).usage().totalTokens()).isEqualTo(1712);
     }
 
     private static UsageDataSource snapshot(String taskUuid, String... requestIds) {

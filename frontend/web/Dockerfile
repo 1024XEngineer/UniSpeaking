@@ -47,6 +47,7 @@ COPY . .
 RUN npm run check:routes \
     && npm run check:realtime-events \
     && npm run test:analytics \
+    && npm run test:telemetry \
     && npm run build
 
 FROM ${DOCKER_IMAGE_REGISTRY}/library/nginx:1.27-alpine

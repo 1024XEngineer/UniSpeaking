@@ -1,64 +1,39 @@
 import { useQuery } from '@tanstack/react-query'
+import { Activity, AlertTriangle, CheckCircle2, CircleDollarSign, ExternalLink, Gauge, RefreshCw, Server } from 'lucide-react'
 import { getDashboardSummary } from '../governance/governanceApi'
+import { getMonitoringOverview, grafanaDashboards, grafanaUrl } from '../monitoring/monitoringApi'
+import { getAiConfiguration, getInvocationUsage } from '../system/systemApi'
+import { getQualitySummary } from '../quality/qualityApi'
 
-function seconds(value: number) {
-  return `${value.toLocaleString('zh-CN', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} 秒`
+const n = (v: number) => v.toLocaleString('zh-CN')
+const money = (v: string | number) => `¥${Number(v || 0).toFixed(2)}`
+const sec = (v: number) => `${v.toLocaleString('zh-CN', { maximumFractionDigits: 1 })} 秒`
+
+function Trend({ points }: { points: { clientErrors: number | null; backendErrors: number | null; slowRequests: number | null }[] }) {
+  const values = points.flatMap(p => [p.clientErrors, p.backendErrors, p.slowRequests]).filter((v): v is number => v != null && Number.isFinite(v))
+  if (!values.length) return <div className="overview-empty">当前时间段暂无趋势样本</div>
+  const max = Math.max(...values, 1)
+  const line = (key: 'clientErrors' | 'backendErrors' | 'slowRequests') => points.map((p, i) => p[key] == null ? null : `${points.length === 1 ? 50 : i / (points.length - 1) * 100},${92 - p[key]! / max * 78}`).filter(Boolean).join(' ')
+  return <div className="overview-trend"><div className="overview-legend"><span><i className="green" />客户端错误</span><span><i className="orange" />后端错误</span><span><i className="blue" />慢请求</span></div><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="接口异常趋势"><line x1="0" y1="14" x2="100" y2="14" /><line x1="0" y1="53" x2="100" y2="53" /><line x1="0" y1="92" x2="100" y2="92" /><polyline className="green" points={line('clientErrors')} /><polyline className="orange" points={line('backendErrors')} /><polyline className="blue" points={line('slowRequests')} /></svg><div className="overview-axis"><span>24 小时前</span><span>现在</span></div></div>
 }
 
 export function OverviewPage() {
-  const summary = useQuery({
-    queryKey: ['governance', 'summary'],
-    queryFn: getDashboardSummary,
-    refetchInterval: 10_000,
-  })
-
-  const metrics = summary.data ? [
-    { label: '用户总数', value: summary.data.total_users.toLocaleString('zh-CN'), hint: '服务器真实账户' },
-    { label: '今日总额度', value: seconds(summary.data.quota_seconds), hint: `剩余 ${seconds(summary.data.remaining_seconds)}` },
-    { label: '今日已用', value: seconds(summary.data.used_seconds), hint: '按用户自动汇总' },
-    { label: '今日费用', value: `¥${Number(summary.data.estimated_cost_cny).toFixed(2)}`, hint: '最终用户费用汇总' },
-  ] : []
-
-  if (summary.isError) {
-    return <ErrorState message="账户数据库或管理后端暂时不可用，请检查 PostgreSQL 和 Java 8090。" />
-  }
-
-  return (
-    <div className="page-stack">
-      <section className="page-heading">
-        <div>
-          <p className="eyebrow">OVERVIEW</p>
-          <h1>用户、额度与费用</h1>
-          <p>后台只展示每个用户自动汇总后的账户、每日额度和最终费用。</p>
-        </div>
-        <div className="sync-summary" aria-live="polite">
-          <span className={`status-dot status-dot--${summary.isLoading ? 'waiting' : 'ok'}`} aria-hidden="true" />
-          <div>
-            <strong>{summary.isLoading ? '正在同步数据' : '管理链路已连接'}</strong>
-            <span>{summary.data ? `更新于 ${new Date(summary.data.generated_at).toLocaleTimeString('zh-CN')}` : '请稍候'}</span>
-          </div>
-        </div>
-      </section>
-
-      <section className="metric-line" aria-label="核心指标">
-        {summary.isLoading && <LoadingRows label="正在读取用量" />}
-        {metrics.map((metric) => (
-          <div className="metric" key={metric.label}>
-            <span>{metric.label}</span>
-            <strong>{metric.value}</strong>
-            <small>{metric.hint}</small>
-          </div>
-        ))}
-      </section>
-
-    </div>
-  )
+  const summary = useQuery({ queryKey: ['governance', 'summary'], queryFn: getDashboardSummary, refetchInterval: 15_000 })
+  const monitoring = useQuery({ queryKey: ['admin', 'monitoring', '24h'], queryFn: () => getMonitoringOverview('24h'), refetchInterval: 15_000 })
+  const configuration = useQuery({ queryKey: ['ai', 'configuration'], queryFn: getAiConfiguration, refetchInterval: 15_000 })
+  const billing = useQuery({ queryKey: ['billing', 'overview'], queryFn: () => getInvocationUsage({ page: 1, limit: 5 }), refetchInterval: 15_000 })
+  const quality = useQuery({ queryKey: ['quality', 'summary'], queryFn: getQualitySummary, refetchInterval: 15_000 })
+  const refresh = () => { void summary.refetch(); void monitoring.refetch(); void configuration.refetch(); void billing.refetch(); void quality.refetch() }
+  if (summary.isError && monitoring.isError) return <section className="error-state glass-surface"><strong>总览数据暂时无法读取</strong><p>请检查管理后端、PostgreSQL 和 Prometheus 连接。</p><button className="button button--secondary" onClick={refresh}><RefreshCw size={15} />重试</button></section>
+  const usage = summary.data; const billingSummary = billing.data?.summary; const monitor = monitoring.data; const qualitySummary = quality.data
+  const healthy = monitor?.summary.backendStatus === 'UP' && (monitor.summary.apiErrorRate5m || 0) < 5
+  return <div className="page-stack overview-page">
+    <section className="overview-hero"><div><p className="eyebrow">SYSTEM OVERVIEW</p><h1>系统概览 <CheckCircle2 size={21} /></h1><p>统一查看系统健康、使用情况、质量治理与核心业务趋势。</p></div><div className="overview-actions"><span className="environment-badge">● 生产环境</span><span>更新于 {new Date(monitor?.summary.generatedAt || usage?.generated_at || Date.now()).toLocaleString('zh-CN', { hour12: false })}</span><a className="button button--primary" href={grafanaUrl(grafanaDashboards.overview)} target="_blank" rel="noreferrer"><Activity size={15} />查看 Grafana<ExternalLink size={13} /></a><button className="icon-command" onClick={refresh} aria-label="刷新" title="刷新"><RefreshCw size={16} /></button></div></section>
+    <section className="overview-cards"><Card icon={<Activity />} tone="green" label="系统健康" value={healthy ? '正常' : '需关注'} note={healthy ? '运行良好，无明显异常' : '请查看运行监控'} href="/admin/monitoring" /><Card icon={<Gauge />} tone="blue" label="今日调用" value={n(usage?.active_sessions ?? 0)} note={sec(usage?.used_seconds ?? 0)} href="/admin/billing" /><Card icon={<CircleDollarSign />} tone="orange" label="今日成本" value={money(usage?.estimated_cost_cny ?? 0)} note={`剩余额度 ${sec(usage?.remaining_seconds ?? 0)}`} href="/admin/billing" /><Card icon={<AlertTriangle />} tone="red" label="活跃问题" value={n(monitor?.summary.activeAlerts ?? 0)} note="待处理问题" href="/admin/quality" /></section>
+    <section className="overview-grid overview-grid--main"><div className="surface-panel overview-panel"><Heading title="系统健康趋势" action="查看监控" href="/admin/monitoring" /><Trend points={monitor?.trend ?? []} /></div><div className="surface-panel overview-panel"><Heading title="问题治理摘要" action="查看 BUG 与优化" href="/admin/quality" /><div className="overview-governance-cards"><Stat label="待处理" value={qualitySummary?.activeIssues ?? 0} tone="orange" /><Stat label="严重问题" value={qualitySummary?.criticalIssues ?? 0} tone="red" /><Stat label="7 天错误事件" value={qualitySummary?.events7d ?? 0} tone="violet" /><Stat label="7 天已解决" value={qualitySummary?.resolved7d ?? 0} tone="green" /></div><p className="overview-summary-line">{qualitySummary ? `当前影响用户 ${n(qualitySummary.affectedUsers7d)} 人 · 优化项 ${n(qualitySummary.optimizations)} 个` : '正在读取 BUG 与优化数据…'}</p></div></section>
+    <section className="overview-grid overview-grid--secondary"><div className="surface-panel overview-panel"><Heading title="用量与计费" action="查看用量与计费" href="/admin/billing" /><div className="overview-usage"><div><span>模型用量</span><strong>{n(billingSummary?.totalTokens ?? usage?.client_tokens ?? 0)} <small>Token</small></strong></div><div><span>调用请求</span><strong>{n(billingSummary?.requests ?? 0)}</strong></div><div><span>账本金额</span><strong>¥{Number(billingSummary?.estimatedCost ?? usage?.estimated_cost_cny ?? 0).toFixed(4)}</strong></div></div><div className="overview-usage-foot">输入 {n(billingSummary?.inputTokens ?? 0)} · 输出 {n(billingSummary?.outputTokens ?? 0)} · 活跃连接 {n(usage?.active_sessions ?? 0)}</div><div className="overview-user-list">{billing.data?.byUser.slice(0, 3).map(user => <div key={user.userId || user.email}><span>{user.email || '系统任务'}</span><b>{n(user.requests)} 次</b><b>{n(user.totalTokens)} Token</b><b>¥{Number(user.estimatedCost || 0).toFixed(4)}</b></div>)}{!billing.data?.byUser.length && <span className="overview-empty">暂无用户调用明细</span>}</div></div><div className="surface-panel overview-panel"><Heading title="模型与供应商" action="查看系统设置" href="/admin/system" /><div className="overview-provider">{configuration.data?.providers.slice(0, 4).map(provider => <div className="overview-provider-row" key={provider.providerId}><span><Server size={15} />{provider.displayName}</span><b className={provider.enabled ? '' : 'is-disabled'}>{provider.enabled ? '已启用' : '已停用'}</b></div>)}{!configuration.data?.providers.length && <div className="overview-empty">正在读取模型供应商配置</div>}</div><div className="overview-provider-foot">当前 {configuration.data?.models.filter(model => model.enabled).length ?? 0} 个模型启用 · {configuration.data?.models.length ?? 0} 个模型已配置</div></div></section>
+  </div>
 }
-
-function LoadingRows({ label }: { label: string }) {
-  return <div className="inline-loading" role="status"><span className="loading-mark" aria-hidden="true" />{label}</div>
-}
-
-function ErrorState({ message }: { message: string }) {
-  return <section className="error-state glass-surface" role="alert"><strong>数据暂时无法读取</strong><p>{message}</p></section>
-}
+function Card({ icon, tone, label, value, note, href }: { icon: React.ReactNode; tone: string; label: string; value: string; note: string; href: string }) { return <a className={`overview-card overview-card--${tone}`} href={href}><span className="overview-card-icon">{icon}</span><span className="overview-card-label">{label}</span><strong>{value}</strong><small>{note}</small></a> }
+function Heading({ title, action, href }: { title: string; action: string; href: string }) { return <div className="overview-panel-heading"><h2>{title}</h2><a href={href}>{action} <span>→</span></a></div> }
+function Stat({ label, value, tone }: { label: string; value: number; tone: string }) { return <div className={`overview-stat overview-stat--${tone}`}><span>{label}</span><strong>{n(value)}</strong></div> }

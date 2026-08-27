@@ -13,6 +13,8 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -23,6 +25,7 @@ import tools.jackson.databind.annotation.JsonNaming;
 @Service
 @ConditionalOnBean(OfficialUsageSink.class)
 public final class OfficialUsageSyncService {
+    private static final Logger log = LoggerFactory.getLogger(OfficialUsageSyncService.class);
     private final OfficialUsageLogSource logSource;
     private final OfficialUsageSink sink;
     private final UsageDataSource usageDataSource;
@@ -73,6 +76,8 @@ public final class OfficialUsageSyncService {
         int rejectedContext = 0;
         int unbound = 0;
         int duplicate = 0;
+        var schemaRejectionReasons = new LinkedHashMap<String, Integer>();
+        var contextRejectionReasons = new LinkedHashMap<String, Integer>();
 
         for (String raw : rawLogs) {
             OfficialUsageRecord record;
@@ -80,10 +85,13 @@ public final class OfficialUsageSyncService {
                 record = parser.parse(raw);
             } catch (OfficialUsageSchemaException exception) {
                 rejectedSchema++;
+                schemaRejectionReasons.merge(exception.getMessage(), 1, Integer::sum);
                 continue;
             }
             if (!matchesExpectedContext(record)) {
                 rejectedContext++;
+                String reason = contextRejectionReason(record);
+                contextRejectionReasons.merge(reason, 1, Integer::sum);
                 continue;
             }
             boolean realtime = "ws".equals(record.protocol()) || "webrtc".equals(record.protocol());
@@ -100,6 +108,12 @@ public final class OfficialUsageSyncService {
         }
 
         List<OfficialUsageRecord> accepted = new ArrayList<>(unique.values());
+        if (!schemaRejectionReasons.isEmpty()) {
+            log.warn("阿里云官方用量记录因格式无效被丢弃: {}", schemaRejectionReasons);
+        }
+        if (!contextRejectionReasons.isEmpty()) {
+            log.warn("阿里云官方用量记录因上下文不匹配被丢弃: {}", contextRejectionReasons);
+        }
         OfficialUsageSink.ImportResult imported = accepted.isEmpty()
                 ? new OfficialUsageSink.ImportResult(0, 0, 0, 0)
                 : sink.importRecords(accepted);
@@ -124,7 +138,22 @@ public final class OfficialUsageSyncService {
         boolean supportedProtocol = "ws".equals(record.protocol())
                 || "webrtc".equals(record.protocol())
                 || "http".equals(record.protocol());
-        return workspaceMatches && "200".equals(record.statusCode()) && supportedProtocol;
+        // Provider error responses still carry billable/reconcilable identifiers;
+        // status_code is informational and must not prevent matching.
+        return workspaceMatches && supportedProtocol;
+    }
+
+    private String contextRejectionReason(OfficialUsageRecord record) {
+        var reasons = new ArrayList<String>();
+        if (expectedWorkspaceId != null && !expectedWorkspaceId.isBlank()
+                && !expectedWorkspaceId.equals(record.workspaceId())) {
+            reasons.add("workspace_mismatch");
+        }
+        if (!("ws".equals(record.protocol()) || "webrtc".equals(record.protocol())
+                || "http".equals(record.protocol()))) {
+            reasons.add("unsupported_protocol");
+        }
+        return reasons.isEmpty() ? "unknown" : String.join("+", reasons);
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)

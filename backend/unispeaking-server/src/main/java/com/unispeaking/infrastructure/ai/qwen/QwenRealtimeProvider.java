@@ -49,8 +49,8 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 			RealtimeCredential credential) {
 		ExchangeResult exchange = exchangeRealtime(
 				command.modelId(), command.offerSdp(), credential.bearerToken());
-		return new RealtimeConnectionResult(
-				null,
+			return new RealtimeConnectionResult(
+					exchange.providerSessionId(),
 				type(),
 				command.modelId(),
 				command.voiceId(),
@@ -153,23 +153,33 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 		RealtimeFlowLog.info("flow.3.sdp.response status={} answerSdp={}",
 				statusCode,
 				RealtimeFlowLog.sdpSummary(response.body()));
-		return new ExchangeResult(response.body(), officialRequestId(response));
-	}
+			return new ExchangeResult(response.body(), officialRequestId(response), officialSessionId(response));
+		}
 
-	private static String officialRequestId(HttpResponse<?> response) {
+		private static String officialRequestId(HttpResponse<?> response) {
 		return response.headers().firstValue("x-request-id")
 				.or(() -> response.headers().firstValue("x-dashscope-request-id"))
 				.map(String::trim)
 				.filter(value -> !value.isBlank())
 				.orElse(null);
-	}
+		}
 
-	private String signalingFailureMessage(int statusCode, String body) {
+		private static String officialSessionId(HttpResponse<?> response) {
+			return response.headers().firstValue("x-dashscope-session-id")
+					.or(() -> response.headers().firstValue("x-session-id"))
+					.or(() -> response.headers().firstValue("x-provider-session-id"))
+					.map(String::trim)
+					.filter(value -> !value.isBlank())
+					.orElse(null);
+		}
+
+		private String signalingFailureMessage(int statusCode, String body) {
 		String detail = body == null ? "" : body.replaceAll("\\s+", " ").trim();
 		if (detail.length() > 500) {
 			detail = detail.substring(0, 500) + "...";
 		}
-		return "Qwen signaling returned " + statusCode
+
+			return "Qwen signaling returned " + statusCode
 				+ (detail.isBlank() ? "" : ": " + detail);
 	}
 
@@ -188,6 +198,6 @@ public class QwenRealtimeProvider extends RealtimeProvider {
 		}
 	}
 
-	private record ExchangeResult(String answerSdp, String requestId) {}
+		private record ExchangeResult(String answerSdp, String requestId, String providerSessionId) {}
 
 }

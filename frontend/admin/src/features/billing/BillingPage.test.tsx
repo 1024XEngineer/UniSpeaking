@@ -152,6 +152,14 @@ describe('BillingPage', () => {
       official_usage: { response_count: 1, total_tokens: 793, input_tokens: 736, output_tokens: 57 },
       official_duration_ms: 51014, estimated_cost_cny: '0.0035688', pricing_status: 'estimated',
       reconciliation_status: 'MATCHED', reconciliation_reasons: [], end_reason: null,
+    }, {
+      session_id: 'pending-session', user_id: '00000000-0000-0000-0000-000000000002', plan_code: 'free',
+      status: 'completed', measured_seconds: 8.2, remaining_seconds: 91.8, temporary_key_id: 'key-2',
+      temporary_key_fingerprint: null, temporary_key_expires_at: null, task_uuid: 'sess-provider-pending',
+      provider_request_id: 'pending-request', model_usage: { response_count: 0, total_tokens: 0, input_tokens: 0, output_tokens: 0 },
+      official_usage: { response_count: 0, total_tokens: 0, input_tokens: 0, output_tokens: 0 },
+      official_duration_ms: null, estimated_cost_cny: null, pricing_status: 'estimated',
+      reconciliation_status: 'PENDING', reconciliation_reasons: [], end_reason: null,
     }])
 
     renderPage()
@@ -183,6 +191,8 @@ describe('BillingPage', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Realtime 会话' }))
     expect(screen.getByText('local-session-01')).toBeInTheDocument()
+    expect(screen.getByText('pending-session')).toBeInTheDocument()
+    expect(screen.getByText('等待官方日志')).toBeInTheDocument()
     expect(screen.getAllByText('进行中').length).toBeGreaterThan(0)
     expect(screen.queryByLabelText('计费开始日期')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('计费结束日期')).not.toBeInTheDocument()
@@ -213,7 +223,7 @@ describe('BillingPage', () => {
     await userEvent.click(screen.getByRole('button', { name: '下一页' }))
 
     expect(await screen.findByText('request-page-two')).toBeInTheDocument()
-    expect(getInvocationUsage).toHaveBeenCalledWith(expect.objectContaining({ page: 2, limit: 100 }))
+    expect(getInvocationUsage).toHaveBeenCalledWith(expect.objectContaining({ page: 2, limit: 20 }))
     await userEvent.click(screen.getByRole('button', { name: 'Realtime 会话' }))
     expect(screen.getAllByText('已结束').length).toBeGreaterThanOrEqual(2)
   })

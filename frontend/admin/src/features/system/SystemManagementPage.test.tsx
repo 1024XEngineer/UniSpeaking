@@ -109,6 +109,31 @@ describe('SystemManagementPage', () => {
     expect((await screen.findAllByText('sha256:123456789abc')).length).toBeGreaterThan(0)
   })
 
+  it('submits all required iFlytek credential fields with Enter', async () => {
+    const provider = { ...configuration.providers[0], providerId: 'iflytek', adapterType: 'iflytek', displayName: '科大讯飞' }
+    vi.mocked(getAiConfiguration).mockResolvedValue(configurationFor(provider))
+    vi.mocked(getCredentialStatus).mockResolvedValue({
+      configured: false, fingerprint: null, writable: true,
+      fields: [
+        { key: 'appId', label: 'App ID', required: true, secret: false, description: '应用 ID', configured: false, fingerprint: null },
+        { key: 'apiKey', label: 'API Key', required: true, secret: true, description: 'API Key', configured: false, fingerprint: null },
+        { key: 'apiSecret', label: 'API Secret', required: true, secret: true, description: 'API Secret', configured: false, fingerprint: null },
+      ],
+    })
+    vi.mocked(replaceCredential).mockResolvedValue({ configured: true, fingerprint: 'sha256:updated', writable: true, fields: [] })
+    const user = userEvent.setup()
+
+    renderPage(<SystemManagementPage />)
+    await user.click(await screen.findByRole('button', { name: '管理密钥' }))
+    await user.type(await screen.findByLabelText('App ID'), 'new-app-id')
+    await user.type(screen.getByLabelText('API Key'), 'new-api-key')
+    await user.type(screen.getByLabelText('API Secret'), 'new-api-secret{Enter}')
+
+    await waitFor(() => expect(replaceCredential).toHaveBeenCalledWith('iflytek', {
+      appId: 'new-app-id', apiKey: 'new-api-key', apiSecret: 'new-api-secret',
+    }))
+  })
+
   it('shows the credential fields required by Aliyun CosyVoice', async () => {
     const provider = { ...configuration.providers[0], providerId: 'aliyun', adapterType: 'aliyun', displayName: '阿里云语音' }
     vi.mocked(getAiConfiguration).mockResolvedValue(configurationFor(provider))

@@ -41,7 +41,7 @@ public class QualityIssueAdminService {
 			     WHERE occurred_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
 			       AND (user_id IS NOT NULL OR NULLIF(anonymous_id, '') IS NOT NULL)) AS affected_users_7d,
 				    COUNT(*) FILTER (WHERE status IN ('RESOLVED', 'VERIFIED')
-				                     AND updated_at >= CURRENT_TIMESTAMP - INTERVAL '7 days') AS resolved_7d
+				                     AND resolved_at >= CURRENT_TIMESTAMP - INTERVAL '7 days') AS resolved_7d
 				FROM quality_issues
 				""", (result, row) -> new QualitySummary(
 				result.getLong("active_issues"),
