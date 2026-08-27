@@ -70,6 +70,11 @@ class AliyunInferenceLogParserTest {
                 .replace("\"total_tokens\": 13289", "\"total_tokens\": 13290")))
                 .isInstanceOf(OfficialUsageSchemaException.class)
                 .hasMessageContaining("total_tokens");
+
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("\"output_tokens\": 351", "\"output_tokens\": 352")))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("output_tokens");
     }
 
     @Test
@@ -249,6 +254,133 @@ class AliyunInferenceLogParserTest {
                 .replace("\"task_uuid\": \"sess_41tAWSq7xIR1b2EDelEgS\",", "")))
                 .isInstanceOf(OfficialUsageSchemaException.class)
                 .hasMessageContaining("task_uuid");
+    }
+
+    @Test
+    void describesNestedSlsShapesWhenStatusCodeIsMissing() {
+        assertThatThrownBy(() -> parser.parse("""
+                {
+                  "request":{"body":{"request_id":"nested-request"}},
+                  "response":"{\\\"body\\\":{\\\"model\\\":\\\"qwen\\\"}}",
+                  "body":[{"value":1}],
+                  "messages":"{\\\"role\\\":\\\"user\\\"}",
+                  "parameters":"not-json",
+                  "choices":[{"index":0}],
+                  "usage":{}
+                }
+                """))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("status_code 缺失")
+                .hasMessageContaining("request:OBJECT")
+                .hasMessageContaining("messages:text")
+                .hasMessageContaining("parameters:text")
+                .hasMessageContaining("invalid-json")
+                .hasMessageContaining("choices:ARRAY[1]")
+                .hasMessageContaining("usage:OBJECT");
+
+        assertThatThrownBy(() -> parser.parse("""
+                {"response":"not-json","body":{"field":1},"messages":["text"],"parameters":"[]"}
+                """))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("response:text")
+                .hasMessageContaining("body:OBJECT")
+                .hasMessageContaining("messages:ARRAY[1]->STRING")
+                .hasMessageContaining("parameters:text(2)->ARRAY");
+    }
+
+    @Test
+    void keepsFlatPayloadWhenSlsMessageCannotBeUnwrapped() {
+        for (String message : new String[] {"", "not-json", "[]"}) {
+            assertThatThrownBy(() -> parser.parse("{\"message\":\"" + message + "\"}"))
+                    .isInstanceOf(OfficialUsageSchemaException.class)
+                    .hasMessageContaining("status_code 缺失");
+        }
+    }
+
+    @Test
+    void acceptsTimestampProtocolAndFieldAliases() {
+        var iso = parser.parse(aliasJson("2026-08-19T03:53:14.285Z", "web_socket"));
+        assertThat(iso.startedAtEpochMs()).isEqualTo(1787111594285L);
+        assertThat(iso.protocol()).isEqualTo("ws");
+        assertThat(iso.requestId()).isEqualTo("alias-request-1");
+        assertThat(iso.taskUuid()).isEqualTo("alias-task-1");
+        assertThat(iso.apiKeyId()).isEqualTo("alias-user");
+
+        var local = parser.parse(aliasJson("2026-08-19 03:53:14.285", "web-rtc"));
+        assertThat(local.startedAtEpochMs()).isEqualTo(1787111594285L);
+        assertThat(local.protocol()).isEqualTo("webrtc");
+    }
+
+    @Test
+    void preservesAvailableTokenUsageForFailedRequests() {
+        var record = parser.parse("""
+                {
+                  "start_unix_timestamp":"1787106742",
+                  "http_status":"429",
+                  "usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15},
+                  "transport":"https",
+                  "workspace":"workspace-alias",
+                  "model_name":"qwen-alias",
+                  "requestId":"failed-request-1"
+                }
+                """);
+
+        assertThat(record.startedAtEpochMs()).isEqualTo(1787106742000L);
+        assertThat(record.protocol()).isEqualTo("http");
+        assertThat(record.apiKeyId()).isEqualTo("unknown");
+        assertThat(record.usage().responseCount()).isEqualTo(1);
+        assertThat(record.usage().totalTokens()).isEqualTo(15);
+    }
+
+    @Test
+    void rejectsMalformedNestedUsageAndInvalidTimestamp() {
+        assertThatThrownBy(() -> parser.parse("{\"usage\":\"[]\"}"))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("usage");
+        assertThatThrownBy(() -> parser.parse("{\"extras\":\"{broken\"}"))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("extras");
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("1784534676105", "not-a-timestamp")))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("不是有效时间");
+
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("3131bedf-7956-91c3-90fe-27cbcb3dfbcf", "bad request id")))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("request_id");
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("\"start_unix_timestamp\": \"1784534676105\",", "")))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("start_unix_timestamp 缺失");
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("\"extras\": {\"protocol\": \"ws\"},", "")))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("protocol 缺失");
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("\"total_tokens\": 13289", "\"total_tokens\": \"invalid\"")))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("不是有效整数");
+        assertThatThrownBy(() -> parser.parse(validJson()
+                .replace("\"total_tokens\": 13289", "\"total_tokens\": -1")))
+                .isInstanceOf(OfficialUsageSchemaException.class)
+                .hasMessageContaining("不能为负数");
+    }
+
+    private static String aliasJson(String timestamp, String protocol) {
+        return """
+                {
+                  "start_time":"%s",
+                  "status":"200",
+                  "usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0},
+                  "connection_type":"%s",
+                  "workspace":"workspace-alias",
+                  "model_name":"qwen-alias",
+                  "uid":"alias-user",
+                  "conversation_id":"alias-task-1",
+                  "requestId":"alias-request-1"
+                }
+                """.formatted(timestamp, protocol);
     }
 
     private static String validJson() {

@@ -117,7 +117,7 @@ function CredentialDialog({ provider, onClose }: { provider: ProviderView; onClo
     mutation.reset()
     setValues((current) => ({ ...current, [key]: value }))
   }
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="entitlement-dialog credential-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-title">
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><form className="entitlement-dialog credential-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-title" onSubmit={(event) => { event.preventDefault(); if (!mutation.isPending && status.data?.writable && !missingRequired && Object.keys(changedValues).length > 0) mutation.mutate() }}>
     <header className="entitlement-dialog__header"><div><p className="eyebrow">PROVIDER CONFIGURATION</p><h2 id="credential-title">{provider.displayName} 凭据配置</h2><p className="entitlement-dialog__identity">所有字段加密保存，页面不回显原值<span>{status.data?.fingerprint || '尚未配置'}</span></p></div><button className="modal-close" type="button" aria-label="关闭凭据设置" onClick={onClose}><X size={18} /></button></header>
     <div className="credential-form">
       {status.isLoading && <p className="credential-form__loading">正在读取配置项…</p>}
@@ -138,8 +138,8 @@ function CredentialDialog({ provider, onClose }: { provider: ProviderView; onClo
       {mutation.isSuccess && <p className="form-success" role="status">凭据配置已更新。</p>}
       {mutation.isError && <p className="form-error">{mutation.error.message}</p>}
     </div>
-    <footer className="entitlement-dialog__footer"><span /><div className="entitlement-dialog__actions"><button className="quiet-button" type="button" onClick={onClose}>取消</button><button className="primary-button" type="button" disabled={!status.data?.writable || missingRequired || Object.keys(changedValues).length === 0 || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? '更新中…' : '保存配置'}</button></div></footer>
-  </section></div>
+    <footer className="entitlement-dialog__footer"><span /><div className="entitlement-dialog__actions"><button className="quiet-button" type="button" onClick={onClose}>取消</button><button className="primary-button" type="submit" disabled={!status.data?.writable || missingRequired || Object.keys(changedValues).length === 0 || mutation.isPending}>{mutation.isPending ? '更新中…' : '保存配置'}</button></div></footer>
+  </form></div>
 }
 
 function ModelTable({ models, onChanged }: { models: ModelView[]; onChanged: () => Promise<unknown> }) {

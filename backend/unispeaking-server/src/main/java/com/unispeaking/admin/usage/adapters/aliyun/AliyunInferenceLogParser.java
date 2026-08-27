@@ -102,12 +102,6 @@ public final class AliyunInferenceLogParser {
         if (record.taskUuid() != null) {
             requireStableId("task_uuid", record.taskUuid());
         }
-        if (record.startedAtEpochMs() < 0) {
-            throw new OfficialUsageSchemaException("start_unix_timestamp 不能为负数");
-        }
-        if (record.durationMs() < 0) {
-            throw new OfficialUsageSchemaException("duration 不能为负数");
-        }
         if (!"ws".equals(record.protocol()) && !"webrtc".equals(record.protocol())
                 && !"http".equals(record.protocol())) {
             throw new OfficialUsageSchemaException("protocol 必须为 ws、webrtc 或 http");
@@ -148,17 +142,14 @@ public final class AliyunInferenceLogParser {
 
     private static String optionalText(JsonNode parent, String... fields) {
         JsonNode node = firstNode(parent, fields);
-        if (node == null) {
-            return null;
-        }
         String value = node.asText();
-        return value == null || value.isBlank() ? null : value;
+        return value.isBlank() ? null : value;
     }
 
     private static long requiredLong(JsonNode parent, String... fields) {
         JsonNode node = firstNode(parent, fields);
         String value = node.asText();
-        if (value == null || value.isBlank()) {
+        if (value.isBlank()) {
             throw new OfficialUsageSchemaException(fields[0] + " 缺失");
         }
         try {
@@ -173,9 +164,6 @@ public final class AliyunInferenceLogParser {
     }
 
     private static long optionalLong(JsonNode parent, String... fields) {
-        if (parent == null) {
-            return 0;
-        }
         JsonNode node = firstNode(parent, fields);
         if (node == null || node.isMissingNode() || node.isNull() || node.asText().isBlank()) {
             return 0;
@@ -324,18 +312,6 @@ public final class AliyunInferenceLogParser {
             }
         }
         return merged;
-    }
-
-    private JsonNode objectNode(JsonNode node, String field) {
-        try {
-            JsonNode resolved = node.isTextual() ? mapper.readTree(node.asText()) : node;
-            if (!resolved.isObject()) {
-                throw new OfficialUsageSchemaException(field + " 必须为 JSON 对象");
-            }
-            return resolved;
-        } catch (JacksonException exception) {
-            throw new OfficialUsageSchemaException(field + " 不是有效 JSON 对象", exception);
-        }
     }
 
     private void validateNestedObjectShape(JsonNode root, String field) {
