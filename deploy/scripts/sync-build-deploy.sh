@@ -48,8 +48,8 @@ fi
 log "同步源码：$current_sha -> $target_sha"
 git -C "$BASE_DIR" reset --hard "$target_sha"
 # Keep server-owned runtime files while removing unexpected untracked files.
-git -C "$BASE_DIR" clean -fd -e deploy/env/ -e runtime-logs/ -e .source-deploy-state
-unexpected="$(git -C "$BASE_DIR" status --porcelain --untracked-files=all | grep -v '^?? deploy/env/' | grep -v '^?? runtime-logs/' || true)"
+git -C "$BASE_DIR" clean -fd -e deploy/env/ -e backups/ -e runtime-logs/ -e .source-deploy-state
+unexpected="$(git -C "$BASE_DIR" status --porcelain --untracked-files=all | grep -v '^?? deploy/env/' | grep -v '^?? backups/' | grep -v '^?? runtime-logs/' || true)"
 [[ -z "$unexpected" ]] || fail "同步后工作区仍有未预期改动：$unexpected"
 
 monitoring_network="$(sed -n 's/^MONITORING_NETWORK_NAME=//p' "$ENV_FILE" | head -n 1 | tr -d "'\"")"
