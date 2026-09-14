@@ -42,7 +42,7 @@ class RealtimeSdpExchangeTest {
 		RealtimeConnectionResult expected = new RealtimeConnectionResult(
 				"provider-session", ProviderType.QWEN, "model-1", "Tina", "trace-1",
 				"answer-sdp", credential.expiresAt());
-		whenExchangeInvokesOperation(registry, ProviderType.QWEN, "model-1", provider, expected);
+		whenExchangeInvokesOperation(registry, "model-1", provider, expected);
 
 		CustomSceneSession session = new CustomSceneSession("session-1", "user-1");
 		StartCommand command = new StartCommand(
@@ -63,7 +63,7 @@ class RealtimeSdpExchangeTest {
 		RealtimeConnectionResult expected = new RealtimeConnectionResult(
 				"provider-session", ProviderType.QINIU, "model-2", "Margaret", "trace-2",
 				"answer", null);
-		whenExchangeInvokesOperation(registry, ProviderType.QINIU, "model-2", provider, expected);
+		whenExchangeInvokesOperation(registry, "model-2", provider, expected);
 
 		CustomSceneSession session = new CustomSceneSession("session-2", "user-2");
 		StartCommand command = new StartCommand(
@@ -87,7 +87,7 @@ class RealtimeSdpExchangeTest {
 				BiFunction operation = (BiFunction) invocation.getArgument(3);
 				return operation.apply("model-1", new CredentialProvider());
 			}).when(registry).routeRealtime(
-				any(AiInvocationContext.class), eq(ProviderType.QWEN), eq("model-1"),
+				any(AiInvocationContext.class), eq(null), eq(null),
 				anyBiFunction());
 		CustomSceneSession session = new CustomSceneSession("session-3", "user-3");
 		StartCommand command = command(ProviderType.QWEN, "model-1");
@@ -103,7 +103,7 @@ class RealtimeSdpExchangeTest {
 				BiFunction operation = (BiFunction) invocation.getArgument(3);
 				throw connectionFailure;
 			}).when(registry).routeRealtime(
-				any(AiInvocationContext.class), eq(ProviderType.QWEN), eq("model-1"),
+				any(AiInvocationContext.class), eq(null), eq(null),
 				anyBiFunction());
 		assertSame(connectionFailure, assertThrows(RuntimeException.class, () ->
 				new RealtimeSdpExchange(registry, issuer)
@@ -112,7 +112,6 @@ class RealtimeSdpExchangeTest {
 
 	private void whenExchangeInvokesOperation(
 			AiProviderRegistry registry,
-			ProviderType type,
 			String model,
 			RealtimeProvider provider,
 			RealtimeConnectionResult expected) {
@@ -121,7 +120,7 @@ class RealtimeSdpExchangeTest {
 			BiFunction operation = (BiFunction) invocation.getArgument(3);
 			return operation.apply(model, provider);
 		}).when(registry).routeRealtime(
-				any(AiInvocationContext.class), eq(type), eq(model), anyBiFunction());
+				any(AiInvocationContext.class), eq(null), eq(null), anyBiFunction());
 	}
 
 	@SuppressWarnings("unchecked")

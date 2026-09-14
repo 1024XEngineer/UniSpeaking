@@ -34,15 +34,16 @@ flock -n 9 || { log "已有部署任务运行，跳过本次检查"; exit 0; }
 
 git -C "$BASE_DIR" remote set-url origin "$REPOSITORY_URL"
 git -C "$BASE_DIR" fetch --prune origin "$BRANCH"
-target_sha="$(git -C "$BASE_DIR" rev-parse "origin/$BRANCH")"
+# An explicit single-branch fetch always updates FETCH_HEAD, but it may leave an
+# existing remote-tracking ref stale. Deploy the commit fetched in this run.
+target_sha="$(git -C "$BASE_DIR" rev-parse FETCH_HEAD)"
 current_sha="$(git -C "$BASE_DIR" rev-parse HEAD)"
 env_sha="$(sha256sum "$ENV_FILE" | awk '{print $1}')"
 
 if [[ -f "$STATE_FILE" ]] \
-  && [[ "$(sed -n 's/^sha=//p' "$STATE_FILE" | head -n 1)" == "$target_sha" ]] \
-  && [[ "$(sed -n 's/^env_sha=//p' "$STATE_FILE" | head -n 1)" == "$env_sha" ]]; then
-  log "当前已部署 $target_sha，源码和环境均无变化"
-  exit 0
+  && [[ "$(sed -n 's/^sha=//p' "$STATE_FILE" | head -n 1)" == "$target_sha" ]]; then
+	log "GitHub 提交未变化（$target_sha），保留服务器当前源码和运行实例"
+	exit 0
 fi
 
 log "同步源码：$current_sha -> $target_sha"
@@ -67,12 +68,26 @@ compose=(docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" --
 "${compose[@]}" config --format json | grep -Fq 'deploy_postgres_data' \
   || fail "Compose 未使用 deploy_postgres_data"
 
-log "构建应用镜像"
-"${compose[@]}" build backend frontend admin || fail "应用镜像构建失败，未启动新版本"
+log "逐个构建应用镜像"
+for service in backend frontend admin; do
+  "${compose[@]}" build "$service" || fail "$service 镜像构建失败，未启动新版本"
+done
+
+# Compose/BuildKit must not be allowed to publish swapped frontend image tags.
+docker run --rm --entrypoint /bin/sh deploy-frontend:latest -ec \
+  '! grep -Fq "/admin/assets/" /usr/share/nginx/html/index.html' \
+  || fail "用户前端镜像内容异常，拒绝启动新版本"
+docker run --rm --entrypoint /bin/sh deploy-admin:latest -ec \
+  'grep -Fq "/admin/assets/" /usr/share/nginx/html/index.html' \
+  || fail "Admin 镜像内容异常，拒绝启动新版本"
 
 log "启动生产服务"
 "${compose[@]}" up -d --no-build postgres backend frontend admin nginx \
   || fail "Compose 启动失败"
+"${compose[@]}" exec -T nginx nginx -t \
+  || fail "Nginx 配置校验失败"
+"${compose[@]}" exec -T nginx nginx -s reload \
+  || fail "Nginx 重载失败"
 
 ready=false
 for _ in $(seq 1 60); do

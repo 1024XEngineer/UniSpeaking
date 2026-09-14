@@ -32,8 +32,8 @@ public class RealtimeSdpExchange {
 			ProviderType type, AbstractSceneSession session, SessionPrompt prompt, StartCommand command) {
 		RealtimeAttempt attempt = providerRegistry.routeRealtime(
 				AiInvocationContext.create(command.userId(), session.getId(), "realtime_connect"),
-				type,
-				command.model(),
+				null,
+				null,
 				(model, provider) -> {
 					RealtimeCredential credential = provider.requiresIssuedCredential()
 							? credentialIssuer.issue(provider.type())
